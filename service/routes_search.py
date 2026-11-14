@@ -7,6 +7,7 @@ the objects the routes use: `st.catalogue` (service.context.CatalogueContext), `
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -18,6 +19,7 @@ from service.products.store import product_key
 from service.workers import filmjob, filmsearchjob
 
 API_PREFIX = "/api/v1"
+RETRY_AFTER_S = 120.0  # a failed search is searched again by a request after this long
 
 
 def make_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
@@ -49,6 +51,10 @@ def make_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             meta = st.store.read_meta(filmsearchjob.KIND, key) or {}
             return {"state": "done", "phase": "done", "error": None, **track_reply(st, film_key, meta)}
         job = st.scheduler.jobs.get(st.scheduler.by_key.get(key, ""))
+        if job is not None:
+            st.scheduler.poll(job.id)  # a page that asks again keeps its job a person's job (a job nobody asks about is abandoned)
+        if job is not None and job.state == "error" and time.time() - (job.finished or 0.0) < RETRY_AFTER_S:
+            return {"state": "error", "phase": job.phase, "error": job.error, "tracks": [], "control": None}  # said once, asked again later
         if job is None or job.state in ("error", "cancelled"):
             index, files, store, wl = st.index, st.files, st.store, st.wavelengths
 
@@ -86,7 +92,7 @@ def track_reply(st: Any, film_key: str, meta: dict[str, Any]) -> dict[str, Any]:
             {
                 "id": i,
                 **tr,
-                "dist_au": None,
+                "dist_au": tr.get("dist_au"),
                 "known": k,
                 "pts": [{"f": p["f"], "x": p["x"], "y": p["y"], "z": p["z"], "how": p["how"]} for p in tr["pts"]],
             }
