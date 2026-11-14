@@ -20,7 +20,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from engine.extras import ades, allwise, cadc_ref, gaia_readiness, spherex_orbit, ssois, tracking
+from engine.extras import ades, allwise, cadc_ref, gaia_readiness, regression_field, spherex_orbit, ssois, tracking
 from engine.extras.cloudcat import Reader, separation_arcsec
 from engine.extras.cube import PIXEL_SR, CubeSource, RangeReader
 from service.products.sxp import decode
@@ -107,6 +107,12 @@ class Extras:
         self.cutout_cache: OrderedDict[tuple[str, float, float, float], bytes] = OrderedDict()
         self.artifacts: dict[str, str] = {}
         self.tracked_cache: dict[tuple[str, float, float, float, int], dict[str, Any]] = {}
+        self._rdra: dict[str, Any] | None = None
+
+    def rdra_snapshot(self) -> dict[str, Any]:
+        if self._rdra is None:
+            self._rdra = regression_field.load()
+        return self._rdra
 
     def cadc(self) -> httpx.AsyncClient:
         if self._cadc is None:
@@ -327,6 +333,17 @@ def build_router(extras: Extras) -> APIRouter:
             if len(extras.tracked_cache) > 200:
                 extras.tracked_cache.pop(next(iter(extras.tracked_cache)))
         return result
+
+    @router.get(f"{API_PREFIX}/regression/r-dra")
+    async def regression_r_dra(request: Request) -> Any:
+        """R Draconis deep sequences (about 2000 Level-2 files, fixed list): which of them the exposure index holds."""
+        sky = getattr(request.app.state, "sky", None)
+        index = getattr(sky, "index", None)
+        if index is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        snap = extras.rdra_snapshot()
+        found = await asyncio.to_thread(index.overlapping, regression_field.RA, regression_field.DEC, regression_field.RADIUS_DEG)
+        return regression_field.compare(snap, [e.key for e in found]) | {"taken": snap["taken"], "field": snap["field"]}
 
     @router.get(f"{API_PREFIX}/gaia/readiness")
     async def gaia_ready() -> Any:
