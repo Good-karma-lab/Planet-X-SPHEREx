@@ -49,7 +49,7 @@ def test_a_searched_field_is_listed_with_its_best_lead(tmp_path: Path) -> None:
     k = add_field(store, 133.79, -7.25)
     movers.put(k, {"tracks": [{"check": "none", "snr": [9.0, 11.5]}, {"check": "still", "snr": [30.0]}]})
     pairs.put(k, {"pairs": [{"x": 1}]})
-    dwarfs.put(k, {"candidates": [{"ra": 1}]})
+    dwarfs.put(k, {"candidates": [{"ra": 1}], "known": [], "counts": {"known_brown_dwarfs": 0}})
     body = asyncio.run(s.get())
     assert body["count"] == 1
     f = body["fields"][0]
@@ -78,3 +78,12 @@ def test_the_route_serves_the_list(tmp_path: Path) -> None:
     r = TestClient(app).get("/api/v1/searched")
     assert r.status_code == 200 and r.json()["count"] == 1
     assert "searched" in VERSIONS
+
+
+def test_a_field_whose_only_brown_dwarf_is_a_known_one_is_not_empty(tmp_path: Path) -> None:
+    store, movers, _pairs, dwarfs, s = build(tmp_path)
+    k = add_field(store, 331.0, -56.8)
+    movers.put(k, {"tracks": []})
+    dwarfs.put(k, {"candidates": [], "known": [{"status": "known brown dwarf"}], "counts": {"known_brown_dwarfs": 1}})
+    f = asyncio.run(s.get())["fields"][0]
+    assert f["nothing"] is False and f["found"] == 1 and f["best"]["label"] == "1 known brown dwarf"

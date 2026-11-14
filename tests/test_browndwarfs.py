@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Any
 
 from service import browndwarfs as bd
 
@@ -57,3 +58,15 @@ def test_a_track_of_the_movers_search_that_stands_there_is_evidence() -> None:
     assert m is not None and m["offset_arcsec"] < 0.1
     far = dict(track, ra=[x + 0.01 for x in t["ra"]])
     assert bd.mover_match(c, [far]) is None
+
+
+def test_the_catalogues_sort_moving_red_sources_into_candidates_and_known_ones() -> None:
+    wise: dict[str, Any] = {"simbad": {"state": "ok", "otype": "BD*"}, "gaia": {"verdict": "none"}}
+    star: dict[str, Any] = {"simbad": {"state": "ok", "otype": "Star"}, "gaia": {"verdict": "same"}}
+    gaia_only: dict[str, Any] = {"simbad": {"state": "none"}, "gaia": {"verdict": "same"}}
+    new: dict[str, Any] = {"simbad": {"state": "none"}, "gaia": {"verdict": "none"}}
+    waiting: dict[str, Any] = {"simbad": {"state": "unavailable"}, "gaia": {"verdict": "none"}}
+    for c in (wise, star, gaia_only, new, waiting):
+        c["status"] = bd.status_of(c)
+    assert [bd.group_of(c) for c in (wise, star, gaia_only, new, waiting)] == ["known", "known", "known", "candidate", "candidate"]
+    assert wise["status"] == "known brown dwarf" and gaia_only["status"] == "star with Gaia motion" and new["status"] == "unidentified"

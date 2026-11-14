@@ -90,9 +90,11 @@ def scan_patch(c: httpx.Client, p: dict[str, Any], fov: float, per_search_s: flo
         "seconds": movers.get("_seconds"),
     }
     dwarfs = ask(c, "/api/v1/browndwarfs", q, {"done", "failed"}, per_search_s)
+    counts = (dwarfs.get("result") or {}).get("counts") or {}
     res["browndwarfs"] = {
         "state": dwarfs.get("state"),
         "candidates": len((dwarfs.get("result") or {}).get("candidates", [])),
+        "known": counts.get("known_brown_dwarfs", 0),
         "seconds": dwarfs.get("_seconds"),
     }
     meta = field.get("meta") or {}
@@ -116,6 +118,7 @@ def leads(d: dict[str, Any]) -> int:
         d.get("movers", {}).get("tracks", 0)
         + d.get("movers", {}).get("pairs", 0)
         + d.get("browndwarfs", {}).get("candidates", 0)
+        + d.get("browndwarfs", {}).get("known", 0)
         + sum(f.get("tracks", 0) for f in d.get("film", []))
     )
 
