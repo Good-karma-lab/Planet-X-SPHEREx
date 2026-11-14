@@ -233,7 +233,8 @@ function fetchTile(id: string, o: number, i: number): Promise<Got> {
   const service = u.service;
   if (!irsa) return getBlob(service!, new AbortController().signal);
   if (!service) return getBlob(irsa, new AbortController().signal);
-  const first = irsaUp() ? irsa : service;
+  // the Allsky image (a megabyte, the first picture of a survey) is kept by the service: it goes first for it
+  const first = irsaUp() && o !== ALLSKY ? irsa : service;
   const second = first === irsa ? service : irsa;
   return new Promise<Got>((resolve, reject) => {
     const a1 = new AbortController();
@@ -421,15 +422,13 @@ export class Sampler {
         const u = this.L.levels[m]!.get(pixAt(m, f));
         if (u) return this.read(u, m, f, out, k);
       }
-      // the base: the shallowest tiles from IRSA (a dozen small tiles cover the sky), else the Allsky image
-      if (floor < 3) {
+      // the base: the shallowest tiles from IRSA (a dozen small tiles cover the sky)
+      if (floor < 3 && n > floor) {
         const bp = pixAt(floor, f);
-        const b = this.L.levels[floor]!.get(bp);
-        if (b === undefined && n > floor) want(this.id, floor, bp, 1);
-        const lost = b === null || failed.has(keyOf(this.id, floor, bp));
-        return this.allsky(f, out, k, lost);
+        if (this.L.levels[floor]!.get(bp) === undefined) want(this.id, floor, bp, 1);
       }
     }
+    // and under everything the Allsky image, asked for first: one request gives a picture of the whole sky
     return this.allsky(f, out, k, true);
   }
 
@@ -445,7 +444,7 @@ export class Sampler {
   private allsky(f: FacePt, out: Float32Array | number[], k: number, ask: boolean): number {
     const a = this.L.allsky;
     if (a === undefined) {
-      if (ask) want(this.id, ALLSKY, 0, 1);
+      if (ask) want(this.id, ALLSKY, 0, 4);
       return FROM_NOTHING;
     }
     if (!a) return FROM_NOTHING;
