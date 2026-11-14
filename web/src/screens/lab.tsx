@@ -1081,7 +1081,7 @@ export function Lab({ route }: { route: Route }) {
       }
       const mvv = mvRef.current;
       if (st.opts.movers && mvv?.result && !days) {
-        for (const t of mvv.result.tracks) {
+        mvv.result.tracks.forEach((t, ti) => {
           const yrs = year - 2025.9;
           const decN = t.dec_2025_9 + (t.v_north * yrs) / 3600;
           const raN = t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((decN * Math.PI) / 180);
@@ -1098,7 +1098,7 @@ export function Lab({ route }: { route: Route }) {
               ra: raN,
               dec: decN,
               kind: 'track',
-              name: 'Mover',
+              name: `Mover ${ti + 1}`,
               lines: [line],
               colour: '#ffb454',
               fill: '#ffd08a',
@@ -1107,7 +1107,7 @@ export function Lab({ route }: { route: Route }) {
               motion: [t.v_east * 1000, t.v_north * 1000],
               dashed: t.check === 'pending',
             });
-        }
+        });
       }
       const near = (ra: number, dec: number, arcsec: number) =>
         marks.find((k) => Math.hypot((k.ra - ra) * Math.cos((dec * Math.PI) / 180), k.dec - dec) * 3600 < arcsec);
@@ -1264,7 +1264,8 @@ export function Lab({ route }: { route: Route }) {
         ctx.setLineDash([]);
       };
       const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
-        let lines = [mk.name, ...mk.lines].filter(Boolean);
+        // only the name or number at the ring; the rate, the checks and the rest are on the selected mark and in the Candidates list (the test target keeps its line)
+        let lines = [mk.name, ...(mk.kind === 'target' || mk.selected ? mk.lines : [])].filter(Boolean);
         if (!lines.length) return;
         // a narrow picture: at most two lines, each cut to fit
         if (box.w < 520) {
