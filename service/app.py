@@ -31,12 +31,13 @@ from service.lightcurves import ztf as lc_ztf
 from service.movers import Movers
 from service.products.store import Store, product_key
 from service.products.versions import VERSIONS
+from service.quicklook import QuickLook
 from service.ratelimit import Buckets, client_id
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
-from service.spectrum import Spectra, spectrum_params
+from service.spectrum import Spectra, place_at, spectrum_params
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
 from service.workers import fieldjob, filmjob
@@ -62,6 +63,7 @@ class State:
         self.scheduler: Scheduler | None = None
         self.executor: ProcessPoolExecutor | None = None
         self.index_health: dict[str, Any] | None = None
+        self.quicklook: QuickLook | None = None
         self.warm: WarmRunner | None = None
         self.hips: HipsTiles | None = None
         self.coverage: dict[str, Any] | None = None
@@ -88,6 +90,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.index = Index(index_path, readonly=True)
         st.s3 = s3 or S3()
         st.files = FileReader(st.s3, cfg.store_dir)
+        st.quicklook = QuickLook(st.s3, cfg.store_dir)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
         st.movers = Movers(st.store, cfg.store_dir)
         st.bodies = KnownBodies(cfg.store_dir, st.index)
@@ -520,6 +523,35 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if run is None:
             raise HTTPException(404, "no such spectrum: ask for /api/v1/spectrum first")
         return run.stamps_view(since)
+
+    @app.get(f"{API_PREFIX}/spectrum/quicklook")
+    async def spectrum_quicklook(
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        pmra: float = Query(0.0, ge=-20000, le=20000),
+        pmdec: float = Query(0.0, ge=-20000, le=20000),
+        epoch: float = Query(2000.0, ge=1900, le=2100),
+    ) -> Any:
+        """A quick look at the place's spectrum from the DR1 all-sky spectral cube (byte-range reads, a few seconds), shown until
+        the spectrum measured from the exposures arrives. The place is taken at the cube's epoch (2025.9)."""
+        if st.quicklook is None:
+            raise HTTPException(503)
+        params = spectrum_params(ra, dec, pmra, pmdec, epoch)
+        qra, qdec = place_at(params, 51544.5 + (2025.9 - 2000.0) * 365.25)
+        path = cfg.store_dir / "quicklook" / "spectra" / f"{qra:.5f}_{qdec:+.5f}.json"
+        if path.is_file():
+            return JSONResponse(json.loads(path.read_text()))
+        try:
+            out = await st.quicklook.spectrum(qra % 360.0, qdec)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+        except Exception as e:  # the bucket did not answer: said, never cached
+            raise HTTPException(502, f"the all-sky cube could not be read: {type(e).__name__}") from e
+        if all(v is None for v in out["flux"]):
+            out["note"] = "no value in the all-sky cube at this pixel (a saturated core or a gap of the map)"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(out, separators=(",", ":")))
+        return out
 
     @app.get(f"{API_PREFIX}/spectrum")
     async def spectrum(
