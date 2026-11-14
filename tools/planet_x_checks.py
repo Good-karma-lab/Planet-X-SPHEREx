@@ -19,13 +19,14 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from planet_nine_scan import PRIOR, run_field
 
-CHECKS = {
+CHECKS: dict[str, dict[str, Any]] = {
     # Sedna's place at the middle pass (JPL Horizons, MJD 61091.52) and the middle dates of the three passes that cover it
     "sedna": {
         "name": "Sedna, blind",
@@ -41,10 +42,10 @@ CHECKS = {
 }
 
 
-def run_centre(c: httpx.Client, f: dict, poll_s: float, max_hours: float) -> dict:
+def run_centre(c: httpx.Client, f: dict[str, Any], poll_s: float, max_hours: float) -> dict[str, Any]:
     """The deep sum from a place and the dates of the passes: the service places every field for the distance range."""
     q = {"centre": f["centre"], "passes": f["passes"], "fov": f["fov"], "dmin": f["dmin"], "dmax": f["dmax"], "det": f["det"]}
-    out: dict = {**f, "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+    out: dict[str, Any] = {**f, "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     plan = c.get("/api/v1/deep", params={**q, "plan": 1}).json()
     out["plan"] = {k: plan.get(k) for k in ("status", "estimate_s", "limit", "fields")} | {
         "hypotheses": (plan.get("plan") or {}).get("hypotheses")
