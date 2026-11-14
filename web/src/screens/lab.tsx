@@ -328,7 +328,7 @@ function MoversRows({
             {rateText(t)} toward {t.pa.toFixed(0)}° · {t.passes.length} passes{t.saturated ? ' · saturated core' : ''}
             {t.source === 'red' ? ' · found in the red bands, 3.8–5 µm' : ''}
           </span>
-          <span class="faint">{t.check === 'same' && gaiaWord(t).includes('apart') ? gaiaWord(t) : (CHECK_WORD[t.check] ?? t.check)}</span>
+          <span class="faint">{t.check === 'same' ? gaiaWord(t) : (CHECK_WORD[t.check] ?? t.check)}</span>
         </button>
       ))}
     </>
