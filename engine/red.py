@@ -21,7 +21,9 @@ from engine.grid import NATIVE_PIXEL_ARCSEC
 
 LONG = (4, 5)  # D5, D6: 3.8–5 µm, where a cold brown dwarf is brightest (methane darkens it near 3.3 µm, in D4)
 SHORT = 1  # D2
-NSIG_DETECT = 6.0
+NSIG_DETECT = 6.0  # a source needs this S/N in the aperture sum over the passes
+NSIG_PEAK = 4.0  # a peak of the smoothed long-wavelength image is looked at from this height above the field's scatter (the scatter grows
+# with the crowding of the field, so a fixed height there would lose faint sources in big fields; the aperture S/N above is the real cut)
 EDGE_PX = 8
 
 
@@ -51,16 +53,23 @@ def _coadd(stacks: list[NDArray[np.floating]], noises: list[NDArray[np.floating]
 
 
 def _aperture(img: NDArray[np.float64], sig: NDArray[np.float64], x: float, y: float, r: float) -> tuple[float, float]:
+    """Flux and error in the aperture of radius r at (x, y), the background from the ring 2.5 r to 4 r (only that window is read)."""
     n = img.shape[0]
-    yy, xx = np.mgrid[0:n, 0:n]
+    w = int(np.ceil(4 * r)) + 1
+    x0, x1 = max(0, int(np.floor(x)) - w), min(n, int(np.floor(x)) + w + 2)
+    y0, y1 = max(0, int(np.floor(y)) - w), min(n, int(np.floor(y)) + w + 2)
+    if x1 <= x0 or y1 <= y0:
+        return float("nan"), float("nan")
+    cut, cut_sig = img[y0:y1, x0:x1], sig[y0:y1, x0:x1]
+    yy, xx = np.mgrid[y0:y1, x0:x1]
     d = np.hypot(xx - x, yy - y)
-    inner = (d <= r) & np.isfinite(img)
-    ring = (d > 2.5 * r) & (d < 4 * r) & np.isfinite(img)
+    inner = (d <= r) & np.isfinite(cut)
+    ring = (d > 2.5 * r) & (d < 4 * r) & np.isfinite(cut)
     if inner.sum() < 3 or ring.sum() < 10:
         return float("nan"), float("nan")
-    bg = float(np.median(img[ring]))
-    f = float(np.sum(img[inner] - bg))
-    e = float(np.sqrt(np.nansum(sig[inner] ** 2)) + 1.4826 * np.median(np.abs(img[ring] - bg)) * np.sqrt(inner.sum()) * 0.5)
+    bg = float(np.median(cut[ring]))
+    f = float(np.sum(cut[inner] - bg))
+    e = float(np.sqrt(np.nansum(cut_sig[inner] ** 2)) + 1.4826 * np.median(np.abs(cut[ring] - bg)) * np.sqrt(inner.sum()) * 0.5)
     return f, e
 
 
@@ -81,7 +90,7 @@ def red_sources(
     mad = 1.4826 * float(np.nanmedian(np.abs(resid - np.nanmedian(resid)))) or 1e-9
     n = long_v.shape[0]
     box = max(3, int(2 * native) | 1)
-    peaks = (resid == maximum_filter(resid, size=box)) & (resid > NSIG_DETECT * mad) & np.isfinite(long_v) & np.isfinite(short_v)
+    peaks = (resid == maximum_filter(resid, size=box)) & (resid > NSIG_PEAK * mad) & np.isfinite(long_v) & np.isfinite(short_v)
     peaks[:EDGE_PX] = peaks[-EDGE_PX:] = False
     peaks[:, :EDGE_PX] = peaks[:, -EDGE_PX:] = False
     passes_long = [_coadd([d[i] for i in LONG], [sg[i] for i in LONG]) for d, sg in zip(dets, noise, strict=True)]
