@@ -196,6 +196,24 @@ interface AnomalyView {
   error: string;
   result: AnomalyField | null;
 }
+interface DwarfRow {
+  ra?: number;
+  dec?: number;
+  ra_j2000?: number;
+  dec_j2000?: number;
+  pmra?: number;
+  pmdec?: number;
+  pm?: number;
+  pa?: number;
+  colour?: number;
+  status?: string;
+  simbad?: { state: string; name?: string; type?: string };
+}
+interface DwarfView {
+  state: string;
+  error?: string;
+  result?: { candidates: DwarfRow[]; known: DwarfRow[]; red_sources?: number };
+}
 interface MoversView {
   state: 'waiting' | 'running' | 'done' | 'failed';
   error: string;
@@ -446,6 +464,9 @@ export function Lab({ route }: { route: Route }) {
   const [note, setNote] = useState('');
   const [wallWait, setWallWait] = useState(false);
   const [trayOpen, setTrayOpen] = useState(false);
+  const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
+  const dwarfsRef = useRef<DwarfView | null>(null);
+  dwarfsRef.current = dwarfs;
   const [bandsWait, setBandsWait] = useState(false);
   const [pairSel, setPairSel] = useState<number | null>(null);
   // the asteroid search runs on its own for the middle pass of the field (in Days: the pass on show)
@@ -1046,6 +1067,29 @@ export function Lab({ route }: { route: Route }) {
             });
         });
       }
+      const dw = dwarfsRef.current?.result;
+      if (dw && !days) {
+        dw.candidates.forEach((c, i) => {
+          const [cra, cdec] =
+            c.ra_j2000 != null && c.dec_j2000 != null
+              ? atEpoch(c.ra_j2000, c.dec_j2000, c.pmra ?? 0, c.pmdec ?? 0, year)
+              : [c.ra ?? 0, c.dec ?? 0];
+          const k = near(cra, cdec, 10);
+          const what = `brown dwarf candidate ${i + 1}${c.status ? ` · ${c.status}` : ''}`;
+          if (k) k.lines.push(what);
+          else
+            marks.push({
+              ra: cra,
+              dec: cdec,
+              kind: 'red',
+              name: `BD candidate ${i + 1}`,
+              lines: c.simbad?.name ? [c.simbad.name] : [],
+              colour: '#b98cff',
+              fill: '#dcc8ff',
+              rr: 16,
+            });
+        });
+      }
       // known bodies of the Days film: a ring where JPL predicts them, solid when the visit's motion map shows them there
       const fb = bodiesRef.current;
       if (days && F && fb && st.opts.marker) {
@@ -1392,6 +1436,33 @@ export function Lab({ route }: { route: Route }) {
       stop = true;
     };
   }, [ra, dec, fov, valid, film]);
+
+  // brown dwarf candidates: red sources that move between passes and have no Gaia counterpart (polled until done)
+  useEffect(() => {
+    setDwarfs(null);
+    if (!valid || !meta) return;
+    let stop = false;
+    void (async () => {
+      for (let i = 0; i < 200 && !stop; i++) {
+        try {
+          const r = await fetch(`/api/v1/browndwarfs?ra=${ra}&dec=${dec}&fov=${fov}`, { cache: 'no-store' });
+          if (r.status === 404) return;
+          if (r.ok) {
+            const v = (await r.json()) as DwarfView;
+            if (stop) return;
+            setDwarfs(v);
+            if (v.state === 'done' || v.state === 'failed') return;
+          }
+        } catch {
+          /* asked again */
+        }
+        await new Promise((res) => setTimeout(res, 3000));
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [ra, dec, fov, valid, meta]);
 
   // the search between passes: asked for once the field is finished; polled until its Gaia checks are done
   useEffect(() => {
@@ -2674,6 +2745,45 @@ export function Lab({ route }: { route: Route }) {
                 <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
               </section>
               <section class="psec fsec">
+                <div class="fsh">Brown dwarf candidates</div>
+                <div class="ssum">
+                  {!dwarfs
+                    ? 'waiting for the field'
+                    : dwarfs.state !== 'done'
+                      ? 'checking the red sources that move against Gaia and SIMBAD…'
+                      : `${dwarfs.result?.candidates.length ?? 0} candidate${dwarfs.result?.candidates.length === 1 ? '' : 's'} (red, moving, no Gaia counterpart) · ${dwarfs.result?.known.length ?? 0} known red movers recovered`}
+                </div>
+                {[
+                  ...(dwarfs?.result?.candidates ?? []).map((c) => ({ c, known: false })),
+                  ...(dwarfs?.result?.known ?? []).map((c) => ({ c, known: true })),
+                ].map(({ c, known }, i) => (
+                  <button
+                    key={i}
+                    class="anrow"
+                    onClick={() => {
+                      setSelAn(null);
+                      setSel({
+                        ra: c.ra_j2000 ?? c.ra ?? ra,
+                        dec: c.dec_j2000 ?? c.dec ?? dec,
+                        pmra: c.ra_j2000 != null ? c.pmra : undefined,
+                        pmdec: c.ra_j2000 != null ? c.pmdec : undefined,
+                        name: c.simbad?.name ?? (known ? 'Known red mover' : `Brown dwarf candidate ${i + 1}`),
+                      });
+                      setTab('obj');
+                    }}
+                    title="Select it: its card, portrait and spectrum"
+                  >
+                    <b>{known ? 'Known' : `Candidate ${i + 1}`}</b>
+                    <span class="t">
+                      {c.simbad?.name ?? 'not in SIMBAD'}
+                      {c.pm != null ? ` · ${(c.pm / 1000).toFixed(1)}″/yr` : ''}
+                      {c.colour != null ? ` · colour ${c.colour.toFixed(2)}` : ''}
+                    </span>
+                    <span class="faint">{c.status ?? ''}</span>
+                  </button>
+                ))}
+              </section>
+              <section class="psec fsec">
                 <div class="fsh">Planet X · bodies beyond Neptune</div>
                 <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
                 {passes.length >= 3 && <DeepSumPanel ra={ra} dec={dec} fov={fov} passes={passes.map((q) => q.mjd_mid)} />}
@@ -2827,6 +2937,7 @@ export function Lab({ route }: { route: Route }) {
                   ['Movers', mv?.state === 'done' ? String(mvr?.tracks.length ?? 0) : null],
                   ['Pairs', mv?.state === 'done' ? String(pairs.length) : null],
                   ['Red', redv?.state === 'done' ? String(redv.result?.red.length ?? 0) : null],
+                  ['Brown dwarfs', dwarfs?.state === 'done' ? String(dwarfs.result?.candidates.length ?? 0) : dwarfs ? null : '–'],
                   [
                     'Anomalies',
                     an?.state === 'done'

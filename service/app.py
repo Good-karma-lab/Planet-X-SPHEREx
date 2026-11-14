@@ -268,6 +268,11 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             while prun.state == "running":
                 await asyncio.sleep(2.0)
         await give_way()
+        if st.dwarfs is not None:
+            drun = st.dwarfs.get_or_start(key)
+            while drun.state == "running":
+                await asyncio.sleep(2.0)
+        await give_way()
         with contextlib.suppress(Exception):  # a field without enough passes: the visitor's button says why
             await find_red_async(st.store, key, cfg.store_dir / "red")
         await give_way()
