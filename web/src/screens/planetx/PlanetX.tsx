@@ -1,42 +1,39 @@
-import { useEffect, useMemo, useState } from 'preact/hooks';
-import { honestLines, useProduct } from '../search/jobs';
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { honestLines } from '../search/jobs';
 import { useSearched, type SearchedField } from '../search/searched';
-import { DEPTH, FIELDS, P9, PROOF, RECORDED, type Field } from './data';
-import { Model } from './model';
-import './planetx.css';
+import { DEPTH, P9, RECORDED } from './data';
+import type { Group, Layers, PxField, PxScene, View } from './scene';
+import './px3.css';
 
-interface Plan {
-  exposures: number;
-  visits: number;
-  hypotheses: number;
-  estimate_s: number;
-}
+// Planet X, v3 (approved design): the model fills the screen; one panel with Candidates · Searched · Story. No forms and no settings:
+// Find Planet X runs by itself on every field opened in the Lab and on the fields we search; this page shows what came out.
 
-const fmtDec = (d: number) => `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(3)}`;
-const mins = (s: number) => (s < 90 ? 'about a minute' : s < 5400 ? `about ${Math.round(s / 60)} minutes` : `about ${(s / 3600).toFixed(1)} hours`);
 const isFpx = (f: SearchedField) => f.kinds.includes('distant') || f.kinds.includes('deep');
 
-function usePlan(ra: number, dec: number, size: number, dmin: number, dmax: number, ok: boolean): Plan | null {
-  const has = useProduct('distant');
-  const [plan, setPlan] = useState<Plan | null>(null);
-  useEffect(() => {
-    setPlan(null);
-    if (has !== true || !ok) return;
-    const ctl = new AbortController();
-    const t = setTimeout(() => {
-      const q = new URLSearchParams({ ra: String(ra), dec: String(dec), fov: String(size >= 20 ? 18 : size), dmin: String(dmin), dmax: String(dmax), plan: '1' });
-      fetch(`/api/v1/distant?${q}`, { signal: ctl.signal })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d: (Plan & { status?: string }) | null) => d && d.status === 'plan' && setPlan(d))
-        .catch(() => {});
-    }, 400);
-    return () => {
-      clearTimeout(t);
-      ctl.abort();
-    };
-  }, [has, ra, dec, size, dmin, dmax, ok]);
-  return plan;
+/** names for the places people know; any other field is named by its coordinates */
+const PLACES: [string, number, number][] = [
+  ["Barnard's Star", 269.448, 4.769],
+  ['ε Indi B', 331.077, -56.794],
+  ['WISE 0855−0714', 133.76, -7.242],
+  ['IRAS/AKARI field', 34.72, -49.79],
+  ['Ecliptic D4 field', 60.712, 8.617],
+  ['394 au candidate place', 60.94, 8.39],
+  ['Sedna', 61.773, 8.841],
+  ['Eris', 27.378, -0.12],
+  ['RW Aurigae', 76.957, 30.401],
+  ['R Draconis', 248.168, 66.755],
+];
+const sep = (a: [number, number], b: [number, number]) => {
+  const r = Math.PI / 180;
+  return Math.acos(Math.min(1, Math.sin(a[1] * r) * Math.sin(b[1] * r) + Math.cos(a[1] * r) * Math.cos(b[1] * r) * Math.cos((a[0] - b[0]) * r))) / r;
+};
+const fmtDec = (d: number) => `${d >= 0 ? '+' : '−'}${Math.abs(d).toFixed(2)}`;
+function nameOf(f: SearchedField): string {
+  const hit = PLACES.find(([, ra, dec]) => sep([ra, dec], [f.ra, f.dec]) < 0.15);
+  return hit ? hit[0] : `RA ${f.ra.toFixed(2)} · Dec ${fmtDec(f.dec)}`;
 }
+const labHref = (f: SearchedField) => `#/lab?ra=${f.open.ra}&dec=${f.open.dec}&fov=${f.open.fov}`;
+const hhmm = (s?: string) => (s ? `${s.slice(0, 10)} ${s.slice(11, 16)} UTC` : '');
 
 function useHonest(): string[] {
   const [h, setH] = useState<string[]>([]);
@@ -49,177 +46,343 @@ function useHonest(): string[] {
   return h;
 }
 
-const LIGHT: { id: string; name: string; hint: string }[] = [
-  { id: '4', name: 'D4', hint: '2.4–3.8 µm: the band where SPHEREx goes deeper than WISE' },
-  { id: '123', name: 'D1–D3', hint: '0.75–2.4 µm: reflected light' },
-  { id: '1234', name: 'D1–D4', hint: 'all four short bands' },
+const CHIPS: { g: Group; name: string; colour: string }[] = [
+  { g: 'planets', name: 'Planets', colour: '#cfd8e0' },
+  { g: 'dwarfs', name: 'Dwarf planets', colour: '#6fdc8c' },
+  { g: 'etnos', name: 'Clustered distant objects', colour: '#7dd3fc' },
+  { g: 'p9', name: 'Planet Nine, predicted', colour: '#ff9b5c' },
+  { g: 'fields', name: 'Where we searched', colour: '#5fe3d6' },
+];
+
+interface Chapter {
+  t: string;
+  sub: string;
+  view: View;
+  show: Layers;
+  cap: [string, string];
+}
+const ALL: Layers = { planets: true, dwarfs: true, etnos: true, p9: true, fields: true, peri: false };
+const CH: Chapter[] = [
+  { t: 'Why astronomers predict it', sub: 'the farthest bodies point the same way', view: 'cluster', show: { planets: true, dwarfs: false, etnos: true, p9: false, fields: false, peri: true }, cap: ['#7dd3fc', 'The clustered bodies: their closest points lie on one side'] },
+  { t: 'What it would be', sub: 'a super-Earth hundreds of au out', view: 'p9', show: { planets: true, dwarfs: false, etnos: false, p9: true, fields: false, peri: false }, cap: ['#ff9b5c', 'Planet Nine: the published range, the most likely orbit bright'] },
+  { t: 'Why it is so hard to find', sub: 'faint, slow and somewhere in a long band', view: 'band', show: { planets: true, dwarfs: false, etnos: false, p9: true, fields: false, peri: false }, cap: ['#ff9b5c', 'Seen almost edge-on: a long, thin band, tilted 16° to the planets'] },
+  { t: 'Why SPHEREx helps', sub: 'the whole sky, twice a year, at 0.75–5 µm', view: 'spherex', show: { planets: true, dwarfs: true, etnos: false, p9: true, fields: true, peri: false }, cap: ['#5fe3d6', 'Each field is searched along its line of sight, 30–2000 au'] },
+  { t: 'What we searched and found', sub: 'no Planet Nine yet', view: 'search', show: ALL, cap: ['#5fe3d6', 'Where we searched, against where Planet Nine may be'] },
 ];
 
 export function PlanetXPage() {
   const searched = useSearched(true);
   const honest = useHonest();
-  const [hover, setHover] = useState<string | null>(null);
-  const [fid, setFid] = useState<string>('ecl');
-  const f0 = FIELDS[0]!;
-  const [ra, setRa] = useState(String(f0.ra));
-  const [dec, setDec] = useState(String(f0.dec));
-  const [size, setSize] = useState(String(f0.size));
-  const [far, setFar] = useState(true);
-  const [light, setLight] = useState('4');
-  const pick = (f: Field) => {
-    setFid(f.id);
-    setRa(String(f.ra));
-    setDec(String(f.dec));
-    setSize(String(f.size));
-    setFar(f.dmin >= 200);
-  };
-  const raN = Number(ra), decN = Number(dec), sizeN = Number(size);
-  const valid = Number.isFinite(raN) && raN >= 0 && raN < 360 && Number.isFinite(decN) && Math.abs(decN) <= 90 && Number.isFinite(sizeN) && sizeN >= 1 && sizeN <= 120;
-  const [dmin, dmax] = far ? [250, 2000] : [30, 300];
-  const plan = usePlan(raN, decN, sizeN, dmin, dmax, valid);
-  const href = useMemo(() => {
-    const q = new URLSearchParams({ ra: raN.toFixed(4), dec: decN.toFixed(4), fov: String(sizeN > 20 ? 60 : sizeN > 10 ? 20 : sizeN > 5 ? 10 : sizeN > 2 ? 5 : 2), fpx: '1', dmin: String(dmin), dmax: String(dmax), det: light });
-    return `#/lab?${q}`;
-  }, [raN, decN, sizeN, dmin, dmax, light]);
+  const [tab, setTab] = useState<'cands' | 'searched' | 'story'>('cands');
+  const [chapter, setChapter] = useState(-1);
+  const [layers, setLayersState] = useState<Layers>(ALL);
+  const [log, setLog] = useState(true);
+  const [ready, setReady] = useState(false);
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const tags = useRef<HTMLDivElement>(null);
+  const model = useRef<HTMLElement>(null);
+  const scene = useRef<PxScene | null>(null);
 
-  const mine = (searched ?? []).filter(isFpx);
-  const area = mine.reduce((s, f) => s + (f.fov / 60) ** 2, 0);
+  const mine = (searched ?? []).filter(isFpx).sort((a, b) => (b.searched_at ?? '').localeCompare(a.searched_at ?? ''));
   const peaks = mine.filter((f) => f.best && f.best.kind === 'peak');
+  const fields: PxField[] = mine.map((f) => ({
+    key: f.key,
+    ra: f.ra,
+    dec: f.dec,
+    name: nameOf(f),
+    best: f.best ? f.best.label : f.state === 'running' ? 'running' : 'nothing above the bar',
+    href: labHref(f),
+    lead: !!(f.best && f.best.kind === 'peak'),
+  }));
+  const fieldSig = fields.map((f) => f.key + f.best).join('|');
+
+  useEffect(() => {
+    let dead = false;
+    void import('./scene').then(({ PxScene }) => {
+      if (dead || !canvas.current || !tags.current) return;
+      const blocked = () => [...(model.current?.querySelectorAll<HTMLElement>('.px3-ov') ?? [])].filter((e) => e.offsetParent).map((e) => e.getBoundingClientRect());
+      scene.current = new PxScene(canvas.current, tags.current, blocked);
+      setReady(true);
+    });
+    return () => {
+      dead = true;
+      scene.current?.dispose();
+      scene.current = null;
+    };
+  }, []);
+  useEffect(() => {
+    if (ready) scene.current?.setFields(fields);
+  }, [ready, fieldSig]);
+  useEffect(() => {
+    if (ready) scene.current?.setLayers(layers);
+  }, [ready, layers]);
+  useEffect(() => {
+    if (ready) scene.current?.setLog(log);
+  }, [ready, log]);
+
+  const openChapter = (i: number) => {
+    const next = chapter === i ? -1 : i;
+    setChapter(next);
+    const c = next >= 0 ? CH[next]! : null;
+    setLayersState(c ? c.show : ALL);
+    scene.current?.view(c ? c.view : 'home', next);
+  };
+  const go = (t: typeof tab) => {
+    setTab(t);
+    if (t !== 'story' && chapter >= 0) openChapter(chapter);
+  };
+  const reset = () => {
+    setChapter(-1);
+    setLayersState(ALL);
+    scene.current?.view('home', -1);
+  };
+  const rec = RECORDED['ecl']!;
+  const cap = chapter >= 0 ? CH[chapter]!.cap : null;
 
   return (
-    <div class="screen">
-      <div class="ipage px-page">
-        <header class="pg-h">
+    <div class="screen px3">
+      <section class="px3-model" ref={model} aria-label="Model of the Solar System with the predicted Planet Nine orbits">
+        <canvas ref={canvas} class="px3-canvas" />
+        <div ref={tags} class="px3-tags" />
+        <div class="px3-ov px3-tl">
           <h1>Planet X</h1>
-          <p class="hint">Where a ninth planet could be, and what this site has searched for it.</p>
-        </header>
-        <div class="fsum" data-testid="px-stats">
-          <div>
-            <b>{searched == null ? '—' : mine.length}</b>
-            <span>fields searched for distant bodies</span>
+          <div class="px3-st" data-testid="px-stats">
+            <span><b>{searched == null ? '—' : mine.length}</b> fields searched for distant bodies</span>
+            <span><b>{searched == null ? '—' : peaks.length}</b> {peaks.length === 1 ? 'lead' : 'leads'}</span>
+            <span><b>0</b> confirmed</span>
           </div>
-          <div>
-            <b>{searched == null ? '—' : area < 0.1 ? area.toFixed(2) : area.toFixed(1)}</b>
-            <span>square degrees</span>
+          <div class="px3-chips">
+            {CHIPS.map((c) => (
+              <button key={c.g} class="px3-chip" style={{ '--c': c.colour }} aria-pressed={layers[c.g]} onClick={() => setLayersState({ ...layers, [c.g]: !layers[c.g] })}>
+                <i />
+                {c.name}
+              </button>
+            ))}
           </div>
-          <div>
-            <b>0.039–0.047</b>
-            <span>mJy blind limit in D4 (WISE: 0.065)</span>
-          </div>
-          <div>
-            <b>{new Set(PROOF.map((x) => x.who)).size}</b>
-            <span>known worlds found blind</span>
-          </div>
-          <div>
-            <b>0</b>
-            <span>confirmed Planet Nine candidates</span>
-          </div>
+          {cap && (
+            <div class="px3-cap" style={{ '--c': cap[0] }}>
+              <b>{chapter + 1}</b> · {cap[1]}
+            </div>
+          )}
         </div>
-        <div class="px-grid">
-          <section class="card glass px-left">
-            <h3>THE SOLAR SYSTEM</h3>
-            <Model onHover={setHover} />
-            <div class="px-status" data-testid="px-status">{hover ?? 'Drag to turn, scroll to zoom, hover a point for its name. Orbits are JPL elements; positions are for today.'}</div>
-            <div class="px-p9">
-              <b>Planet Nine, predicted</b>
-              <span>semi-major axis {P9.a} au ({P9.aRange[0]}–{P9.aRange[1]}) · perihelion {P9.peri} au · inclination {P9.i}° · {P9.mass}</span>
-              <span class="hint">Not discovered. Its position on the orbit is unknown, so the search covers every direction a field can look.</span>
-            </div>
-          </section>
-          <section class="card glass px-right">
-            <h3>FIND PLANET X ON A FIELD</h3>
-            <div class="px-presets" role="group" aria-label="Field presets">
-              {FIELDS.map((f) => (
-                <button key={f.id} class={`chip ${fid === f.id ? 'on' : ''}`} onClick={() => pick(f)} title={f.why}>
-                  {f.name}
-                </button>
-              ))}
-            </div>
-            <div class="px-form">
-              <label>RA°<input value={ra} onInput={(e) => { setFid(''); setRa((e.target as HTMLInputElement).value); }} inputMode="decimal" data-testid="px-ra" /></label>
-              <label>Dec°<input value={dec} onInput={(e) => { setFid(''); setDec((e.target as HTMLInputElement).value); }} inputMode="decimal" data-testid="px-dec" /></label>
-              <label>Size ′<input value={size} onInput={(e) => { setFid(''); setSize((e.target as HTMLInputElement).value); }} inputMode="decimal" data-testid="px-size" /></label>
-            </div>
-            <div class="px-row">
-              <span class="px-k">Distance</span>
-              <span class="px-seg">
-                <button class={!far ? 'on' : ''} onClick={() => setFar(false)}>30–300 au</button>
-                <button class={far ? 'on' : ''} onClick={() => setFar(true)}>250–2000 au</button>
-              </span>
-            </div>
-            <div class="px-row">
-              <span class="px-k">Light</span>
-              <span class="px-seg">
-                {LIGHT.map((l) => (
-                  <button key={l.id} class={light === l.id ? 'on' : ''} onClick={() => setLight(l.id)} title={l.hint}>{l.name}</button>
-                ))}
-              </span>
-            </div>
-            <div class="px-plan" data-testid="px-plan">
-              {!valid ? 'Enter RA 0–360°, Dec −90…+90° and a size of 1–120′.' : plan ? `reads ${plan.exposures} exposures in ${plan.visits} visits · ${mins(plan.estimate_s)}` : 'planning…'}
-            </div>
-            <a class={`btn primary wide ${valid ? '' : 'disabled'}`} href={valid ? href : undefined} aria-disabled={!valid} data-testid="px-run">
-              Run Find Planet X in the Lab
-            </a>
-            <h3 class="px-h3">CANDIDATES</h3>
-            <ul class="px-cands" data-testid="px-cands">
-              <li class="rej">
-                <div class="px-ct"><b>{RECORDED['ecl']!.title}</b><em class="px-v bad">{RECORDED['ecl']!.verdict}</em></div>
-                <p>{RECORDED['ecl']!.text}</p>
-                <table class="px-rows">
-                  <tbody>
-                    {RECORDED['ecl']!.rows!.map((r) => (
-                      <tr key={r[0]}><td>{r[0]}</td><td>{r[1]}</td></tr>
-                    ))}
-                  </tbody>
-                </table>
-              </li>
-              {peaks.map((f) => (
-                <li key={f.key}>
-                  <div class="px-ct">
-                    <b>{f.best!.label}{f.best!.sn != null ? ` · ${f.best!.sn.toFixed(1)}σ` : ''}</b>
-                    <em class="px-v">lead</em>
-                  </div>
-                  <p>RA {f.ra.toFixed(3)}, Dec {fmtDec(f.dec)} · {f.fov}′ field · deep sum of the passes. A peak is a lead: it needs a closed orbit across the passes and a check against NEOWISE before it counts.</p>
-                  <a class="px-open" href={`#/lab?ra=${f.open.ra}&dec=${f.open.dec}&fov=${f.open.fov}`}>Open in the Lab</a>
-                </li>
-              ))}
-              {searched != null && peaks.length === 0 && <li class="px-none">No live peaks above the bar right now.</li>}
-            </ul>
-            <div class="px-honest">
-              {honest.map((l, k) => (
-                <p key={k} class="hint">{l}</p>
-              ))}
-            </div>
-          </section>
+        <div class="px3-ov px3-tools">
+          <span class="px3-seg">
+            <button class={log ? 'on' : ''} onClick={() => setLog(true)}>Log</button>
+            <button class={!log ? 'on' : ''} onClick={() => setLog(false)}>True</button>
+          </span>
+          <span class="px3-seg">
+            <button onClick={reset}>Reset view</button>
+          </span>
         </div>
-        <section class="card glass px-bottom">
-          <div class="px-cols">
-            <div>
-              <h3>DEPTH AGAINST WISE</h3>
-              <div class="px-bars" data-testid="px-depth">
-                {DEPTH.map((d) => (
-                  <div key={d.name} class="px-bar">
-                    <span class="px-bn">{d.name}<em>{d.note}</em></span>
-                    <span class="px-bt"><i style={{ width: `${(d.mjy / 0.07) * 100}%`, background: d.colour }} /></span>
-                    <b>{d.mjy.toFixed(3)}</b>
-                  </div>
-                ))}
+        {layers.p9 && (
+          <div class="px3-ov px3-p9">
+            <div class="h">
+              <b>Planet Nine · predicted, not found</b>
+              <span>Brown &amp; Batygin 2021</span>
+            </div>
+            <div class="kv">
+              <span>mass<b>6.2 M⊕</b></span>
+              <span>a<b>{P9.aRange[0]}–{P9.aRange[1]} au</b></span>
+              <span>perihelion<b>240–385 au</b></span>
+              <span>tilt<b>16 ± 5°</b></span>
+            </div>
+            <div class="lg">
+              <span><i />most likely orbit</span>
+              <span><i class="thin" />the published range</span>
+              <span><i class="glow" />where it most likely is now</span>
+            </div>
+          </div>
+        )}
+        <div class="px3-ov px3-credit">
+          <span class="px3-hint">drag to turn · scroll to zoom</span>
+          <span class="px3-hint touch">two fingers to turn and zoom</span>
+          Orbits: JPL · Planet Nine: Brown &amp; Batygin 2021 · textures: Solar System Scope (CC BY 4.0) · sky: 2MASS · bodies enlarged
+        </div>
+      </section>
+
+      <aside class="px3-panel" aria-label="Planet X">
+        <div class="px3-tabs" role="tablist">
+          <button role="tab" aria-selected={tab === 'cands'} onClick={() => go('cands')} data-testid="px-tab-cands">
+            Candidates <span class="n">{1 + peaks.length}</span>
+          </button>
+          <button role="tab" aria-selected={tab === 'searched'} onClick={() => go('searched')} data-testid="px-tab-searched">
+            Searched <span class="n">{searched == null ? '—' : mine.length}</span>
+          </button>
+          <button role="tab" aria-selected={tab === 'story'} onClick={() => go('story')} data-testid="px-tab-story">
+            Story
+          </button>
+        </div>
+        <div class="px3-body">
+          {tab === 'cands' && (
+            <div data-testid="px-cands">
+              <div class="px3-cand rej" onMouseEnter={() => scene.current?.highlight(mine.find((f) => nameOf(f) === 'Ecliptic D4 field')?.key ?? null)} onMouseLeave={() => scene.current?.highlight(null)}>
+                <div class="t">
+                  <b>{rec.title}</b>
+                  <em class="pill no">{rec.verdict}</em>
+                </div>
+                <div class="where">RA 60.94 · Dec +8.39 · ecliptic D4 field</div>
+                <p>{rec.text}</p>
+                {rec.rows && (
+                  <table>
+                    <tbody>
+                      {rec.rows.map((r) => (
+                        <tr key={r[0]}>
+                          <td>{r[0]}</td>
+                          <td class="r">{r[1]}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
               </div>
-              <p class="hint">Faintest body found blind, mJy at 3 µm, measured on artificial bodies in 1° fields at 250–2000 au. Lower is deeper.</p>
+              {peaks.map((f) => (
+                <div key={f.key} class="px3-cand lead" onMouseEnter={() => scene.current?.highlight(f.key)} onMouseLeave={() => scene.current?.highlight(null)}>
+                  <div class="t">
+                    <b>
+                      {f.best!.label}
+                      {f.best!.sn != null ? ` · ${f.best!.sn.toFixed(1)}σ` : ''}
+                    </b>
+                    <em class="pill lead">lead</em>
+                  </div>
+                  <div class="where">
+                    {nameOf(f)} · RA {f.ra.toFixed(2)} · Dec {fmtDec(f.dec)} · {f.fov}′
+                  </div>
+                  <p>A peak in the deep sum of the passes. A peak is a lead: it needs a closed orbit across the passes and the check against known bodies before it counts.</p>
+                  <a class="go" href={labHref(f)}>Open in the Lab →</a>
+                </div>
+              ))}
+              {searched != null && peaks.length === 0 && <p class="px3-note">No live peaks above the bar right now.</p>}
+              {honest.map((l, k) => (
+                <p key={k} class="px3-note">{l}</p>
+              ))}
             </div>
-            <div>
-              <h3>KNOWN WORLDS FOUND BLIND</h3>
-              <ul class="px-proof" data-testid="px-proof">
-                {PROOF.map((p) => (
-                  <li key={p.who}><b>{p.who}</b><span>{p.what}</span><em>{p.got}</em></li>
-                ))}
-              </ul>
-              <p class="hint">{RECORDED['sedna']!.text}</p>
+          )}
+          {tab === 'searched' && (
+            <div data-testid="px-searched">
+              <div class="px3-auto">
+                <b>Nothing to set.</b> Find Planet X runs by itself on every field opened in the Lab and on the fields we search: both distance ranges (30–300 and 250–2000 au) and both light choices, every time.
+              </div>
+              {searched == null && <p class="px3-note">Loading the searched fields…</p>}
+              {mine.map((f) => (
+                <a key={f.key} class={`px3-sf ${f.best?.kind === 'peak' ? 'lead' : ''}`} href={labHref(f)} onMouseEnter={() => scene.current?.highlight(f.key)} onMouseLeave={() => scene.current?.highlight(null)}>
+                  <span class="sd" />
+                  <span>
+                    <b>{nameOf(f)}</b>
+                    <small>
+                      RA {f.ra.toFixed(2)} · Dec {fmtDec(f.dec)} · {f.fov}′ · {hhmm(f.searched_at)}
+                    </small>
+                  </span>
+                  <span class="sr">
+                    {f.best ? f.best.label : f.state === 'running' ? 'running' : 'nothing above the bar'}
+                    <i>open →</i>
+                  </span>
+                </a>
+              ))}
+              <p class="px3-note">Live from spherex.space, newest first. Click a field, here or on the model, to open it in the Lab.</p>
             </div>
-          </div>
-        </section>
-      </div>
+          )}
+          {tab === 'story' && (
+            <div data-testid="px-story">
+              {CH.map((c, i) => (
+                <div key={i} class={`px3-ch ${chapter === i ? 'on' : ''}`}>
+                  <button onClick={() => openChapter(i)} aria-expanded={chapter === i}>
+                    <span class="k">{i + 1}</span>
+                    <span>
+                      <h3>{c.t}</h3>
+                      <span class="sub">{c.sub}</span>
+                    </span>
+                    <span class="eye">◉ on the model</span>
+                  </button>
+                  {chapter === i && <div class="in">{body(i, mine.length, peaks)}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </aside>
     </div>
+  );
+}
+
+function body(i: number, nFields: number, peaks: SearchedField[]) {
+  if (i === 0)
+    return (
+      <>
+        <p>
+          The most distant known bodies beyond Neptune, <b>Sedna, 2012 VP113</b> and others, travel on long, stretched orbits. Their closest points to the Sun all lie on one side, and their orbits lean the same way. On the model they are the blue orbits; the short blue lines point to where each one comes closest.
+        </p>
+        <p>
+          Chance would scatter them. One explanation is the pull of an unseen planet whose own orbit points the opposite way: <b>Planet Nine</b>.
+        </p>
+        <div class="src">Batygin &amp; Brown 2016 · Brown &amp; Batygin 2019</div>
+      </>
+    );
+  if (i === 1)
+    return (
+      <>
+        <div class="px3-facts">
+          <div><b>6.2 M⊕</b><span>mass, 4.9–8.4</span></div>
+          <div><b>380 au</b><span>average distance, 300–520</span></div>
+          <div><b>300 au</b><span>closest to the Sun, 240–385</span></div>
+          <div><b>16 ± 5°</b><span>tilt of its orbit</span></div>
+        </div>
+        <p>
+          One orbit takes about <b>7,400 years</b>. It spends most of that time near its far point, around <b>460 au</b>, so that is where it most likely is now: the bright stretch on the model. The thin orange orbits are the whole published range; the bright one is the most likely.
+        </p>
+        <div class="src">Brown &amp; Batygin 2021</div>
+      </>
+    );
+  if (i === 2)
+    return (
+      <>
+        <p>
+          At 400–500 au sunlight is <b>160,000–250,000 times weaker</b> than at Earth, and the little it reflects fades again on the way back.
+        </p>
+        <p>
+          Its orbit crosses a long band of sky, partly through the Milky Way, where stars crowd. And it barely moves: over six months it shifts only because the Earth has moved, about <b>0.3°</b> at 400 au.
+        </p>
+      </>
+    );
+  if (i === 3)
+    return (
+      <>
+        <p>
+          SPHEREx maps the <b>whole sky every six months</b> in 102 colours of infrared light. Two passes half a year apart see the Earth on opposite sides of the Sun: a distant body jumps by an amount that gives its distance.
+        </p>
+        <p>Adding up the exposures along every orbit a body could have reaches fainter than any single picture. At 3 µm (D4) the search goes deeper than the WISE search for Planet Nine:</p>
+        <div class="px3-bars">
+          {DEPTH.map((d) => (
+            <div key={d.name} class="bar">
+              <span>
+                {d.name}
+                <small>{d.note}</small>
+              </span>
+              <span class="tr">
+                <i style={{ width: `${(d.mjy / 0.07) * 100}%`, background: d.colour }} />
+              </span>
+              <span class="v">{d.mjy.toFixed(3)} mJy</span>
+            </div>
+          ))}
+        </div>
+        <div class="src">Faintest body found, mJy at 3 µm, with artificial bodies in 1° fields: a shorter bar is a deeper search.</div>
+      </>
+    );
+  return (
+    <>
+      <p>
+        Find Planet X has run on <b>{nFields}</b> {nFields === 1 ? 'field' : 'fields'} so far, every one opened in the Lab or searched by us, shown on the model as lines of sight.{' '}
+        {peaks.length ? (
+          <>
+            The strongest result is a lead: <b>{peaks[0]!.best!.label}</b>, which needs a closed orbit across the passes before it counts.
+          </>
+        ) : (
+          'No peak passes the bar right now.'
+        )}
+      </p>
+      <p>
+        In the ecliptic D4 field a 394 au candidate passed the bar, but ten years of NEOWISE images would show it at 13.6σ and show nothing: <b>ruled out</b>.
+      </p>
+      <p>No Planet Nine has been found. A search that finds nothing does not show that nothing is there.</p>
+    </>
   );
 }
