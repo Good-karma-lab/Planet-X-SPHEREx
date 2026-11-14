@@ -31,16 +31,19 @@ import {
   type FilmTrack,
   type Pair,
 } from './search';
+import { useDistantPlan } from './search/distant';
 import { useAsteroidSearch } from './asteroids';
 
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
 type Time = 'loop' | 'diff' | 'sum';
-type Tab = 'ctl' | 'cand' | 'obj' | 'spec' | 'find';
+type Tab = 'ctl' | 'cand' | 'obj' | 'spec';
 
 const ICON_DET =
   '<svg viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="8" aria-hidden="true"><rect x="28" y="64" width="62" height="56" rx="8"/><rect x="97" y="64" width="62" height="56" rx="8"/><rect x="166" y="64" width="62" height="56" rx="8"/><rect x="28" y="136" width="62" height="56" rx="8"/><rect x="97" y="136" width="62" height="56" rx="8"/><rect x="166" y="136" width="62" height="56" rx="8"/></svg>';
 
+/** one line on a view button; the full name is its tooltip */
+const VIEW_WORD: Record<string, string> = { picture: 'Picture', bands: 'Bands', det: 'Detectors' };
 const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
   {
     id: 'picture',
@@ -478,7 +481,7 @@ export function Lab({ route }: { route: Route }) {
   const artMap = useRef(new Map<number, HTMLCanvasElement>());
   const motionCache = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
   const artRef = useRef<HTMLCanvasElement | null>(null);
-  const [, setStage] = useState({ w: 400, h: 400 });
+  const [stage, setStage] = useState({ w: 400, h: 400 });
   const stageRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState('');
   const ft = useFilmTracks(filmData?.key ?? null);
@@ -487,7 +490,7 @@ export function Lab({ route }: { route: Route }) {
   const [trackSel, setTrackSel] = useState(-1);
   const [note, setNote] = useState('');
   const [wallWait, setWallWait] = useState(false);
-  const [trayOpen, setTrayOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(() => typeof innerWidth === "number" && innerWidth > 860 && innerHeight > 640);
   const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
   const dwarfsRef = useRef<DwarfView | null>(null);
   dwarfsRef.current = dwarfs;
@@ -518,7 +521,7 @@ export function Lab({ route }: { route: Route }) {
     const key = `${ra},${dec},${fov}`;
     if (!fpx || !meta || distRef.available !== true || distRef.ds.state !== 'idle' || fpxStarted.current === key) return;
     fpxStarted.current = key;
-    setTab('find');
+    setTab('cand');
     void distRef.start(null);
   }, [fpx, meta, distRef.available, distRef.ds.state, ra, dec, fov]);
   const trackSelRef = useRef(-1);
@@ -1606,7 +1609,7 @@ export function Lab({ route }: { route: Route }) {
     const dec0 = t.dec_2025_9 - (t.v_north * years) / 3600;
     const ra0 = t.ra_2025_9 - (t.v_east * years) / 3600 / Math.cos((t.dec_2025_9 * Math.PI) / 180);
     setSel({ ra: (ra0 + 360) % 360, dec: dec0, name: name || undefined, pmra: t.v_east * 1000, pmdec: t.v_north * 1000 });
-    setTab('spec');
+    setTab('obj');
   };
 
   // the spectral anomaly map: its state when the field opens (a finished map is shown at once); started by the button
@@ -1660,13 +1663,31 @@ export function Lab({ route }: { route: Route }) {
         ? { ra: x.ra_j2000, dec: x.dec_j2000, pmra: x.pmra, pmdec: x.pmdec, name: `Red source ${k + 1}` }
         : { ra: x.ra, dec: x.dec, name: `Red source ${k + 1}` },
     );
-    setTab('spec');
+    setTab('obj');
   };
   const pickAnomaly = (n: number) => {
     const a = an?.result?.anomalies.find((x) => x.n === n);
     if (!a) return;
     setSel({ ra: a.ra, dec: a.dec, name: `Anomaly ${n}`, pmra: a.pmra || undefined, pmdec: a.pmdec || undefined });
     setSelAn(n);
+    setTab('obj');
+  };
+
+  /** a track found inside a pass: selected as an object (at its middle place in the film's grid) and its passport opened */
+  const selectTrack = (i: number) => {
+    setTrackSel(i);
+    const t = ft.state === 'ok' ? ft.tracks[i] : undefined;
+    const g = filmData?.meta.grid;
+    if (t && g && t.pts.length) {
+      const p = t.pts[Math.floor(t.pts.length / 2)]!;
+      const cd = Math.cos((g.dec0 * Math.PI) / 180);
+      setSelAn(null);
+      setSel({
+        ra: g.ra0 - ((p.x + 0.5 - g.n / 2) * g.step_arcsec) / 3600 / cd,
+        dec: g.dec0 - ((p.y + 0.5 - g.n / 2) * g.step_arcsec) / 3600,
+        name: t.known?.name ?? `Track ${i + 1}`,
+      });
+    }
     setTab('obj');
   };
 
@@ -1913,7 +1934,7 @@ export function Lab({ route }: { route: Route }) {
           pmra: o.pmra ?? 0,
           pmdec: o.pmdec ?? 0,
         });
-        setTab('spec');
+        setTab('obj');
         return;
       }
     }
@@ -1950,7 +1971,7 @@ export function Lab({ route }: { route: Route }) {
     const [ra2, dec2] = toSky(gx, gy);
     setSelAn(null);
     setSel({ ra: ra2, dec: dec2 });
-    setTab('spec');
+    setTab('obj');
   };
   const goAim = () => {
     const a = parseRA(raIn);
@@ -2113,6 +2134,62 @@ export function Lab({ route }: { route: Route }) {
   const pairMjds = (mv as unknown as { mjd?: number[] } | null)?.mjd ?? passes.map((q) => q.mjd_mid);
   const anFrac = an?.state === 'done' ? 1 : an?.state === 'running' ? (an.total ? an.done / an.total : null) : 0;
   const dist = distRef;
+  const pxPlan = useDistantPlan(
+    { ra, dec, fov, pass: null, mjd: (meta?.passes.find((q) => q.index === (shown?.pass ?? 0)) ?? meta?.passes[0])?.mjd_mid },
+    dist.available === true && valid,
+  );
+
+  const pxState = (() => {
+    const ds = dist.ds;
+    if (dist.available !== true) return { frac: 0, text: 'not offered' };
+    if (ds.state === 'idle') return { frac: 0, text: pxPlan ? (pxPlan.estimate_s < 90 ? '~1 min' : pxPlan.estimate_s < 5400 ? `~${Math.round(pxPlan.estimate_s / 60)} min` : `~${(pxPlan.estimate_s / 3600).toFixed(1)} h`) : 'ready' };
+    if (ds.state === 'loading') return { frac: ds.frac, text: ds.frac != null ? `${Math.round(ds.frac * 100)} %` : 'running' };
+    if (ds.state === 'ok') return { frac: 1, text: `${ds.r.candidates?.length ?? 0} found` };
+    if (ds.state === 'none') return { frac: 0, text: 'no data' };
+    return { frac: 0, text: 'failed' };
+  })();
+  const goPx = (e: Event, deep: boolean) => {
+    e.stopPropagation();
+    setTab('cand');
+    if (!deep && dist.ds.state === 'idle') void dist.start(null);
+    setTimeout(() => document.getElementById('px-section')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 80);
+  };
+  const scanItems: (readonly [string, string | null])[] = [
+    ...(
+  [
+                  ['Movers', mv?.state === 'done' ? String(mvr?.tracks.length ?? 0) : null],
+                  ['Pairs', mv?.state === 'done' ? String(pairs.length) : null],
+                  ['Red', redv?.state === 'done' ? String(redv.result?.red.length ?? 0) : null],
+                  [
+                    'Brown dwarfs',
+                    dwarfs?.state === 'done'
+                      ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0}${dwarfs.result?.counts?.known_brown_dwarfs ? ` (+${dwarfs.result.counts.known_brown_dwarfs} known)` : ''}`
+                      : dwarfs
+                        ? null
+                        : '–',
+                  ],
+                  [
+                    'Anomalies',
+                    an?.state === 'done'
+                      ? String(an.result?.anomalies.length ?? 0)
+                      : an?.state === 'running'
+                        ? `${pct(anFrac) ?? 0}%`
+                        : null,
+                  ],
+                  [
+                    'Asteroids',
+                    ast.state === 'done'
+                      ? String(ast.tracks?.length ?? 0)
+                      : ast.state === 'none'
+                        ? '–'
+                        : ast.frac !== null && ast.state !== 'idle'
+                          ? `${pct(ast.frac)}%`
+                          : null,
+                  ],
+                ] as readonly (readonly [string, string | null])[]
+    ),
+    ['Planet X', dist.ds.state === 'ok' ? String(dist.ds.r.candidates?.length ?? 0) : dist.ds.state === 'loading' ? `${Math.round((dist.ds.frac ?? 0) * 100)}%` : null],
+  ];
   const foundCount =
     (mvr?.tracks.length ?? 0) +
     pairs.length +
@@ -2130,6 +2207,9 @@ export function Lab({ route }: { route: Route }) {
               style={{
                 width: `${side}px`, // one square in every view: the frame never moves or grows
                 height: `${side}px`,
+                // whole pixels, so that the 1 px frame is crisp and never one pixel thick in one state and two in another
+                marginLeft: `${Math.max(0, Math.floor((stage.w - side) / 2))}px`,
+                marginTop: `${Math.max(0, Math.floor((stage.h - side) / 2))}px`,
                 cursor: 'crosshair',
               }}
               onClick={(e) => {
@@ -2150,8 +2230,7 @@ export function Lab({ route }: { route: Route }) {
                     filmData.meta.frames.map((f) => f.mjd),
                   );
                   if (hit >= 0) {
-                    setTrackSel(hit);
-                    setTab('cand');
+                    selectTrack(hit);
                     return;
                   }
                 }
@@ -2536,7 +2615,6 @@ export function Lab({ route }: { route: Route }) {
                   ['cand', 'Candidates'],
                   ['obj', 'Object'],
                   ['spec', 'Spectrum'],
-                  ['find', 'Planet X'],
                 ] as const
               ).map(([k, n]) => (
                 <button key={k} class={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
@@ -2555,7 +2633,7 @@ export function Lab({ route }: { route: Route }) {
                     <label for="raIn">RA</label>
                     <input
                       id="raIn"
-                      class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`}
+                      class={`inp coord ${raIn !== '' && parseRA(raIn) === null ? 'bad' : ''}`}
                       spellcheck={false}
                       value={raIn}
                       onInput={(e) => setRaIn((e.target as HTMLInputElement).value)}
@@ -2567,7 +2645,7 @@ export function Lab({ route }: { route: Route }) {
                     <label for="decIn">Dec</label>
                     <input
                       id="decIn"
-                      class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`}
+                      class={`inp coord ${decIn !== '' && parseDec(decIn) === null ? 'bad' : ''}`}
                       spellcheck={false}
                       value={decIn}
                       onInput={(e) => setDecIn((e.target as HTMLInputElement).value)}
@@ -2589,7 +2667,7 @@ export function Lab({ route }: { route: Route }) {
                       data-testid={`view-${v.id}`}
                     >
                       <span class="vi" dangerouslySetInnerHTML={{ __html: v.icon }} />
-                      <span>{v.name}</span>
+                      <span>{VIEW_WORD[v.id] ?? v.name}</span>
                     </button>
                   ))}
                 </div>
@@ -2628,7 +2706,6 @@ export function Lab({ route }: { route: Route }) {
                     ft.state === 'ok'
                       ? 'the asteroid search found no track in this pass'
                       : 'the asteroid search of this pass has not finished yet',
-                    ft.state === 'ok' ? 'none here' : '↓ search',
                   )}
                   {sw(
                     'anoChk',
@@ -2639,7 +2716,6 @@ export function Lab({ route }: { route: Route }) {
                     an?.result
                       ? 'the anomaly search found no anomaly in this field'
                       : 'the anomaly search of this field has not finished yet',
-                    an?.result ? 'none here' : '↓ search',
                   )}
                   {sw(
                     'maskChk',
@@ -2648,13 +2724,6 @@ export function Lab({ route }: { route: Route }) {
                     opts.artifacts,
                     wallView ? null : (v) => set({ art: v ? '1' : null }),
                     'shown on the Picture and in Days, not on the walls',
-                  )}
-                  {sw(
-                    'refChk',
-                    'Reference',
-                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
-                    opts.reference,
-                    (v) => set({ ref: v ? '1' : null }),
                   )}
                 </div>
                 <div class="psub">Image</div>
@@ -2695,6 +2764,13 @@ export function Lab({ route }: { route: Route }) {
                     opts.motion && film !== null,
                     film !== null && filmData ? (v) => set({ mot: v ? '1' : null }) : null,
                     'Days scale only',
+                  )}
+                  {sw(
+                    'refChk',
+                    'Reference',
+                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
+                    opts.reference,
+                    (v) => set({ ref: v ? '1' : null }),
                   )}
                 </div>
                 <div class="seg sm" role="group" aria-label="Blend">
@@ -2972,7 +3048,7 @@ export function Lab({ route }: { route: Route }) {
                       key={i}
                       class="mvrow"
                       onClick={() => {
-                        setTrackSel(i);
+                        selectTrack(i);
                         if (film === null) toDays();
                         setFrame(t.pts[0]?.f ?? 0);
                         setPlaying(false);
@@ -3034,11 +3110,7 @@ export function Lab({ route }: { route: Route }) {
                   </>
                 )}
               </section>
-            </div>
-          )}
-          {tab === 'find' && (
-            <div class="pbody">
-              <section class="psec fsec">
+              <section class="psec fsec" id="px-section">
                 <div class="fsh">Planet X · bodies beyond Neptune</div>
                 <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
                 {passes.length >= 3 && (
@@ -3054,55 +3126,12 @@ export function Lab({ route }: { route: Route }) {
               </section>
             </div>
           )}
-          <div class={`sbar ${trayOpen ? '' : 'tray'}`}>
-            <div
-              class="tray-line"
-              onClick={() => setTrayOpen((o) => !o)}
-              title={trayOpen ? 'Fold the scans' : 'Show every scan'}
-              data-testid="scans"
-            >
+          <div class={`sbar ${trayOpen ? '' : 'tray'}`} data-testid="scans">
+            <button class="tray-head" onClick={() => setTrayOpen((o) => !o)} aria-expanded={trayOpen} title={trayOpen ? 'Fold the scans' : 'Show every scan'}>
               <b>Scans</b>
-              {(
-                [
-                  ['Movers', mv?.state === 'done' ? String(mvr?.tracks.length ?? 0) : null],
-                  ['Pairs', mv?.state === 'done' ? String(pairs.length) : null],
-                  ['Red', redv?.state === 'done' ? String(redv.result?.red.length ?? 0) : null],
-                  [
-                    'Brown dwarfs',
-                    dwarfs?.state === 'done'
-                      ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0}${dwarfs.result?.counts?.known_brown_dwarfs ? ` (+${dwarfs.result.counts.known_brown_dwarfs} known)` : ''}`
-                      : dwarfs
-                        ? null
-                        : '–',
-                  ],
-                  [
-                    'Anomalies',
-                    an?.state === 'done'
-                      ? String(an.result?.anomalies.length ?? 0)
-                      : an?.state === 'running'
-                        ? `${pct(anFrac) ?? 0}%`
-                        : null,
-                  ],
-                  [
-                    'Asteroids',
-                    ast.state === 'done'
-                      ? String(ast.tracks?.length ?? 0)
-                      : ast.state === 'none'
-                        ? '–'
-                        : ast.frac !== null && ast.state !== 'idle'
-                          ? `${pct(ast.frac)}%`
-                          : null,
-                  ],
-                ] as const
-              ).map(([n, v]) => (
-                <span class="it" key={n}>
-                  <i class={v === null || v.endsWith('%') ? 'busy' : ''} />
-                  {n} {v ?? '…'}
-                </span>
-              ))}
-              <span class="tg">{trayOpen ? '▾' : '▴'}</span>
-            </div>
-            {trayOpen && (
+              <span class="chev">{trayOpen ? '▾' : '▴'}</span>
+            </button>
+            {trayOpen ? (
               <div onClick={() => setTab('cand')} title="Open the candidates of this field">
                 {srow(
                   'Movers',
@@ -3175,6 +3204,47 @@ export function Lab({ route }: { route: Route }) {
                     'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
                   'search-asteroids',
                 )}
+                {srow(
+                  'Brown dwarfs',
+                  !dwarfs ? 0 : dwarfs.state === 'done' ? 1 : dwarfs.state === 'failed' ? 0 : null,
+                  !dwarfs
+                    ? 'waiting'
+                    : dwarfs.state === 'done'
+                      ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0} found${dwarfs.result?.counts?.known_brown_dwarfs ? ` · +${dwarfs.result.counts.known_brown_dwarfs} known` : ''}`
+                      : dwarfs.state === 'failed'
+                        ? 'failed'
+                        : 'checking',
+                  'Red sources that move between the passes and that the catalogues do not explain',
+                  'search-browndwarfs',
+                )}
+                <div class="sline sline-px" data-testid="search-px" title="Find Planet X: the visits of a pass added along trial distances and own motions (30–300 au)">
+                  <b>Find Planet X</b>
+                  <span class={`sprog ${pxState.frac === null ? 'busy' : ''}`}>
+                    <i style={{ width: `${pxState.frac === null ? 30 : Math.max(2, pxState.frac * 100)}%` }} />
+                  </span>
+                  <span class="sval">{pxState.text}</span>
+                  <span class="sacts">
+                    {dist.ds.state === 'idle' && dist.available === true && (
+                      <button class="btn sm mini" onClick={(e) => goPx(e, false)}>
+                        Start
+                      </button>
+                    )}
+                    {passes.length >= 3 && pxPlan && (
+                      <button class="btn sm mini" onClick={(e) => goPx(e, true)} title="The deep sum of all passes: its plan and time are shown before it starts">
+                        Deep sum
+                      </button>
+                    )}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div class="tray-sum" onClick={() => setTrayOpen(true)}>
+                {scanItems.map(([n, v]) => (
+                  <span class="it" key={n}>
+                    <i class={v === null || v.endsWith('%') ? 'busy' : ''} />
+                    {n} {v ?? '…'}
+                  </span>
+                ))}
               </div>
             )}
           </div>

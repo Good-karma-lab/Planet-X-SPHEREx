@@ -770,7 +770,7 @@ input[type='range']::-moz-range-thumb {
 }
 .panel {
   flex: none;
-  width: clamp(330px, 30vw, 480px);
+  width: 356px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2337,3 +2337,37 @@ input[type='range']::-moz-range-thumb {
 }
 .vsq.compact .ftitle { max-width: calc(100% - 140px); }
 .vsq.compact .ftitle span { display: none; }
+
+/* lab v2.3 panel: 356 px (326 px on smaller screens), tidy */
+@media (max-width: 1360px) { .panel { width: 326px; } }
+.vsquare { white-space: nowrap; padding: 0 2px; }
+.lab .stretch { display: grid; grid-template-columns: auto minmax(56px, 1fr) auto auto; gap: 8px; align-items: center; min-height: 30px; margin-top: 4px; font-size: 11.5px; }
+.lab .stretch > span:first-child { color: var(--muted); }
+.lab .stretch .mono-s { min-width: 52px; text-align: right; }
+.lab .stretch select.inp { width: 92px; padding: 3px 4px; font-size: 11px; }
+.lab .psec > .seg.sm { display: flex; width: 100%; }
+.lab .psec > .seg.sm button { flex: 1; justify-content: center; }
+.sbar .tray-line { flex-wrap: wrap; white-space: normal; gap: 2px 10px; }
+.sbar .sline { grid-template-columns: minmax(0, 1fr) 64px minmax(0, auto); }
+.sbar .sline b { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.2; }
+@media (max-width: 860px), (max-aspect-ratio: 1/1) { .panel { width: 100%; } }
+
+/* the picture sits at whole pixels (its offsets are set in the page), so its frame has one width in every state */
+.lab .vstage { align-items: flex-start; justify-content: flex-start; }
+.vsq canvas.vid { box-shadow: 0 0 0 1px var(--edge-hi), 0 14px 44px rgba(0, 0, 0, 0.55); outline: none; }
+.vsq :focus, .vsq :focus-visible { outline: none; }
+
+/* the scans: a header with a clear chevron; opened (default), one line per scan; folded, the same scans in one wrapped line */
+.sbar .tray-head { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 0 4px; background: none; border: 0; color: var(--muted); cursor: pointer; font: 650 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; }
+.sbar .tray-head b { font-weight: 650; }
+.sbar .tray-head .chev { display: inline-grid; place-items: center; width: 24px; height: 18px; border: 1px solid var(--edge); border-radius: 6px; background: rgba(255, 255, 255, 0.04); color: var(--accent-l); font-size: 12px; letter-spacing: 0; }
+.sbar .tray-head:hover .chev { border-color: var(--edge-hi); }
+.sbar .tray-sum { display: flex; flex-wrap: wrap; gap: 2px 10px; font-size: 11.5px; color: var(--muted); }
+.sbar .tray-sum .it { display: inline-flex; gap: 4px; align-items: baseline; }
+.sbar .tray-sum .it i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.sbar .tray-sum .it i.busy { background: #ffb454; animation: pulse 1.2s infinite; }
+.sbar .sline.sline-px { grid-template-columns: auto 34px minmax(0, 1fr) auto; }
+.sbar .sline-px b { white-space: nowrap; }
+.sbar .sline-px .sval { text-align: right; }
+.sbar .sline-px .sacts { display: inline-flex; gap: 4px; }
+.btn.mini { padding: 0 7px; height: 20px; min-height: 0; font-size: 10.5px; line-height: 18px; }
