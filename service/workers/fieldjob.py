@@ -108,8 +108,8 @@ async def run_field(
         store.write_part(KIND, key, f"quick_p{k}.sxp", await ctx.compute(encode_quick, pp, cdet))
         ctx.part_ready(f"quick_p{k}")
 
-    def progress(text: str) -> None:
-        ctx.phase(text)
+    def progress(text: str, done: int | None = None, total: int | None = None) -> None:
+        ctx.phase(text, done, total)
 
     def reading(k: int, n: int, mb: float) -> None:
         ctx.phase(f"reading the exposures: {k} of {n}, {mb:.0f} MB downloaded", k, n)
