@@ -199,6 +199,53 @@ def _stack_block(A, B, sh, wsum):
     return best, arg, neg
 
 
+SEARCH_BLOCKS = 48  # the hypotheses of a scan are cut into this many blocks (each its own call, spread over the worker processes)
+
+
+def search_prepare(DV, T, N, dmin, dmax, workdir, step=STEP, mu_scale=1.0, hmax=HMAX):
+    """The first stage of `search` for a service that spreads the blocks over processes: the hypotheses and the arrays every block reads
+    (written to `workdir` as .npy files, read in place by the blocks) -> dict(H, OFF, tv, Rv, i0, w, wa, cuts, wsum)"""
+    tv = np.array([v["t"] for v in DV])
+    Rv = np.array([v["R"] for v in DV])
+    i0 = int(np.argmin(np.abs(tv - 0.5 * (tv.min() + tv.max()))))
+    H = hypotheses(dmin, dmax, tv, Rv, i0, T, step, mu_scale, hmax=hmax)
+    OFF = offsets(H, tv, Rv, i0, T)
+    SH = np.round(OFF / S).astype("i4")
+    w0 = np.array([1 / v["sg"] ** 2 for v in DV])
+    sv = np.array([v["s"] for v in DV])
+    wa, w = w0 * sv, w0 * sv * sv
+    A = np.array([v["d"] * wi for v, wi in zip(DV, wa)], "f4")
+    B = np.array([v["good"] * wi for v, wi in zip(DV, w)], "f4")
+    np.save(f"{workdir}/A.npy", A)
+    np.save(f"{workdir}/B.npy", B)
+    np.save(f"{workdir}/SH.npy", SH)
+    cuts = np.linspace(0, len(H), max(1, min(len(H), SEARCH_BLOCKS)) + 1).astype(int)
+    return dict(H=H, OFF=OFF, tv=tv, Rv=Rv, i0=i0, w=w, wa=wa, cuts=cuts, wsum=float(w.sum()), N=N)
+
+
+def search_block(workdir, a, b, wsum):
+    """One block of hypotheses a..b (the arrays read in place from `workdir`) -> (a, best S/N per sky point, index in the block, best S/N of the negated data)"""
+    A = np.load(f"{workdir}/A.npy", mmap_mode="r")
+    B = np.load(f"{workdir}/B.npy", mmap_mode="r")
+    SH = np.load(f"{workdir}/SH.npy", mmap_mode="r")
+    best, g, neg = _stack_block(A, B, np.asarray(SH[a:b]), wsum)
+    return a, best, g, neg
+
+
+def search_merge(prep, parts, secs):
+    """The blocks put together (parts: the results of `search_block`, any order) -> the dict `search` returns"""
+    N = prep["N"]
+    best = np.zeros((N, N), "f4")
+    arg = np.full((N, N), -1, "i4")
+    neg = np.zeros((N, N), "f4")
+    for a, b_, g_, n_ in sorted(parts, key=lambda q: q[0]):
+        m = b_ > best
+        best[m] = b_[m]
+        arg[m] = a + g_[m]
+        neg = np.maximum(neg, n_)
+    return dict(H=prep["H"], OFF=prep["OFF"], tv=prep["tv"], Rv=prep["Rv"], i0=prep["i0"], best=best, arg=arg, neg=neg, w=prep["w"], wa=prep["wa"], secs=secs)
+
+
 def search(DV, T, N, dmin, dmax, step=STEP, mu_scale=1.0, workers=6, progress=None, cancel=None, hmax=HMAX):
     """The distance knob on the differences DV of one pass -> dict(H, OFF, tv, Rv, i0, best, arg, neg, w, wa) (best: the best S/N per sky point, arg: its hypothesis, neg: the same for the
     negated data)"""
