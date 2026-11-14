@@ -4,13 +4,15 @@ import { formatHash, type Route } from '../lib/route';
 import type { SxpPart } from '../lib/sxp';
 import { frameAt } from '../viewer/pendulum';
 import { Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
+import { FilmView } from './film';
 
 const SIZES = [2, 5, 10, 20, 60];
-type View = 'picture' | 'bands' | 'det';
+type View = 'picture' | 'bands' | 'det' | 'film';
 const VIEWS: { key: View; name: string; tip: string }[] = [
   { key: 'picture', name: 'Picture', tip: 'The passes one after another in spectral colour: what moved jumps, the rest stands still.' },
   { key: 'bands', name: 'Wall of bands', tip: 'One panel per named band: in which light the object is bright.' },
   { key: 'det', name: 'Wall of detectors', tip: 'One panel per detector: a real object jumps in all six at once.' },
+  { key: 'film', name: 'Film of one pass', tip: 'One frame per visit of one pass: a body that crosses the field in days hops from frame to frame.' },
 ];
 type Time = 'pendulum' | 'difference' | 'coadd';
 const TIMES: { key: Time; name: string; tip: string }[] = [
@@ -47,7 +49,7 @@ export function Lab({ route }: { route: Route }) {
   const ra = Number(route.params['ra']);
   const dec = Number(route.params['dec']);
   const fov = SIZES.includes(Number(route.params['fov'])) ? Number(route.params['fov']) : 5;
-  const view: View = (['picture', 'bands', 'det'] as const).find((v) => v === route.params['view']) ?? 'picture';
+  const view: View = (['picture', 'bands', 'det', 'film'] as const).find((v) => v === route.params['view']) ?? 'picture';
   const time: Time = (['pendulum', 'difference', 'coadd'] as const).find((v) => v === route.params['time']) ?? 'pendulum';
   const canvas = useRef<HTMLCanvasElement>(null);
   const clientRef = useRef<FieldClient | null>(null);
@@ -57,6 +59,7 @@ export function Lab({ route }: { route: Route }) {
   const [labels, setLabels] = useState<Label[]>([]);
   const [playing, setPlaying] = useState(true);
   const [fixed, setFixed] = useState<number | null>(null);
+  const [filmStatus, setFilmStatus] = useState('');
   const valid = Number.isFinite(ra) && Number.isFinite(dec);
   const state = useRef({ view, time, playing, fixed, meta: null as FieldMeta | null });
   state.current = { view, time, playing, fixed, meta };
@@ -182,15 +185,16 @@ export function Lab({ route }: { route: Route }) {
     <div class="lab">
       <div class="lab-picture">
         <div class="picture-wrap">
-          <canvas ref={canvas} class="picture" data-testid="picture" />
-          {labels.map((l) => (
+          <canvas ref={canvas} class="picture" data-testid="picture" style={view === 'film' ? { visibility: 'hidden' } : undefined} />
+          {view === 'film' && <FilmView ra={ra} dec={dec} fov={fov} mjd={Number(route.params['film']) || undefined} playing={playing} onStatus={setFilmStatus} />}
+          {view !== 'film' && labels.map((l) => (
             <div class="panel-label" style={{ left: `${l.x + 4}px`, top: `${l.y + 3}px`, maxWidth: `${l.w - 8}px` }}>
               {l.text}
               <span>{l.sub}</span>
             </div>
           ))}
         </div>
-        <div class="status-line" data-testid="lab-status">{status}</div>
+        <div class="status-line" data-testid="lab-status">{view === 'film' ? filmStatus : status}</div>
         <div class="timeline">
           <button class="play" onClick={() => { setFixed(null); setPlaying(!playing); }} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
           {(meta?.passes ?? []).map((p) => (

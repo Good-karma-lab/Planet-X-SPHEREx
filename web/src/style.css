@@ -62,3 +62,6 @@ nav a.on { color: var(--text); background: rgba(47, 183, 176, 0.18); }
 .entry .row { display: flex; gap: 8px; align-items: center; }
 .entry input { background: #0b1118; color: var(--text); border: 1px solid rgba(47, 183, 176, 0.35); border-radius: 6px; padding: 5px 8px; font: inherit; width: 260px; }
 .entry .dim { color: var(--dim); }
+.film { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+.film-canvas { height: 100%; max-width: 100%; aspect-ratio: 1 / 1; image-rendering: auto; background: #000; }
+.film-switch { position: absolute; right: 8px; top: 6px; font-size: 12px; color: var(--dim); background: rgba(0, 0, 0, 0.5); padding: 2px 6px; border-radius: 4px; }

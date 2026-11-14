@@ -31,13 +31,13 @@ const WHAT: Record<string, string> = {
   'R Draconis': 'a pulsating red giant near the ecliptic pole',
 };
 
-const DEMO = [
-  { label: 'Asteroids near the ecliptic', ra: 169.8917, dec: 4.3514, fov: 60, what: 'a square degree with known asteroids crossing it' },
-  { label: 'Eris field', ra: 27.378, dec: -0.12, fov: 20, what: 'the dwarf planet beyond Neptune, 95 au away' },
+const DEMO: { label: string; ra: number; dec: number; fov: number; what: string; extra: Record<string, string> }[] = [
+  { label: 'Asteroids near the ecliptic', ra: 169.8917, dec: 4.3514, fov: 60, what: 'the film of one pass: asteroids hop from visit to visit', extra: { view: 'film', film: '61027' } },
+  { label: 'Eris field', ra: 27.378, dec: -0.12, fov: 20, what: 'the dwarf planet beyond Neptune, 95 au away', extra: {} },
 ];
 
-function open(ra: number, dec: number, fov: number) {
-  location.hash = formatHash({ screen: 'lab', params: { ra: ra.toFixed(5), dec: dec.toFixed(5), fov: String(fov) } });
+function open(ra: number, dec: number, fov: number, extra: Record<string, string> = {}) {
+  location.hash = formatHash({ screen: 'lab', params: { ra: ra.toFixed(5), dec: dec.toFixed(5), fov: String(fov), ...extra } });
 }
 
 export function Globe() {
@@ -77,7 +77,7 @@ export function Globe() {
         <h2>Fields</h2>
         <div class="cards">
           {DEMO.map((d) => (
-            <button class="card" key={d.label} onClick={() => open(d.ra, d.dec, d.fov)}>
+            <button class="card" key={d.label} onClick={() => open(d.ra, d.dec, d.fov, d.extra)}>
               <b>{d.label}</b>
               <span>{d.what}</span>
               <small>RA {d.ra.toFixed(4)} · Dec {d.dec.toFixed(4)} · {d.fov}′</small>
