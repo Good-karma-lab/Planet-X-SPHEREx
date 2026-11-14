@@ -169,6 +169,7 @@ export function Globe() {
   const [survey, setSurvey] = useState<SurveyId>(kept.survey);
   const [proj, setProj] = useState<'globe' | 'moll'>(kept.proj);
   const [covOn, setCovOn] = useState(kept.covOn);
+  const [catOpen, setCatOpen] = useState(kept.catOpen);
   const [filter, setFilter] = useState(kept.filter);
   const [query, setQuery] = useState(kept.query);
   const [page, setPage] = useState(kept.page);
@@ -200,8 +201,8 @@ export function Globe() {
 
   // the choices survive a visit to another screen
   useEffect(() => {
-    Object.assign(kept, { survey, proj, covOn, filter, query, page, per, sel: sel?.n ?? null });
-  }, [survey, proj, covOn, filter, query, page, per, sel]);
+    Object.assign(kept, { survey, proj, covOn, catOpen, filter, query, page, per, sel: sel?.n ?? null });
+  }, [survey, proj, covOn, catOpen, filter, query, page, per, sel]);
 
   useEffect(() => {
     void loadCatalog().then((c) => setCatalog((old) => (old === c ? old : c)));
@@ -355,9 +356,9 @@ export function Globe() {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.globalCompositeOperation = 'screen';
-        ctx.drawImage(toneOf(sky.canvas, sky.gen, tb), 0, 0, W, H);
+        ctx.drawImage(toneOf(sky.canvas, sky.gen, tb, st.survey), 0, 0, W, H);
         ctx.globalAlpha = 0.35;
-        ctx.drawImage(haloOf(sky.canvas, sky.gen, tb), 0, 0, W, H);
+        ctx.drawImage(haloOf(sky.canvas, sky.gen, tb, st.survey), 0, 0, W, H);
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
       }
@@ -844,18 +845,52 @@ export function Globe() {
 
   return (
     <div class="screen">
-      <div class="globe-wrap">
+      <div class={`globe-wrap${catOpen ? " cat-open" : ""}`}>
         <canvas ref={cv} aria-label="Sky globe" data-testid="sky" />
         <div class="globe-vig" aria-hidden="true" />
-        <div class="map-ui">
-          <div class="seg sm" role="group" aria-label="Sky background">
-            {SURVEYS.map((s) => (
-              <button key={s.id} class={s.id === survey ? 'on' : ''} aria-pressed={s.id === survey} title={s.note} onClick={() => setSurvey(s.id)}>
-                {s.name}
-              </button>
-            ))}
-          </div>
-          <div class="seg" role="group" aria-label="Projection">
+        <div class="map-ui map-tl">
+    <section class="aim aimchip dark-glass" aria-label="Aim">
+      <div class="coords">
+        <div class="field">
+          <label for="gRa">RA</label>
+          <input
+            id="gRa"
+            class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`}
+            spellcheck={false}
+            value={raIn}
+            onInput={(e) => setRaIn((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => e.key === 'Enter' && goAim()}
+            onBlur={goAim}
+          />
+        </div>
+        <div class="field">
+          <label for="gDec">Dec</label>
+          <input
+            id="gDec"
+            class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`}
+            spellcheck={false}
+            value={decIn}
+            onInput={(e) => setDecIn((e.target as HTMLInputElement).value)}
+            onKeyDown={(e) => e.key === 'Enter' && goAim()}
+            onBlur={goAim}
+          />
+        </div>
+      </div>
+      <div class="field">
+        <label>FOV</label>
+        <div class="seg fov">
+          {SIZES.map((s) => (
+            <button key={s} class={s === a.fov ? 'on' : ''} onClick={() => aim.set({ fov: s }, 'fov')} title={`${s}′ field`}>
+              {s}′
+            </button>
+          ))}
+        </div>
+      </div>
+    </section>
+        </div>
+        <div class="map-ui map-tr">
+          <div class="maprow">
+            <div class="seg" role="group" aria-label="Projection">
             <button class={proj === 'globe' ? 'on' : ''} onClick={() => setProj('globe')}>
               <span dangerouslySetInnerHTML={{ __html: icon('globe', 16) }} style={{ display: 'contents' }} />
               3D globe
@@ -865,26 +900,39 @@ export function Globe() {
               Mollweide map
             </button>
           </div>
-          <div class="map-read">
-            Aim: <b>{formatRA(a.ra)}</b> · <b>{formatDec(a.dec)}</b> · {a.fov}′
-            {count &&
-              (count.n ? (
-                <span style={{ color: 'var(--good)' }}>
-                  {' '}
-                  · {count.n.toLocaleString('en-US')} exposures (DR1 {count.by['dr1'] ?? 0}, QR3 {count.by['qr3'] ?? 0})
-                </span>
-              ) : (
-                <span class="faint"> · no SPHEREx exposures here</span>
-              ))}
-            {sel && (
-              <>
-                {' · '}
-                <button class="lnk" onClick={() => openObj(sel)} title="Open this field in the spectral lab">
-                  Open {sel.n.length > 26 ? `${sel.n.slice(0, 24)}…` : sel.n} in the lab
-                </button>
-              </>
-            )}
+            <button class={`btn sm dark-glass catbtn ${catOpen ? 'on' : ''}`} onClick={() => setCatOpen(!catOpen)} aria-pressed={catOpen} title="Show or hide the catalogue of objects">
+              Catalogue
+            </button>
           </div>
+          <div class="seg sm" role="group" aria-label="Sky background">
+            {SURVEYS.map((s) => (
+              <button key={s.id} class={s.id === survey ? 'on' : ''} aria-pressed={s.id === survey} title={s.note} onClick={() => setSurvey(s.id)}>
+                {s.name}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div class="map-bl">
+          {(count || sel) && (
+            <div class="map-read">
+              {count &&
+                (count.n ? (
+                  <span style={{ color: 'var(--good)' }}>
+                    {count.n.toLocaleString('en-US')} exposures (DR1 {count.by['dr1'] ?? 0}, QR3 {count.by['qr3'] ?? 0})
+                  </span>
+                ) : (
+                  <span class="faint">no SPHEREx exposures here</span>
+                ))}
+              {sel && (
+                <>
+                  {count ? ' · ' : ''}
+                  <button class="lnk" onClick={() => openObj(sel)} title="Open this field in the spectral lab">
+                    Open {sel.n.length > 26 ? `${sel.n.slice(0, 24)}…` : sel.n} in the lab
+                  </button>
+                </>
+              )}
+            </div>
+          )}
           {sel && moving(sel) && (
             <div class="map-read map-dates" data-testid="globe-dates">
               On this picture: <b>{sel.n.length > 26 ? `${sel.n.slice(0, 24)}…` : sel.n}</b> in {selYear.toFixed(1)}
@@ -898,6 +946,13 @@ export function Globe() {
               )}
             </div>
           )}
+          <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
+          <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
+          ★ are test targets.
+          <span class="globe-credit">
+            {survey === 'spherex' ? 'Backdrop: SPHEREx DR1 (IRSA)' : `Backdrop: ${sv.name} (IRSA / CDS HiPS)`}
+          </span>
+        </div>
         </div>
         <label
           class="chk covsw dark-glass"
@@ -921,58 +976,17 @@ export function Globe() {
             {searchedOn && <SearchedLegend count={searched.length} />}
           </label>
         )}
-        <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
-          <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
-          ★ are test targets.
-          <span class="globe-credit">
-            {survey === 'spherex' ? 'Backdrop: SPHEREx DR1 (IRSA)' : `Backdrop: ${sv.name} (IRSA / CDS HiPS)`}
-          </span>
-        </div>
         <button class="btn primary big map-open" onClick={showArea} title="Open the field under the frame in the spectral lab">
           <span dangerouslySetInnerHTML={{ __html: icon('scan', 18) }} style={{ display: 'contents' }} />
           Show area
         </button>
       </div>
+      {catOpen && (
       <aside class="catalog glass">
         <div class="cat-top">
-          <section class="aim">
-            <div class="coords">
-              <div class="field">
-                <label for="gRa">RA</label>
-                <input
-                  id="gRa"
-                  class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`}
-                  spellcheck={false}
-                  value={raIn}
-                  onInput={(e) => setRaIn((e.target as HTMLInputElement).value)}
-                  onKeyDown={(e) => e.key === 'Enter' && goAim()}
-                  onBlur={goAim}
-                />
-              </div>
-              <div class="field">
-                <label for="gDec">Dec</label>
-                <input
-                  id="gDec"
-                  class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`}
-                  spellcheck={false}
-                  value={decIn}
-                  onInput={(e) => setDecIn((e.target as HTMLInputElement).value)}
-                  onKeyDown={(e) => e.key === 'Enter' && goAim()}
-                  onBlur={goAim}
-                />
-              </div>
-            </div>
-            <div class="field">
-              <label>FOV</label>
-              <div class="seg fov">
-                {SIZES.map((s) => (
-                  <button key={s} class={s === a.fov ? 'on' : ''} onClick={() => aim.set({ fov: s }, 'fov')} title={`${s}′ field`}>
-                    {s}′
-                  </button>
-                ))}
-              </div>
-            </div>
-          </section>
+          <button class="btn sm catclose" onClick={() => setCatOpen(false)} title="Hide the catalogue">
+            Hide catalogue
+          </button>
           <input
             class="inp search"
             placeholder="Search a name or coordinates"
@@ -1198,6 +1212,7 @@ export function Globe() {
           <span class="cnt">Total: {list.length.toLocaleString('en-US')}</span>
         </div>
       </aside>
+      )}
     </div>
   );
 }

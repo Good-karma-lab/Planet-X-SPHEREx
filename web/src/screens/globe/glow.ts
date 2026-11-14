@@ -36,18 +36,34 @@ function blur(a: Float32Array, w: number, h: number, sigma: number): Float32Arra
 
 const ASINH_K = Math.asinh(1 / 0.08);
 
-/** The night ramp as a lookup: stretched luminance (0..1, 1024 steps) to RGB. */
-const RAMP = (() => {
-  const t = new Uint8ClampedArray(1024 * 3);
+/**
+ * The night ramps: stretched luminance (0..1, 1024 steps) to RGB, one palette per survey so that the layers read as different things at a glance. Each is
+ * R = (r0 + r1·w)·v and so on, with w = min(1, 1.25 v): dark at the bottom, the palette's own highlight at the top. The luminance is the survey's own.
+ * visible: warm neutral; near-infrared: amber; infrared: red-orange; dust: blue-violet; SPHEREx: teal.
+ */
+const PALETTES: Record<string, [number, number, number, number, number, number]> = {
+  dss2: [120, 100, 112, 92, 104, 62],
+  '2mass': [150, 105, 92, 98, 34, 36],
+  wise: [172, 83, 54, 62, 46, 18],
+  dust: [78, 40, 44, 24, 150, 56],
+  spherex: [26, 56, 136, 104, 148, 90],
+};
+const rampCache = new Map<string, Uint8ClampedArray>();
+function rampFor(survey: string): Uint8ClampedArray {
+  let t = rampCache.get(survey);
+  if (t) return t;
+  const [r0, r1, g0, g1, b0, b1] = PALETTES[survey] ?? [92, 86, 128, 58, 186, 14];
+  t = new Uint8ClampedArray(1024 * 3);
   for (let i = 0; i < 1024; i++) {
     const v = i / 1023;
     const w = Math.min(1, 1.25 * v);
-    t[i * 3] = (92 + 86 * w) * v;
-    t[i * 3 + 1] = (128 + 58 * w) * v;
-    t[i * 3 + 2] = (186 + 14 * w) * v;
+    t[i * 3] = (r0 + r1 * w) * v;
+    t[i * 3 + 1] = (g0 + g1 * w) * v;
+    t[i * 3 + 2] = (b0 + b1 * w) * v;
   }
+  rampCache.set(survey, t);
   return t;
-})();
+}
 /** The asinh stretch of a luminance already scaled to 0..1: asinh(x / 0.08) / asinh(1 / 0.08) · 0.92. */
 const stretch = (x: number) => (Math.asinh(x / 0.08) / ASINH_K) * 0.92;
 
@@ -84,14 +100,15 @@ export function toneBounds(src: HTMLCanvasElement, gen: number, survey: string, 
   return b;
 }
 
-let toneCache: { gen: number; canvas: HTMLCanvasElement } | null = null;
+let toneCache: { gen: number; survey: string; canvas: HTMLCanvasElement } | null = null;
 
 /**
  * The survey picture toned: luminance, the asinh stretch between the survey's bounds, the night ramp, at full resolution. The stars stay the survey's own pixels (a light
  * blur of 0.7 px at most is the picture's own smoothing); nothing is drawn that the survey does not hold.
  */
-export function toneOf(src: HTMLCanvasElement, gen: number, b: Bounds): HTMLCanvasElement {
-  if (toneCache && toneCache.gen === gen) return toneCache.canvas;
+export function toneOf(src: HTMLCanvasElement, gen: number, b: Bounds, survey: string): HTMLCanvasElement {
+  if (toneCache && toneCache.gen === gen && toneCache.survey === survey) return toneCache.canvas;
+  const RAMP = rampFor(survey);
   const w = src.width;
   const h = src.height;
   const out = document.createElement('canvas');
@@ -112,15 +129,16 @@ export function toneOf(src: HTMLCanvasElement, gen: number, b: Bounds): HTMLCanv
     q[i * 4 + 3] = 255;
   }
   o.putImageData(img, 0, 0);
-  toneCache = { gen, canvas: out };
+  toneCache = { gen, survey, canvas: out };
   return out;
 }
 
-let haloCache: { gen: number; canvas: HTMLCanvasElement } | null = null;
+let haloCache: { gen: number; survey: string; canvas: HTMLCanvasElement } | null = null;
 
 /** The light halo of the band: the stretched luminance blurred over 42 px (at 1440 wide), at a quarter of the resolution; the caller adds it at 0.35. */
-export function haloOf(src: HTMLCanvasElement, gen: number, b: Bounds): HTMLCanvasElement {
-  if (haloCache && haloCache.gen === gen) return haloCache.canvas;
+export function haloOf(src: HTMLCanvasElement, gen: number, b: Bounds, survey: string): HTMLCanvasElement {
+  if (haloCache && haloCache.gen === gen && haloCache.survey === survey) return haloCache.canvas;
+  const RAMP = rampFor(survey);
   const sw = Math.max(32, Math.ceil(src.width / 4));
   const sh = Math.max(32, Math.ceil(src.height / 4));
   const small = document.createElement('canvas');
@@ -149,7 +167,7 @@ export function haloOf(src: HTMLCanvasElement, gen: number, b: Bounds): HTMLCanv
     img.data[i * 4 + 3] = 255;
   }
   o.putImageData(img, 0, 0);
-  haloCache = { gen, canvas: out };
+  haloCache = { gen, survey, canvas: out };
   return out;
 }
 
