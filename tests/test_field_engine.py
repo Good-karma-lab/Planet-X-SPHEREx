@@ -89,3 +89,26 @@ def test_parallax_sign_barnards_star() -> None:
     r2, d2 = place(ra0, dec0, 2000.0, pm[0], pm[1], 546.9759, 61288.0)  # 2026-09-04
     r3, d3 = place(ra0, dec0, 2000.0, pm[0], pm[1], 0.0, 61288.0)
     assert offset_arcsec(r2[0], d2[0], r3[0], d3[0])[0] < -0.3
+
+
+def test_a_partial_pass_says_which_detectors_and_bands_have_no_exposure() -> None:
+    from service.workers.fieldjob import annotate
+
+    meta = {
+        "passes": [
+            {"index": 0, "detectors": {"D1": 7, "D2": 11, "D3": 23, "D4": 7, "D5": 11, "D6": 23}},
+            {"index": 3, "detectors": {"D1": 22, "D4": 22}},  # R Draconis, season 4: only D1 and D4
+        ],
+        "bands": [{"key": "star"}, {"key": "co2"}, {"key": "h2o"}, {"key": "pah"}],
+    }
+    out = annotate(meta)
+    assert out is not None
+    full, part = out["passes"]
+    assert full["partial"] is False and all(v["state"] == "ok" for v in full["detector_status"].values())
+    assert part["partial"] is True
+    assert [d for d, v in part["detector_status"].items() if v["state"] != "ok"] == ["D2", "D3", "D5", "D6"]
+    assert part["detector_status"]["D1"]["exposures"] == 22
+    assert part["bands_status"]["star"]["state"] == "ok"  # 0.75-1.1 um is D1
+    assert part["bands_status"]["co2"]["state"] == "no exposure"  # 4.3 um is D5
+    assert part["bands_status"]["pah"]["state"] == "ok"  # 3.3 um is D4
+    assert annotate(None) is None

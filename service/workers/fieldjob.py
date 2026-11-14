@@ -161,6 +161,32 @@ async def run_field(
 _SIGNATURES: dict[tuple[str, int], str] = {}
 
 
+def annotate(meta: dict[str, Any] | None) -> dict[str, Any] | None:
+    """The field's meta with, for every pass, what the exposures of that pass cover: `detector_status` (D1..D6: the number of exposures and
+    "ok" or "no exposure in this pass"), `bands_status` (for each named band: "ok", or "no exposure" when no detector that has exposures in
+    the pass covers any window of the band), and `partial` (some detector has no exposure). A pass is often partial (a short season, the
+    edge of the survey): the page says "no exposure in D2 this season" instead of showing black. Computed from the counts the meta
+    already holds, so no stored field changes."""
+    if meta is None:
+        return None
+    from engine.colour import DETECTOR_RANGES_UM
+
+    windows = {b.key: b.windows for b in load_bands()}
+    passes = []
+    for p in meta.get("passes", []):
+        have = {int(k[1:]): int(v) for k, v in (p.get("detectors") or {}).items() if v}
+        status = {
+            f"D{d}": {"exposures": have.get(d, 0), "state": "ok" if have.get(d, 0) else "no exposure in this pass"} for d in range(1, 7)
+        }
+        bands: dict[str, Any] = {}
+        for b in meta.get("bands", []):
+            wins: tuple[tuple[float, float], ...] = windows.get(b["key"]) or ()
+            covered = [d for d, (lo, hi) in DETECTOR_RANGES_UM.items() if d in have and any(w_lo < hi and w_hi > lo for w_lo, w_hi in wins)]
+            bands[b["key"]] = {"state": "ok" if covered or not wins else "no exposure", "detectors": covered}
+        passes.append({**p, "detector_status": status, "bands_status": bands, "partial": len(have) < 6})
+    return {**meta, "passes": passes}
+
+
 def exposure_signature(index: Index, params: dict[str, Any]) -> str:
     """What the field is built from: its overlapping exposures (a new period changes only the keys of the fields it touches). Kept in
     memory per field and index size, so opening a field again asks nothing of the index."""

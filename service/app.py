@@ -468,7 +468,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         params = fieldjob.canonical(ra, dec, fov)
         key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
         if st.store.is_complete(key):
-            return {"key": key, "state": "done", "params": params, "meta": st.store.read_meta(fieldjob.KIND, key)}
+            return {"key": key, "state": "done", "params": params, "meta": fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))}
         if key not in st.scheduler.by_key or st.scheduler.jobs[st.scheduler.by_key[key]].state in ("error", "cancelled"):
             wait = st.new_work.take(client_id(request, st.salt))
             if wait > 0:
@@ -477,7 +477,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 )
         _, job = submit_field(params, Priority.P0)
         if job is None:
-            return {"key": key, "state": "done", "params": params, "meta": st.store.read_meta(fieldjob.KIND, key)}
+            return {"key": key, "state": "done", "params": params, "meta": fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))}
         return {"key": key, "params": params, "job": job.view()}
 
     @app.get(f"{API_PREFIX}/film")
