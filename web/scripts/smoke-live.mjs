@@ -45,6 +45,7 @@ await check('lab: Barnard 5′ opens (warm)', async () => {
   return await page.getByTestId('lab-status').innerText();
 });
 await check('lab: movers find Barnard with Gaia', async () => {
+  await page.getByTestId('tab-find').click();
   await page.getByText('Gaia: same motion').first().waitFor({ timeout: 60000 });
 });
 await check('lab: spectrum of a clicked star', async () => {
@@ -57,6 +58,7 @@ await check('lab: spectrum of a clicked star', async () => {
 });
 await check('lab: ε Indi B 20′ anomaly 1 is the brown dwarf', async () => {
   await lab('ra=331.09645&dec=-56.80059&fov=20');
+  await page.getByTestId('tab-find').click(); // the results of the searches are in the Findings tab
   await page.getByText('Anomaly 1', { exact: true }).first().waitFor({ timeout: 60000 });
   const row = (await page.locator('.anrow').allInnerTexts()).find((t) => t.startsWith('Anomaly 1')) ?? '';
   if (!/eps Ind B/.test(row)) throw new Error(`anomaly 1 is ${row}`);
@@ -64,7 +66,8 @@ await check('lab: ε Indi B 20′ anomaly 1 is the brown dwarf', async () => {
 });
 await check('lab: red sources in WISE 0855 5′', async () => {
   await lab('ra=133.75999&dec=-7.24220&fov=5');
-  // the searches start by themselves; their rows are in the searches bar
+  // the searches start by themselves; their results are in the Findings tab
+  await page.getByTestId('tab-find').click();
   await page.getByText('Red source 1', { exact: true }).first().waitFor({ timeout: 90000 });
   return (await page.locator('.anrow').allInnerTexts())
     .filter((t) => t.startsWith('Red'))
