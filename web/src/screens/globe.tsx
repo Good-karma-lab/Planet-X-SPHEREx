@@ -8,6 +8,7 @@ import { sky, type SkyLayer } from './globe/sky';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
 import { KnownList } from './search/known';
+import { useProduct } from './search/jobs';
 import { SearchedCard, SearchedLegend, drawSearched, hitSearched, useSearched, type SearchedField } from './search/searched';
 import { drawBodyPath, drawMovingPath, placeAt, type BodyPath, type MovingObject } from './search/path';
 import './globe/globe.css';
@@ -181,6 +182,8 @@ export function Globe() {
   const [bodyPath, setBodyPath] = useState<BodyPath | null>(null);
   // «Where we've searched»: every searched field coloured by its result (the list exists only when the service makes it)
   const searched = useSearched(true);
+  // the switch is there as soon as the service makes the list; the list itself can take a while to arrive
+  const hasSearched = useProduct('searched') === true;
   const [searchedOn, setSearchedOn] = useState(false);
   const [searchedSel, setSearchedSel] = useState<SearchedField | null>(null);
   const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel });
@@ -392,16 +395,6 @@ export function Globe() {
           ctx.fill();
         }
       }
-      // catalogue dots, at their place on the date of the backdrop
-      ctx.globalAlpha = 0.75;
-      for (const o of st.catalog) {
-        if (o.b) continue;
-        const p = project(...shownPlace(o, st.survey), b);
-        if (!p[2]) continue;
-        ctx.fillStyle = KIND[o.k]?.dot ?? '#fff';
-        ctx.fillRect(p[0] - 1, p[1] - 1, 2.2, 2.2);
-      }
-      ctx.globalAlpha = 1;
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
       pins = [];
       if (st.searchedOn && st.searched) drawSearched(ctx, (ra, dec) => project(ra, dec, b), st.searched, st.searchedSel?.key ?? null);
@@ -636,19 +629,6 @@ export function Globe() {
             near = q.o;
           }
         }
-        if (!near && view.current.zoom > 3) {
-          const b = basis();
-          for (const o of st.catalog) {
-            if (o.b) continue;
-            const p = project(...shownPlace(o, st.survey), b);
-            if (!p[2]) continue;
-            const d = Math.hypot(p[0] - px, p[1] - py);
-            if (d < bd) {
-              bd = d;
-              near = o;
-            }
-          }
-        }
         if (near) {
           setSel(near);
           const [ra, dec] = epochPlace(near);
@@ -856,7 +836,7 @@ export function Globe() {
             >
               Coverage
             </button>
-            {searched && (
+            {hasSearched && (
               <button
                 class={`btn sm dark-glass tgl ${searchedOn ? 'on' : ''}`}
                 aria-pressed={searchedOn}
@@ -871,9 +851,10 @@ export function Globe() {
               </button>
             )}
           </div>
-          {searched && searchedOn && (
+          {hasSearched && searchedOn && (
             <div class="searched-float dark-glass">
-              {!searchedSel && <SearchedLegend fields={searched} />}
+              {!searched && <span class="mono-s faint">reading the searched fields…</span>}
+              {searched && !searchedSel && <SearchedLegend fields={searched} />}
       {searchedSel && (
         <SearchedCard
           f={searchedSel}
