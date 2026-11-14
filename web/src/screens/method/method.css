@@ -33,3 +33,5 @@
 .mf-prose .mf-fig { margin: 4px 0 16px; }
 .mf-prose .mf-figslot { min-height: 0; }
 .mf-prose .mf-fig figcaption { font: 500 11.5px var(--mono); color: var(--muted); margin-top: 4px; }
+.mf-prose .mf-media { display: block; width: 100%; max-width: 760px; border-radius: 8px; border: 1px solid var(--edge-soft); background: #05090c; }
+.mf-prose .mf-credit { color: var(--muted); }

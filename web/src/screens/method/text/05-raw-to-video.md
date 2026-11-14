@@ -2,6 +2,14 @@
 
 A raw SPHEREx exposure cannot be blinked: each one shows a star in a different colour, at a different place on the detector, with cosmic-ray hits, saturated cores and the glow of the zodiacal dust. To make a moving picture we read the exposures that cover a place, clean them, add them into one stable picture per pass, colour that picture by wavelength, and compare passes. This part follows one field from the archive file to the picture; the Method parts that come after give every step in detail.
 
+## The raw movie
+
+The first thing we can do with the files is the simplest: play the raw exposures of one place one after another, with the pixels exactly as they are in the files, only rotated north up and with the background subtracted. The result jumps and flickers. Every frame has its own pixel grid and its own wavelength, the star changes brightness and shape from frame to frame, and the white squares at its centre are saturated pixels that hold no value. A star that moves by a few arcseconds in a year is lost in this movie, and a hit by a cosmic ray looks as real as a star.
+
+[figure: raw-exposures | The raw exposures of one place played in a row: the pixel grid, the wavelength and the brightness change from frame to frame]
+
+Everything after this section is what turns that movie into a picture that stands still.
+
 ## What one exposure contains
 
 The archive file of one exposure and one detector (a Level-2 file, about 70 MB) holds a 2040 by 2040 pixel image in megajanskys per steradian, a flag word for every pixel (saturation, cosmic-ray hits, hot and dead pixels, ghosts, streaks and others), the variance of every pixel, a model of the zodiacal light, the point-spread function of the detector at several places, and a table that gives the wavelength of every pixel. The wavelength changes along the detector because of the linear variable filter: one exposure is not a picture in one colour but a picture in a band of colours that changes from edge to edge.

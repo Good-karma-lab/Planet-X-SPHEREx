@@ -1,5 +1,7 @@
 /** A small Markdown renderer for the Method text: headings, paragraphs, lists, tables, code blocks, bold, italics-free inline code and links. HTML in the text is escaped. */
 
+import { FIGURES } from './figures';
+
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Inline: `code`, **bold**, [text](url). */
@@ -96,8 +98,15 @@ export function render(md: string, prefix: string): Rendered {
     const fig = /^\[figure:\s*([a-z0-9-]+)\s*(?:\|\s*(.*?))?\s*\]\s*$/.exec(l.trim());
     if (fig) {
       figures++;
+      const f = FIGURES[fig[1]!];
+      const media = !f
+        ? ''
+        : f.kind === 'video'
+          ? `<video class="mf-media" src="${f.src}"${f.poster ? ` poster="${f.poster}"` : ''} muted loop playsinline controls preload="none" aria-label="${esc(f.alt).replace(/"/g, '&quot;')}"></video>`
+          : `<img class="mf-media" src="${f.src}" alt="${esc(f.alt).replace(/"/g, '&quot;')}" loading="lazy" />`;
+      const credit = f?.credit ? `<span class="mf-credit">${inline(f.credit)}</span>` : '';
       out.push(
-        `<figure class="mf-fig" data-fig="${fig[1]}" id="${prefix}-fig-${figures}"><div class="mf-figslot" data-fig="${fig[1]}"></div>${fig[2] ? `<figcaption>${inline(fig[2])}</figcaption>` : ''}</figure>`,
+        `<figure class="mf-fig" data-fig="${fig[1]}" id="${prefix}-fig-${figures}"><div class="mf-figslot" data-fig="${fig[1]}">${media}</div>${fig[2] || credit ? `<figcaption>${fig[2] ? inline(fig[2]) : ''}${credit ? ` ${credit}` : ''}</figcaption>` : ''}</figure>`,
       );
       i++;
       continue;

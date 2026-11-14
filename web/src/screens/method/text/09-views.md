@@ -51,6 +51,8 @@ faint = smoothstep(0.04, 0.16, l)         # none at the noise level either: nois
 
 A faint reddish ring can appear around very bright stars, because stars are wider at long wavelengths.
 
+[figure: spectral-colour | One pass stack coloured by wavelength: each exposure is tinted by its own wavelength, the star's colour is its infrared colour]
+
 ## Named bands
 
 A band is a set of wavelength windows in which a broad spectral feature sits. Half-open windows, lower edge included: an exposure pixel contributes to a band only if its own wavelength lies inside a window. These are our working definitions of broad tracers, not line fluxes. One file (`data/bands.json`) is read by the pictures, the page and this text.

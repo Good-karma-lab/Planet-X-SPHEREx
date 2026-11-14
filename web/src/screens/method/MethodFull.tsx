@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef } from 'preact/hooks';
 import './method.css';
 import { render, type Heading } from './md';
+import { playWhenVisible } from './media';
 
 interface Part {
   id: string;
@@ -42,7 +43,11 @@ export function MethodFull() {
       if (w) go(`m-${w}`, true);
     };
     window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
+    const stopMedia = root.current ? playWhenVisible(root.current) : () => {};
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      stopMedia();
+    };
   }, []);
   return (
     <div class="mfull" ref={root}>
