@@ -1,7 +1,7 @@
 # Demo video — 30 seconds
 
 ≤ 30 s, English subtitles burned in. Every picture is a screen recording of https://spherex.space on real SPHEREx data, made by a
-scripted browser (`demo/record.mjs`); no generated imagery, no synthetic voice, so no SI watermark is needed.
+scripted browser (`web/scripts/demo-video.mjs`); no generated imagery, no synthetic voice, so no SI watermark is needed.
 
 | Time | Shot (screen recording of the live tool) | Subtitle |
 |---|---|---|

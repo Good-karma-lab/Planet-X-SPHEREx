@@ -28,3 +28,4 @@ cache/
 .idea/
 .vscode/
 .claude/launch.json
+docs/submission/demo/out/

@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SPHEREx Sky — slides</title>
+<style>
+  @page { size: 1920px 1080px; margin: 0; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #04080c; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif; color: #d6e7ed; }
+  .slide { width: 1920px; height: 1080px; position: relative; overflow: hidden; page-break-after: always; padding: 80px 96px;
+    background: radial-gradient(1100px 650px at 85% -10%, rgba(255,150,60,.10), transparent 62%), radial-gradient(1200px 760px at 5% 110%, rgba(40,200,205,.14), transparent 62%), #04080c; }
+  .k { font: 600 22px ui-monospace, Menlo, monospace; letter-spacing: .16em; text-transform: uppercase; color: #9ff3ea; }
+  h1 { font-size: 76px; margin: 14px 0 18px; letter-spacing: .01em; color: #f2fbff; }
+  h2 { font-size: 58px; margin: 12px 0 26px; color: #f2fbff; }
+  p, li { font-size: 32px; line-height: 1.45; color: #c4d8df; }
+  ul { margin: 0; padding-left: 36px; }
+  li { margin: 8px 0; }
+  b { color: #ffffff; }
+  .amber { color: #ffb454; }
+  .shot { position: absolute; border-radius: 14px; box-shadow: 0 0 0 1px rgba(140,225,240,.35), 0 20px 60px rgba(0,0,0,.6); }
+  .two { display: grid; grid-template-columns: 720px 1fr; gap: 56px; align-items: start; }
+  .two img { width: 100%; border-radius: 14px; box-shadow: 0 0 0 1px rgba(140,225,240,.35), 0 20px 60px rgba(0,0,0,.6); }
+  .foot { position: absolute; left: 96px; bottom: 44px; font: 500 20px ui-monospace, Menlo, monospace; color: #7d96a0; }
+  .url { font: 700 64px ui-monospace, Menlo, monospace; color: #ffffff; }
+  .crop { width: 100%; height: 760px; object-fit: cover; object-position: left top; }
+</style>
+</head>
+<body>
+
+<section class="slide">
+  <div class="k">NASA Space Apps 2026 · Planet X and SPHEREx</div>
+  <h1>SPHEREx Sky</h1>
+  <p style="font-size:44px;color:#9ff3ea;margin:0 0 40px">see the sky change</p>
+  <p><b>Good Karma Lab</b> · Barcelona</p>
+  <p class="url" style="margin-top:40px">spherex.space</p>
+  <img class="shot" src="img/lab-barnard.png" style="right:-260px;top:150px;width:1240px">
+  <div class="foot">All pictures: screenshots of the live tool on real NASA SPHEREx data</div>
+</section>
+
+<section class="slide">
+  <div class="k">The problem</div>
+  <h2>SPHEREx sees everything twice a year — but its frames don't show motion</h2>
+  <div class="two">
+    <div>
+      <ul>
+        <li>The whole sky in <b>102 infrared colours</b>, 0.75–5 µm, about every six months</li>
+        <li>Each raw exposure sees a star at another wavelength, roll angle and pixel grid: stepping through them shows flicker, not motion</li>
+        <li><b>Our answer:</b> clean and stack every season of a field, colour it by its spectrum, then blink the seasons</li>
+      </ul>
+    </div>
+    <img src="img/globe.png">
+  </div>
+  <div class="foot">Globe: 1.63 million SPHEREx exposures indexed · DSS2 background · test targets and 4,100 SIMBAD objects</div>
+</section>
+
+<section class="slide">
+  <div class="k">Years in a loop</div>
+  <h2>The seasons play back and forth: what moves, jumps</h2>
+  <div class="two">
+    <div>
+      <ul>
+        <li><b>Barnard's Star</b> swings by 10″ a year; the field stands still</li>
+        <li>The search between seasons finds it: <b>10.66″/yr toward 353°</b>, and <b>Gaia DR3 confirms the same motion</b> (10.39″/yr)</li>
+        <li>Chance control: <b>0.0 tracks</b> per field when the moving sources are put at random places</li>
+        <li><span class="amber">Archive images</span> add DSS2 (1985–99), 2MASS and AllWISE before SPHEREx 2025–26</li>
+      </ul>
+    </div>
+    <img src="img/lab-barnard.png">
+  </div>
+</section>
+
+<section class="slide">
+  <div class="k">Click anything</div>
+  <h2>A live spectrum from every exposure</h2>
+  <div class="two">
+    <div>
+      <ul>
+        <li>The PSF of the detector is fitted in <b>every exposure</b> that covers the source; one point per exposure, coloured by detector, drawn as it is measured</li>
+        <li>A moving star is measured where it was on each date</li>
+        <li>Checked: an ordinary star gives 357 points of 385 exposures; 42 mJy at 1.25 µm against <b>39 mJy</b> from its 2MASS J</li>
+        <li>SIMBAD and Gaia DR3 name the source; distance from a clean parallax</li>
+      </ul>
+    </div>
+    <img src="img/spectrum.png">
+  </div>
+</section>
+
+<section class="slide">
+  <div class="k">What does not look like a star</div>
+  <h2>The anomaly search ranks ε Indi B first — by far</h2>
+  <div class="two">
+    <div>
+      <ul>
+        <li>Every source of the field measured in every exposure; the field's own <b>ordinary star</b> built from them</li>
+        <li>ε Indi B: <b>score 13.8</b> against a threshold of 2.6; the next source 4.6</li>
+        <li>Its passport: excess at <b>3.9–4.3 µm (+40σ)</b>, where a cold brown dwarf emits most of its light</li>
+        <li>On an ecliptic field a <b>Seyfert 2 galaxy</b> comes first: galaxies are not stars</li>
+      </ul>
+    </div>
+    <img src="img/anomaly.png">
+  </div>
+</section>
+
+<section class="slide">
+  <div class="k">Real data, honest results</div>
+  <h2>Measured, not modelled</h2>
+  <div class="two">
+    <div>
+      <ul>
+        <li><b>NASA SPHEREx Level-2</b> (IRSA, public AWS bucket) · <b>ESA Gaia DR3</b> · DSS2, 2MASS, AllWISE (IRSA HiPS) · SIMBAD</li>
+        <li>Only the image rows a field needs are read; cleaned, stacked, served; drawn with WebGL</li>
+        <li>Every find is a <b>lead</b> with its evidence, a catalogue check and a chance control — never a "discovery"</li>
+        <li>Limits: stars saturated in most exposures have no SPHEREx spectrum; a track needs three seasons</li>
+      </ul>
+    </div>
+    <img src="img/findings.png">
+  </div>
+</section>
+
+<section class="slide">
+  <div class="k">Try it</div>
+  <h1 style="margin-top:120px">spherex.space</h1>
+  <p style="font-size:40px">Open any place, play its seasons, click a star, find what moves.</p>
+  <p style="margin-top:60px">Code: github.com/Good-karma-lab/Planet-X-SPHEREx · Apache-2.0</p>
+  <p>Built with AI coding assistants under the team's direction (see our SI statement). No generated imagery: every picture is computed from the data.</p>
+  <div class="foot">Good Karma Lab · NASA Space Apps 2026 · Barcelona</div>
+</section>
+
+</body>
+</html>

@@ -13,10 +13,21 @@
 - **M4: deployed.** https://spherex.space on an Oracle Cloud VM in Madrid (E5.Flex x86-64, 4 vCPU, 16 GB; an A1 aarch64 VM later),
   Caddy with automatic HTTPS in front, `deploy/provision.sh` + `deploy/push.sh`; a cold Barnard 5′ field builds on the VM from the
   bucket within 90 s; the warm runner fills the 28 fields of the test targets.
-- **M5 (in progress):** Lab with one control panel (Controls / Object / Spectrum): pendulum, colour with a white balance on star peaks,
-  walls of bands and detectors, Difference, Co-add, Sharpen (on), target marker (on), stretch and trim, video download, film of a pass.
-- **M6 (in progress):** Globe over DSS2 / 2MASS / AllWISE / IRIS tiles (service tile cache), exposure coverage layer, exposure count under
-  the aim, catalogue of 4,100 SIMBAD objects with the five test targets; Findings, Index, Method and About pages.
+- **M5–M10 (core built, deployed):** Lab with one control panel; colour with a white balance on star peaks; walls; Difference; Co-add;
+  Sharpen and target marker on; stretch and trim; video download; film of a pass; archive images (DSS2 red, 2MASS Ks, AllWISE W1) as a
+  Reference inset and blinked before the seasons. Spectrum on click (PSF photometry in every exposure, streamed; validation star 357 of
+  385 exposures, 42 mJy against 39 from J). Identification of any clicked source (SIMBAD, Gaia DR3, distance). Search between passes
+  with the Gaia DR3 check and a chance control (Barnard's Star 20′: 10.66″/yr toward 353°, Gaia same motion; ε Indi B: 4.6–4.7″/yr,
+  four passes, same motion; chance 0.0 tracks per field). Spectral anomaly map with passports (ε Indi 20′: ε Indi B first, score 13.8
+  against 2.6, excess at 3.9–4.3 µm; ecliptic 60′: a Seyfert 2 galaxy first).
+- **M6 (built, deployed):** Globe (DSS2 / 2MASS / AllWISE / IRIS tiles through the service, coverage layer, exposure count under the aim,
+  catalogue of 4,100 SIMBAD objects); Findings read live from the service; Index, Method and About pages; phone layout.
+- **Warm set:** the 5′, 10′ and 20′ fields of every target first, each with its movers search (and anomalies from 10′); visitors who only
+  look do not pause it.
+- **Submission:** texts in `docs/submission/` match the deployed tool; 29.6 s demo video and 7-slide deck in `docs/submission/demo/`,
+  reproducible with `web/scripts/demo-video.mjs`, `demo-cut.mjs`, `demo-shots.mjs`, `slides-pdf.mjs`.
+- **Not built:** the distance slider and searches beyond Neptune, the in-pass (film) search for asteroids, pairs changing in place,
+  catalogue synthetic photometry of spectra, the small-body list of the globe.
 
 ## M0 — Foundations (done)
 
