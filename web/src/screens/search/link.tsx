@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { progressText, runJob, useProduct } from './jobs';
+import { honestLines, progressText, runJob, useProduct } from './jobs';
 import './search.css';
 
 interface LinkPoint {
@@ -47,7 +47,7 @@ export interface LinkResult {
     confirmed: boolean;
   };
   tolerance_arcsec?: number;
-  honest?: string;
+  honest?: unknown;
 }
 
 type Ask = { state: 'idle' } | { state: 'running'; text: string; frac: number | null } | { state: 'none' | 'error'; text: string } | { state: 'ok'; r: LinkResult };
@@ -140,7 +140,11 @@ export function LinkCard({ r, onPick }: { r: LinkResult; onPick?: (e: LinkEntry)
           </button>
         );
       })}
-      {r.honest && <div class="mono-s">{r.honest}</div>}
+      {honestLines(r.honest).map((t) => (
+        <div class="mono-s" key={t}>
+          {t}
+        </div>
+      ))}
     </div>
   );
 }
@@ -153,7 +157,7 @@ export interface Jump {
   corridor_arcmin: number;
   line_length_arcmin: number;
   in_corridor: { ra?: number; dec?: number; key?: string; i?: number; off_line_arcmin: number; line_distance_au: number; own_distance_in_line_interval: boolean; sn?: number }[];
-  honest?: string;
+  honest?: unknown;
 }
 
 /**
@@ -212,14 +216,21 @@ export function JumpView({ distKey, i, mjd, corridor = 5 }: { distKey: string; i
     g.stroke();
     g.font = '600 10.5px ui-monospace, Menlo, monospace';
     g.fillStyle = '#d6e7ed';
+    let lx = -1e9;
+    let ly = -1e9;
     j.line.forEach((p, k) => {
-      if (k % 8 && k !== j.line.length - 1) return;
+      const px = X(pts[k]![0]);
+      const py = Y(pts[k]![1]);
+      if (k % 4 && k !== j.line.length - 1) return;
       g.fillStyle = '#ffb454';
       g.beginPath();
-      g.arc(X(pts[k]![0]), Y(pts[k]![1]), 3, 0, 7);
+      g.arc(px, py, 3, 0, 7);
       g.fill();
+      if (Math.hypot(px - lx, py - ly) < 46) return; // a label only where it does not run into the previous one
+      lx = px;
+      ly = py;
       g.fillStyle = '#d6e7ed';
-      g.fillText(`${Math.round(p.d)} au`, X(pts[k]![0]) + 6, Y(pts[k]![1]) - 4);
+      g.fillText(`${Math.round(p.d)} au`, px + 6, py - 4);
     });
     g.fillStyle = '#6aff9e';
     extra.forEach((p) => {
@@ -246,7 +257,11 @@ export function JumpView({ distKey, i, mjd, corridor = 5 }: { distKey: string; i
               <b>{q.off_line_arcmin}′</b> off the line · at {q.line_distance_au.toFixed(0)} au on it{q.own_distance_in_line_interval ? ' · its own distance fits' : ' · its own distance does not fit'}
             </div>
           ))}
-          {j.honest && <div class="mono-s">{j.honest}</div>}
+          {honestLines(j.honest).map((t) => (
+            <div class="mono-s" key={t}>
+              {t}
+            </div>
+          ))}
         </>
       )}
     </div>
