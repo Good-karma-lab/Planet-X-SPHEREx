@@ -116,11 +116,11 @@ class Context:
         j = self.job
         if j._cancel:
             raise Cancelled
-        if j.priority < Priority.P2 or not self._s.person_active():
+        if j.priority < Priority.P2 or not self._s.person_waiting():
             return
         before, t0 = j.phase, time.time()
         j.state, j.phase = "paused", "paused: a person is working"
-        while self._s.person_active() and not j._cancel:
+        while self._s.person_waiting() and not j._cancel:
             await asyncio.sleep(0.5)
         j.paused_s += time.time() - t0
         j.state, j.phase = "running", before
@@ -162,6 +162,11 @@ class Scheduler:
     # ---- people -----------------------------------------------------------------------------------------------------------------
     def saw_person(self) -> None:
         self._last_person = time.time()
+
+    def person_waiting(self) -> bool:
+        """A person's job (P0/P1) is queued or running: background jobs give way at their next checkpoint. A visitor who only looks
+        at finished products costs nothing and does not stop the warm set."""
+        return any(j.priority <= Priority.P1 and j.state in ("queued", "running") for j in self.jobs.values())
 
     def person_active(self) -> bool:
         if time.time() - self._last_person < PERSON_QUIET_S:

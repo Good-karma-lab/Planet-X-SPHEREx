@@ -72,10 +72,10 @@ def test_background_pauses_while_a_person_is_active(monkeypatch: pytest.MonkeyPa
         s.start()
         warm = s.submit("field", "warm", {}, sleeper(1.0), Priority.P2, "heavy")
         await until(lambda: warm.state == "running")
-        s.saw_person()
+        person = s.submit("field", "person", {}, sleeper(0.3), Priority.P0, "heavy")
         await until(lambda: warm.state == "paused")
         assert warm.phase == "paused: a person is working"
-        await until(lambda: warm.state == "done", timeout=10)
+        await until(lambda: warm.state == "done" and person.state == "done", timeout=10)
         assert warm.paused_s > 0.1
         await s.stop()
 
