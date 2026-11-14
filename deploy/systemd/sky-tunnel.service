@@ -1,0 +1,13 @@
+[Unit]
+Description=Cloudflare Tunnel for SPHEREx Sky
+After=network-online.target sky-api.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=/etc/sky/env
+ExecStart=/usr/bin/cloudflared --no-autoupdate tunnel run --token ${CLOUDFLARE_TUNNEL_TOKEN}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=SPHEREx Sky: daily exposure index update and reconciliation
+
+[Service]
+Type=oneshot
+User=sky
+WorkingDirectory=/opt/sky
+EnvironmentFile=/etc/sky/env
+ExecStart=/home/sky/.local/bin/uv run --no-dev python -m indexer.build --index /var/lib/sky/index/exposures.sqlite bootstrap --workers 3 --refresh-days 5
+ExecStartPost=/home/sky/.local/bin/uv run --no-dev python -m indexer.build --index /var/lib/sky/index/exposures.sqlite reconcile
+Nice=10

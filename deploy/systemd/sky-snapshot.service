@@ -1,0 +1,9 @@
+[Unit]
+Description=SPHEREx Sky: snapshot of the index and the warm set to R2
+
+[Service]
+Type=oneshot
+User=sky
+EnvironmentFile=/etc/sky/env
+ExecStart=/opt/sky/deploy/snapshot.sh
+Nice=10
