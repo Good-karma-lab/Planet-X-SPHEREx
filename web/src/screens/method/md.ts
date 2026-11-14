@@ -95,3 +95,72 @@ export function render(md: string, prefix: string): Rendered {
   }
   return { html: out.join('\n'), headings };
 }
+
+
+/** A figure placed in the text: `[figure: name | caption]` on a line of its own. */
+export interface FigureBlock {
+  kind: 'figure';
+  name: string;
+  caption: string;
+}
+/** A callout for the margin: `Result: headline | text | source` (an optional tone in brackets: `Result [amber]:` or `Result [red]:`). */
+export interface ResultBlock {
+  kind: 'result';
+  headline: string;
+  text: string;
+  source: string;
+  tone: '' | 'am' | 'rd';
+}
+export interface HtmlBlock {
+  kind: 'html';
+  html: string;
+}
+export type Block = HtmlBlock | FigureBlock | ResultBlock;
+
+export interface Blocks {
+  blocks: Block[];
+  headings: Heading[];
+}
+
+const FIG = /^\[figure:\s*([a-z0-9_-]+)\s*(?:\|\s*(.*?))?\s*\]\s*$/i;
+const RES = /^Result\s*(?:\[(amber|red|am|rd)\])?\s*:\s*(.+)$/i;
+
+/** Renders a text into blocks: runs of Markdown as HTML, figures and Result callouts as their own blocks. */
+export function renderBlocks(md: string, prefix: string): Blocks {
+  const blocks: Block[] = [];
+  const headings: Heading[] = [];
+  let buf: string[] = [];
+  let inCode = false;
+  const flush = () => {
+    if (!buf.some((l) => l.trim())) {
+      buf = [];
+      return;
+    }
+    const r = render(buf.join('\n'), prefix);
+    headings.push(...r.headings);
+    blocks.push({ kind: 'html', html: r.html });
+    buf = [];
+  };
+  for (const line of md.split('\n')) {
+    if (line.startsWith('```')) inCode = !inCode;
+    if (!inCode) {
+      const f = FIG.exec(line.trim());
+      if (f) {
+        flush();
+        blocks.push({ kind: 'figure', name: f[1]!.toLowerCase(), caption: (f[2] ?? '').trim() });
+        continue;
+      }
+      const r = RES.exec(line.trim());
+      if (r) {
+        flush();
+        const [headline = '', text = '', source = ''] = r[2]!.split(/\s+\|\s+/).map((x) => x.trim());
+        const t = (r[1] ?? '').toLowerCase();
+        blocks.push({ kind: 'result', headline, text, source, tone: t.startsWith('a') ? 'am' : t.startsWith('r') ? 'rd' : '' });
+        continue;
+      }
+    }
+    buf.push(line);
+  }
+  flush();
+  return { blocks, headings };
+}
