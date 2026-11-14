@@ -298,7 +298,7 @@ function FindingsPage() {
           <h3>Spectra (validation)</h3>
           <dl class="kv">
             {kv('2MASS J17572542+0446559', '357 of 385 exposures used; 42 mJy in D2 against J 11.53 (39 mJy)')}
-            {kv('A click in an open field', 'first point in about 2 s, all points in about 30 s')}
+            {kv('A click in an open field', 'all 377 exposures measured in about 3 s (16 worker processes)')}
           </dl>
         </section>
       </div>
@@ -337,7 +337,10 @@ function MethodPage() {
       'Display',
       "asinh law (linear knee 0.40, white point fixed or at the field's 99.9th / 99.5th percentile); Sharpen boosts faint point sources only, with one gain for every channel, never near saturated cores.",
     ],
-    ['Difference', 'Each pass against the first as significance per pixel; |z| > 4 is shown (magenta brighter, cyan fainter).'],
+    [
+      'Difference',
+      'Each pass against the first as significance per pixel; a pixel is shown (magenta brighter, cyan fainter) when |z| > 4 and the change is at least a third of the brightest light within a detector pixel and a half, so a moving source shows and the small residual rings of static stars (registration, a slightly different point-spread function) do not.',
+    ],
     [
       'Spectrum',
       "A click measures the source in every exposure that covers it: PSF fit on a 7 × 7 stamp with the detector zone's PSF, weights from the variance plane, three rounds of 6σ rejection; flux from the local solid angle; a moving star is measured where it was on each date; points beyond 5σ of their 7 neighbours in wavelength are flagged.",
@@ -350,7 +353,26 @@ function MethodPage() {
       'Anomalies',
       "Stationary sources with S/N ≥ 12 and every track, measured in every exposure of the field; spectra in 24 bins of ln λ; the field's ordinary star from the median of the bright half and two principal components; score with a 5 % floor; anomalous above median + 6 robust σ; the passport names the driving bins and what SIMBAD and Gaia know.",
     ],
-    ['Film', 'The visits inside one pass, aligned; the static sky removed; what moves between visits is shown in amber.'],
+    [
+      'Months and Days',
+      "The timeline has two scales. Months plays the passes of the field. Days plays the visits inside the pass shown (hours to days apart), aligned on the field's stars and drawn with the same display law, Sharpen and Brighten; each visit is tinted by the wavelength of its detector; a core masked in a visit is drawn white. Asteroids hop from visit to visit: the known ones are ringed where JPL predicts them, solid when the visit shows them there.",
+    ],
+    [
+      'Marks',
+      'One marker per object: a found track on the test target joins its ring and gives the measured rate with its uncertainty (scatter of the places about the fitted line over the spread of the pass dates) and the Gaia verdict; an anomaly or red source on the same star becomes a line of its label. The 2′ zoom in the corner shows the selected object from the same frames.',
+    ],
+    [
+      'Portrait',
+      "A cutout around a source built from its own spectrum: each detector's picture added in the colour of its wavelength (0.75 µm blue to 5 µm red), so the colour of the source is its spectrum; a saturated core is white.",
+    ],
+    [
+      'Artifacts',
+      'Red where the SPHEREx pipeline flagged the pixel in many exposures of the pass (bloom, crosstalk, dichroic, halo, persistence, transients, surface-fit errors); real sources and saturation are not counted.',
+    ],
+    [
+      'Quick look',
+      "Before the measured spectrum arrives, the place's spectrum from the DR1 all-sky spectral cube: the cube's HiPS tile is found by HEALPix and one pixel's 102 planes are read by byte ranges (a few seconds; nothing else of the 320 MB tile is fetched). It is the mosaic's surface brightness, shown as a quick look only.",
+    ],
     [
       'Movers: how many are found',
       'Moving point sources injected into real stacks (three 20′ fields): a mover with a peak at 40× the stack noise is found in about 85 % of cases at 5–100″/yr; at 20× it is found in 62–88 % of cases but, with only three passes, often as a weak track the page does not draw; below 12× most are missed. Chance alone gives 0.0 tracks per field.',
