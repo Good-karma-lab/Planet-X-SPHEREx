@@ -54,7 +54,7 @@ from service.searched import Searched
 from service.spectrum import Spectra, place_at, spectrum_params
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
-from service.workers import fieldjob, filmjob
+from service.workers import fieldjob, filmjob, filmsearchjob
 
 SERVICE_NAME = "spherex-sky"
 API_PREFIX = "/api/v1"
@@ -255,7 +255,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
     async def warm_field_searches(f: WarmField) -> None:
         """Everything a visitor of a test field asks for, kept on disk: movers, pairs that change in place, red sources, the anomaly
-        search (every size), the spectra of the test target and of every anomaly, and the anomalies' passports."""
+        search (every size), the asteroid search of the middle pass, the spectra of the test target and of every anomaly, and the
+        anomalies' passports."""
         assert st.store is not None and st.index is not None
         k = await asyncio.to_thread(warm_key, f)
         if k is None or not st.store.is_complete(k[0]):
@@ -286,6 +287,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             while arun.state in ("running", "waiting"):
                 await asyncio.sleep(5.0)
             anomalies = list((arun.result or {}).get("anomalies", []))
+        await give_way()
+        await warm_asteroid_search(f, key)
         if st.spectra is None:
             return
         wanted = [
@@ -308,6 +311,46 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             srun = st.spectra.get(params) or st.spectra.start(params)
             while srun.state == "running":
                 await asyncio.sleep(3.0)
+
+    async def warm_asteroid_search(f: WarmField, field_key: str) -> None:
+        """The lab's own asteroid search of a field, at the key the lab asks for: the film of the middle pass, its known bodies, then
+        the search for unknown movers in it."""
+        assert st.store is not None and st.scheduler is not None and st.index is not None and st.files is not None
+        fmeta = st.store.read_meta(fieldjob.KIND, field_key) or {}
+        passes = fmeta.get("passes") or []
+        if not passes:
+            return
+        mjd = float(passes[len(passes) // 2]["mjd_mid"])
+        k = await asyncio.to_thread(warm_key, WarmField(f.label, f.ra, f.dec, f.fov, round(mjd, 1)))
+        if k is None:
+            return
+        fkey, fparams = k
+        if not st.store.is_complete(fkey):
+            fjob = st.scheduler.jobs.get(st.scheduler.by_key.get(fkey, "")) or submit_film(fkey, fparams, Priority.P2)
+            while fjob.state not in ("done", "error", "cancelled"):
+                await asyncio.sleep(3.0)
+        if not st.store.is_complete(fkey):
+            return
+        meta = st.store.read_meta(filmjob.KIND, fkey)
+        if st.bodies is not None and meta is not None and st.bodies.cached(fkey) is None:
+            st.bodies.start(fkey, meta)
+        if meta is None:
+            return
+        await give_way()
+        params = meta["params"]
+        skey = product_key(filmsearchjob.KIND, params, extra=(fkey,))
+        if st.store.is_complete(skey):
+            return
+        job = st.scheduler.jobs.get(st.scheduler.by_key.get(skey, ""))
+        if job is None or job.state in ("error", "cancelled"):
+            index, files, store, wl = st.index, st.files, st.store, st.wavelengths
+
+            async def fn(ctx: Any) -> dict[str, Any]:
+                return await filmsearchjob.run_filmsearch(ctx, index, files, store, fkey, params, wl)
+
+            job = st.scheduler.submit(filmsearchjob.KIND, skey, params, fn, Priority.P2, "heavy", 1500)
+        while job.state not in ("done", "error", "cancelled"):
+            await asyncio.sleep(3.0)
 
     targets_by_label: dict[str, dict[str, Any]] = {}
 
