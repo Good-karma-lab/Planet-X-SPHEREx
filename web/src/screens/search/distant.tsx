@@ -131,7 +131,7 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
       if (my !== tok.current) return;
       if (!j) return setDs({ state: 'none', text: 'The service does not make this search yet.' });
       const r = j.result as unknown as DistantResult;
-      if (r?.status === 'no-coverage') return setDs({ state: 'none', text: 'No SPHEREx exposure of detectors D1–D3 covers this field.' });
+      if (r?.status === 'no-coverage') return setDs({ state: 'none', text: `No SPHEREx exposure of ${aim.det && aim.det !== '123' ? `detector${aim.det.length > 1 ? 's' : ''} D${aim.det.split('').join(', D')}` : 'detectors D1–D3'} covers this field.` });
       if (!r || (r.status !== 'ok' && r.status !== 'one-pass'))
         return setDs({ state: 'none', text: (r?.notes ?? []).join(' ') || 'No result for this field.' });
       const binUrl = r.bin_url || `/api/v1/distant/${String(j.key)}/bin`;

@@ -65,6 +65,9 @@ export function DeepSumPanel({
   passes,
   onPick,
   autoPlan,
+  autoRun,
+  autoHold,
+  onState,
 }: {
   ra: number;
   dec: number;
@@ -72,6 +75,12 @@ export function DeepSumPanel({
   passes: number[];
   /** a link asked for this distance range: plan it at once (the plan and its time are shown; the person starts it) */
   autoPlan?: [number, number];
+  /** run on its own for this distance range (plan, then start) once `autoHold` is false; no button is shown while it is idle */
+  autoRun?: [number, number];
+  /** an automatic run waits while this is true (the other scans and the earlier searches go first) */
+  autoHold?: boolean;
+  /** the state of the search, for the owner's scan line */
+  onState?: (s: { state: string; frac: number | null }) => void;
   /** a peak was chosen: the owner opens its card with these rows */
   onPick?: (title: string, c: DeepCandidate, rows: [string, string, string][]) => void;
 }) {
@@ -89,6 +98,22 @@ export function DeepSumPanel({
     if (!autoPlan || has !== true || passes.length < 3 || d.state !== 'idle' || planned.current === k) return;
     planned.current = k;
     void plan(autoPlan[0], autoPlan[1]);
+  });
+  const started = useRef('');
+  useEffect(() => {
+    onState?.({ state: d.state, frac: d.state === 'running' ? d.frac : d.state === 'done' ? 1 : null });
+  }, [d]);
+  useEffect(() => {
+    if (!autoRun || autoHold || has !== true || passes.length < 3) return;
+    const k = `${ra},${dec},${fov},${autoRun.join('-')}`;
+    if (d.state === 'idle' && started.current !== k) {
+      started.current = k;
+      void plan(autoRun[0], autoRun[1]);
+    } else if (d.state === 'plan' && started.current === k && d.p.plan.hypotheses <= d.p.limit) {
+      const fields = inputs.current.map((x, i) => `${(+x[0]).toFixed(5)},${(+x[1]).toFixed(5)},${d.p.fields[i]![2]}`).join(';');
+      started.current = `${k}:run`;
+      void run(d.dmin, d.dmax, d.p.estimate_s, fields);
+    }
   });
   if (has !== true || passes.length < 3) return null;
   const f = Math.min(fov, 18);
@@ -153,6 +178,7 @@ export function DeepSumPanel({
     tok.current++;
     setD({ state: 'idle' });
   };
+  if (d.state === 'idle' && autoRun) return null;
   if (d.state === 'idle')
     return (
       <div class="dsbox">
