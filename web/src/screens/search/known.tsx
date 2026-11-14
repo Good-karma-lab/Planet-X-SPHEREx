@@ -4,6 +4,8 @@ import { fetchBodyPath, todayText, type BodyPath, type SmallBody } from './path'
 interface Page {
   count: number;
   rows: SmallBody[];
+  /** a name that fits several bodies: the choices */
+  candidates?: { pdes: string; full_name: string; kind: string }[];
 }
 type Ask = { state: 'loading' } | { state: 'absent' } | { state: 'error'; error: string } | { state: 'ok'; page: Page };
 
@@ -21,9 +23,12 @@ export function useKnown(kind: 'a' | 'c', page: number, name: string): Ask {
     fetch(`/api/v1/known?${q}`, { signal: ctl.signal })
       .then(async (r) => {
         if (r.status === 404) return setA({ state: 'absent' });
-        if (!r.ok) throw new Error(`the Small-Body Database answered ${r.status}`);
-        const d = (await r.json()) as { count?: number; rows?: SmallBody[] };
-        setA({ state: 'ok', page: { count: d.count ?? d.rows?.length ?? 0, rows: d.rows ?? [] } });
+        if (!r.ok) {
+          const e = (await r.json().catch(() => ({}))) as { detail?: unknown };
+          throw new Error(typeof e.detail === 'string' ? e.detail : `the Small-Body Database answered ${r.status}`);
+        }
+        const d = (await r.json()) as { count?: number; rows?: SmallBody[]; candidates?: Page['candidates'] };
+        setA({ state: 'ok', page: { count: d.count ?? d.rows?.length ?? 0, rows: d.rows ?? [], candidates: d.candidates } });
       })
       .catch((e) => {
         if (!ctl.signal.aborted) setA({ state: 'error', error: String(e.message ?? e) });
@@ -140,6 +145,17 @@ export function KnownList({
       {note && <div class="mono-s known-note">{note}</div>}
       {a.state === 'loading' && <div class="empty">Asking JPL…</div>}
       {a.state === 'error' && <div class="empty">{a.error}</div>}
+      {a.state === 'ok' && a.page.candidates && a.page.candidates.length > 0 && (
+        <div class="chips known-note">
+          <span class="mono-s">Several bodies match:</span>
+          {a.page.candidates.map((c) => (
+            <button key={c.pdes} class="chip" onClick={() => setName(c.pdes)}>
+              {c.full_name}
+            </button>
+          ))}
+        </div>
+      )}
+      {a.state === 'ok' && !a.page.rows.length && !a.page.candidates && name && <div class="empty">No body of that name.</div>}
       {a.state === 'ok' &&
         a.page.rows.map((r) => {
           const on = selected === r.spkid;
