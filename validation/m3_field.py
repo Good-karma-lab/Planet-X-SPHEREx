@@ -26,6 +26,7 @@ from engine.colour import STAR_THRESHOLD, white_balance
 from engine.halo import saturated_zones
 from engine.register import STAR_FWHM_ARCSEC, stars
 from indexer.store import Index
+from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.workers.fieldbuild import FieldBuild, build_field
@@ -150,10 +151,11 @@ async def run_field(name: str, index: Index, store: Path, png: Path, workers: in
     fr = FileReader(s3, store)
     with ProcessPoolExecutor(workers) as ex:
         t = time.time()
-        b = await build_field(index, fr, ra, dec, fov, executor=ex, keep_natives=True)
+        wl = WavelengthMaps(s3, store)
+        b = await build_field(index, fr, ra, dec, fov, executor=ex, keep_natives=True, wavelengths=wl)
         cold = time.time() - t
         t = time.time()
-        await build_field(index, FileReader(s3, store), ra, dec, fov, executor=ex)
+        await build_field(index, FileReader(s3, store), ra, dec, fov, executor=ex, wavelengths=wl)
         warm = time.time() - t
     await s3.close()
     lines.append(f"- exposures: {len(b.exposures)} of {b.thinned_from} overlapping; not readable: {len(b.missing)}")

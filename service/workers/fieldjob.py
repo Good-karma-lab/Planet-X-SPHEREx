@@ -26,6 +26,7 @@ from indexer.store import Index
 from service.jobs.scheduler import Context
 from service.products.store import Store
 from service.products.sxp import encode
+from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.workers.fieldbuild import build_field
 
@@ -80,7 +81,9 @@ def pass_meta(pp: PassProducts, kr: float, kb: float) -> dict[str, Any]:
     }
 
 
-async def run_field(ctx: Context, index: Index, fr: FileReader, store: Store, params: dict[str, Any]) -> dict[str, Any]:
+async def run_field(
+    ctx: Context, index: Index, fr: FileReader, store: Store, params: dict[str, Any], wavelengths: WavelengthMaps | None = None
+) -> dict[str, Any]:
     key = ctx.job.key
     store.begin(KIND, key, params)
     bands = load_bands()
@@ -139,6 +142,7 @@ async def run_field(ctx: Context, index: Index, fr: FileReader, store: Store, pa
         checkpoint=ctx.checkpoint,
         on_pass=on_pass,
         on_quick=on_quick,
+        wavelengths=wavelengths,
     )
     ctx.phase("comparing passes")
     if len(built) >= 2:

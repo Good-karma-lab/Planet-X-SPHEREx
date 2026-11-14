@@ -23,6 +23,7 @@ from service.jobs.scheduler import Priority, Scheduler
 from service.products.store import Store, product_key
 from service.products.versions import VERSIONS
 from service.ratelimit import Buckets, client_id
+from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.warm import WarmField, WarmRunner, warm_set
@@ -42,6 +43,7 @@ class State:
         self.index: Index | None = None
         self.store: Store | None = None
         self.files: FileReader | None = None
+        self.wavelengths: WavelengthMaps | None = None
         self.s3: S3 | None = None
         self.scheduler: Scheduler | None = None
         self.executor: ProcessPoolExecutor | None = None
@@ -61,6 +63,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.index = Index(index_path, readonly=True)
         st.s3 = s3 or S3()
         st.files = FileReader(st.s3, cfg.store_dir)
+        st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
         if scheduler is None:
             st.executor = ProcessPoolExecutor(max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2))))
             st.scheduler = Scheduler(executor=st.executor)
@@ -87,10 +90,10 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
         if st.store.is_complete(key):
             return key, None
-        index, files, store = st.index, st.files, st.store
+        index, files, store, wl = st.index, st.files, st.store, st.wavelengths
 
         async def fn(ctx: Any) -> dict[str, Any]:
-            return await fieldjob.run_field(ctx, index, files, store, params)
+            return await fieldjob.run_field(ctx, index, files, store, params, wl)
 
         return key, st.scheduler.submit(fieldjob.KIND, key, params, fn, priority, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
 

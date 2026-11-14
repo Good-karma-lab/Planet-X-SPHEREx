@@ -22,6 +22,7 @@ from engine.grid import Grid, grid_for_fov
 from engine.passes import common_detectors, detectors_per_pass, split_passes, split_visits
 from engine.register import register, stars
 from indexer.store import Exposure, Index
+from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.workers.native import read_native
 
@@ -70,6 +71,7 @@ async def build_field(
     checkpoint: Callable[[], Awaitable[None]] | None = None,
     on_pass: Callable[[PassProducts, tuple[int, ...]], Awaitable[None]] | None = None,
     on_quick: Callable[[PassProducts, tuple[int, ...]], Awaitable[None]] | None = None,
+    wavelengths: WavelengthMaps | None = None,
 ) -> FieldBuild:
     t0 = time.time()
     grid = grid_for_fov(ra, dec, fov_arcmin)
@@ -87,7 +89,7 @@ async def build_field(
 
     async def one(i: int) -> None:
         try:
-            ne = await read_native(fr, exps[i].key, grid, visit_of[i])
+            ne = await read_native(fr, exps[i].key, grid, visit_of[i], wavelengths=wavelengths)
         except Exception as err:  # a file that cannot be read is counted and said, never hidden
             missing.append(f"{exps[i].key}: {err}")
             return

@@ -12,6 +12,7 @@ from engine.grid import Grid
 from engine.spx import flags as spxflags
 from engine.spx import wave as spxwave
 from engine.spx import wcs as spxwcs
+from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 
 BOX_MARGIN_PX = 3
@@ -35,6 +36,7 @@ async def read_native(
     visit: int,
     target: tuple[float, float] | None = None,
     keep_outlier: bool = False,
+    wavelengths: WavelengthMaps | None = None,
 ) -> NativeExposure | None:
     """The exposure inside the field, or None when the field is off this detector."""
     lay = await fr.layout(key)
@@ -54,13 +56,20 @@ async def read_native(
     img = (await fr.rows(key, "image", y0, y1))[:, x0:x1].astype(np.float32)
     flg = (await fr.rows(key, "flags", y0, y1))[:, x0:x1].astype(np.int64)
     table, _, _ = spxflags.resolve(lay.flags_header)
-    wh, wd = await fr.table_bytes(key, "wave")
-    wm = spxwave.WaveMap(spxwave.table_from_hdu_bytes(wh, wd), lay.detector)
     jj, ii = np.mgrid[y0:y1, x0:x1]
     xd, yd = ii.ravel().astype(float), jj.ravel().astype(float)
     pra, pdec = spxwcs.pix2sky(w, xd, yd)
     u, v = grid.sky_to_grid(pra, pdec)
-    lam, _ = wm(xd, yd)
+    lam = None
+    if wavelengths is not None:
+        try:
+            cw, _ = await wavelengths.get(lay.detector)
+            lam = cw[y0:y1, x0:x1].ravel().astype(np.float64)
+        except Exception:  # the calibration map could not be read: the file's own table below
+            lam = None
+    if lam is None:
+        wh, wd = await fr.table_bytes(key, "wave")
+        lam, _ = spxwave.WaveMap(spxwave.table_from_hdu_bytes(wh, wd), lay.detector)(xd, yd)
     vals = img.ravel()
     flags_flat = flg.ravel()
     r_t = None
