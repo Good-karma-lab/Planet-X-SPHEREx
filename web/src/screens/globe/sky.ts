@@ -6,7 +6,7 @@
 // slices of a few milliseconds per frame and replaces the picture when it is done. Nothing is painted while nothing changes.
 
 import { D2R } from '../../lib/sky';
-import { FROM_NOTHING, facePt, orderFor, Sampler, tiles, type FacePt } from '../../lib/hips';
+import { FROM_NOTHING, HIPS, facePt, orderFor, Sampler, tiles, type FacePt } from '../../lib/hips';
 
 export interface SkyView {
   ra: number;
@@ -22,6 +22,24 @@ export interface SkyLayer {
   id: string;
   gain: number;
   black: number;
+}
+
+/** ICRS (equatorial) to galactic: the rows of the standard rotation matrix. */
+const GAL = [
+  [-0.0548755604162154, -0.873437090234885, -0.4838350155487132],
+  [0.4941094278755837, -0.4448296299600112, 0.7469822444972189],
+  [-0.8676661490190047, -0.1980763734312015, 0.4559837761750669],
+] as const;
+
+/** Galactic longitude (degrees) and sin(latitude) of an equatorial place given by RA (degrees) and z = sin(dec). */
+export function toGalactic(ra: number, z: number): [number, number] {
+  const c = Math.sqrt(Math.max(0, 1 - z * z));
+  const x = c * Math.cos(ra * D2R);
+  const y = c * Math.sin(ra * D2R);
+  const gx = GAL[0][0] * x + GAL[0][1] * y + GAL[0][2] * z;
+  const gy = GAL[1][0] * x + GAL[1][1] * y + GAL[1][2] * z;
+  const gz = GAL[2][0] * x + GAL[2][1] * y + GAL[2][2] * z;
+  return [Math.atan2(gy, gx) / D2R, gz];
 }
 
 const mw = (v: SkyView) => Math.min(v.W - 20, (v.H - 20) * 2);
@@ -80,6 +98,8 @@ class SkyPainter {
   private spare = document.createElement('canvas');
   /** the view the picture shows */
   shown: SkyView | null = null;
+  /** counts the pictures: the toned glow is made once per picture */
+  gen = 0;
   /** a full-resolution pass is needed (tiles arrived, the view came to rest) */
   stale = true;
   private pass: Pass | null = null;
@@ -133,6 +153,8 @@ class SkyPainter {
     const rgb = this.rgb;
     const one = layer.length === 1;
     const l0 = layer[0]!;
+    // a survey whose tiles are in galactic coordinates (the dust map) is looked up at the galactic place of each pixel
+    const gal = layer.every((l) => HIPS[l.id]?.frame === 'galactic');
     const g0 = (l0.gain * 255) / (255 - l0.black);
     while (p.row < sh) {
       const j = p.row++;
@@ -157,7 +179,11 @@ class SkyPainter {
           z = zz * b.c[2] + sy * b.n[2];
           ra = Math.atan2(vy, vx) / D2R;
         }
-        facePt(ra, z > 1 ? 1 : z < -1 ? -1 : z, f);
+        const zc = z > 1 ? 1 : z < -1 ? -1 : z;
+        if (gal) {
+          const g = toGalactic(ra, zc);
+          facePt(g[0], g[1] > 1 ? 1 : g[1] < -1 ? -1 : g[1], f);
+        } else facePt(ra, zc, f);
         const q = (j * sw + i) * 4;
         if (one) {
           if (samplers[0]!.at(f, rgb, 0) === FROM_NOTHING) continue;
@@ -211,6 +237,7 @@ class SkyPainter {
     this.spare = this.canvas;
     this.canvas = nx;
     this.shown = v;
+    this.gen++;
   }
 }
 

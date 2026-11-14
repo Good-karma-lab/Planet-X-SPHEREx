@@ -5,9 +5,13 @@ import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVE
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, type SkyLayer } from './globe/sky';
+import { glowOf, paintGround } from './globe/glow';
+import { drawStars, fovOfGlobe, loadStars } from './globe/stars';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
-import { drawMovingPath, placeAt, type MovingObject } from './search/path';
+import { KnownList } from './search/known';
+import { SearchedCard, SearchedLegend, drawSearched, hitSearched, useSearched, type SearchedField } from './search/searched';
+import { drawBodyPath, drawMovingPath, placeAt, type BodyPath, type MovingObject } from './search/path';
 import './globe/globe.css';
 
 const KIND: Record<string, { cls: string; dot: string }> = {
@@ -174,8 +178,14 @@ export function Globe() {
   const [decIn, setDecIn] = useState(formatDec(a.dec));
   const [, setDatesTick] = useState(0);
   const cv = useRef<HTMLCanvasElement>(null);
-  const live = useRef({ survey, proj, covOn, a, sel, catalog });
-  live.current = { survey, proj, covOn, a, sel, catalog };
+  // a comet or asteroid chosen in the list: its path since April 2025 and where it is today
+  const [bodyPath, setBodyPath] = useState<BodyPath | null>(null);
+  // «Where we've searched»: every searched field coloured by its result (the list exists only when the service makes it)
+  const searched = useSearched(true);
+  const [searchedOn, setSearchedOn] = useState(false);
+  const [searchedSel, setSearchedSel] = useState<SearchedField | null>(null);
+  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel });
+  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel };
   const dirty = useRef(true);
   const view = useRef(kept.view ?? { ra: a.ra, dec: a.dec, zoom: 1.6 });
   kept.view = view.current;
@@ -189,6 +199,7 @@ export function Globe() {
   useEffect(() => {
     void loadCatalog().then((c) => setCatalog((old) => (old === c ? old : c)));
     void loadCoverage().then(() => (dirty.current = true));
+    void loadStars().then(() => (dirty.current = true));
     const offDates = onImageDates(() => {
       dirty.current = true;
       setDatesTick((t) => t + 1);
@@ -232,7 +243,7 @@ export function Globe() {
 
   useEffect(() => {
     dirty.current = true;
-  }, [survey, proj, covOn, sel, catalog]);
+  }, [survey, proj, covOn, sel, catalog, bodyPath, searched, searchedOn, searchedSel]);
 
   // the sky canvas
   useEffect(() => {
@@ -312,54 +323,48 @@ export function Globe() {
 
     // where each test target's pin and the selected object's pin were drawn: the click finds them there
     let pins: { o: Obj; x: number; y: number }[] = [];
+    let starTier = 0;
+    let glowMix = 1;
+    let glowT = performance.now();
     const font = getComputedStyle(document.body).fontFamily;
     const draw = () => {
       const st = live.current;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
+      paintGround(ctx, W, H);
+      // wide view: the survey as a soft glow (toned, real); below 12° across: the raw survey, crossfaded over 400 ms
+      const wideNow = st.proj !== 'globe' || fovOfGlobe(W, R()) > 12;
+      const tNow = performance.now();
+      glowMix = Math.max(0, Math.min(1, glowMix + ((tNow - glowT) / 400) * (wideNow ? 1 : -1)));
+      glowT = tNow;
+      if (glowMix > 0 && glowMix < 1) dirty.current = true;
       if (sky.shown) {
         ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(sky.canvas, 0, 0, W, H);
+        ctx.imageSmoothingQuality = 'high';
+        if (glowMix < 1) {
+          ctx.globalAlpha = 1 - glowMix;
+          ctx.drawImage(sky.canvas, 0, 0, W, H);
+        }
+        if (glowMix > 0) {
+          ctx.globalAlpha = glowMix;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.drawImage(glowOf(sky.canvas, sky.gen, st.survey === 'dss2' ? 0.45 : 0.3), 0, 0, W, H);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.globalAlpha = 1;
       }
       const b = basis();
-      // grid
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,255,255,.10)';
-      ctx.lineWidth = 1;
-      ctx.fillStyle = 'rgba(255,255,255,.45)';
-      ctx.font = `11px ${font}`;
-      const line = (pts: [number, number][]) => {
-        ctx.beginPath();
-        let pen = false;
-        let lx = 0;
-        for (const [ra, de] of pts) {
-          const p = project(ra, de, b);
-          if (!p[2] || (st.proj === 'moll' && pen && Math.abs(p[0] - lx) > W / 2)) {
-            pen = false;
-            if (!p[2]) continue;
-          }
-          if (pen) ctx.lineTo(p[0], p[1]);
-          else ctx.moveTo(p[0], p[1]);
-          pen = true;
-          lx = p[0];
-        }
-        ctx.stroke();
-      };
-      for (let ra = 0; ra < 360; ra += 30) {
-        const pts: [number, number][] = [];
-        for (let de = -90; de <= 90; de += 3) pts.push([ra, de]);
-        line(pts);
-        const lp = project(ra, 2, b);
-        if (lp[2]) ctx.fillText(`${ra / 15}h`, lp[0] + 3, lp[1] - 3);
-      }
-      for (let de = -60; de <= 60; de += 30) {
-        const pts: [number, number][] = [];
-        for (let ra = 0; ra <= 360; ra += 3) pts.push([ra, de]);
-        line(pts);
-        const lp = project(st.proj === 'moll' ? 170 : view.current.ra, de, b);
-        if (lp[2]) ctx.fillText(`${de > 0 ? '+' : ''}${de}°`, lp[0] + 3, lp[1] - 3);
-      }
-      ctx.restore();
+      // the stars: the real Hipparcos catalogue as points of light (no grid, no catalogue dots); a slow frame drops to a lower tier
+      const t0 = performance.now();
+      drawStars(ctx, (ra, dec) => project(ra, dec, b), {
+        W,
+        H,
+        fov: st.proj === 'globe' ? fovOfGlobe(W, R()) : 150,
+        tier: starTier,
+      });
+      const dt = performance.now() - t0;
+      if (dt > 20) starTier = 1;
+      else if (dt < 8) starTier = 0;
       ctx.strokeStyle = 'rgba(255,255,255,.22)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -383,18 +388,10 @@ export function Globe() {
           ctx.fill();
         }
       }
-      // catalogue dots, at their place on the date of the backdrop
-      ctx.globalAlpha = 0.75;
-      for (const o of st.catalog) {
-        if (o.b) continue;
-        const p = project(...shownPlace(o, st.survey), b);
-        if (!p[2]) continue;
-        ctx.fillStyle = KIND[o.k]?.dot ?? '#fff';
-        ctx.fillRect(p[0] - 1, p[1] - 1, 2.2, 2.2);
-      }
-      ctx.globalAlpha = 1;
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
       pins = [];
+      if (st.searchedOn && st.searched) drawSearched(ctx, (ra, dec) => project(ra, dec, b), st.searched, st.searchedSel?.key ?? null);
+      if (st.bodyPath) drawBodyPath(ctx, (ra, dec) => project(ra, dec, b), st.bodyPath, W / 2, font);
       // the selected object's path: from its earliest archive image to 2050, a dot at every image date, the SPHEREx stretch, and its
       // pin at its place on the date of the backdrop shown (the path is drawn larger than true when it would be under 60 px)
       let pathPin = false;
@@ -607,6 +604,15 @@ export function Globe() {
       if (drag && !drag.moved) {
         // the pins where they were drawn (the place on the backdrop's date), then the catalogue dots the same way
         const st = live.current;
+        if (st.searchedOn && st.searched) {
+          const hb = basis();
+          const hit = hitSearched((ra, dec) => project(ra, dec, hb), st.searched, px, py);
+          if (hit) {
+            setSearchedSel(hit);
+            drag = null;
+            return;
+          }
+        }
         let near: Obj | null = null;
         let bd = 12;
         for (const q of pins) {
@@ -614,19 +620,6 @@ export function Globe() {
           if (d < bd) {
             bd = d;
             near = q.o;
-          }
-        }
-        if (!near && view.current.zoom > 3) {
-          const b = basis();
-          for (const o of st.catalog) {
-            if (o.b) continue;
-            const p = project(...shownPlace(o, st.survey), b);
-            if (!p[2]) continue;
-            const d = Math.hypot(p[0] - px, p[1] - py);
-            if (d < bd) {
-              bd = d;
-              near = o;
-            }
           }
         }
         if (near) {
@@ -810,6 +803,20 @@ export function Globe() {
           Exposure coverage
           <span class="covkey">teal: DR1 exposures · blue: QR3 only · more opaque = more exposures (log scale)</span>
         </label>
+        {searched && (
+          <label class="chk covsw srchsw dark-glass" title="Every field a search ran on, coloured by what was found: amber = leads, teal = nothing above the bar, grey = running. Click a field for its result.">
+            <input
+              type="checkbox"
+              checked={searchedOn}
+              onChange={(e) => {
+                setSearchedOn((e.target as HTMLInputElement).checked);
+                setSearchedSel(null);
+              }}
+            />
+            Where we've searched
+            {searchedOn && <SearchedLegend count={searched.length} />}
+          </label>
+        )}
         <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
           ★ are test targets.
@@ -896,6 +903,18 @@ export function Globe() {
           </div>
         </div>
         <div class="cat-list">
+          {searchedSel && (
+            <SearchedCard
+              f={searchedSel}
+              onClose={() => setSearchedSel(null)}
+              onOpen={(o) => {
+                location.hash = formatHash({
+                  screen: 'lab',
+                  params: { ra: o.ra.toFixed(5), dec: o.dec.toFixed(5), fov: String(o.fov), ...(o.film ? { film: String(o.film) } : {}) },
+                });
+              }}
+            />
+          )}
           {filter !== 'demo' && filter !== 'small' && !slice.length && catalog.length > 0 && (
             <div class="empty">Not in the local SIMBAD snapshot. Coordinates work too, e.g. “17h57m48s, +04d41m”.</div>
           )}
@@ -945,6 +964,28 @@ export function Globe() {
                 </div>
               </div>
             ))}
+          {filter === 'small' && (
+            <div class="known-head">
+              <span class="mono-s">Every comet and asteroid of the JPL Small-Body Database: Show on map draws its path since April 2025</span>
+            </div>
+          )}
+          {filter === 'small' && (
+            <KnownList
+              selected={bodyPath?.body.spkid ?? null}
+              today={bodyPath}
+              onShow={(p) => {
+                setBodyPath(p);
+                aim.set({ ra: p.today.ra, dec: p.today.dec, fov: 10 }, 'catalog');
+                flyRef.current(p.today.ra, p.today.dec, 30);
+              }}
+              onOpen={(_b, c) => {
+                location.hash = formatHash({
+                  screen: 'lab',
+                  params: { ra: c.ra.toFixed(5), dec: c.dec.toFixed(5), fov: '10', film: ((c.mjd0 + c.mjd1) / 2).toFixed(3) },
+                });
+              }}
+            />
+          )}
           {filter !== 'demo' &&
             filter !== 'small' &&
             slice.map((o) => {

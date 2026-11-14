@@ -26,6 +26,8 @@ interface Survey {
   min: number;
   /** tile width, pixels */
   w: number;
+  /** the sky frame of the tiles when it is not equatorial (hips_frame in the survey's properties file) */
+  frame?: 'galactic';
 }
 
 /** The surveys the globe and the lab read (the same map the service's tile cache uses). */
@@ -33,7 +35,7 @@ export const HIPS: Record<string, Survey> = {
   dss2: { path: 'CDS/DSS2/color', max: 9, min: 0, w: 512 },
   '2mass': { path: 'CDS/2MASS/Color', max: 9, min: 0, w: 512 },
   wise: { path: 'CDS/AllWISE/RGB-W4-W2-W1', max: 8, min: 0, w: 512 },
-  dust: { path: 'CDS/IRIS/color', max: 3, min: 3, w: 256 },
+  dust: { path: 'CDS/IRIS/color', max: 3, min: 3, w: 256, frame: 'galactic' },
   dss2red: { path: 'CDS/DSS2/red', max: 9, min: 0, w: 512 },
   '2massk': { path: 'CDS/2MASS/K', max: 9, min: 0, w: 512 },
   wise1: { path: 'CDS/AllWISE/W1', max: 8, min: 0, w: 512 },

@@ -21,3 +21,6 @@
   .map-ui .map-dates .faint { display: none; }
   .screen .globe-wrap > .covsw { bottom: 66px; right: 10px; }
 }
+.known-head { padding: 8px 14px 0; }
+.globe-wrap > .srchsw { top: auto; bottom: 150px; right: 16px; }
+@media (max-width: 860px) { .screen .globe-wrap > .srchsw { bottom: 128px; right: 10px; } }
