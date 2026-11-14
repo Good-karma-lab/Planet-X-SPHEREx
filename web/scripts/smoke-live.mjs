@@ -56,6 +56,8 @@ await check('lab: movers find Barnard with Gaia', async () => {
 await check('lab: spectrum of a clicked star', async () => {
   const v = await page.locator('.vsq').boundingBox();
   await page.mouse.click(v.x + v.width * 0.514, v.y + v.height * 0.165);
+  // a click opens the object's passport; its spectrum is the Spectrum tab
+  await page.getByTestId('tab-spec').click();
   await page.waitForFunction(() => /points from|Measuring/.test(document.querySelector('.spec-state')?.textContent ?? ''), null, {
     timeout: 90000,
   });
@@ -96,9 +98,10 @@ await check('lab: Days scale of the ecliptic field with known asteroids', async 
   );
   return (await page.getByTestId('lab-status').innerText()).slice(0, 140);
 });
-await check('findings: live cards', async () => {
+await check('findings: ranked leads from the service', async () => {
   await page.goto(`${BASE}/#/findings`);
-  await page.getByText('Gaia: same motion').first().waitFor({ timeout: 60000 });
+  await page.locator('.leadrow').first().waitFor({ timeout: 60000 });
+  return `${await page.locator('.leadrow').count()} leads`;
 });
 await check('method and about', async () => {
   await page.goto(`${BASE}/#/method`);
