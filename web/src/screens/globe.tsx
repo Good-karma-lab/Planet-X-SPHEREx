@@ -8,6 +8,7 @@ import { sky, type SkyLayer } from './globe/sky';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
 import { KnownList } from './search/known';
+import { SearchedCard, SearchedLegend, drawSearched, hitSearched, useSearched, type SearchedField } from './search/searched';
 import { drawBodyPath, drawMovingPath, placeAt, type BodyPath, type MovingObject } from './search/path';
 import './globe/globe.css';
 
@@ -177,8 +178,12 @@ export function Globe() {
   const cv = useRef<HTMLCanvasElement>(null);
   // a comet or asteroid chosen in the list: its path since April 2025 and where it is today
   const [bodyPath, setBodyPath] = useState<BodyPath | null>(null);
-  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath });
-  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath };
+  // «Where we've searched»: every searched field coloured by its result (the list exists only when the service makes it)
+  const searched = useSearched(true);
+  const [searchedOn, setSearchedOn] = useState(false);
+  const [searchedSel, setSearchedSel] = useState<SearchedField | null>(null);
+  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel });
+  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel };
   const dirty = useRef(true);
   const view = useRef(kept.view ?? { ra: a.ra, dec: a.dec, zoom: 1.6 });
   kept.view = view.current;
@@ -235,7 +240,7 @@ export function Globe() {
 
   useEffect(() => {
     dirty.current = true;
-  }, [survey, proj, covOn, sel, catalog, bodyPath]);
+  }, [survey, proj, covOn, sel, catalog, bodyPath, searched, searchedOn, searchedSel]);
 
   // the sky canvas
   useEffect(() => {
@@ -398,6 +403,7 @@ export function Globe() {
       ctx.globalAlpha = 1;
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
       pins = [];
+      if (st.searchedOn && st.searched) drawSearched(ctx, (ra, dec) => project(ra, dec, b), st.searched, st.searchedSel?.key ?? null);
       if (st.bodyPath) drawBodyPath(ctx, (ra, dec) => project(ra, dec, b), st.bodyPath, W / 2, font);
       // the selected object's path: from its earliest archive image to 2050, a dot at every image date, the SPHEREx stretch, and its
       // pin at its place on the date of the backdrop shown (the path is drawn larger than true when it would be under 60 px)
@@ -611,6 +617,15 @@ export function Globe() {
       if (drag && !drag.moved) {
         // the pins where they were drawn (the place on the backdrop's date), then the catalogue dots the same way
         const st = live.current;
+        if (st.searchedOn && st.searched) {
+          const hb = basis();
+          const hit = hitSearched((ra, dec) => project(ra, dec, hb), st.searched, px, py);
+          if (hit) {
+            setSearchedSel(hit);
+            drag = null;
+            return;
+          }
+        }
         let near: Obj | null = null;
         let bd = 12;
         for (const q of pins) {
@@ -814,6 +829,20 @@ export function Globe() {
           Exposure coverage
           <span class="covkey">teal: DR1 exposures · blue: QR3 only · more opaque = more exposures (log scale)</span>
         </label>
+        {searched && (
+          <label class="chk covsw srchsw dark-glass" title="Every field a search ran on, coloured by what was found: amber = leads, teal = nothing above the bar, grey = running. Click a field for its result.">
+            <input
+              type="checkbox"
+              checked={searchedOn}
+              onChange={(e) => {
+                setSearchedOn((e.target as HTMLInputElement).checked);
+                setSearchedSel(null);
+              }}
+            />
+            Where we've searched
+            {searchedOn && <SearchedLegend count={searched.length} />}
+          </label>
+        )}
         <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
           ★ are test targets.
@@ -900,6 +929,18 @@ export function Globe() {
           </div>
         </div>
         <div class="cat-list">
+          {searchedSel && (
+            <SearchedCard
+              f={searchedSel}
+              onClose={() => setSearchedSel(null)}
+              onOpen={(o) => {
+                location.hash = formatHash({
+                  screen: 'lab',
+                  params: { ra: o.ra.toFixed(5), dec: o.dec.toFixed(5), fov: String(o.fov), ...(o.film ? { film: String(o.film) } : {}) },
+                });
+              }}
+            />
+          )}
           {filter !== 'demo' && filter !== 'small' && !slice.length && catalog.length > 0 && (
             <div class="empty">Not in the local SIMBAD snapshot. Coordinates work too, e.g. “17h57m48s, +04d41m”.</div>
           )}
