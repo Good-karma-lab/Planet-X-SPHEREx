@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from indexer.store import Index
 from service import __version__
 from service.anomalies import Anomalies
+from service.bodies import KnownBodies
 from service.config import Config, load
 from service.coverage import coverage_map
 from service.jobs.scheduler import Priority, Scheduler
@@ -60,6 +61,7 @@ class State:
         self.spectra: Spectra | None = None
         self.movers: Movers | None = None
         self.anomalies: Anomalies | None = None
+        self.bodies: KnownBodies | None = None
         self.identified: dict[tuple[float, float, int, int], dict[str, Any]] = {}
         self.coverage_lock = asyncio.Lock()
 
@@ -80,6 +82,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.files = FileReader(st.s3, cfg.store_dir)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
         st.movers = Movers(st.store, cfg.store_dir)
+        st.bodies = KnownBodies(cfg.store_dir)
         if st.index is not None:
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
             st.anomalies = Anomalies(st.index, st.files, st.wavelengths, st.store, cfg.store_dir)
@@ -251,6 +254,20 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
         job = st.scheduler.submit(filmjob.KIND, key, params, fn, Priority.P0, "heavy", 1500)
         return {"key": key, "params": params, "job": job.view()}
+
+    @app.get(f"{API_PREFIX}/film/{{key}}/bodies")
+    async def film_bodies(key: str) -> Any:
+        """Known solar-system bodies predicted in a finished film: their place on every frame (JPL sb_ident + Horizons)."""
+        if st.store is None or st.bodies is None or not key.isalnum():
+            raise HTTPException(400)
+        hit = st.bodies.cached(key)
+        if hit is not None:
+            return hit
+        meta = st.store.read_meta(filmjob.KIND, key)
+        if meta is None:
+            return {"state": "waiting", "bodies": []}
+        st.bodies.start(key, meta)
+        return st.bodies.view(key)
 
     @app.get(f"{API_PREFIX}/film/{{key}}/parts/{{name}}")
     def film_part(key: str, name: str) -> Response:

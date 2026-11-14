@@ -10,7 +10,7 @@ import { ARCHIVE, ArchiveSet } from '../viewer/archive';
 import { FADE_MS, HOLD_MS, order } from '../viewer/pendulum';
 import { PER_PASS, Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
 import { atEpoch } from '../lib/sky';
-import { FilmView } from './film';
+import { FilmView, type KnownBody } from './film';
 import { ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
 import { halfToFloat } from '../lib/sxp';
 
@@ -291,6 +291,7 @@ export function Lab({ route }: { route: Route }) {
   const anRef = useRef<AnomalyView | null>(null);
   anRef.current = an;
   const [selAn, setSelAn] = useState<number | null>(null);
+  const [filmBodies, setFilmBodies] = useState<{ state: string; bodies: KnownBody[]; vLimit: number } | null>(null);
   const archive = useRef<ArchiveSet | null>(null);
   const [archTick, setArchTick] = useState(0);
   const [archStep, setArchStep] = useState<number | null>(null);
@@ -1214,7 +1215,15 @@ export function Lab({ route }: { route: Route }) {
             )}
             {film !== null && (
               <div style={{ position: 'absolute', inset: 0 }}>
-                <FilmView ra={ra} dec={dec} fov={fov} mjd={film || undefined} playing={playing} onStatus={setFilmStatus} />
+                <FilmView
+                  ra={ra}
+                  dec={dec}
+                  fov={fov}
+                  mjd={film || undefined}
+                  playing={playing}
+                  onStatus={setFilmStatus}
+                  onBodies={setFilmBodies}
+                />
               </div>
             )}
           </div>
@@ -1656,6 +1665,35 @@ export function Lab({ route }: { route: Route }) {
                     {film === null ? 'Film' : 'Close film'}
                   </button>
                 </div>
+                {film !== null && filmBodies && (
+                  <>
+                    <div
+                      class="srow"
+                      title="Known solar-system bodies JPL predicts in this field during the pass (Small-Body Identification + Horizons); seen = the film's motion map shows something at the predicted place on that visit"
+                    >
+                      <b>Known bodies</b>
+                      <span class="st">
+                        {filmBodies.state === 'running'
+                          ? 'asking JPL which bodies cross the field…'
+                          : filmBodies.state === 'unavailable'
+                            ? 'JPL not reachable; asked again next time'
+                            : `${filmBodies.bodies.length} predicted (V ≤ ${filmBodies.vLimit}) · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen on at least one of their visits`}
+                      </span>
+                    </div>
+                    {[...filmBodies.bodies]
+                      .sort((a, b) => b.seen.length - a.seen.length || (a.v ?? 99) - (b.v ?? 99))
+                      .slice(0, 8)
+                      .map((b) => (
+                        <div key={b.name} class="mvrow" style={{ cursor: 'default' }}>
+                          <b>{b.name}</b>
+                          <span>V {b.v?.toFixed(1) ?? '—'}</span>
+                          <span class="faint">
+                            seen {b.seen.length} of {b.expected.length} visits
+                          </span>
+                        </div>
+                      ))}
+                  </>
+                )}
               </div>
             </div>
           )}
