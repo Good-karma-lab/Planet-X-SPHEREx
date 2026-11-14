@@ -2371,3 +2371,7 @@ input[type='range']::-moz-range-thumb {
 .sbar .sline-px .sval { text-align: right; }
 .sbar .sline-px .sacts { display: inline-flex; gap: 4px; }
 .btn.mini { padding: 0 7px; height: 20px; min-height: 0; font-size: 10.5px; line-height: 18px; }
+
+/* a tile of a wall whose detector or band has no exposure in the season shown says so (it is never a black tile with only a marker) */
+.vsq .panel-empty { position: absolute; z-index: 2; display: grid; place-items: center; padding: 10px; text-align: center; pointer-events: none; }
+.vsq .panel-empty span { font: 500 12px var(--mono); color: var(--muted); background: rgba(6, 10, 14, 0.6); border: 1px dashed var(--edge); border-radius: 8px; padding: 5px 9px; max-width: 90%; }

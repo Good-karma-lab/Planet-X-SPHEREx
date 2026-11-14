@@ -66,6 +66,8 @@ const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
   },
 ];
 
+/** the detectors whose range holds a band (D1 0.75–1.11, D2 1.11–1.64, D3 1.64–2.42, D4 2.42–3.82, D5 3.82–4.42, D6 4.42–5.00 µm) */
+const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2, 4], ice: [4], pah: [4], co2: [5], co: [6] };
 const BANDS = [
   { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
   {
@@ -462,6 +464,8 @@ export function Lab({ route }: { route: Route }) {
       text: string;
       sub: string;
       hue: number;
+      /** the tile's own box and what it says when its detector or band has no exposure in the season shown */
+      empty?: { x: number; y: number; w: number; h: number; text: string };
     }[]
   >([]);
   const [playing, setPlaying] = useState(true);
@@ -841,7 +845,9 @@ export function Lab({ route }: { route: Route }) {
             }
           }
           const timeMode = st.time === 'diff' ? 'difference' : st.time === 'sum' ? 'coadd' : 'pendulum';
-          let panels: (Panel & { label?: string; sub?: string; hue?: number })[] = [];
+          let panels: (Panel & { label?: string; sub?: string; hue?: number; empty?: string })[] = [];
+          const passMeta0 = st.meta?.passes.find((q) => q.index === a);
+          const lacks = (dets: number[]) => (passMeta0 && dets.length > 0 && dets.every((d) => !((passMeta0.detectors?.[`D${d}`] ?? 0) > 0)) ? dets : null);
           if (st.view === 'picture') {
             const mask = BANDS.reduce((m, bd, i) => (st.bands.includes(bd.key) ? m | (1 << i) : m), 0);
             panels = [
@@ -898,6 +904,7 @@ export function Lab({ route }: { route: Route }) {
                 label: bd.name,
                 sub: bd.band,
                 hue: bd.hue,
+                empty: lacks(BAND_DETS[bd.key] ?? []) ? `no exposure in ${(BAND_DETS[bd.key] ?? []).map((d) => `D${d}`).join(', ')} in this season` : undefined,
               };
             });
           } else {
@@ -919,6 +926,7 @@ export function Lab({ route }: { route: Route }) {
                 label: `D${d + 1} ${DETECTORS[d]!.name}`,
                 sub: DETECTORS[d]!.range,
                 hue: DETECTORS[d]!.hue,
+                empty: lacks([d + 1]) ? `no exposure in D${d + 1} in this season` : undefined,
               };
             });
           }
@@ -926,7 +934,8 @@ export function Lab({ route }: { route: Route }) {
           for (const q of panels) {
             r.panel(q, a, b, t);
             if (!q.zoom) rects.push({ x: q.x, y: q.y, w: q.w, h: q.h });
-            if (q.label) out.push({ x: q.x, y: q.y + q.h - 20, w: q.w, text: q.label, sub: q.sub ?? '', hue: q.hue ?? 0 });
+            if (q.label)
+              out.push({ x: q.x, y: q.y + q.h - 20, w: q.w, text: q.label, sub: q.sub ?? '', hue: q.hue ?? 0, empty: q.empty ? { x: q.x, y: q.y, w: q.w, h: q.h, text: q.empty } : undefined });
           }
           setShown((s) => (s && s.pass === a && s.stack === stack ? s : { pass: a, stack }));
         }
@@ -2291,6 +2300,13 @@ export function Lab({ route }: { route: Route }) {
                 data-testid="picture"
               />
               <canvas ref={overlay} class="ov" />
+              {labels.map((l) =>
+                l.empty ? (
+                  <div class="panel-empty" style={{ left: `${l.empty.x}px`, top: `${l.empty.y}px`, width: `${l.empty.w}px`, height: `${l.empty.h}px` }}>
+                    <span>{l.empty.text}</span>
+                  </div>
+                ) : null,
+              )}
               {labels.map((l) => (
                 <div class="panel-label" style={{ left: `${l.x + 6}px`, top: `${l.y + 2}px`, maxWidth: `${l.w - 10}px` }}>
                   <span class="sw" style={{ background: `hsl(${l.hue},80%,60%)`, boxShadow: `0 0 8px hsl(${l.hue},80%,60%)` }} />
