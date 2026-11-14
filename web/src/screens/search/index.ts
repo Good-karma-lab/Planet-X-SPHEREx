@@ -3,7 +3,7 @@ export { KnownList, useKnown, type Crossing } from './known';
 export { drawBodyPath, fetchBodyPath, todayText, type BodyPath, type PathPoint, type SmallBody } from './path';
 export { FilmTracks, useFilmTracks, chanceText, daysStatus, trackLine, visitMarks } from './film-tracks';
 export { TRACK_COLOURS, drawBlink, drawTracks, hitTrack, trackLabel, trackName, trackPlace, type FilmControl, type FilmTrack, type TrackPoint } from './tracks';
-export { PairButton, PairCard, type Pair } from './pair';
+export { PairButton, PairCard, type ChancePairs, type Pair } from './pair';
 export { DistantCanvas, DistantLines, DistantPanel, peakRows, useDistant, useDistantPlan, type Distant, type DistantPlan, type DistantCandidate, type DistantResult, type DistantSliders } from './distant';
 export { about, progressText, runJob, useProduct } from './jobs';
 export { DeepSumPanel, type DeepCandidate, type DeepResult } from './deep';

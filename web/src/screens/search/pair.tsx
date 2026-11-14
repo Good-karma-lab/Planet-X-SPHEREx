@@ -28,6 +28,25 @@ export interface Pair {
   note?: string;
 }
 
+/** What the service measured against chance for the pairs of a field (movers answer: chance_pairs). */
+export interface ChancePairs {
+  candidates?: number;
+  steady_pairs?: number;
+  tested?: number;
+  passed?: number;
+  rate?: number | null;
+}
+
+/**
+ * A change that depends on the detector, with a bright core (Gaia G of 11.5 or brighter: it saturates in some detectors) is most likely an artefact of the saturated
+ * core, whose flux follows the detector mix of each pass, and not a variable star.
+ */
+export function saturationArtefact(p: Pair): { g: number } | null {
+  if (!/depends on the detector/i.test(p.verdict ?? '')) return null;
+  const gs = p.components.map((c) => Number(c.gaia?.g)).filter((g) => Number.isFinite(g) && g <= 11.5);
+  return gs.length ? { g: Math.min(...gs) } : null;
+}
+
 const fluxText = (a?: (number | null)[]) =>
   (a ?? []).map((v) => (v == null ? '–' : Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(1))).join(' → ');
 const coreName = (c: Core) => c.simbad?.name || (c.gaia?.source_id ? `Gaia DR3 ${c.gaia.source_id}` : null);
@@ -67,11 +86,14 @@ export function PairCard({
   pair: p,
   mjds,
   zoomed,
+  chance,
   onSpectrum,
   onZoom,
   onBack,
 }: {
   pair: Pair;
+  /** the chance control of the field's pairs (tested only where the field has enough steady pairs: 60′) */
+  chance?: ChancePairs | null;
   /** the dates of the passes (MJD), for the captions of the cut-outs */
   mjds?: number[];
   zoomed?: boolean;
@@ -80,6 +102,7 @@ export function PairCard({
   onBack?: () => void;
 }) {
   const [A, B] = p.components;
+  const sat = saturationArtefact(p);
   const perDet = Object.entries(p.dln_ratio_per_detector ?? {})
     .map(([d, a]) => {
       const v = a && a[a.length - 1];
@@ -96,7 +119,7 @@ export function PairCard({
     <div class="paircard">
       <div class="ohead">
         <div>
-          <b class="oname">Brightness changed between the passes</b>
+          <b class="oname">{sat ? 'Pair · change most likely a saturation artefact' : 'Brightness changed between the passes'}</b>
           <div class="mono-s">a pair of sources {p.separation_arcsec.toFixed(1)}″ apart · nothing moves</div>
         </div>
         <span class="badge orange" title="A lead: the search first saw a track here; the two cores are the explanation, not a moving body">
@@ -117,6 +140,12 @@ export function PairCard({
             : 'no: both cores stay where they are; only their brightness ratio changes',
           'a mover shifts the whole blob; a changing pair shifts only the peak',
         )}
+        {sat &&
+          row(
+            'Most likely',
+            `a saturation artefact: the bright core (Gaia G ${sat.g.toFixed(1)}) is saturated and its flux follows the detector mix of each pass, so the ratio changes in some detectors and not in others; not a variable star`,
+            'the service says the change depends on the detector; a real variable changes the same way in every detector',
+          )}
         {p.change_sigma != null && row('Size of the change', `${p.change_sigma.toFixed(1)} σ in the ratio of the cores`, 'the largest change of ln(core 2 ÷ core 1) between two passes, with the covariance of the two amplitudes in its error')}
         {[A, B].map((c, i) =>
           row(
@@ -128,6 +157,12 @@ export function PairCard({
         {p.ratio_per_pass && row('Core 2 ÷ core 1', p.ratio_per_pass.map((v) => (v == null ? '–' : v.toFixed(2))).join(' → '), 'per pass, in the white stack')}
         {perDet.length > 0 &&
           row('By detector', perDet.join(' · '), 'the change of the ratio from the first to the last pass in each detector alone: the same in all six = one variable star; different = a colour')}
+        {chance &&
+          row(
+            'Chance rate',
+            chance.tested ? `${chance.passed ?? 0} of ${chance.tested} steady pairs passed the change test (60′ field)` : 'not tested at this size: the chance rate is measured on 60′ fields only',
+            'steady pairs (the ratio of the cores does not change) are put through the same change test; how many pass is what chance makes. It needs at least ten such pairs, which only a 60′ field has.',
+          )}
         {row('Position', `${formatRA(A.ra)}  ${formatDec(A.dec)}`, 'ICRS, core 1')}
       </div>
       <div class="chips" style="margin:8px 0">
@@ -175,7 +210,7 @@ export function PairButton({ pair: p, on, onClick }: { pair: Pair; on?: boolean;
       onClick={onClick}
       title="Two sources close together whose relative brightness changed between the passes: the peak seems to move, nothing does"
     >
-      <b>Pair · brightness changed</b> · cores {p.separation_arcsec.toFixed(1)}″ apart · {p.verdict ? p.verdict.replace(/ \(.*$/, '') : ''}
+      <b>{saturationArtefact(p) ? 'Pair · change most likely a saturation artefact' : 'Pair · brightness changed'}</b> · cores {p.separation_arcsec.toFixed(1)}″ apart · {p.verdict ? p.verdict.replace(/ \(.*$/, '') : ''}
     </button>
   );
 }
