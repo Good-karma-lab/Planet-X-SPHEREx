@@ -101,7 +101,7 @@ def test_honest(tmp_path: Path) -> None:
     client, _ = make_app(tmp_path)
     with client:
         h = client.get("/api/v1/planetx/honest").json()
-        assert "limit" in h and "lead" in h and "numbers" in h
+        assert "limit" in h and "lead" in h and "mJy" not in h["limit"]  # the depth is the field's own measured bar
 
 
 def test_jump_and_link_on_stored_results(tmp_path: Path) -> None:
