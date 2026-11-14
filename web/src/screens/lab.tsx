@@ -440,6 +440,7 @@ export function Lab({ route }: { route: Route }) {
   ftRef.current = ft.state === 'ok' ? ft.tracks : null;
   const [trackSel, setTrackSel] = useState(-1);
   const [note, setNote] = useState('');
+  const [wallWait, setWallWait] = useState(false);
   const [pairSel, setPairSel] = useState<number | null>(null);
   // the asteroid search runs on its own for the middle pass of the field (in Days: the pass on show)
   const astMjd = film ? film : meta?.passes[Math.floor((meta?.passes.length ?? 1) / 2)]?.mjd_mid;
@@ -737,7 +738,11 @@ export function Lab({ route }: { route: Route }) {
         if (st.view === 'picture')
           stack = allOn ? (r.loaded('picture').length >= 2 || r.loaded('quick').length === 0 ? 'picture' : 'quick') : 'bands';
         else stack = st.view === 'bands' ? 'bands' : 'dets';
-        const loaded = r.loaded(stack);
+        const all = r.loaded(stack);
+        // Difference: the reference pass shows no change, so the loop plays the passes compared with it
+        const loaded = st.time === 'diff' && all.length > 1 && st.frame === null ? all.filter((k) => k > 0) : all;
+        const waiting = st.view !== 'picture' && !all.length;
+        setWallWait((w) => (w === waiting ? w : waiting));
         if (loaded.length) {
           let a = loaded[0]!;
           let b = a;
@@ -1899,6 +1904,9 @@ export function Lab({ route }: { route: Route }) {
                   <canvas ref={refCanvas} width={150} height={150} />
                   <span>Reference · DSS2 red · 1985–1999</span>
                 </div>
+              )}
+              {film === null && wallWait && (
+                <div class="vwait">loading the pictures of every {view === 'det' ? 'detector' : 'band'} for each pass…</div>
               )}
               {film !== null && !filmData && <div class="vwait">{filmNote || 'asking for the visits of the pass…'}</div>}
               {dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}

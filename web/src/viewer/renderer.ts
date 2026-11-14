@@ -118,7 +118,7 @@ vec3 passColour(int k) {
 }
 
 vec3 diffColour(int k) {
-  vec3 base = vec3(dot(passColour(k), vec3(0.3333)) * 0.35);  // the pass, dimmed and grey, under the significance
+  vec3 base = vec3(dot(passColour(k), vec3(0.3333)) * 0.5);  // the pass, dimmed and grey, under the significance
   if (k == 0 || uHasDiff == 0) return base;                    // the first pass is the reference and shows nothing
   float e = texture(uDiff, vec3(uv, float(k * uDiffPer + uDiffLayer))).r * 255.0;
   if (e < 0.5) return base;
