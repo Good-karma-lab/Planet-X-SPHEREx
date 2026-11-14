@@ -23,7 +23,13 @@ SURVEYS = {
     "2massk": ("CDS/2MASS/K", 9),
     "wise1": ("CDS/AllWISE/W1", 8),
     "sdss": ("CDS/SDSS/DR9/color", 10),
+    # three frames of the SPHEREx DR1 all-sky cube (frame = 17·(band − 1) + channel − 1): 0.91, 1.86 and 4.50 µm, for the globe's
+    # SPHEREx background (a visualisation product: 8-bit, asinh-stretched)
+    "spx8": ("SPHEREx/spherex_allsky_cube", 5),
+    "spx40": ("SPHEREx/spherex_allsky_cube", 5),
+    "spx88": ("SPHEREx/spherex_allsky_cube", 5),
 }
+FRAME = {"spx8": 8, "spx40": 40, "spx88": 88}
 TILE = re.compile(r"^(allsky|\d{1,9})$")
 
 
@@ -39,14 +45,17 @@ class HipsTiles:
         if survey not in SURVEYS or not TILE.match(tile):
             raise ValueError("unknown survey or tile")
         deepest = SURVEYS[survey][1]
+        frame = FRAME.get(survey)
+        ext = "png" if frame is not None else "jpg"
+        suffix = f"_{frame}" if frame else ""
         if tile == "allsky":
             if order != 3:
                 raise ValueError("the Allsky image exists for order 3")
-            return "Norder3/Allsky.jpg"
+            return f"Norder3/Allsky{suffix}.{ext}"
         i = int(tile)
         if not 3 <= order <= deepest or i >= 12 * 4**order:
             raise ValueError("tile outside the survey")
-        return f"Norder{order}/Dir{(i // 10000) * 10000}/Npix{i}.jpg"
+        return f"Norder{order}/Dir{(i // 10000) * 10000}/Npix{i}{suffix}.{ext}"
 
     def get(self, survey: str, order: int, tile: str) -> bytes | None:
         rel = self.relative(survey, order, tile)

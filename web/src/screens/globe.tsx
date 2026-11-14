@@ -42,6 +42,14 @@ const SURVEYS = [
     black: 16,
     note: 'Digitized Sky Survey: red, blue and infrared photographic plates, colour',
   },
+  {
+    id: 'spherex',
+    name: 'SPHEREx — DR1',
+    max: 5,
+    gain: 1.25,
+    black: 0,
+    note: 'SPHEREx DR1 all-sky cube (IRSA, a visualisation product): 0.91 µm blue, 1.86 µm green, 4.50 µm red',
+  },
   { id: '2mass', name: 'Near-infrared — 2MASS', max: 9, gain: 2.2, black: 0, note: '2MASS J, H and Ks (1.2, 1.7, 2.2 µm), colour' },
   { id: 'wise', name: 'Infrared — WISE', max: 8, gain: 2.4, black: 0, note: 'AllWISE W1, W2 and W4 (3.4, 4.6, 22 µm), colour' },
   {
@@ -293,7 +301,14 @@ export function Globe() {
           }
           const p = (j * sw + i) * 4;
           if (!ok) continue;
-          const col = tiles.sample(sv.id, ra, dec, order);
+          let col: [number, number, number] | null;
+          if (sv.id === 'spherex') {
+            // three frames of the cube as the three colours
+            const r = tiles.sample('spx88', ra, dec, order);
+            const gg = tiles.sample('spx40', ra, dec, order);
+            const bl = tiles.sample('spx8', ra, dec, order);
+            col = r && gg && bl ? [r[0], gg[0], bl[0]] : null;
+          } else col = tiles.sample(sv.id, ra, dec, order);
           o[p + 3] = 255;
           if (col) {
             o[p] = Math.max(0, col[0] - sv.black) * g;

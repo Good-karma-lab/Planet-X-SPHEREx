@@ -23,6 +23,8 @@ def test_nested_pixels_of_known_places() -> None:
 def test_hips_tile_paths() -> None:
     assert HipsTiles.relative("dss2", 3, "allsky") == "Norder3/Allsky.jpg"
     assert HipsTiles.relative("wise", 5, "12000") == "Norder5/Dir10000/Npix12000.jpg"
+    assert HipsTiles.relative("spx88", 3, "allsky") == "Norder3/Allsky_88.png"
+    assert HipsTiles.relative("spx8", 5, "100") == "Norder5/Dir0/Npix100_8.png"
     for bad in (("nope", 3, "allsky"), ("dss2", 4, "allsky"), ("wise", 9, "1"), ("dss2", 3, "../x"), ("dust", 3, "999")):
         with pytest.raises(ValueError):
             HipsTiles.relative(*bad)

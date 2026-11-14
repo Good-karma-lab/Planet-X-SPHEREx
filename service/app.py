@@ -487,7 +487,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             raise HTTPException(502, "survey tiles unavailable") from e
         if data is None:
             raise HTTPException(404)
-        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=2592000, immutable"})
+        media = "image/png" if data[:4] == b"\x89PNG" else "image/jpeg"
+        return Response(data, media_type=media, headers={"Cache-Control": "public, max-age=2592000, immutable"})
 
     if cfg.serve_web and cfg.web_dist.is_dir():
         app.mount("/", StaticFiles(directory=cfg.web_dist, html=True), name="web")

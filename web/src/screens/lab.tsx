@@ -309,6 +309,9 @@ export function Lab({ route }: { route: Route }) {
   const anRef = useRef<AnomalyView | null>(null);
   anRef.current = an;
   const [selAn, setSelAn] = useState<number | null>(null);
+  const dragFrom = useRef<{ x: number; y: number } | null>(null);
+  const dragged = useRef(false);
+  const [dragBox, setDragBox] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [redv, setRedv] = useState<RedView | null>(null);
   const redRef = useRef<RedView | null>(null);
   redRef.current = redv;
@@ -333,11 +336,13 @@ export function Lab({ route }: { route: Route }) {
   >([]);
   const [playing, setPlaying] = useState(true);
   const [frame, setFrame] = useState<number | null>(null);
-  const [speed, setSpeed] = useState(1);
+  const speed = [0.25, 0.5, 1, 2, 4].includes(Number(p['spd'])) ? Number(p['spd']) : 1;
+  const setSpeed = (v: number) => set({ spd: v === 1 ? null : String(v) });
   const [filmStatus, setFilmStatus] = useState('');
   const [raIn, setRaIn] = useState('');
   const [decIn, setDecIn] = useState('');
-  const [stretch, setStretch] = useState(0.4);
+  const stretch = Number(p['lin']) > 0 && Number(p['lin']) < 5 ? Number(p['lin']) : 0.4;
+  const setStretch = (v: number) => set({ lin: Math.abs(v - 0.4) < 0.005 ? null : v.toFixed(2) });
   const [recording, setRecording] = useState(false);
   const state = useRef({
     view,
@@ -1092,6 +1097,10 @@ export function Lab({ route }: { route: Route }) {
         e.preventDefault();
         setFrame(null);
         setPlaying((x) => !x);
+      } else if (e.key === '[' || e.key === ']') {
+        const steps = [0.25, 0.5, 1, 2, 4];
+        const i = steps.indexOf(speed);
+        setSpeed(steps[Math.max(0, Math.min(steps.length - 1, i + (e.key === ']' ? 1 : -1)))]!);
       } else if ((e.code === 'ArrowRight' || e.code === 'ArrowLeft') && n) {
         setPlaying(false);
         setFrame((f) => ((f ?? shown?.pass ?? 0) + (e.code === 'ArrowRight' ? 1 : n - 1)) % n);
@@ -1099,7 +1108,7 @@ export function Lab({ route }: { route: Route }) {
     };
     window.addEventListener('keydown', on);
     return () => window.removeEventListener('keydown', on);
-  }, [meta, shown]);
+  }, [meta, shown, speed, p]);
 
   if (!valid) {
     return (
@@ -1285,8 +1294,56 @@ export function Lab({ route }: { route: Route }) {
               height: `${side}px`,
               cursor: view === 'picture' && film === null ? 'crosshair' : undefined,
             }}
-            onClick={pick}
+            onClick={(e) => {
+              if (dragged.current) {
+                dragged.current = false;
+                return;
+              }
+              pick(e);
+            }}
+            onPointerDown={(e) => {
+              if (film !== null || view !== 'picture' || !meta) return;
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              dragFrom.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+            }}
+            onPointerMove={(e) => {
+              const f = dragFrom.current;
+              if (!f) return;
+              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              const x = e.clientX - r.left;
+              const y = e.clientY - r.top;
+              if (Math.hypot(x - f.x, y - f.y) > 12) setDragBox({ x0: f.x, y0: f.y, x1: x, y1: y });
+            }}
+            onPointerUp={() => {
+              const b = dragBox;
+              dragFrom.current = null;
+              setDragBox(null);
+              if (!b || !meta) return;
+              dragged.current = true;
+              // open the dragged box as a new field: its centre, the smallest field size that holds it
+              const n = meta.grid.n;
+              const sc = n / side;
+              const cx = ((b.x0 + b.x1) / 2) * sc;
+              const cy = ((b.y0 + b.y1) / 2) * sc;
+              const sizeArcmin = (Math.max(Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)) * sc * meta.grid.step_arcsec) / 60;
+              const nf = SIZES.find((z) => z >= sizeArcmin) ?? 60;
+              const nra =
+                (meta.grid.ra0 - ((cx - n / 2) * meta.grid.step_arcsec) / 3600 / Math.cos((meta.grid.dec0 * Math.PI) / 180) + 360) % 360;
+              const ndec = meta.grid.dec0 - ((cy - n / 2) * meta.grid.step_arcsec) / 3600;
+              set({ ra: nra.toFixed(5), dec: ndec.toFixed(5), fov: String(nf) });
+            }}
           >
+            {dragBox && (
+              <div
+                class="dragbox"
+                style={{
+                  left: `${Math.min(dragBox.x0, dragBox.x1)}px`,
+                  top: `${Math.min(dragBox.y0, dragBox.y1)}px`,
+                  width: `${Math.abs(dragBox.x1 - dragBox.x0)}px`,
+                  height: `${Math.abs(dragBox.y1 - dragBox.y0)}px`,
+                }}
+              />
+            )}
             <canvas
               ref={canvas}
               class="vid"
@@ -1724,10 +1781,10 @@ export function Lab({ route }: { route: Route }) {
                     class="inp"
                     value={String(speed)}
                     onChange={(e) => setSpeed(Number((e.target as HTMLSelectElement).value))}
-                    title="Playback speed"
+                    title="Playback speed: the time each season is shown ([ and ] change it)"
                   >
                     {[0.25, 0.5, 1, 2, 4].map((v) => (
-                      <option value={String(v)}>Speed {v}×</option>
+                      <option value={String(v)}>{`Speed ${v}× · ${Math.round((HOLD_MS + FADE_MS) / v)} ms`}</option>
                     ))}
                   </select>
                   <button
@@ -1863,7 +1920,42 @@ export function Lab({ route }: { route: Route }) {
               {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                 <Passport a={an.result.anomalies.find((a) => a.n === selAn)!} f={an.result} />
               ) : (
-                <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
+                <>
+                  <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
+                  {sel && (
+                    <div class="xlinks">
+                      <span class="faint">Look it up:</span>
+                      <a
+                        target="_blank"
+                        rel="noopener"
+                        href={`https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}&Radius=10&Radius.unit=arcsec`}
+                      >
+                        SIMBAD
+                      </a>
+                      <a
+                        target="_blank"
+                        rel="noopener"
+                        href={`https://vizier.cds.unistra.fr/viz-bin/VizieR-4?-c=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}&-c.rs=10`}
+                      >
+                        VizieR
+                      </a>
+                      <a
+                        target="_blank"
+                        rel="noopener"
+                        href={`https://www.legacysurvey.org/viewer?ra=${sel.ra.toFixed(5)}&dec=${sel.dec.toFixed(5)}&layer=ls-dr10&zoom=15`}
+                      >
+                        Legacy Survey
+                      </a>
+                      <a
+                        target="_blank"
+                        rel="noopener"
+                        href={`https://irsa.ipac.caltech.edu/applications/finderchart/?locstr=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}`}
+                      >
+                        IRSA finder chart
+                      </a>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
