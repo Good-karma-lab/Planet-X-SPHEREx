@@ -17,7 +17,14 @@ flipped once when the visit images are made.
 from __future__ import annotations
 
 import asyncio
+import functools
+import json
 import math
+import os
+import shutil
+import tempfile
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -154,6 +161,59 @@ def cap_exposures_by_visits(
     in_pass = int((pno[keep] == pk).sum())
     note = f"the field holds {n} exposures: {len(keep)} were used (whole visits at an even stride, {in_pass} of them in the searched pass)"
     return [exps[i] for i in keep], pno[keep], note
+
+
+class _FileCancel:
+    """The cancel flag of a job as seen from a worker process: a file the job creates."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+
+    def is_set(self) -> bool:
+        return os.path.exists(self.path)
+
+
+def _tracked_call(fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[str, Any], progress_path: str, cancel_path: str) -> Any:
+    """Runs `fn(*args, progress=..., cancel=..., **kwargs)` in a worker process: progress is written to a file, cancel is a file."""
+
+    last = [0.0]
+
+    def progress(*vals: Any) -> None:
+        now = time.monotonic()
+        if now - last[0] < 0.5:
+            return
+        last[0] = now
+        tmp = progress_path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump([float(v) for v in vals], f)
+        os.replace(tmp, progress_path)
+
+    return fn(*args, progress=progress, cancel=_FileCancel(cancel_path), **kwargs)
+
+
+async def tracked(ctx: Context, fn: Callable[..., Any], *args: Any, on_progress: Callable[..., None] | None = None, **kwargs: Any) -> Any:
+    """`await ctx.compute(fn, ...)` for a long call that reports progress and can be cancelled: `fn` (a module-level function) takes
+    `progress` (called with numbers) and `cancel` (an object with is_set()) as keywords; the progress arrives here every 2 s as
+    `on_progress(*numbers)`, and a cancelled job stops the call at its next check."""
+    work = tempfile.mkdtemp(prefix="px_")
+    progress_path, cancel_path = os.path.join(work, "progress.json"), os.path.join(work, "cancel")
+    fut = asyncio.ensure_future(ctx.compute(functools.partial(_tracked_call, fn, args, kwargs, progress_path, cancel_path)))
+    try:
+        while not fut.done():
+            await asyncio.wait({fut}, timeout=2.0)
+            if ctx.job._cancel and not os.path.exists(cancel_path):
+                open(cancel_path, "w").close()
+            if on_progress is not None and not fut.done():
+                try:
+                    with open(progress_path) as f:
+                        vals = json.load(f)
+                except (OSError, ValueError):
+                    continue
+                on_progress(*vals)
+        return fut.result()
+    finally:
+        fut.cancel()
+        shutil.rmtree(work, ignore_errors=True)
 
 
 class CancelFlag:

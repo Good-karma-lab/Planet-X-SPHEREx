@@ -86,7 +86,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         }
 
     @r.get(f"{prefix}/distant")
-    def distant(
+    async def distant(
         request: Request,
         ra: float = Query(..., ge=0, lt=360),
         dec: float = Query(..., ge=-90, le=90),
@@ -107,7 +107,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         dets = tuple(sorted({int(c) for c in det if c in "123456"})) or (1, 2, 3)
         params = distantjob.distant_params(ra, dec, fov, mjd, pass_, dmin, dmax, dets, mu_scale)
         if plan:
-            return distantjob.plan(st.index, params)
+            return await distantjob.plan_async(st.index, params)
         exps, _pno, pk, info, _ = distantjob.selection(st.index, params)
         if not exps:
             return {
@@ -124,7 +124,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             if limited is not None:
                 return limited
             if key not in estimates:
-                estimates[key] = int(distantjob.plan(st.index, params).get("estimate_s", 0) or 0)
+                estimates[key] = int((await distantjob.plan_async(st.index, params)).get("estimate_s", 0) or 0)
             index, files, store, wl, ps = st.index, st.files, st.store, getattr(st, "wavelengths", None), psf_provider()
 
             async def fn(ctx: Any) -> dict[str, Any]:
@@ -134,7 +134,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         return job_reply(key, job, estimates.get(key))
 
     @r.get(f"{prefix}/deep")
-    def deep(
+    async def deep(
         request: Request,
         fields: str | None = Query(None, description="ra,dec,mjd;ra,dec,mjd;...  the field centre and the middle date of each pass (2-6)"),
         centre: str | None = Query(None, description="ra,dec,mjd of one place in one pass (the other centres follow from `passes`)"),
@@ -175,7 +175,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             raise HTTPException(400, "fields: at least two passes (ra,dec,mjd;ra,dec,mjd;...), or centre and passes")
         params = deepjob.deep_params(fl, fov, dmin, dmax, dets, keep, nmax)
         if plan or guessed:
-            return deepjob.plan(st.index, params)
+            return await deepjob.plan_async(st.index, params)
         sels = deepjob.selections(st.index, params)
         key = product_key(deepjob.KIND, params, extra=(deepjob.signature(sels),))
         if st.store.is_complete(key):
@@ -186,7 +186,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             if limited is not None:
                 return limited
             if key not in estimates:
-                estimates[key] = int(deepjob.plan(st.index, params).get("estimate_s") or 0)
+                estimates[key] = int((await deepjob.plan_async(st.index, params)).get("estimate_s") or 0)
             index, files, store, wl, ps = st.index, st.files, st.store, getattr(st, "wavelengths", None), psf_provider()
 
             async def fn(ctx: Any) -> dict[str, Any]:

@@ -40,6 +40,7 @@ from engine import distant as edist
 from engine import orbit as eorbit
 from engine.passes import split_visits
 from indexer.store import Exposure, Index
+from service import cpu
 from service.jobs.scheduler import Context
 from service.products.store import Store
 from service.reader.calib import WavelengthMaps
@@ -107,48 +108,71 @@ def signature(sels: list[Any]) -> str:
     return distantjob.signature([e for s in sels for e in s[0]])
 
 
-def plan_geometry(index: Index, p: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-    """A quick look without reading an exposure: the visits of the pass of every field (their times, the Earth for the telescope), the
-    geometry, the number of hypotheses and the time. -> ((G, D, cell, fine) | None, plan dict)"""
-    P: list[dict[str, Any]] = []
-    info: list[dict[str, Any]] = []
+def plan_geometry_input(index: Index, p: dict[str, Any]) -> dict[str, Any]:
+    """What a plan needs from the exposure index (queries; no numpy work): per field the visit times of its pass and the counts."""
+    fields: list[dict[str, Any]] = []
     for fi, ((a, d, _m), (exps, pno, pk, passes, _note)) in enumerate(zip(p["fields"], selections(index, p), strict=True)):
         if not exps or pk < 0:
-            return None, {"status": "no-coverage", "error": f"no exposure overlaps field {fi + 1}"}
+            return {"error": {"status": "no-coverage", "error": f"no exposure overlaps field {fi + 1}"}}
         sel = [i for i in range(len(exps)) if pno[i] == pk]
         visits = split_visits([exps[i].mjd0 for i in sel], [exps[i].det for i in sel])
-        tv = np.array(sorted(float(np.mean([exps[sel[x]].mjd0 for x in v])) for v in visits if len(v) >= px.MIN_VISIT_EXPOSURES))
+        tv = sorted(float(np.mean([exps[sel[x]].mjd0 for x in v])) for v in visits if len(v) >= px.MIN_VISIT_EXPOSURES)
         if len(tv) < 4:
-            return None, {"status": "few-visits", "error": f"field {fi + 1}: fewer than four visits in its pass ({len(tv)})"}
+            return {"error": {"status": "few-visits", "error": f"field {fi + 1}: fewer than four visits in its pass ({len(tv)})"}}
         n = px.grid_for(a, d, p["fov"]).n
         if n > 800:
-            return None, {"status": "too-large", "error": "the field is too large"}
+            return {"error": {"status": "too-large", "error": "the field is too large"}}
+        fields.append(
+            {
+                "fi": fi,
+                "a": a,
+                "d": d,
+                "n": n,
+                "tv": tv,
+                "pk": pk,
+                "passes": len(passes),
+                "n_exposures": len(sel),
+                "mjd0": float(min(exps[i].mjd0 for i in sel)),
+                "mjd1": float(max(exps[i].mjd1 for i in sel)),
+            }
+        )
+    return {"fields": fields}
+
+
+def plan_geometry_numbers(inp: dict[str, Any], p: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
+    """The geometry, the number of hypotheses and the time (a worker process). -> ((G, D, cell, fine) | None, plan dict)"""
+    if "error" in inp:
+        return None, inp["error"]
+    P: list[dict[str, Any]] = []
+    info: list[dict[str, Any]] = []
+    for f in inp["fields"]:
+        tv = np.array(f["tv"])
         i0 = int(np.argmin(np.abs(tv - 0.5 * (tv.min() + tv.max()))))
         P.append(
             {
-                "T": edist.Tangent(a, d),
-                "N": n,
+                "T": edist.Tangent(f["a"], f["d"]),
+                "N": f["n"],
                 "tv": tv,
                 "Rv": np.array([eorbit.earth(t) for t in tv]),
                 "i0": i0,
                 "W": 1.0,
                 "span": float(np.abs(tv - tv[i0]).max()),
-                "n_exposures": len(sel),
+                "n_exposures": f["n_exposures"],
                 "n_visits": len(tv),
-                "mjd0": float(min(exps[i].mjd0 for i in sel)),
-                "mjd1": float(max(exps[i].mjd1 for i in sel)),
+                "mjd0": f["mjd0"],
+                "mjd1": f["mjd1"],
             }
         )
         info.append(
             {
-                "field": fi + 1,
-                "ra": a,
-                "dec": d,
-                "pass": pk,
-                "passes_in_field": len(passes),
-                "pass_mjd0": round(P[-1]["mjd0"], 2),
-                "pass_mjd1": round(P[-1]["mjd1"], 2),
-                "exposures": len(sel),
+                "field": f["fi"] + 1,
+                "ra": f["a"],
+                "dec": f["d"],
+                "pass": f["pk"],
+                "passes_in_field": f["passes"],
+                "pass_mjd0": round(f["mjd0"], 2),
+                "pass_mjd1": round(f["mjd1"], 2),
+                "exposures": f["n_exposures"],
                 "visits": len(tv),
             }
         )
@@ -173,23 +197,51 @@ def plan_geometry(index: Index, p: dict[str, Any]) -> tuple[Any, dict[str, Any]]
     }
 
 
+def plan_numbers(inp: dict[str, Any], p: dict[str, Any]) -> dict[str, Any]:
+    """The plan dict of `plan_geometry_numbers` without the geometry (a worker process: the geometry stays there)."""
+    geo, pl = plan_geometry_numbers(inp, p)
+    return pl if geo is not None else {**pl, "no_geometry": True}
+
+
 _PLANS: dict[str, dict[str, Any]] = {}
 
 
-def plan(index: Index, p: dict[str, Any]) -> dict[str, Any]:
-    """The answer of `plan=1`: {status: 'plan', plan{hypotheses, exposures, ...}, fields, estimate_s, limit} (no exposure is read)."""
-    memo = json.dumps(p, sort_keys=True)
-    if memo in _PLANS:
-        return _PLANS[memo]
-    geo, pl = plan_geometry(index, p)
-    if geo is None:
-        return {"status": pl["status"], "plan": pl, "fields": p["fields"], "estimate_s": None, "limit": HYPOTHESES_MAX}
+def _plan_reply(pl: dict[str, Any], p: dict[str, Any]) -> dict[str, Any]:
+    if pl.get("no_geometry"):
+        return {
+            "status": pl["status"],
+            "plan": {k: v for k, v in pl.items() if k != "no_geometry"},
+            "fields": p["fields"],
+            "estimate_s": None,
+            "limit": HYPOTHESES_MAX,
+        }
     status = "plan" if pl["hypotheses"] <= HYPOTHESES_MAX else "too-many-hypotheses"
-    out = {"status": status, "plan": pl, "fields": p["fields"], "estimate_s": pl["estimate_s"], "limit": HYPOTHESES_MAX}
+    return {"status": status, "plan": pl, "fields": p["fields"], "estimate_s": pl["estimate_s"], "limit": HYPOTHESES_MAX}
+
+
+def _remember(memo: str, out: dict[str, Any]) -> dict[str, Any]:
     if len(_PLANS) > 200:
         _PLANS.clear()
     _PLANS[memo] = out  # the count of the orbits takes seconds: the page asks again while the person edits the fields
     return out
+
+
+def plan(index: Index, p: dict[str, Any]) -> dict[str, Any]:
+    """The answer of `plan=1`: {status: 'plan', plan{hypotheses, exposures, ...}, fields, estimate_s, limit} (no exposure is read). In this
+    process: for tools and tests; the service uses `plan_async`."""
+    memo = json.dumps(p, sort_keys=True)
+    if memo in _PLANS:
+        return _PLANS[memo]
+    return _remember(memo, _plan_reply(plan_numbers(plan_geometry_input(index, p), p), p))
+
+
+async def plan_async(index: Index, p: dict[str, Any]) -> dict[str, Any]:
+    """The same: the index queries here, the numbers in a worker process."""
+    memo = json.dumps(p, sort_keys=True)
+    if memo in _PLANS:
+        return _PLANS[memo]
+    pl: dict[str, Any] = await cpu.run(plan_numbers, plan_geometry_input(index, p), p)
+    return _remember(memo, _plan_reply(pl, p))
 
 
 def _init_worker(path: str, nice: int) -> None:
@@ -203,6 +255,29 @@ def _count(G: Any, D: np.ndarray, cs: float, fstep: float, n_r: int) -> list[int
     return [
         int(edeep.scan(G, {"box": (0, n_r, 0, n_r), "anchor": (0.0, 0.0), "d": [d], "cs": cs, "f": fstep, "count": True})["nh"]) for d in D
     ]
+
+
+def field_inputs(DV: list[dict[str, Any]], a: float, d: float, n: int) -> tuple[dict[str, Any], float]:
+    """The visit differences of one field in the form the sum along the orbits reads (a worker process). -> (the field's dict, its time)."""
+    w = np.array([1.0 / v["sg"] ** 2 for v in DV])
+    tv = np.array([v["t"] for v in DV])
+    i0 = int(np.argmin(np.abs(tv - 0.5 * (tv.min() + tv.max()))))
+    P_ = {
+        "T": edist.Tangent(a, d),
+        "N": n,
+        "tv": tv,
+        "Rv": np.array([v["R"] for v in DV]),
+        "i0": i0,
+        "W": float(w.sum()),
+        "span": float(np.abs(tv - tv[i0]).max()),
+        "Z": np.stack(
+            [
+                np.array([v["d"] * wi for v, wi in zip(DV, w, strict=True)], "f4"),
+                np.array([v["good"] * wi for v, wi in zip(DV, w, strict=True)], "f4"),
+            ]
+        ),
+    }
+    return P_, float(tv[i0])
 
 
 def deep_sep(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -231,9 +306,9 @@ async def run_deep(
         return {"status": status}
 
     ctx.phase("planning")
-    geo, pl = await asyncio.to_thread(plan_geometry, index, p)
-    res["plan"] = pl
-    if geo is None:
+    pl = await ctx.compute(plan_numbers, plan_geometry_input(index, p), p)
+    res["plan"] = {k: v for k, v in pl.items() if k != "no_geometry"}
+    if pl.get("no_geometry"):
         res["notes"].append(pl.get("error", ""))
         return finish(pl.get("status", "no-plan"))
     if pl["hypotheses"] > HYPOTHESES_MAX:
@@ -250,37 +325,20 @@ async def run_deep(
         if pv.failed:
             res["notes"].append(f"field {fi + 1}: {pv.failed} exposures were not read")
         ctx.phase(f"field {fi + 1} of {nf}: static sky and differences")
-        DV, notes = await asyncio.to_thread(edist.static_and_differences, pv.vis, pk)
+        DV, notes = await ctx.compute(edist.static_and_differences, pv.vis, pk)
         res["notes"] += [f"field {fi + 1}: {n_}" for n_ in notes]
         if len(DV) < 4:
             res["notes"].append(f"field {fi + 1}: fewer than four usable visits in its pass")
             return finish("few-visits")
-        w = np.array([1.0 / v["sg"] ** 2 for v in DV])
-        tv = np.array([v["t"] for v in DV])
-        i0 = int(np.argmin(np.abs(tv - 0.5 * (tv.min() + tv.max()))))
-        P_ = {
-            "T": edist.Tangent(a, d),
-            "N": grid.n,
-            "tv": tv,
-            "Rv": np.array([v["R"] for v in DV]),
-            "i0": i0,
-            "W": float(w.sum()),
-            "span": float(np.abs(tv - tv[i0]).max()),
-            "Z": np.stack(
-                [
-                    np.array([v["d"] * wi for v, wi in zip(DV, w, strict=True)], "f4"),
-                    np.array([v["good"] * wi for v, wi in zip(DV, w, strict=True)], "f4"),
-                ]
-            ),
-        }
-        FD.append({"P": P_, "exps": exps, "pno": pno, "pk": pk, "loaded": pv.loaded, "sc": pv.sc, "f": (a, d), "mid": float(tv[i0])})
+        P_, mid = await ctx.compute(field_inputs, DV, a, d, grid.n)
+        FD.append({"P": P_, "exps": exps, "pno": pno, "pk": pk, "loaded": pv.loaded, "sc": pv.sc, "f": (a, d), "mid": mid})
         del pv, DV
     FD.sort(key=lambda x: x["mid"])
     G = edeep.Geometry([x["P"] for x in FD])
     D, cs, fstep = edeep.distances(G, p["dmin"], p["dmax"])
     N = G.P[G.r]["N"]
     ctx.phase("counting the orbits that land inside every field")
-    cnt = await asyncio.to_thread(_count, G, D, cs, fstep, N)
+    cnt = await ctx.compute(_count, G, D, cs, fstep, N)
     Dw = [dd for dd, n_ in zip(D, cnt, strict=True) if n_]
     if not Dw:
         res["notes"].append("no orbit of this distance range lands inside every field: the fields of the passes do not match")
@@ -325,6 +383,39 @@ async def run_deep(
                 n_done += 1
             secs = asyncio.get_running_loop().time() - t_scan
             ctx.phase(f"summing along the orbits: job {n_done} of {len(jobs)} ({secs:.0f} s)", n_done, len(jobs))
+        res["scan_secs"] = round(asyncio.get_running_loop().time() - t_scan, 1)
+        best, neg = M["best"], M["neg"]
+        null = edist.peaks(neg, edist.SN_MIN)
+        ceil = null[0][2] if null else 0.0
+        thr = max(edist.SN_MIN, 1.05 * ceil)
+        res.update(ceiling=round(float(ceil), 2), threshold=round(float(thr), 2), sum_peak=round(float(best.max()), 2))
+        # the peaks of the sum and of the negated sum
+        C: list[dict[str, Any]] = []
+        for sign, (A, dd, uu, vv) in ((1, (best, M["bd"], M["bu"], M["bv"])), (-1, (neg, M["nd"], M["nu"], M["nv"]))):
+            got: list[dict[str, Any]] = []
+            for x, y, s_ in edist.peaks(A, p["keep"]):
+                if any(math.hypot(x - c["x"], y - c["y"]) * edist.S < 30.0 for c in got):
+                    continue
+                got.append({"x": x, "y": y, "sn": s_, "d": float(dd[y, x]), "mu": (float(uu[y, x]), float(vv[y, x])), "sign": sign})
+                if len(got) >= p["nmax"]:
+                    break
+            C += got
+        ctx.phase(f"tuning {len(C)} peaks", 0, len(C))
+        sem = asyncio.Semaphore(4)
+        tuned = 0
+
+        async def tune(c: dict[str, Any]) -> None:
+            nonlocal tuned
+            async with sem:
+                try:
+                    x, y, d, mu, snt = await asyncio.wrap_future(ex.submit(edeep.refine_job, (c["x"], c["y"], c["d"], c["mu"], c["sign"])))
+                    c.update(xr=x, yr=y, dr=d, mur=mu, sn_tuned=snt)
+                except Exception:  # a peak that cannot be tuned keeps its grid place
+                    c.update(xr=c["x"], yr=c["y"], dr=c["d"], mur=c["mu"], sn_tuned=None)
+            tuned += 1
+            ctx.phase(f"tuning {len(C)} peaks", tuned, len(C))
+
+        await asyncio.gather(*(tune(c) for c in C))
     finally:
         if ex is not None:
             procs = list(getattr(ex, "_processes", {}).values())
@@ -333,39 +424,6 @@ async def run_deep(
                 with contextlib.suppress(Exception):
                     proc.terminate()
         shutil.rmtree(tmp, ignore_errors=True)
-    res["scan_secs"] = round(asyncio.get_running_loop().time() - t_scan, 1)
-    best, neg = M["best"], M["neg"]
-    null = edist.peaks(neg, edist.SN_MIN)
-    ceil = null[0][2] if null else 0.0
-    thr = max(edist.SN_MIN, 1.05 * ceil)
-    res.update(ceiling=round(float(ceil), 2), threshold=round(float(thr), 2), sum_peak=round(float(best.max()), 2))
-    # the peaks of the sum and of the negated sum
-    C: list[dict[str, Any]] = []
-    for sign, (A, dd, uu, vv) in ((1, (best, M["bd"], M["bu"], M["bv"])), (-1, (neg, M["nd"], M["nu"], M["nv"]))):
-        got: list[dict[str, Any]] = []
-        for x, y, s_ in edist.peaks(A, p["keep"]):
-            if any(math.hypot(x - c["x"], y - c["y"]) * edist.S < 30.0 for c in got):
-                continue
-            got.append({"x": x, "y": y, "sn": s_, "d": float(dd[y, x]), "mu": (float(uu[y, x]), float(vv[y, x])), "sign": sign})
-            if len(got) >= p["nmax"]:
-                break
-        C += got
-    ctx.phase(f"tuning {len(C)} peaks", 0, len(C))
-    sem = asyncio.Semaphore(4)
-    tuned = 0
-
-    async def tune(c: dict[str, Any]) -> None:
-        nonlocal tuned
-        async with sem:
-            try:
-                x, y, d, mu, snt = await asyncio.to_thread(edeep.refine, G, c["x"], c["y"], c["d"], c["mu"], c["sign"])
-                c.update(xr=x, yr=y, dr=d, mur=mu, sn_tuned=snt)
-            except Exception:  # a peak that cannot be tuned keeps its grid place
-                c.update(xr=c["x"], yr=c["y"], dr=c["d"], mur=c["mu"], sn_tuned=None)
-        tuned += 1
-        ctx.phase(f"tuning {len(C)} peaks", tuned, len(C))
-
-    await asyncio.gather(*(tune(c) for c in C))
     await ctx.checkpoint()
     res["n_peaks"], res["n_peaks_negated"] = sum(1 for c in C if c["sign"] > 0), sum(1 for c in C if c["sign"] < 0)
     # photometry along the orbits

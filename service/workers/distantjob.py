@@ -26,6 +26,7 @@ import numpy as np
 from engine import distant as edist
 from engine import orbit as eorbit
 from indexer.store import Exposure, Index
+from service import cpu
 from service.jobs.scheduler import Context
 from service.products.store import Store
 from service.reader.calib import WavelengthMaps
@@ -75,20 +76,28 @@ def signature(exps: list[Exposure]) -> str:
     return hashlib.sha256(json.dumps(sorted(e.key for e in exps)).encode()).hexdigest()[:16]
 
 
-def plan(index: Index, p: dict[str, Any]) -> dict[str, Any]:
-    """A quick look without reading an exposure: the passes, the visits of the searched pass, the hypotheses the search would scan and
-    the time it takes."""
+def plan_input(index: Index, p: dict[str, Any]) -> dict[str, Any]:
+    """What a plan needs from the exposure index (a query; no numpy work): the passes, the visit times of the searched pass, the count."""
     from engine.passes import split_visits
 
     exps, pno, pk, info, note = selection(index, p)
     out: dict[str, Any] = {"passes": info, "pass": pk, "exposures": len(exps), "note": note}
     if not exps:
-        return {**out, "status": "no-coverage"}
+        return {"early": {**out, "status": "no-coverage"}}
     if len(info) < 2:
-        return {**out, "status": "one-pass"}
+        return {"early": {**out, "status": "one-pass"}}
     sel = [i for i in range(len(exps)) if pno[i] == pk]
     visits = split_visits([exps[i].mjd0 for i in sel], [exps[i].det for i in sel])
-    tv = np.array(sorted(float(np.mean([exps[sel[a]].mjd0 for a in v])) for v in visits if len(v) >= px.MIN_VISIT_EXPOSURES))
+    tv = sorted(float(np.mean([exps[sel[a]].mjd0 for a in v])) for v in visits if len(v) >= px.MIN_VISIT_EXPOSURES)
+    return {"out": out, "tv": tv, "n_exposures": len(exps)}
+
+
+def plan_result(inp: dict[str, Any], p: dict[str, Any]) -> dict[str, Any]:
+    """The hypotheses the search would scan and the time it takes (a worker process)."""
+    if "early" in inp:
+        early: dict[str, Any] = inp["early"]
+        return early
+    out, tv = inp["out"], np.array(inp["tv"])
     if len(tv) < 4:
         return {**out, "status": "few-visits", "visits": len(tv)}
     Rv = np.array([eorbit.earth(t) for t in tv])
@@ -98,8 +107,20 @@ def plan(index: Index, p: dict[str, Any]) -> dict[str, Any]:
     if dmin is None:
         return {**out, "status": "too-many-hypotheses", "visits": len(tv)}
     nh = edist.estimate_hypotheses(dmin, p["dmax"], tv, Rv, i0, T, mu_scale=p["mu_scale"])
-    est = int(nh * SEC_PER_HYPOTHESIS + SEC_PER_EXPOSURE * len(exps) + 30)
+    est = int(nh * SEC_PER_HYPOTHESIS + SEC_PER_EXPOSURE * inp["n_exposures"] + 30)
     return {**out, "status": "plan", "visits": len(tv), "hypotheses": int(nh), "dmin_used": round(float(dmin), 1), "estimate_s": est}
+
+
+def plan(index: Index, p: dict[str, Any]) -> dict[str, Any]:
+    """A quick look without reading an exposure: the passes, the visits of the searched pass, the hypotheses the search would scan and
+    the time it takes (in this process: for tools and tests; the service uses `plan_async`)."""
+    return plan_result(plan_input(index, p), p)
+
+
+async def plan_async(index: Index, p: dict[str, Any]) -> dict[str, Any]:
+    """The same, the index query here and the numbers in a worker process."""
+    result: dict[str, Any] = await cpu.run(plan_result, plan_input(index, p), p)
+    return result
 
 
 async def track_photometry(
@@ -223,7 +244,7 @@ async def run_distant(
     if pv.failed:
         res["notes"].append(f"{pv.failed} exposures were not read")
     ctx.phase("static sky and differences")
-    DV, notes = await asyncio.to_thread(edist.static_and_differences, pv.vis, pk)
+    DV, notes = await ctx.compute(edist.static_and_differences, pv.vis, pk)
     res["notes"] += notes
     res["n_visits"], res["n_visits_all"] = len(DV), len(pv.vis)
     if len(DV) < 4:
@@ -245,43 +266,30 @@ async def run_distant(
         )
     p["dmin"] = float(dmin_used)
     ctx.phase("scanning distance and own motion")
-    ctl_flag = px.CancelFlag(ctx)
 
-    def prog(done: int, total: int, secs: float) -> None:
-        ctx.phase(f"scanning distance and own motion: block {done} of {total} ({secs:.0f} s)", done, total)
+    def on_scan(done: float, total: float, secs: float) -> None:
+        ctx.phase(f"scanning distance and own motion: block {int(done)} of {int(total)} ({secs:.0f} s)", int(done), int(total))
 
     try:
-        R = await asyncio.to_thread(
-            edist.search, DV, T, N, p["dmin"], p["dmax"], mu_scale=p["mu_scale"], workers=4, progress=prog, cancel=ctl_flag
-        )
+        R = await px.tracked(ctx, edist.search, DV, T, N, p["dmin"], p["dmax"], mu_scale=p["mu_scale"], workers=4, on_progress=on_scan)
     except edist.TooManyHypotheses as e:
         res["notes"].append(f"about {e.args[0]} hypotheses (the limit is {edist.HMAX}): raise the nearest distance")
         return finish("too-many-hypotheses")
+    except RuntimeError:
+        await ctx.checkpoint()  # a cancelled scan ends the job as cancelled
+        raise
     await ctx.checkpoint()
-    C, thr, null = edist.candidates(R)
     t0, R0 = float(R["tv"][R["i0"]]), R["Rv"][R["i0"]]
     res.update(
         n_hypotheses=len(R["H"]),
         scan_secs=round(R["secs"], 1),
-        threshold=round(float(thr), 2),
-        null=[round(q[2], 2) for q in null[:10]],
         t0=round(t0, 4),
         span_days=round(float(np.ptp(R["tv"])), 2),
     )
-    ctx.phase(f"refining {len(C)} candidates")
-    for c in C:
-        try:
-            edist.refine(c, R, DV, N)
-        except Exception:  # a candidate that cannot be tuned keeps its grid place
-            res["notes"].append("a candidate could not be tuned")
-    for c in C:
-        ds, kn = edist.knob(R, DV, c["x"], c["y"])
-        inside = ds[kn >= kn.max() - 1.0]
-        c["d_lo"], c["d_hi"] = float(inside.min()), float(inside.max())
-        c["knob"] = (ds, kn)
-        pu, pvv = edist.parallax(c["d"], R["Rv"], R0, T)
-        uu, vv = pu + c["mu"][0] * (R["tv"] - t0), pvv + c["mu"][1] * (R["tv"] - t0)
-        c["path"] = float(np.hypot(uu[-1] - uu[0], vv[-1] - vv[0]))
+    ctx.phase("finding and tuning the candidates")
+    C, thr, null, untuned = await ctx.compute(scan_candidates, R, DV, N, T, R0, t0)
+    res.update(threshold=round(float(thr), 2), null=[round(q[2], 2) for q in null[:10]])
+    res["notes"] += ["a candidate could not be tuned"] * untuned
     measured = C[:MAX_PHOTOMETRY_CANDIDATES]
     tracks: list[dict[str, Any]] = []
     for ci, c in enumerate(measured):
@@ -346,14 +354,47 @@ async def run_distant(
     res["candidates"] = cands
     res["candidates_measured"] = len(measured)
     res["control"] = {"measured": nctl[0], "reach_sn5": nctl[1]}
-    # the slider: the differences, the offsets by distance, the maps
-    dgrid = np.geomspace(p["dmin"], p["dmax"], 48)
+    ctx.phase("the arrays of the distance slider")
+    res["slider"], blob = await ctx.compute(slider_arrays, R, DV, N, T, R0, t0, p["dmin"], p["dmax"], p["mu_scale"])
+    store.write_part(KIND, key, "bin", blob)
+    res["bin_url"] = f"/api/v1/distant/{key}/bin"
+    return finish("ok")
+
+
+def scan_candidates(
+    R: dict[str, Any], DV: list[dict[str, Any]], N: int, T: edist.Tangent, R0: Any, t0: float
+) -> tuple[list[dict[str, Any]], float, list[Any], int]:
+    """The candidates of a scan, tuned, with the distance range of each (the knob) and the length of its path (a worker process).
+    -> (candidates, threshold, the negated sum's best, how many could not be tuned)."""
+    C, thr, null = edist.candidates(R)
+    untuned = 0
+    for c in C:
+        try:
+            edist.refine(c, R, DV, N)
+        except Exception:  # a candidate that cannot be tuned keeps its grid place
+            untuned += 1
+    for c in C:
+        ds, kn = edist.knob(R, DV, c["x"], c["y"])
+        inside = ds[kn >= kn.max() - 1.0]
+        c["d_lo"], c["d_hi"] = float(inside.min()), float(inside.max())
+        c["knob"] = (ds, kn)
+        pu, pvv = edist.parallax(c["d"], R["Rv"], R0, T)
+        uu, vv = pu + c["mu"][0] * (R["tv"] - t0), pvv + c["mu"][1] * (R["tv"] - t0)
+        c["path"] = float(np.hypot(uu[-1] - uu[0], vv[-1] - vv[0]))
+    return C, float(thr), null, untuned
+
+
+def slider_arrays(
+    R: dict[str, Any], DV: list[dict[str, Any]], N: int, T: edist.Tangent, R0: Any, t0: float, dmin: float, dmax: float, mu_scale: float
+) -> tuple[dict[str, Any], bytes]:
+    """The slider: the offsets by distance, the weights, and the binary part (the differences and the maps) (a worker process)."""
+    dgrid = np.geomspace(dmin, dmax, 48)
     offs = []
     for d in dgrid:
         pu, pvv = edist.parallax(float(d), R["Rv"], R0, T)
         offs.append([[round(float(a) / edist.S, 2), round(float(b) / edist.S, 2)] for a, b in zip(pu, pvv, strict=True)])
     w = R["w"]
-    res["slider"] = {
+    slider = {
         "n": N,
         "step": edist.S,
         "distances": [round(float(d), 2) for d in dgrid],
@@ -362,7 +403,7 @@ async def run_distant(
         "t": [round(float(x), 4) for x in R["tv"]],
         "weights": [round(float(x), 4) for x in (R["wa"] / np.sqrt(w.sum()))],
         "w2": [round(float(x), 4) for x in w],
-        "mu_max": [round(5016.0 * p["mu_scale"] / float(d) ** 1.5, 3) for d in dgrid],
+        "mu_max": [round(5016.0 * mu_scale / float(d) ** 1.5, 3) for d in dgrid],
         "detector": [int(v["k"]) + 1 for v in DV],
         "sg": [round(v["sg"], 4) for v in DV],
     }
@@ -372,9 +413,7 @@ async def run_distant(
         blob += z.tobytes()
     blob += np.clip(np.round(R["best"] * 255 / 12.0), 0, 255).astype(np.uint8).tobytes()
     blob += np.clip(np.round(R["neg"] * 255 / 12.0), 0, 255).astype(np.uint8).tobytes()
-    store.write_part(KIND, key, "bin", bytes(blob))
-    res["bin_url"] = f"/api/v1/distant/{key}/bin"
-    return finish("ok")
+    return slider, bytes(blob)
 
 
 def estimate_text(p: dict[str, Any]) -> str:

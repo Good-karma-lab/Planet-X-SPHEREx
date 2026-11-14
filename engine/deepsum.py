@@ -270,3 +270,8 @@ def init_worker(path):
 
 def scan_job(job):
     return scan(_W, job)
+
+
+def refine_job(args):
+    """refine() of a peak in a worker that has the passes loaded (init_worker)"""
+    return refine(_W, *args)
