@@ -60,6 +60,10 @@ Merged and live at ed31aa2: lab-ui's Planet X page fixes (detector digits in the
 left out") with scan blocks sized by the work. The `distant` version was kept at d1 so the searched list keeps every search done so
 far: cached results still show the old "10 exposures were not read" note, new searches the new line. Warm set: every field a page
 links to (Planet X page fields at 20′/60′, the landing's brown dwarf link) — 8f99e29.
+User items "U, 20:5x": warm set 37/37 fields; the warm searches now include the lab's asteroid search (film of the middle pass,
+its known bodies, unknown movers) for every test-target zone up to 60′ — bdce43a. Submission texts lead with movers, brown dwarfs
+and Find Planet X — 0c6c0e3. lab-ui builds the globe layout and palettes, Planet X labels, the Candidates tab and the
+coordinate-only lab entry; prod-build reviews and merges each branch as it lands.
 
 Open, with owner (the app pauses this session's messages to the other sessions, so these are the hand-over notes):
 - sky-service: WISE 0855 5′ movers find no track (blend); WISE 0855 5′ Find Planet X has fewer than four usable visits per pass
