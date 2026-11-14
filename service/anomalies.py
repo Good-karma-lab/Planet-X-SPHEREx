@@ -79,6 +79,7 @@ class Anomalies:
         self.runs: OrderedDict[str, Run] = OrderedDict()
         self.sem = asyncio.Semaphore(IN_FLIGHT)
         self.breakers = {"gaia": Breaker("Gaia archive"), "simbad": Breaker("SIMBAD")}
+        self.catalogue: Any = None  # the catalogue context (service.context): when set, it answers `identify`
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(30, connect=10), headers={"User-Agent": "spherex-sky/0.1"})
 
     def key_of(self, field_key: str) -> str:
@@ -214,6 +215,9 @@ class Anomalies:
 
     async def identify(self, ra: float, dec: float, pmra: float, pmdec: float) -> dict[str, Any]:
         """What SIMBAD and Gaia DR3 call the place (at the survey's epoch for a moving source)."""
+        if self.catalogue is not None:
+            named: dict[str, Any] = await self.catalogue.identify(ra, dec)
+            return named
         r_ep, d_ep = place_at({"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec}, 61000.0)
         rad = (IDENTIFY_ARCSEC + 12.0 * (1 if (pmra or pmdec) else 0)) / 3600.0
         out: dict[str, Any] = {}
