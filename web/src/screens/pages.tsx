@@ -152,12 +152,28 @@ function IndexPage({ health }: { health: FullHealth | null }) {
   );
 }
 
+/** Is the window at least `px` wide? (follows a resize) */
+function useWide(px: number): boolean {
+  const q = () => typeof matchMedia !== 'undefined' && matchMedia(`(min-width: ${px}px)`).matches;
+  const [w, setW] = useState(q());
+  useEffect(() => {
+    const m = matchMedia(`(min-width: ${px}px)`);
+    const f = () => setW(m.matches);
+    m.addEventListener('change', f);
+    return () => m.removeEventListener('change', f);
+  }, [px]);
+  return w;
+}
+
 function FindingsPage() {
   const live = useLive();
   const searched = useSearched();
   const leads = [...rankLeads(live), ATLAS_LEAD];
   const [leadId, setLeadId] = useLeadParam();
   const open = leads.find((l) => l.id === leadId);
+  // a wide screen has room for the lead beside the list: the one clicked, else the first, so the page is never half empty
+  const wide = useWide(1100);
+  const beside = wide ? (open ?? leads[0]) : undefined;
   return (
     <>
       <div class="pg-h">
@@ -165,8 +181,11 @@ function FindingsPage() {
         <p class="hint">What the searches find in real SPHEREx exposures. Every number is measured by this system on SPHEREx Level-2 files.</p>
       </div>
       <SearchedCounter fields={searched} />
-      <LeadsList leads={leads} onOpen={setLeadId} openId={open?.id ?? null} all={searched ? searched.reduce((a, f) => a + f.found, 0) : undefined} />
-      {open && <LeadPanel lead={open} onClose={() => setLeadId(null)} />}
+      <div class={wide ? 'fgrid' : undefined}>
+        <LeadsList leads={leads} onOpen={setLeadId} openId={beside?.id ?? open?.id ?? null} all={searched ? searched.reduce((a, f) => a + f.found, 0) : undefined} />
+        {wide && beside && <LeadPanel lead={beside} onClose={() => setLeadId(null)} inline />}
+      </div>
+      {!wide && open && <LeadPanel lead={open} onClose={() => setLeadId(null)} />}
       <p class="fmethod">
         <a href="#/method?sec=validation">How we know it works → Method, validation</a>
       </p>

@@ -129,6 +129,7 @@ export function DeepSumPanel({
         dmax: String(dmax),
         plan: '1',
       });
+      if (autoRun) q.set('bg', '1');
       const r = await fetch(`/api/v1/deep?${q}`, { cache: 'no-store' });
       if (r.status === 404) return setD({ state: 'none', text: 'The service does not make this search yet.' });
       const j = (await r.json()) as {
@@ -153,6 +154,8 @@ export function DeepSumPanel({
     setD({ state: 'running', text: 'Starting…', frac: null, estimate_s: est });
     try {
       const q = new URLSearchParams({ fields, fov: String(f), dmin: String(dmin), dmax: String(dmax) });
+      // an automatic run gives way to every person's job
+      if (autoRun) q.set('bg', '1');
       const j = await runJob(`/api/v1/deep?${q}`, {
         cancelled: () => my !== tok.current,
         every: 3000,

@@ -40,3 +40,9 @@
 .leadrow .lf { font-weight: 400; color: var(--muted); }
 .fmethod { margin: 4px 0 0; }
 @media (max-width: 600px) { .leadrow .lt .mono-s { white-space: normal; overflow-wrap: anywhere; } }
+
+/* a wide screen: the list on the left, the lead on the right, side by side (the first lead until one is clicked) */
+.fgrid { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 520px); gap: 18px; align-items: start; }
+.leadpanel.inline { position: sticky; top: 8px; width: auto; max-height: calc(100vh - 24px); border: 1px solid var(--edge); border-radius: 16px; animation: none; box-shadow: none; z-index: 1; background: rgba(5, 14, 19, 0.7); }
+/* a phone: a lead's title wraps instead of being cut */
+@media (max-width: 600px) { .leadrow .lt b { white-space: normal; overflow-wrap: anywhere; } }
