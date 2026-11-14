@@ -36,10 +36,10 @@ export function useAsteroidSearch(ra: number, dec: number, fov: number, mjd: num
       setS({ state: 'building', text: 'building the visits of the pass…', frac: null });
       let key = '';
       for (let i = 0; i < 2000 && !stop; i++) {
-        const { status, body } = await getJson(`/api/v1/film?ra=${ra}&dec=${dec}&fov=${fov}&mjd=${mjdKey}`);
+        const { status, body } = await getJson(`/api/v1/film?ra=${ra}&dec=${dec}&fov=${fov}&mjd=${mjdKey}&bg=1`);
         if (stop) return;
         if (!body) {
-          if (status !== 503 && status !== 502 && status !== 0)
+          if (status !== 503 && status !== 502 && status !== 429 && status !== 0)
             return setS({ state: 'failed', text: `the service answered ${status}`, frac: null });
           await sleep(3000);
           continue;

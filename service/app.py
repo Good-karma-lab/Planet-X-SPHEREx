@@ -425,6 +425,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         dec: float = Query(..., ge=-90, le=90),
         fov: float = Query(20, gt=0, le=60),
         mjd: float | None = Query(None, ge=60000, le=70000),
+        bg: int = Query(0, ge=0, le=1),
     ) -> Any:
         """The film of one pass at (ra, dec): the finished product or the job that makes it (create or attach)."""
         if st.index is None or st.store is None or st.scheduler is None or st.files is None:
@@ -442,7 +443,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 return JSONResponse(
                     {"error": "too many new jobs from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
                 )
-        job = submit_film(key, params, Priority.P0)
+        # bg=1: the lab's own asteroid search asks for the film by itself, not a person: it must not delay a person's field
+        job = submit_film(key, params, Priority.P1 if bg else Priority.P0)
         return {"key": key, "params": params, "job": job.view()}
 
     @app.get(f"{API_PREFIX}/film/{{key}}/bodies")

@@ -248,7 +248,8 @@ class Scheduler:
                     (j for j in self.jobs.values() if j.state == "queued" and j.size == size), key=lambda j: (j.priority, j.created)
                 )
                 for j in queued:
-                    if free <= 0:
+                    # a person's job (P0) may run beyond the slots by two: it never waits behind background searches
+                    if free <= 0 and not (j.priority == Priority.P0 and free > -2):
                         j.phase = f"waiting for a free worker ({queued.index(j) + 1} ahead)" if j.phase.startswith("waiting") else j.phase
                         continue
                     if j.priority >= Priority.P2 and self.person_active():

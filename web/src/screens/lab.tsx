@@ -809,7 +809,8 @@ export function Lab({ route }: { route: Route }) {
             }
           } else if (st.view === 'bands') {
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
-            panels = wallLayout(shownBands.length, w, h).map((c, j) => {
+            panels = wallLayout(shownBands.length, w, h - 96).map((c0, j) => {
+              const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the band buttons below
               const { bd, i } = shownBands[j]!;
               return {
                 x: c.x,
@@ -830,7 +831,8 @@ export function Lab({ route }: { route: Route }) {
             });
           } else {
             const shownDets = st.dets.slice().sort();
-            panels = wallLayout(shownDets.length, w, h).map((c, j) => {
+            panels = wallLayout(shownDets.length, w, h - 96).map((c0, j) => {
+              const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the detector buttons below
               const d = shownDets[j]! - 1;
               return {
                 x: c.x,
