@@ -1438,17 +1438,53 @@ export function Lab({ route }: { route: Route }) {
     };
   }, [fieldKey]);
   // the test targets on an archive picture: where they were at the survey's epoch
-  const drawTargets = (ctx: CanvasRenderingContext2D, size: number, epoch: number, ring: number) => {
+  const drawTargets = (ctx: CanvasRenderingContext2D, size: number, epoch: number, ring: number, withPath = false) => {
     if (!meta) return;
     const scale = size / meta.grid.n;
+    const xy = (ra0: number, dec0: number): [number, number] => [
+      (meta.grid.n / 2 -
+        ((((ra0 - meta.grid.ra0 + 540) % 360) - 180) * Math.cos((meta.grid.dec0 * Math.PI) / 180) * 3600) / meta.grid.step_arcsec) *
+        scale,
+      (meta.grid.n / 2 - ((dec0 - meta.grid.dec0) * 3600) / meta.grid.step_arcsec) * scale,
+    ];
     for (const o of targets.current) {
-      const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, epoch);
-      const x =
-        (meta.grid.n / 2 -
-          ((((tra - meta.grid.ra0 + 540) % 360) - 180) * Math.cos((meta.grid.dec0 * Math.PI) / 180) * 3600) / meta.grid.step_arcsec) *
-        scale;
-      const y = (meta.grid.n / 2 - ((tdec - meta.grid.dec0) * 3600) / meta.grid.step_arcsec) * scale;
+      const [x, y] = xy(...atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, epoch));
       if (x < -ring || y < -ring || x > size + ring || y > size + ring) continue;
+      if (withPath && ((o.pmra ?? 0) || (o.pmdec ?? 0))) {
+        // the path from this image's date to the SPHEREx passes, a dot and a year at every archive image and pass
+        const years = [...ARCHIVE.map((a) => a.epoch), ...(meta.passes.map((q) => 2000 + (q.mjd_mid - 51544.5) / 365.25) ?? [])].sort(
+          (a, b) => a - b,
+        );
+        const pts = years.map((yr) => [yr, ...xy(...atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, yr))] as const);
+        ctx.save();
+        ctx.setLineDash([3, 3]);
+        ctx.lineWidth = 2.6;
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+        ctx.beginPath();
+        pts.forEach(([, px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+        ctx.stroke();
+        ctx.lineWidth = 1.3;
+        ctx.strokeStyle = '#7ff0e4';
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = `600 ${Math.round(10 * (size / Math.max(1, side)) + 0.5)}px ui-monospace, Menlo, monospace`;
+        let lastLabel = -1e9;
+        for (const [yr, px, py] of pts) {
+          const now = Math.abs(yr - epoch) < 0.6;
+          ctx.fillStyle = now ? '#ffb454' : '#7ff0e4';
+          ctx.beginPath();
+          ctx.arc(px, py, now ? 3.6 * (size / side) : 2.4 * (size / side), 0, 2 * Math.PI);
+          ctx.fill();
+          if (yr - lastLabel > 4) {
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#000';
+            ctx.strokeText(String(Math.round(yr)), px + 6 * (size / side), py + 4 * (size / side));
+            ctx.fillText(String(Math.round(yr)), px + 6 * (size / side), py + 4 * (size / side));
+            lastLabel = yr;
+          }
+        }
+        ctx.restore();
+      }
       ctx.lineWidth = 3;
       ctx.strokeStyle = 'rgba(0,0,0,0.7)';
       ctx.beginPath();
@@ -1475,9 +1511,9 @@ export function Lab({ route }: { route: Route }) {
       const ctx = big.getContext('2d')!;
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(a.canvases.get(s.id)!, 0, 0, px, px);
-      drawTargets(ctx, px, s.epoch, 18 * (px / side));
+      drawTargets(ctx, px, s.epoch, 18 * (px / side), opts.trajectory);
     }
-  }, [archTick, archStep, opts.reference, side, meta]);
+  }, [archTick, archStep, opts.reference, opts.trajectory, side, meta]);
   // archive frames blinked before the SPHEREx seasons: archive 1..k, then season 1..N, again
   useEffect(() => {
     if (!opts.archive || !meta || film !== null) {
@@ -1714,12 +1750,28 @@ export function Lab({ route }: { route: Route }) {
     phase && !(shown && meta)
       ? phase
       : archStep !== null && archStep < ARCHIVE.length
-        ? `Archive · ${ARCHIVE[archStep]!.name} · ${ARCHIVE[archStep]!.years} · then the SPHEREx seasons`
+        ? `Archive · ${ARCHIVE[archStep]!.name} · ${ARCHIVE[archStep]!.years}${archOffset(ARCHIVE[archStep]!.epoch)} · then the SPHEREx passes`
         : shown && meta
           ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd_mid) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${meta.overlapping > meta.exposures ? ` (an even sample of the ${meta.overlapping} that cover the field)` : ''}${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}${phase ? ` · ${phase}` : ''}${Math.abs(eclipticLat(ra, dec)) < 10 ? ' · near the ecliptic: asteroids likely here, switch to Days' : ''}`
           : phase;
   const frameIndex = frame ?? shown?.pass ?? 0;
   const wallView = view !== 'picture' && film === null;
+  /** How far the test target in the field was, on an archive image's date, from its place in 2025.9 (and which way). */
+  function archOffset(epoch: number): string {
+    const half = fov / 120;
+    const o = targets.current.find((t) => {
+      const [tra, tdec] = atEpoch(t.ra, t.dec, t.pmra ?? 0, t.pmdec ?? 0, 2025.9);
+      return Math.abs(tdec - dec) < half && Math.abs(((tra - ra + 540) % 360) - 180) * Math.cos((dec * Math.PI) / 180) < half;
+    });
+    if (!o || !((o.pmra ?? 0) || (o.pmdec ?? 0))) return '';
+    const [a0, d0] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, epoch);
+    const [a1, d1] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2025.9);
+    const dx = (((a0 - a1 + 540) % 360) - 180) * Math.cos((d1 * Math.PI) / 180) * 3600;
+    const dy = (d0 - d1) * 3600;
+    const r = Math.hypot(dx, dy);
+    const dir = Math.abs(dy) > Math.abs(dx) ? (dy > 0 ? 'north' : 'south') : dx > 0 ? 'east' : 'west';
+    return ` · ${o.n} was ${r >= 60 ? `${(r / 60).toFixed(1)}′` : `${r.toFixed(0)}″`} ${dir} of its 2025 place`;
+  }
   /** The portrait of a source at (ra, dec) [J2000 with motion] from the detector stacks of the season shown. */
   const portraitOf = (src: { ra: number; dec: number; pmra?: number; pmdec?: number }, label: string) => {
     void portraitTick;
@@ -2071,7 +2123,33 @@ export function Lab({ route }: { route: Route }) {
               ))}
             </div>
             <div class="tl-mid">
-              {film === null ? (
+              {film === null && archStep !== null ? (
+                <>
+                  <div class="tl-labels">
+                    {[...ARCHIVE.map((a) => String(Math.round(a.epoch))), ...passes.map((q) => season(q.mjd_mid))].map((t, j, all) => (
+                      <span
+                        key={j}
+                        class={archStep === j ? 'on' : ''}
+                        style={{
+                          left: all.length > 1 ? `${(j / (all.length - 1)) * 100}%` : '0%',
+                          transform: `translateX(${j === 0 ? 0 : j === all.length - 1 ? -100 : -50}%)`,
+                        }}
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={ARCHIVE.length + passes.length - 1}
+                    step={1}
+                    value={archStep}
+                    aria-label="Archive images, then the passes"
+                    disabled
+                  />
+                </>
+              ) : film === null ? (
                 <>
                   <div class="tl-labels">
                     {passes.map((q, i) => (
@@ -2475,7 +2553,7 @@ export function Lab({ route }: { route: Route }) {
                 />
               ))}
             {srow(
-              `Asteroids${passMeta ? ` · pass of ${season(passMeta.mjd_mid)}` : ''}`,
+              `Asteroids${astMjd ? ` · pass of ${season(astMjd)}` : ''}`,
               ast.state === 'done' ? 1 : ast.state === 'none' || ast.state === 'failed' || ast.state === 'idle' ? 0 : ast.frac,
               ast.state === 'done'
                 ? `${ast.tracks?.length ?? 0} found`
