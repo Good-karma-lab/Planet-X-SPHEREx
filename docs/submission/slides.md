@@ -1,17 +1,16 @@
-# Demo slides — up to 7 including the title, draft
+# Demo slides — 7 including the title
 
-(The alternative to the video: ≤ 7 slides. Pictures are screenshots of the tool on real data; captions credit SPHEREx/IRSA.)
+Pictures are screenshots of https://spherex.space on real SPHEREx data (`demo/slides.html`, exported to PDF).
 
-1. **Title.** SPHEREx Sky — see the sky change. Team name, local event, challenge "Planet X and SPHEREx", the URL. A still of the colour
-   pendulum (Barnard's Star).
-2. **The problem.** SPHEREx's raw frames don't show motion: each exposure sees a star at another wavelength and pixel grid. Picture:
-   three raw frames side by side vs one clean stack.
-3. **Our answer: the pendulum.** Clean, stack, colour by spectrum, play the passes back and forth: what moves jumps. Pictures: Barnard's
-   Star (10″ per year) and ε Indi B (orange-red brown dwarf among white stars).
-4. **Every time scale.** Years: pendulum. Days: the film of one pass (asteroids). Beyond Neptune: the distance slider (Eris comes into
-   focus at ~95 au; Sedna found in the sum of three passes). Three small pictures.
-5. **Click anything.** Live spectrum from the individual exposures, checked against 2MASS/WISE; walls of bands and detectors; leads with
-   their evidence and chance control. Picture: spectrum of ε Indi B with the T-dwarf peaks.
-6. **Real data, honest results.** NASA SPHEREx (IRSA) + ESA Gaia + 2MASS/WISE + JPL; what was validated (Barnard's motion vs Gaia, 4 of 4
-   known asteroids, Eris and Sedna blind, a 394 au candidate ruled out); what it cannot do (Planet Nine is fainter than one blind search).
-7. **Try it / what's next.** URL, QR code, code link; next: all-sky coverage, more searches, citizen-science leads. SI disclosure line.
+1. **SPHEREx Sky — see the sky change.** Good Karma Lab · Barcelona · challenge "Planet X and SPHEREx" · spherex.space. Picture: the lab on
+   Barnard's Star.
+2. **The problem.** SPHEREx sees every place twice a year in 102 colours, but its raw frames show no motion: each exposure sees a star at
+   another wavelength and pixel grid. Our answer: clean, stack and colour each season, then blink the seasons.
+3. **Years in a loop.** The pendulum of seasons: Barnard's Star (10″/yr) moves, the field stands still; the search between seasons finds
+   it and Gaia DR3 confirms the motion. Archive images add 1985–2010.
+4. **Click anything.** The live spectrum of any source from every exposure, coloured by detector; SIMBAD and Gaia name it.
+5. **What does not look like a star.** The anomaly search ranks ε Indi B first by far (score 13.8, threshold 2.6): an excess at 3.9–4.3 µm,
+   where a cold brown dwarf emits most of its light. On an ecliptic field a Seyfert galaxy comes first.
+6. **Real data, honest results.** NASA SPHEREx Level-2 (IRSA, AWS) + ESA Gaia DR3 + DSS2, 2MASS, AllWISE. Measured: motions vs Gaia, a
+   spectrum vs 2MASS, chance 0.0 tracks per field. Limits: saturated stars have no spectrum; a track needs three seasons.
+7. **Try it.** spherex.space · code on GitHub (Apache-2.0) · built with AI coding assistants under the team's direction (SI statement).

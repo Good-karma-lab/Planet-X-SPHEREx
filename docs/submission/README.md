@@ -1,6 +1,6 @@
-# NASA Space Apps 2026 submission — drafts
+# NASA Space Apps 2026 submission
 
-**Deadline: Sunday, November 15, 2026, 23:59 local time of the team's Local Event** (submission opened Saturday, November 14, 9:00 local;
+**Barcelona Local Event: projects and presentations due Sunday, November 15, 2026, 16:00 (live pitch 16:30); the global deadline is 23:59 local time** (submission opened Saturday, November 14, 9:00 local;
 as checked by the supervisor on spaceappschallenge.org on 2026-11-14; the full list of requirements with sources is in
 [`../plan/07-submission-and-pitch.md`](../plan/07-submission-and-pitch.md)).
 

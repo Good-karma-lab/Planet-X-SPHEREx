@@ -157,7 +157,13 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
     @app.middleware("http")
     async def headers_and_people(request: Request, call_next: Any) -> Response:
-        if request.url.path.startswith("/api/") and request.url.path != f"{API_PREFIX}/health" and st.scheduler is not None:
+        # a person is working when they ask for new work (a field, a film, a spectrum, an anomaly search); looking at the globe or at
+        # finished products does not pause the warm set
+        path = request.url.path
+        if st.scheduler is not None and (
+            path in (f"{API_PREFIX}/fields", f"{API_PREFIX}/film", f"{API_PREFIX}/spectrum")
+            or (path == f"{API_PREFIX}/anomalies" and request.query_params.get("start") == "1")
+        ):
             st.scheduler.saw_person()
         response: Response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")

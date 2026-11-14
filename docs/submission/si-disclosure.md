@@ -1,6 +1,6 @@
-# Super Intelligence (SI) use disclosure — draft
+# Super Intelligence (SI) use disclosure
 
-**Statement for the project page (draft):**
+**Statement for the project page:**
 
 This project was built with AI coding assistants (Anthropic's Claude Code agents) working under the direction of our team. People on
 the team set the goals and the rules, chose between designs, reviewed every result by looking at the pictures and clicking through the
@@ -8,7 +8,7 @@ tool, and decided what to keep. The agents wrote most of the code (the Python se
 documentation and the method write-up, ran the validation scripts and drafted these submission texts; a human reviewed and edited them.
 
 The images and videos the tool shows are **not AI-generated**: they are computed deterministically by our code from real NASA SPHEREx
-exposures (and archive images from DSS, 2MASS, WISE and Pan-STARRS, credited on screen). No generative image or video model was used for
+exposures (and archive images from DSS2, 2MASS and AllWISE, credited on screen). No generative image or video model was used for
 any picture, figure or video of the submission. No NASA logo or insignia appears in any generated content.
 
 AI-written code and text are acknowledged here and in the repository (commit messages carry a co-author line for the AI assistant).
