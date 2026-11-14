@@ -16,7 +16,7 @@ export function useCatalogue(src: Source | null, ready: boolean): Ask {
       q.set('pmdec', String(src.pmdec ?? 0));
     }
     (async () => {
-      for (let i = 0; i < 80 && !stop; i++) {
+      for (let i = 0; i < 30 && !stop; i++) {
         const r = await fetch(`/api/v1/spectrum/catalogue?${q}`, { cache: 'no-store' });
         if (stop) return;
         if (r.status === 404) return setA({ state: 'absent' });
@@ -25,6 +25,7 @@ export function useCatalogue(src: Source | null, ready: boolean): Ask {
         if (d.state === 'done') return setA({ state: 'done', rows: d.rows ?? [], notes: d.notes ?? [] });
         await new Promise((res) => setTimeout(res, 3000));
       }
+      if (!stop) setA({ state: 'error', error: 'the comparison did not finish in 90 s' });
     })().catch((e) => {
       if (!stop) setA({ state: 'error', error: String(e.message ?? e) });
     });
@@ -38,9 +39,17 @@ export function useCatalogue(src: Source | null, ready: boolean): Ask {
 const mjy = (v: number) => `${v.toFixed(v < 10 ? 2 : 1)} mJy`;
 
 /** The check against catalogues: for each band the spectrum under the filter against the catalogue, and their ratio (near 1 = the numbers are right). */
-export function CatalogueCheck({ src, ready }: { src: Source | null; ready: boolean }) {
-  const a = useCatalogue(src, ready);
-  if (!ready || a.state === 'absent') return null;
+export function CatalogueCheck({ src, ready, saturated }: { src: Source | null; ready: boolean; saturated?: boolean }) {
+  const a = useCatalogue(src, ready && !saturated);
+  if (!ready) return null;
+  if (saturated)
+    return (
+      <div class="catchk">
+        <div class="spec-sub">Check against catalogues</div>
+        <div class="mono-s">no unsaturated points to compare with the catalogues</div>
+      </div>
+    );
+  if (a.state === 'absent') return null;
   return (
     <div class="catchk">
       <div class="spec-sub">Check against catalogues</div>

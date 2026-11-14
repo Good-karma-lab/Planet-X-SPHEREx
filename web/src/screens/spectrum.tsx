@@ -345,6 +345,8 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const perDet = [1, 2, 3, 4, 5, 6].map((d) => points.filter((p) => p.ok && p.det === d).length);
   const usable = points.filter((p) => p.ok).length;
   const cur = rows[k] ?? null;
+  // a target that saturates the detector has no SPHEREx spectrum: say so once, show none of the per-exposure lines
+  const saturated = !!view && (view.no_spectrum || (view.measured >= 20 && view.saturated > 0.5 * view.measured));
   return (
     <div class="spec">
       <div class="spec-head">
@@ -370,7 +372,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           <i style={view && view.total > 0 ? `width:${Math.round((100 * view.measured) / view.total)}%` : ''} />
         </div>
       )}
-      {(view?.no_spectrum || (view && view.measured >= 20 && view.saturated > 0.5 * view.measured)) && (
+      {saturated && (
         <div class="partial">Saturated in most exposures: no SPHEREx spectrum (the core of this star overflows the detector)</div>
       )}
       <SpectrumChart points={points} bins={bins} cur={cur} quick={quick} />
@@ -383,7 +385,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           </span>
         ))}
       </div>
-      {rows.length > 1 && (
+      {rows.length > 1 && !saturated && (
         <ExposurePlayer
           rows={rows}
           k={k}
@@ -395,21 +397,21 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           }}
         />
       )}
-      {cur && (
+      {cur && !saturated && (
         <StampPanels
           stamp={stamps.get(cur.i)}
           note={!cur.ok ? `no fit: ${cur.why || 'no usable measurement'}` : undefined}
         />
       )}
-      {cur && stampsDone && stamps.size === 0 && <div class="mono-s">The pixels were not kept for this spectrum (it was measured before they were stored).</div>}
-      {why.size > 0 && <div class="mono-s">Not used: {[...why.entries()].map(([k2, n]) => `${n} ${k2}`).join(' · ')}</div>}
+      {cur && !saturated && stampsDone && stamps.size === 0 && <div class="mono-s">The pixels were not kept for this spectrum (it was measured before they were stored).</div>}
+      {why.size > 0 && !saturated && <div class="mono-s">Not used: {[...why.entries()].map(([k2, n]) => `${n} ${k2}`).join(' · ')}</div>}
       {error && (
         <div class="mono-s" style={{ color: 'var(--amber)' }}>
           {error}
         </div>
       )}
-      <CatalogueCheck src={shown} ready={view?.state === 'done' && points.length > 0} />
-      {view?.state === 'done' && points.length > 0 && (
+      <CatalogueCheck src={shown} ready={view?.state === 'done' && points.length > 0} saturated={saturated} />
+      {view?.state === 'done' && usable > 0 && (
         <a
           class="lnk"
           download={`spectrum-${formatRA(shown.ra, true)}${formatDec(shown.dec, true)}.csv`}
@@ -443,15 +445,34 @@ function useIdentify(src: Source | null): Identified | null | 'asking' {
     if (!src) return;
     setV('asking');
     const ctl = new AbortController();
-    const q = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6) });
-    if (src.pmra || src.pmdec) {
-      q.set('pmra', String(src.pmra ?? 0));
-      q.set('pmdec', String(src.pmdec ?? 0));
+    // a place on the picture is where the thing is in 2025.9: ask the catalogues at that epoch (they move their stars); a catalogue object
+    // that carries a proper motion has its J2000 place, so epoch 2000
+    const moving = !!(src.pmra || src.pmdec);
+    const cq = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6), epoch: moving ? '2000' : '2025.9', radius: '6' });
+    const old = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6) });
+    if (moving) {
+      old.set('pmra', String(src.pmra ?? 0));
+      old.set('pmdec', String(src.pmdec ?? 0));
     }
-    fetch(`/api/v1/identify?${q}`, { signal: ctl.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: Identified | null) => setV(d))
-      .catch(() => {});
+    const fromContext = (c: {
+      simbad?: { state: string; name?: string; otype?: string; sptype?: string | null; sep?: number };
+      gaia?: Identified['gaia'];
+    }): Identified => ({
+      simbad: c.simbad && { state: c.simbad.state, name: c.simbad.name, type: c.simbad.otype, sp: c.simbad.sptype ?? null, sep: c.simbad.sep },
+      gaia: c.gaia,
+    });
+    fetch(`/api/v1/context?${cq}`, { signal: ctl.signal })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((c) => setV(fromContext(c)))
+      .catch((e) => {
+        if (ctl.signal.aborted) return;
+        // the service has no context route: the older lookup (J2000 place and proper motion)
+        void e;
+        fetch(`/api/v1/identify?${old}`, { signal: ctl.signal })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d: Identified | null) => setV(d))
+          .catch(() => {});
+      });
     return () => ctl.abort();
   }, [src?.ra, src?.dec, src?.pmra, src?.pmdec]);
   return v;
