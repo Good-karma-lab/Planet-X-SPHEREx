@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { formatDec, formatRA } from '../../lib/sky';
 import { FIELD, type Live } from './live';
+import { formatHash } from '../../lib/route';
 import { FieldThumb } from './thumb';
 
 /** One lead: a track no catalogue explains, an odd spectrum, or a mover that is a known star (listed last, as a recovery). */
@@ -8,7 +9,7 @@ export interface Lead {
   id: string;
   kind: 'track' | 'anomaly';
   /** 0 = unexplained track, 1 = anomaly, 2 = explained track (a recovery, not a lead) */
-  tier: 0 | 1 | 2;
+  tier: 0 | 1 | 2 | 3;
   score: number;
   title: string;
   sub: string;
@@ -18,6 +19,8 @@ export interface Lead {
   ra: number;
   dec: number;
   rows: [string, string][];
+  /** 3I/ATLAS: its panel shows the SPHEREx frame beside the partner agency's */
+  atlas?: boolean;
 }
 
 const ut = (m: number) => new Date((m - 40587) * 864e5).toISOString().slice(0, 10);
@@ -50,7 +53,7 @@ export function rankLeads(live: Live[]): Lead[] {
           ['Rate', `${t.speed.toFixed(2)} ″/yr toward ${t.pa.toFixed(0)}° (east ${t.v_east?.toFixed(2) ?? '?'}, north ${t.v_north?.toFixed(2) ?? '?'})`],
           ['Seen in', `${t.passes.length} passes${t.mjd ? `: ${t.mjd.map(ut).join(', ')}` : ''}`],
           ['Straight-line fit', t.rms_arcsec != null ? `rms ${t.rms_arcsec}″ about a straight line` : 'n/a'],
-          ['Signal', t.snr ? `S/N ${t.snr.map((v) => (v == null ? '–' : v.toFixed(0))).join(' · ')} in the passes` : 'n/a'],
+          ['Signal', t.snr?.some((v) => v != null) ? `S/N ${t.snr.map((v) => (v == null ? '–' : v.toFixed(0))).join(' · ')} in the passes` : 'n/a'],
           [
             'Gaia check',
             t.check === 'same' && t.gaia
@@ -94,7 +97,25 @@ export function rankLeads(live: Live[]): Lead[] {
   return out.sort((a, b) => a.tier - b.tier || b.score - a.score);
 }
 
-const labHref = (l: Lead) => `#/lab?ra=${l.ra.toFixed(5)}&dec=${l.dec.toFixed(5)}&fov=${FIELD}`;
+/** The interstellar comet 3I/ATLAS: SPHEREx imaged it on 14 Dec 2025, and CSA's NEOSSat took it the same day. Listed after the ranked leads. */
+export const ATLAS_LEAD: Lead = {
+  id: 'c:3I-ATLAS',
+  kind: 'track',
+  tier: 3,
+  score: 0,
+  title: '3I/ATLAS · interstellar comet · 14 Dec 2025',
+  sub: 'comet · also seen by NEOSSat (CSA)',
+  field: '3I/ATLAS',
+  fieldKey: null,
+  passes: 1,
+  ra: 166.8274,
+  dec: 5.2787,
+  rows: [],
+  atlas: true,
+};
+const ATLAS_FILM = formatHash({ screen: 'lab', params: { ra: '166.82740', dec: '5.27870', fov: '60', film: '61023.6' } });
+
+const labHref = (l: Lead) => l.atlas ? ATLAS_FILM : `#/lab?ra=${l.ra.toFixed(5)}&dec=${l.dec.toFixed(5)}&fov=${FIELD}`;
 
 /** The lead id in the address (#/findings?lead=...), kept in step with the address bar. */
 export function useLeadParam(): [string | null, (id: string | null) => void] {
@@ -108,66 +129,124 @@ export function useLeadParam(): [string | null, (id: string | null) => void] {
   return [id, (v) => (location.hash = v ? `#/findings?lead=${encodeURIComponent(v)}` : '#/findings')];
 }
 
-const TIER = ['Unexplained', 'Odd spectrum', 'Known mover recovered'];
+const TIER = ['Unexplained', 'Odd spectrum', 'Known mover', 'Comet · also seen by NEOSSat (CSA)'];
 
-/** The ranked list of leads with a thumbnail each; a click opens its report. */
-export function LeadsList({ leads, onOpen }: { leads: Lead[]; onOpen: (id: string) => void }) {
+/** The ranked list of leads, one dense row each; a click opens the lead in the side panel. */
+export function LeadsList({ leads, onOpen, openId }: { leads: Lead[]; onOpen: (id: string) => void; openId: string | null }) {
   if (!leads.length) return null;
   return (
     <section class="card glass leads">
-      <h3>Leads, ranked</h3>
-      <p class="hint" style="margin-top:0">Unexplained movers first, then odd spectra by how far over the bar they are, then known movers the search recovered. A lead is not a discovery.</p>
+      <h3>Leads in the test fields, ranked</h3>
       <ol class="leadlist">
-        {leads.slice(0, 12).map((l, i) => (
+        {[...leads.filter((l) => !l.atlas).slice(0, 12), ...leads.filter((l) => l.atlas)].map((l, i) => (
           <li key={l.id}>
-            <button class="leadrow" onClick={() => onOpen(l.id)}>
+            <button class="leadrow" aria-current={l.id === openId ? 'true' : undefined} title={`${l.title} · ${l.sub}`} onClick={() => onOpen(l.id)}>
               <span class="rank">{i + 1}</span>
               <span class="lt">
                 <b>{l.title}</b>
-                <span class="mono-s">{l.sub}</span>
+                <span class="mono-s">{l.field}</span>
               </span>
-              <span class={`badge ${l.tier === 2 ? 'green' : 'orange'}`}>{TIER[l.tier]}</span>
+              <span class={`badge ${l.tier >= 2 ? 'green' : 'orange'}`} title={TIER[l.tier]}>{l.atlas ? 'Comet · NEOSSat' : TIER[l.tier]}</span>
             </button>
           </li>
         ))}
       </ol>
+      <p class="hint leadnote">A lead is not a discovery.</p>
     </section>
   );
 }
 
-/** The report of one lead: the picture of the field, every number and check, the link into the lab, and the report as JSON. */
-export function LeadReport({ lead, onBack }: { lead: Lead; onBack: () => void }) {
-  const json = () => JSON.stringify({ title: lead.title, field: lead.field, ra: lead.ra, dec: lead.dec, kind: lead.kind, rows: Object.fromEntries(lead.rows), note: 'a lead, not a discovery', generated: new Date().toISOString() }, null, 2);
+interface NeosCard {
+  date_obs: string;
+  exposure_s: number;
+  wcs_offset_arcsec: number;
+  gaia_matches: number;
+  offset_from_prediction_arcsec: number;
+  g_mag: number | null;
+  snr: number | null;
+}
+
+function PanelShell({ lead, rows, media, onClose }: { lead: Lead; rows: [string, string][]; media: preact.ComponentChildren; onClose: () => void }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [onClose]);
+  const json = () => JSON.stringify({ title: lead.title, field: lead.field, ra: lead.ra, dec: lead.dec, kind: lead.kind, rows: Object.fromEntries(rows), note: lead.atlas ? 'SPHEREx and NEOSSat observations of 3I/ATLAS' : 'a lead, not a discovery', generated: new Date().toISOString() }, null, 2);
   return (
-    <section class="card glass">
-      <button class="lnk" onClick={onBack}>
-        ← All findings
+    <aside class="leadpanel glass" role="dialog" aria-label="Lead report">
+      <button class="leadpanel-x" aria-label="Close" onClick={onClose}>
+        ×
       </button>
-      <div class="fcard" style="margin-top:8px">
-        <FieldThumb fieldKey={lead.fieldKey} passes={lead.passes} size={220} />
-        <div class="fbody">
-          <h3 style="margin-top:0">{lead.title}</h3>
-          <div class="mono-s">{lead.sub} · {TIER[lead.tier]} · a lead, not a discovery</div>
-          <dl class="kv">
-            {lead.rows.map(([k, v]) => (
-              <div class="kvr" key={k}>
-                <dt>{k}</dt>
-                <dd>{v}</dd>
-              </div>
-            ))}
-          </dl>
-          <div class="chips">
-            <a class="btn sm primary" href={labHref(lead)}>
-              Open in the lab
-            </a>
-            <a class="btn sm" download={`lead-${lead.id.replace(/[^a-z0-9]+/gi, '_')}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(json())}`}>
-              Download the report (JSON)
-            </a>
+      {media}
+      <h3 class="lp-title">{lead.title}</h3>
+      <div class="mono-s">{lead.atlas ? lead.sub : `${lead.sub} · ${TIER[lead.tier]} · a lead, not a discovery`}</div>
+      <dl class="lp-kv">
+        {rows.map(([k, v]) => (
+          <div class="kvr" key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
           </div>
-        </div>
+        ))}
+      </dl>
+      <div class="chips">
+        <a class="btn sm primary" href={labHref(lead)}>
+          {lead.atlas ? 'Open the film in the lab' : 'Open in the lab'}
+        </a>
+        <a class="btn sm" download={`lead-${lead.id.replace(/[^a-z0-9]+/gi, '_')}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(json())}`}>
+          Download JSON
+        </a>
       </div>
-    </section>
+    </aside>
   );
+}
+
+/** 3I/ATLAS: the SPHEREx picture of the 60′ field and the NEOSSat frame of the same day, side by side, with the measured numbers. */
+function AtlasPanel({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+  const [c, setC] = useState<NeosCard | null>(null);
+  const [fld, setFld] = useState<{ key: string | null; passes: number }>({ key: null, passes: 1 });
+  useEffect(() => {
+    void fetch('/neossat/3i-2025-12-14.json').then((r) => (r.ok ? r.json() : null)).then(setC).catch(() => {});
+    // the pass of the 60′ field that contains 14 Dec 2025 (MJD 61023.6)
+    void fetch(`/api/v1/fields?ra=${lead.ra.toFixed(5)}&dec=${lead.dec.toFixed(5)}&fov=60`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { key?: string; meta?: { passes?: { index: number; mjd0: number; mjd1: number }[] } } | null) => {
+        const ps = d?.meta?.passes ?? [];
+        const hit = ps.find((q) => q.mjd0 <= 61023.6 && q.mjd1 >= 61023.6);
+        if (d?.key && hit) setFld({ key: d.key, passes: hit.index + 1 });
+      })
+      .catch(() => {});
+  }, [lead.ra, lead.dec]);
+  const rows: [string, string][] = [
+    ['SPHEREx', "55 exposures on 14 Dec 2025 (IRSA's exposure table); the film rings the comet where JPL predicts it on every visit"],
+    ...(c
+      ? ([
+          ['NEOSSat (CSA)', `${c.date_obs.replace('T', ' ').slice(0, 16)} UT, ${c.exposure_s.toFixed(0)} s exposure`],
+          ['Found', `${c.offset_from_prediction_arcsec.toFixed(0)}″ from JPL's predicted place, G ≈ ${c.g_mag?.toFixed(1)}, S/N ${c.snr?.toFixed(0)}`],
+          ['Pointing', `refitted on ${c.gaia_matches} Gaia DR3 stars (the header was ${c.wcs_offset_arcsec.toFixed(0)}″ off)`],
+        ] as [string, string][])
+      : []),
+    ['Place', `${formatRA(lead.ra)} ${formatDec(lead.dec)}`],
+  ];
+  const media = (
+    <div class="lp-pair">
+      <figure>
+        <FieldThumb fieldKey={fld.key} passes={fld.passes} size={170} />
+        <figcaption class="mono-s">SPHEREx, 60′ field</figcaption>
+      </figure>
+      <figure>
+        <img class="lp-neos" src="/neossat/3i-2025-12-14.png" alt="3I/ATLAS in a NEOSSat frame, ringed at the place JPL predicts" />
+        <figcaption class="mono-s">NEOSSat (CSA), north up, east left</figcaption>
+      </figure>
+    </div>
+  );
+  return <PanelShell lead={lead} rows={rows} media={media} onClose={onClose} />;
+}
+
+/** The lead slid in from the right: the picture of the field, every number and check, the link into the lab, and the report as JSON. Closes with × or Esc. */
+export function LeadPanel({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+  if (lead.atlas) return <AtlasPanel lead={lead} onClose={onClose} />;
+  return <PanelShell lead={lead} rows={lead.rows} media={<FieldThumb fieldKey={lead.fieldKey} passes={lead.passes} size={200} />} onClose={onClose} />;
 }
 
 /** One plain sentence for a field card: what the searches found there, in words a visitor can follow. */
