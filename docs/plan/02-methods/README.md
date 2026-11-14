@@ -1,7 +1,7 @@
 # 2. Methods
 
 Every algorithm the system uses, with its parameters, the numbers that validate it and its known limits. The algorithms were worked
-out and measured in a research phase on real SPHEREx Level-2 exposures (November 2026); the numbers quoted as "research" are the
+out and measured on real SPHEREx Level-2 exposures (November 2026); the numbers quoted as "measured" or "target" are the
 acceptance targets of the production build. Where the production design differs from what was measured, the difference is stated.
 
 | File | Contents |

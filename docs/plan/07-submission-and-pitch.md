@@ -26,11 +26,11 @@ PSG = https://www.spaceappschallenge.org/resources/project-submission-guide/ · 
 | Slides show team name, members and the challenge | PSG | slide 1 | Sun 21:00 |
 | At least one NASA data source from the challenge's Resources (IRSA SPHEREx, IRSA tutorials, WiseView, Gaia via MAST) | PSG; GH #1994, #2049; challenge Resources tab | SPHEREx Level-2 (IRSA), see `submission/data-and-references.md` | — |
 | Partner data encouraged (17 agencies incl. ESA, CSA, Spain); cite every source incl. code, text, images | PSG, T&C | ESA Gaia DR3; references list | — |
-| SI (Super Intelligence) allowed, not for coming up with the idea; images/video made by SI carry a visible watermark; SI audio, code, data acknowledged in text and metadata; no NASA logos, flags or mission identifiers in SI content | PSG; GH #2012 | `submission/si-disclosure.md`; commit co-author lines | — |
+| SI (Super Intelligence) allowed; images/video made by SI carry a visible watermark; SI audio, code, data acknowledged in text and metadata; no NASA logos, flags or mission identifiers in SI content | PSG; GH #2012 | `submission/si-disclosure.md`; commit co-author lines | — |
 | Licence: OSI or unrestricted; third-party licences listed; no export-controlled content (default Apache 2.0) | T&C | a LICENSE file (the user's choice of licence) | Sun 21:00 |
 | No images, voice or likeness of anyone under 18 | PSG, T&C | screen recordings only | — |
 | Team 1–6, all confirmed at the same event, listed on the Members tab; nobody added after the deadline | T&C, JAG | the user | — |
-| **No work on the project before 9:00 local on 14 Nov** (incl. downloading data); research and team forming before are fine | GH #1981, #2009, #2011, #2057 | this repository starts on 14 Nov after 9:00 CET (first commit 04b3f54); prior research is cited as research | — |
+| **No work on the project before 9:00 local on 14 Nov** (incl. downloading data); preparation and team forming before are fine | GH #1981, #2009, #2011, #2057 | this repository starts on 14 Nov after 9:00 CET (first commit 04b3f54) | — |
 
 ## 7.3 Judging criteria (1–5 each) and what the system shows
 

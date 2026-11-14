@@ -2,7 +2,7 @@
 import { defineConfig } from 'vite';
 import preact from '@preact/preset-vite';
 
-// The API runs on its own port in development (never the research service's 8770).
+// The API runs on its own port in development (8780; 8770 is never used).
 const API = process.env.SKY_API ?? 'http://127.0.0.1:8780';
 
 export default defineConfig({

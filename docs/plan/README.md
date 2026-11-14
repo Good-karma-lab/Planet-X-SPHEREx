@@ -1,7 +1,6 @@
 # Plan: SPHEREx Sky — a public tool to see the sky change
 
-The plan for building the system from scratch, on the basis of a research phase that worked out and measured every method on real
-SPHEREx Level-2 exposures (November 2026).
+The plan for building the system: every method with the numbers measured on real SPHEREx Level-2 exposures (November 2026).
 
 | # | Document | What it decides |
 |---|---|---|

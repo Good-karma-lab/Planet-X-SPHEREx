@@ -4,8 +4,7 @@
 
 - **NASA Space Apps 2026: submission closes Sun 15 Nov 23:59 CET** (team Good Karma Lab, Local Event Barcelona). Drafts in
   `docs/submission/`, requirements with sources in `docs/plan/07-submission-and-pitch.md`. The organisers rule out work before 9:00 local
-  on 14 Nov (GH #1981, #2009, #2011, #2057); this repository starts after that. Whether earlier research code may be brought in is put
-  to the user (reported to the supervisor); nothing has been brought in.
+  on 14 Nov (GH #1981, #2009, #2011, #2057); this repository starts after that.
 - **M0, M1, M2: done.** M2: index of 1,628,230 files bootstrapped from IRSA; reconciliation against the bucket exact for every period
   (DR1 1,179,406, QR3 448,824); footprint margin 34.9″ worst of 60 files (all detectors), index margin 60″.
 - **M3: validated on real fields** (report `docs/validation/2026-11-14-m3-field.md`): ε Indi B 4.58″/yr toward 122° (catalogue 4.68, 122°;
@@ -42,7 +41,7 @@ Notes for whoever continues:
   own browser.
 - Filter curves (2MASS J/H/Ks, WISE W1/W2) are not in `data/` yet: they are fetched from the SVO Filter Profile Service in M8, where
   the catalogue check needs them.
-- The API runs on port 8780 (dev) and 8781 (e2e); the research service's port 8770 is never used.
+- The API runs on port 8780 (dev) and 8781 (e2e); port 8770 is never used.
 
 ## M1 — Level-2 access (done)
 

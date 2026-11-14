@@ -2,7 +2,7 @@
 
 Date: 2026-11-14. Status: accepted.
 
-**Context.** In the research phase background work (the warm-up, abandoned jobs) held the places a person's spectrum needed, and the
+**Context.** In measurements before this decision, background work (the warm-up, abandoned jobs) held the places a person's spectrum needed, and the
 person waited; polling was refused with HTTP 429.
 
 **Decision.** Four classes: P0 a job a person watches, P1 a person's background work, P2 the warm runner, P3 maintenance. Lower classes

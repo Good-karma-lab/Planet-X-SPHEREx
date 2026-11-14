@@ -42,10 +42,10 @@ timeouts, retries, concurrency limits and a circuit breaker, and a generic User-
 - **How:** HTTPS GET with `Range: bytes=a-b`; one request per contiguous row band per plane; header chain walked once per file and
   stored in the index (offsets of IMAGE, FLAGS, VARIANCE, ZODI, PSF, WCS-WAVE). Compressed FLAGS (QR3): only the needed tiles.
   Connection pool with keep-alive; concurrency by budget (section 5.4 of the architecture): up to 96 in flight for a person's field on
-  the research link, tuned for the cloud in M4.
+  a residential link, tuned for the cloud in M4.
 - **Limits:** S3 has no multi-range GET; request-rate limits are far above our use (thousands per second per prefix). Our budget, not
   S3's, is the limit: a 60′ cold field reads 9–12 MB × 600–700 exposures ≈ 7–9 GB.
-- **Caching:** raw row bands per (file, plane, band of 64 rows), compressed, in `cache/raw/` with LRU eviction under a cap (research:
+- **Caching:** raw row bands per (file, plane, band of 64 rows), compressed, in `cache/raw/` with LRU eviction under a cap (measured:
   ~40 GB for the warm set and testing; cloud cap ~100 GB); window results per (file, field box) in `cache/win/`. Raw data never expire
   (files are immutable; a reprocessed file has a new key).
 - **Failure handling:** retry once with jitter; a read that stalls 40 s is abandoned and counted; circuit breaker on S3 per host (opens
@@ -56,7 +56,7 @@ timeouts, retries, concurrency limits and a circuit breaker, and a generic User-
 
 Built by our own indexer from the bucket (3.2) and kept on local disk; snapshot to R2 after every daily update. ~0.9 GB for 1.8 M files
 (170 periods, 2026-11). A full rebuild reads the first 32 kB of every file (primary + IMAGE header; other offsets derived and validated by
-full header walks on a 1 % sample): research measurement 42 GB read in 8.6 h (~52 files/s, 16 connections, back-off on S3 `SlowDown`).
+full header walks on a 1 % sample): measured: 42 GB read in 8.6 h (~52 files/s, 16 connections, back-off on S3 `SlowDown`).
 It runs only on a fresh deployment without a snapshot; a new period (~11 k files) takes 4–5 min; the indexer follows hourly. Reconciled daily against
 IRSA ObsCore counts per period: a difference is reported in `/api/v1/health` (IRSA lagged by many periods in 2026-11; the bucket is the
 truth for reading).
@@ -65,11 +65,11 @@ truth for reading).
 
 | Service | Endpoint | Used for | Notes |
 |---|---|---|---|
-| TAP (sync) | `https://irsa.ipac.caltech.edu/TAP/sync` | ObsCore reconciliation (on 2026-11-14 ObsCore lists `spherex_dr1` 945,725, `spherex_dr1_deep` 233,681, `spherex_dr1_cube` 12,288 HiPS-cube tiles, `spherex_qr3` 362,124, `spherex_qr3_deep` 86,700; QR2 is no longer listed: DR1 supersedes it; footprints are 4-corner polygons; the "lag after 2026W20" seen in the research on 2026-11-12 was the split into the `spherex_dr1` and `spherex_qr3` collections, not missing data; reconciliation uses `spherex.plane` ⨝ `spherex.artifact`); 2MASS `fp_psc`, AllWISE `allwise_p3as_psd`, CatWISE | can take 45 s; down on 2026-11-13/14 (502, timeouts); 1 concurrent query per kind, 20 s timeout for interactive parts |
+| TAP (sync) | `https://irsa.ipac.caltech.edu/TAP/sync` | ObsCore reconciliation (on 2026-11-14 ObsCore lists `spherex_dr1` 945,725, `spherex_dr1_deep` 233,681, `spherex_dr1_cube` 12,288 HiPS-cube tiles, `spherex_qr3` 362,124, `spherex_qr3_deep` 86,700; QR2 is no longer listed: DR1 supersedes it; footprints are 4-corner polygons; the "lag after 2026W20" seen on 2026-11-12 was the split into the `spherex_dr1` and `spherex_qr3` collections, not missing data; reconciliation uses `spherex.plane` ⨝ `spherex.artifact`); 2MASS `fp_psc`, AllWISE `allwise_p3as_psd`, CatWISE | can take 45 s; down on 2026-11-13/14 (502, timeouts); 1 concurrent query per kind, 20 s timeout for interactive parts |
 | SIA2 | `https://irsa.ipac.caltech.edu/SIA?COLLECTION=spherex_…` | exposure list for unindexed periods | lags the bucket |
 | Finder Chart | `https://irsa.ipac.caltech.edu/applications/finderchart/servlet/api` | 2MASS, WISE images with links | about a minute per field cold |
 | IBE / cutouts | `https://irsa.ipac.caltech.edu/ibe/…` | NEOWISE single exposures | ~1 min per cutout; 900 per candidate; on request only, 2 concurrent |
-| HiPS mirror | `https://irsa.ipac.caltech.edu/data/hips/CDS/{2MASS/Color, AllWISE/RGB-W4-W2-W1, DSS2/color, …}` | globe backgrounds | CORS open; CDS's own servers (alasky) timed out from the research network, so the IRSA mirror is primary and CDS a secondary |
+| HiPS mirror | `https://irsa.ipac.caltech.edu/data/hips/CDS/{2MASS/Color, AllWISE/RGB-W4-W2-W1, DSS2/color, …}` | globe backgrounds | CORS open; CDS's own servers (alasky) timed out from a test network, so the IRSA mirror is primary and CDS a secondary |
 
 ## 3.5 Catalogues
 
@@ -80,7 +80,7 @@ truth for reading).
   (one source per request). Positions moved from epoch 2016.0 with proper motion to the date needed.
 - **Mirrors.** Gaia: GAVO `https://dc.g-vo.org/tap/sync` and ESA `https://gea.esac.esa.int/tap-server/tap/sync`; SIMBAD:
   `https://simbad.cds.unistra.fr/simbad/sim-tap/sync` and `https://simbad.harvard.edu/simbad/sim-tap/sync`; Sesame for names. Each
-  part tries its mirrors in order before saying "did not answer". Every upstream has a breaker (research left HiPS, VSX and NED unguarded:
+  part tries its mirrors in order before saying "did not answer". Every upstream has a breaker (an unguarded upstream is a known failure:
   production guards all of them).
 - **SIMBAD.** TAP for cone queries with proper motion (two cones for fast movers, 2.6.2) and the name resolver for the globe search; the
   five test targets are also kept as a dated local snapshot so the globe never waits on SIMBAD for them; a SIMBAD answer is cached 30
@@ -92,7 +92,7 @@ truth for reading).
 
 - **IMCCE SkyBoT** cone search (`https://ssp.imcce.fr/webservices/skybot/api/conesearch.php`): bodies in a cone at an epoch with V and
   rates; geocentric, so positions are moved to the spacecraft viewpoint with the exposure's `X_SC/Y_SC/Z_SC`. Used after a search,
-  never fed into it. 20–30 s per request in research: background, cached per (field, epoch).
+  never fed into it. 20–30 s per request measured: background, cached per (field, epoch).
 - **JPL Horizons** (`https://ssd.jpl.nasa.gov/api/horizons.api`): observer `500@-163182` (the SPHEREx spacecraft), `TLIST` of exposure
   MJDs, quantities 1, 3, 9, 19, 20, 24. One request at a time (JPL asks for serial use).
 - **JPL SBDB** (`https://ssd-api.jpl.nasa.gov/sbdb.api`, `sbdb_query.api`) for orbit, H, diameter, and the globe's small-body lists;

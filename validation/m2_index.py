@@ -4,7 +4,7 @@
    how far any real edge point lies outside the 4-corner polygon. The index adds EDGE_MARGIN_DEG to every overlap test; it must exceed
    the largest bulge found.
 2. V3: exposures of the test fields: containing the centre, and overlapping the field (circumscribed circle of the square field).
-   The research counts (Barnard's Star 5′: 384 overlapping, 361 containing the centre; 60′: 603) were made on QR2 + QR3; this index holds
+   The reference counts (Barnard's Star 5′: 384 overlapping, 361 containing the centre; 60′: 603) were made on QR2 + QR3; this index holds
    DR1 + QR3 (DR1 replaces QR2), so the counts are compared, not required to be equal.
 
 Run:  uv run python -m validation.m2_index [--index store/index/exposures.sqlite] [--sample 36]
@@ -113,7 +113,7 @@ def main() -> None:
         "",
         *counts(index),
         "",
-        "Research values (QR2 + QR3 index, 2026-11-12): Barnard's Star 5′ 384 overlapping, 361 containing the centre; 60′ 603.",
+        "Reference counts (QR2 + QR3 index, 2026-11-12): Barnard's Star 5′ 384 overlapping, 361 containing the centre; 60′ 603.",
     ]
     out = ROOT / "docs" / "validation" / f"{datetime.now(UTC).date().isoformat()}-m2-index.md"
     out.write_text("\n".join(rep) + "\n", encoding="utf-8")

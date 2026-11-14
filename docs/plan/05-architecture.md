@@ -55,9 +55,9 @@ docs/                   plan/, PROGRESS.md, decisions/ (ADRs), validation/ (date
 | Area | Choice | Why |
 |---|---|---|
 | Language (server) | Python 3.12 | astropy/numpy/scipy are the base of the method; every algorithm was measured in Python |
-| Hot loops | NumPy vectorisation first; Numba (aarch64 supported) for splat/leave-one-out, linkers and the chance controls | the research's slowest parts were Python loops (chance control 2–2000 s per field); target < 5 s |
+| Hot loops | NumPy vectorisation first; Numba (aarch64 supported) for splat/leave-one-out, linkers and the chance controls | the slowest parts measured were Python loops (chance control 2–2000 s per field); target < 5 s |
 | HTTP | Starlette (via FastAPI for typed contracts and OpenAPI) on uvicorn, one process, async | many concurrent polls and streams with few threads; contracts documented and tested |
-| Compute | a pool of worker **processes** (spawned, recycled after N jobs or above a memory mark) | no GIL contention; memory returned to the OS when a process exits (the research needed a macOS allocator trick); a crash kills one job, not the service |
+| Compute | a pool of worker **processes** (spawned, recycled after N jobs or above a memory mark) | no GIL contention; memory returned to the OS when a process exits (measured: a long-lived process needed a macOS allocator trick); a crash kills one job, not the service |
 | Reads | async HTTP client with a bounded connection pool, range GETs; row bands cached as compressed files | link-bound work needs concurrency, not threads |
 | State | SQLite (WAL) for jobs, product catalogue, rate buckets, upstream cache index; files for products | survives restarts; one file; no server to run |
 | Browser | TypeScript, Vite build, Preact for panels, hand-written WebGL2 renderer, no other runtime dependencies | typed parsers and shaders, small bundle, fast load |
@@ -130,14 +130,14 @@ docs/                   plan/, PROGRESS.md, decisions/ (ADRs), validation/ (date
 
 - **One binary container format (`SXP1`)** for every array part: magic, header length, JSON header (shape, dtype, layer names, grid:
   centre, step, orientation, pass list), padding to 8 bytes, then the arrays (float16, uint8, float32), little-endian. **One
-  orientation everywhere:** row 0 = north, column 0 = east-left as displayed (the research had two conventions; one is enough).
+  orientation everywhere:** row 0 = north, column 0 = east-left as displayed (two conventions are one too many).
 - **Parts per field:** `quick`, `picture` (R, G, B float16 + validity + saturated share, per pass blocks), `dets`, `bands`, `diff`,
   `flags`. The page loads `quick` then `picture`; walls, bands, Difference and the mask only when opened (all at once up to 10′).
-- **Size at 60′:** the research parts were 245–490 MB per 60′ field (Picture 33 MB for 3 passes). Production keeps float16 (no
+- **Size at 60′:** measured parts are 245–490 MB per 60′ field (Picture 33 MB for 3 passes). Production keeps float16 (no
   quantisation of real values) but adds a **tiled pyramid for 60′**: an overview at half resolution (≈ 8 MB) loads first; full-resolution
   tiles of 256² load for the area on screen when zoomed. Brotli/gzip stored next to each part. Every part is immutable once complete.
 - **Immutable means complete:** a response is marked `immutable` only when its product can never change; a record that can still be
-  completed (a search waiting for a Gaia check) is `no-store` until final (the research served a later-completed record as immutable and
+  completed (a search waiting for a Gaia check) is `no-store` until final (a later-completed record served as immutable
   the browser kept the old one).
 
 ## 5.8 API (v1)
@@ -233,7 +233,7 @@ The API contract is documented in `docs/api.md` (generated from the typed models
   client); all inputs validated (ranges for RA, Dec, sizes, distances, counts; tracks capped at 600 points).
 - **Rate limits** (per client hash, token buckets): job creation (e.g. 60 new jobs per 10 min), light endpoints (300 per 10 min),
   upstream-backed endpoints (identify/context/small bodies: charged only for new places); polling free; per-client concurrency (8
-  connections); global daily budgets for upstream requests and bytes out (the research left these disabled for local use: production
+  connections); global daily budgets for upstream requests and bytes out (disabled for local use only: production
   enables them); Cloudflare rate-limiting rule as an outer fence.
 - **Headers:** strict CSP (self + the R2 endpoint), no third-party scripts, `X-Content-Type-Options`, `Referrer-Policy`, HSTS via
   Cloudflare.
@@ -241,11 +241,11 @@ The API contract is documented in `docs/api.md` (generated from the typed models
 - **Supply chain:** locked dependencies, `pip-audit` and `npm audit` in CI, Dependabot alerts; container image built in CI.
 - **Secrets:** R2 credentials and the background-marker secret in a root-only env file on the VM and in CI secrets; never in the repo.
 
-## 5.14 Decisions taken from what the research learned
+## 5.14 Structural decisions
 
-| Research observation | Production decision |
+| Risk avoided | Decision |
 |---|---|
-| one 12.8k-line module with global state | packages with clear boundaries: engine (pure), reader, upstream, jobs, products, api |
+| one large module with global state | packages with clear boundaries: engine (pure), reader, upstream, jobs, products, api |
 | one flat cache directory of ~300 k files, listed in full on every prune | hashed subfolders, SQLite catalogue, eviction by catalogue |
 | a few writes not atomic | every write atomic |
 | two row orientations in binary formats | one orientation, one container format |
@@ -255,6 +255,6 @@ The API contract is documented in `docs/api.md` (generated from the typed models
 | an "immutable" record later completed | immutable only when complete |
 | any client could set the background header | signed marker |
 | version bump without purge left stale results; purge without re-warm made the demo wait | versioned keys, automatic purge, automatic re-warm, R2 snapshot |
-| HiPS, VSX, NED had no breaker | every upstream behind a breaker |
-| budgets disabled for local use | budgets on in production |
-| Sharpen was made default after looking at one frame per field | frame audit on every frame before any default |
+| an upstream without a breaker | every upstream behind a breaker |
+| budgets disabled | budgets on in production |
+| a display option made default after looking at one frame per field | frame audit on every frame before any default |

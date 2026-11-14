@@ -69,13 +69,13 @@ make it a yes.
 | RA 27.378, Dec −0.120, 18′, pass of July 2025 | a point that comes into focus as the distance slider nears 95 au (Eris, V 18.7) | sum of the visits along the motion |
 | Sedna's three fields | after the deep sum, one lead card that is Sedna (V 20.8), about 83 au | deep sum of three passes |
 
-Known honest result from the research (to be improved, not hidden): in the ecliptic 60′ film a verified asteroid is seen because it is
+Known honest limit (to be improved, not hidden): in the ecliptic 60′ film a verified asteroid is seen because it is
 ringed; unmarked it is a 2–3 px point among ~300 stars. Milestone M10 carries the work that could turn this into a yes (sky behind
 the motion layer, a short trail, a blink strip of the body's visits, a narrower film around a found track).
 
 ## 1.6 Rules that hold everywhere
 
-These come from the research phase and from the user's own reviews. They are requirements, not preferences.
+These come from measurements on real exposures and from the user's own reviews. They are requirements, not preferences.
 
 | Rule | Detail |
 |---|---|

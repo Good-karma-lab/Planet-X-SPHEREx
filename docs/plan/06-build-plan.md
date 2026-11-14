@@ -168,7 +168,7 @@ to the supervisor. Small commits throughout. The walking skeleton is deployed ea
 | Memory spikes (60′ fields, deep sums) | OOM on 12 GB | memory admission; streaming builds; process recycling |
 | Version bumps purge the warm set right before a demo | the demo waits | automatic re-warm; `/health` warm line; freeze product versions before the demo; R2 snapshot of the previous warm set |
 | Free-tier terms change | cost or loss of service | check on sign-up day; documented fallback |
-| Research numbers not reproduced exactly (full files vs the research's cutouts; new pipeline versions) | doubt | each mismatch investigated and explained in the validation report before moving on |
+| Target numbers not reproduced exactly (full files vs cutouts; new pipeline versions) | doubt | each mismatch investigated and explained in the validation report before moving on |
 
 ## 6.2 Open questions and decisions
 

@@ -2,7 +2,7 @@
 
 Date: 2026-11-14. Status: accepted.
 
-**Context.** In the research phase one engine version was part of every key and was bumped nine times in two days, throwing away
+**Context.** With one engine version in every key, a busy development period bumps it many times a day, throwing away
 every computed field; the demo targets were then recomputed while a person waited.
 
 **Decision.** One version per product kind and a declared dependency graph; a key holds the product's own version, the versions of the
