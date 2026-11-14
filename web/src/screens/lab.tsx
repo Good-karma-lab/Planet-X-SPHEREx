@@ -158,6 +158,10 @@ interface Track {
   saturated: boolean;
   check: 'same' | 'none' | 'pending' | 'still';
   gaia: { source_id: string; pm: number; pa?: number; g?: number | null; offset_arcsec: number } | null;
+  /** 'red': found by the brown dwarf scan in the red bands (3.8–5 µm), where the white stacks do not show it */
+  source?: 'red';
+  /** the catalogue name the service found for it */
+  name?: string;
 }
 /** The designation JPL and CADC understand: the number of a numbered body, else its provisional designation. */
 function sbdbName(name: string): string {
@@ -319,9 +323,10 @@ function MoversRows({
           onClick={() => onPick(t, names[i] ?? '')}
           title="Select this mover: its spectrum is measured along its track"
         >
-          <b>{names[i] || 'unnamed'}</b>
+          <b>{names[i] || t.name || 'unnamed'}</b>
           <span>
             {rateText(t)} toward {t.pa.toFixed(0)}° · {t.passes.length} passes{t.saturated ? ' · saturated core' : ''}
+            {t.source === 'red' ? ' · found in the red bands, 3.8–5 µm' : ''}
           </span>
           <span class="faint">{t.check === 'same' && gaiaWord(t).includes('apart') ? gaiaWord(t) : (CHECK_WORD[t.check] ?? t.check)}</span>
         </button>
@@ -1037,7 +1042,7 @@ export function Lab({ route }: { route: Route }) {
           const yrs = year - 2025.9;
           const decN = t.dec_2025_9 + (t.v_north * yrs) / 3600;
           const raN = t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((decN * Math.PI) / 180);
-          const line = `${rateText(t)} · ${gaiaWord(t)}${t.saturated ? ' · saturated core' : ''}`;
+          const line = `${rateText(t)} · ${gaiaWord(t)}${t.saturated ? ' · saturated core' : ''}${t.source === 'red' ? ' · red bands' : ''}`;
           const same = marks.find(
             (k) => k.kind === 'target' && Math.hypot((k.ra - raN) * Math.cos((decN * Math.PI) / 180), k.dec - decN) * 3600 < 12,
           );
