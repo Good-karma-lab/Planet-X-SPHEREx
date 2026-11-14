@@ -24,6 +24,8 @@ from service.catalogue_check import check as catalogue_check
 from service.config import Config, load
 from service.coverage import coverage_map
 from service.jobs.scheduler import Priority, Scheduler
+from service.lightcurves import neowise as lc_neowise
+from service.lightcurves import ztf as lc_ztf
 from service.movers import Movers
 from service.products.store import Store, product_key
 from service.products.versions import VERSIONS
@@ -64,6 +66,7 @@ class State:
         self.movers: Movers | None = None
         self.anomalies: Anomalies | None = None
         self.bodies: KnownBodies | None = None
+        self.lightcurves: dict[tuple[float, float, int, int], dict[str, Any]] = {}
         self.identified: dict[tuple[float, float, int, int], dict[str, Any]] = {}
         self.coverage_lock = asyncio.Lock()
 
@@ -346,6 +349,29 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             media_type="application/json" if name.endswith(".json") else "application/octet-stream",
             headers={"Cache-Control": "public, max-age=31536000, immutable" if immutable else "no-store"},
         )
+
+    @app.get(f"{API_PREFIX}/lightcurves")
+    async def lightcurves(
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        pmra: float = Query(0.0, ge=-20000, le=20000),
+        pmdec: float = Query(0.0, ge=-20000, le=20000),
+    ) -> Any:
+        """ZTF and NEOWISE light curves of a place (IRSA), each part ok / none / unavailable."""
+        if st.spectra is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        key = (round(ra, 5), round(dec, 5), round(pmra), round(pmdec))
+        hit = st.lightcurves.get(key)
+        if hit is not None:
+            return hit
+        params = spectrum_params(ra, dec, pmra, pmdec)
+        z, nw = await asyncio.gather(lc_ztf(params), lc_neowise(params))
+        out = {"ztf": z, "neowise": nw}
+        if z["state"] != "unavailable" and nw["state"] != "unavailable":
+            st.lightcurves[key] = out
+            if len(st.lightcurves) > 2000:
+                st.lightcurves.pop(next(iter(st.lightcurves)))
+        return out
 
     @app.get(f"{API_PREFIX}/identify")
     async def identify(

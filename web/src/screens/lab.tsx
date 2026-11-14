@@ -12,6 +12,7 @@ import { PER_PASS, Renderer, wallLayout, type Panel, type StackName } from '../v
 import { atEpoch } from '../lib/sky';
 import { FilmView, type KnownBody } from './film';
 import { NeossatCard } from './neossat';
+import { LightCurves } from './lightcurve';
 import { ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
 import { halfToFloat } from '../lib/sxp';
 
@@ -1925,6 +1926,7 @@ export function Lab({ route }: { route: Route }) {
               ) : (
                 <>
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
+                  {sel && <LightCurves src={sel} />}
                   {sel && (
                     <div class="xlinks">
                       <span class="faint">Look it up:</span>
