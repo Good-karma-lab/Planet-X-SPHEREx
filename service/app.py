@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import multiprocessing
 import os
@@ -12,6 +13,7 @@ from collections.abc import AsyncIterator
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
@@ -64,6 +66,7 @@ class State:
         self.executor: ProcessPoolExecutor | None = None
         self.index_health: dict[str, Any] | None = None
         self.quicklook: QuickLook | None = None
+        self.warm_searches: dict[str, Any] = {}
         self.warm: WarmRunner | None = None
         self.hips: HipsTiles | None = None
         self.coverage: dict[str, Any] | None = None
@@ -219,10 +222,83 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             raise RuntimeError(job.error)
         return False
 
+    class _Background:
+        priority = Priority.P2  # what service.cpu reads: the warm searches give way to a person's work
+
+    async def give_way() -> None:
+        while st.scheduler is not None and st.scheduler.person_waiting():
+            await asyncio.sleep(2.0)
+
+    async def warm_field_searches(f: WarmField) -> None:
+        """Everything a visitor of a test field asks for, kept on disk: movers, red sources, the anomaly search (every size), the
+        spectra of the test target and of every anomaly, and the anomalies' passports (asked of SIMBAD and Gaia by the search)."""
+        assert st.store is not None and st.index is not None
+        k = await asyncio.to_thread(warm_key, f)
+        if k is None or not st.store.is_complete(k[0]):
+            return
+        key = k[0]
+        await give_way()
+        if st.movers is not None:
+            mrun = st.movers.get_or_start(key)
+            while mrun.state == "running":
+                await asyncio.sleep(2.0)
+        await give_way()
+        with contextlib.suppress(Exception):  # a field without enough passes: the visitor's button says why
+            await find_red_async(st.store, key, cfg.store_dir / "red")
+        await give_way()
+        anomalies: list[dict[str, Any]] = []
+        if st.anomalies is not None:
+            arun = st.anomalies.get(key) or st.anomalies.start(key)
+            while arun.state in ("running", "waiting"):
+                await asyncio.sleep(5.0)
+            anomalies = list((arun.result or {}).get("anomalies", []))
+        if st.spectra is None:
+            return
+        wanted = [
+            spectrum_params(float(a["ra"]), float(a["dec"]), float(a.get("pmra") or 0.0), float(a.get("pmdec") or 0.0)) for a in anomalies
+        ]
+        t = targets_by_label.get(f.label)
+        if t is not None:
+            wanted.insert(
+                0,
+                spectrum_params(
+                    float(t["ra_deg"]),
+                    float(t["dec_deg"]),
+                    float(t["pmra_mas_yr"]),
+                    float(t["pmdec_mas_yr"]),
+                    float(t.get("epoch", 2000.0)),
+                ),
+            )
+        for params in wanted:
+            await give_way()
+            srun = st.spectra.get(params) or st.spectra.start(params)
+            while srun.state == "running":
+                await asyncio.sleep(3.0)
+
+    targets_by_label: dict[str, dict[str, Any]] = {}
+
     async def warm_loop() -> None:
         assert st.warm is not None
+        cpu.JOB.set(_Background())
+        try:
+            data = json.loads((Path(__file__).resolve().parent.parent / "data" / "targets.json").read_text(encoding="utf-8"))
+            targets_by_label.update({t["label"]: t for t in data["targets"]})
+        except (OSError, ValueError, KeyError):
+            pass
         while True:
             await st.warm.run(ensure_warm, warm_complete)
+            if st.warm.state == "done":
+                # then the searches of every warm field, smallest first (each is skipped at once when already on disk)
+                fields = sorted((f for f in st.warm.fields if f.film_mjd is None), key=lambda f: f.fov)
+                st.warm_searches = {"done": 0, "total": len(fields), "current": ""}
+                for f in fields:
+                    st.warm_searches["current"] = f"{f.label} {f.fov:g}′"
+                    try:
+                        await warm_field_searches(f)
+                    except Exception as e:  # said in /health, the next round tries again
+                        st.warm_searches.setdefault("failed", {})[f"{f.label} {f.fov:g}′"] = f"{type(e).__name__}: {e}"[:200]
+                    st.warm_searches["done"] += 1
+                st.warm_searches["current"] = ""
             await asyncio.sleep(60.0 if st.warm.state != "done" else 600.0)
 
     app = FastAPI(
@@ -265,7 +341,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "product_versions": dict(VERSIONS),
             "index": index_health(),
             "jobs": st.scheduler.snapshot() if st.scheduler else None,
-            "warm": st.warm.snapshot() if st.warm else None,
+            "warm": {**st.warm.snapshot(), "searches": st.warm_searches} if st.warm else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
             "cpu": cpu.stats(),
             "tiles": None if st.hips is None else {"cached": st.hips.count, "fetched": st.hips.fetched, "failed": st.hips.failed},
