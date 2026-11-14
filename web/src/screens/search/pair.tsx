@@ -16,6 +16,8 @@ export interface Pair {
   separation_arcsec: number;
   components: [Core, Core];
   verdict?: string;
+  /** the largest change of the ratio between passes, in σ (with the covariance of the two amplitudes) */
+  change_sigma?: number | null;
   peak_shift_arcsec?: number | null;
   centroid_shift_arcsec?: number | null;
   ratio_per_pass?: (number | null)[];
@@ -110,9 +112,12 @@ export function PairCard({
         )}
         {row(
           'Moving?',
-          `no: the peak hops ${p.peak_shift_arcsec != null ? `${p.peak_shift_arcsec.toFixed(1)}″` : ''} between the cores; the light-weighted centre moves ${p.centroid_shift_arcsec != null ? `${p.centroid_shift_arcsec.toFixed(1)}″` : 'little'}`,
+          p.peak_shift_arcsec != null
+            ? `no: the peak hops ${p.peak_shift_arcsec.toFixed(1)}″ between the cores; the light-weighted centre moves ${p.centroid_shift_arcsec != null ? `${p.centroid_shift_arcsec.toFixed(1)}″` : 'little'}`
+            : 'no: both cores stay where they are; only their brightness ratio changes',
           'a mover shifts the whole blob; a changing pair shifts only the peak',
         )}
+        {p.change_sigma != null && row('Size of the change', `${p.change_sigma.toFixed(1)} σ in the ratio of the cores`, 'the largest change of ln(core 2 ÷ core 1) between two passes, with the covariance of the two amplitudes in its error')}
         {[A, B].map((c, i) =>
           row(
             `Core ${i + 1}${coreName(c) ? ` · ${coreName(c)}` : ''}`,

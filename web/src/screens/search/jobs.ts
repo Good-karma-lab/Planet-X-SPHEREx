@@ -75,3 +75,10 @@ export function useProduct(name: string): boolean | null {
   }, [name]);
   return has;
 }
+
+/** The service's honest words: one string, or an object of strings (limit, planet_nine, lead, ...), as lines. */
+export function honestLines(h: unknown): string[] {
+  if (typeof h === 'string') return [h];
+  if (h && typeof h === 'object') return Object.values(h as Record<string, unknown>).filter((v): v is string => typeof v === 'string');
+  return [];
+}

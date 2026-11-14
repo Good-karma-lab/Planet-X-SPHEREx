@@ -4,9 +4,10 @@ export { drawBodyPath, fetchBodyPath, todayText, type BodyPath, type PathPoint, 
 export { FilmTracks, useFilmTracks, chanceText, daysStatus, trackLine, visitMarks } from './film-tracks';
 export { drawBlink, drawTracks, trackName, type FilmControl, type FilmTrack, type TrackPoint } from './tracks';
 export { PairButton, PairCard, type Pair } from './pair';
-export { DistantCanvas, DistantLines, DistantPanel, peakRows, useDistant, type Distant, type DistantCandidate, type DistantResult, type DistantSliders } from './distant';
+export { DistantCanvas, DistantLines, DistantPanel, peakRows, useDistant, useDistantPlan, type Distant, type DistantPlan, type DistantCandidate, type DistantResult, type DistantSliders } from './distant';
 export { about, progressText, runJob, useProduct } from './jobs';
 export { DeepSumPanel, type DeepCandidate, type DeepResult } from './deep';
 export { JumpView, LinkCard, LinkPanel, type Jump, type LinkEntry, type LinkResult } from './link';
 export { BACKDROP_YEAR, SPHEREX_YEARS, drawMovingPath, placeAt, type MovingObject } from './path';
-export { SEARCHED_COLOR, SearchedCard, SearchedLegend, drawSearched, hitSearched, useSearched, type SearchedField } from './searched';
+export { ExportFound, foundCsv, useFound } from './export';
+export { SEARCHED_COLOR, SearchedCard, SearchedCounter, SearchedLegend, searchedTotals, drawSearched, hitSearched, useSearched, type SearchedField } from './searched';

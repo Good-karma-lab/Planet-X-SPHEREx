@@ -28,6 +28,10 @@ export interface DeepResult {
   control?: { measured: number; reach_sn5: number };
   candidates?: DeepCandidate[];
   total_secs?: number;
+  /** seconds the scan of the orbits took */
+  scan_secs?: number;
+  sum_peak?: number;
+  honest?: unknown;
 }
 
 interface Plan {
@@ -112,7 +116,7 @@ export function DeepSumPanel({
       if (my !== tok.current) return;
       if (!j) return setD({ state: 'none', text: 'The service does not make this search yet.' });
       const r = j.result as unknown as DeepResult;
-      setD(r?.status === 'ok' ? { state: 'done', r: { ...r, total_secs: r.total_secs ?? (Date.now() - t0) / 1000 }, sel: null } : { state: 'none', text: (r?.notes ?? []).join(' ') || 'No result.' });
+      setD(r?.status === 'ok' ? { state: 'done', r: { ...r, total_secs: r.scan_secs ?? r.total_secs ?? (Date.now() - t0) / 1000 }, sel: null } : { state: 'none', text: (r?.notes ?? []).join(' ') || 'No result.' });
     } catch (e) {
       if ((e as Error).message !== 'cancelled') setD({ state: 'error', text: (e as Error).message });
     }
@@ -145,7 +149,7 @@ export function DeepSumPanel({
         </>
       )}
       {d.state === 'plan' && (
-        <PlanForm d={d} passes={passes} inputs={inputs} onStart={(fields) => void run(d.dmin, d.dmax, d.p.estimate_s, fields)} onCancel={close} />
+        <PlanForm d={d} passes={passes} inputs={inputs} onStart={(fields) => void run(d.dmin, d.dmax, d.p.estimate_s, fields)} onReplan={(a, b) => void plan(a, b)} onCancel={close} />
       )}
       {d.state === 'running' && (
         <>
@@ -169,21 +173,33 @@ function PlanForm({
   passes,
   inputs,
   onStart,
+  onReplan,
   onCancel,
 }: {
   d: Extract<Deep, { state: 'plan' }>;
   passes: number[];
   inputs: { current: [string, string][] };
   onStart: (fields: string) => void;
+  onReplan: (dmin: number, dmax: number) => void;
   onCancel: () => void;
 }) {
   const [, force] = useState(0);
+  const [lo, setLo] = useState(String(d.dmin));
+  const [hi, setHi] = useState(String(d.dmax));
   const over = d.p.plan.hypotheses > d.p.limit;
   const fields = () => inputs.current.map((x, i) => `${(+x[0]).toFixed(5)},${(+x[1]).toFixed(5)},${d.p.fields[i]![2]}`).join(';');
   return (
     <>
       <div class="mono-s stl" title="The centres of the passes are a guess (a circular prograde orbit at the middle distance); a body whose own motion is larger or smaller than that can leave the 18′ field. Change them if you know better.">
-        distance {d.dmin}–{d.dmax} au · centres guessed, editable
+        distance range and centres guessed, editable
+      </div>
+      <div class="mono-s">
+        distance{' '}
+        <input class="ds-in" type="text" value={lo} aria-label="Nearest distance, au" onInput={(e) => setLo((e.currentTarget as HTMLInputElement).value)} /> –{' '}
+        <input class="ds-in" type="text" value={hi} aria-label="Farthest distance, au" onInput={(e) => setHi((e.currentTarget as HTMLInputElement).value)} /> au{' '}
+        <button class="btn sm" onClick={() => onReplan(Math.max(20, +lo || d.dmin), +hi || d.dmax)}>
+          Update the plan
+        </button>
       </div>
       {d.p.fields.map((f, i) => (
         <div class="mono-s" key={i}>
@@ -238,9 +254,10 @@ function DeepResultView({
       {L(`bar: S/N ${r.photometry_threshold} · control tracks: ${r.control ? `${r.control.reach_sn5} of ${r.control.measured} reach S/N 5` : 'n/a'}`)}
       {L('blind limit about V 20–21 · reflected light')}
       {L('Planet Nine: margin 1.4–1.7× only in D4 (3 µm)')}
-      {!C.length && L('nothing above the bar')}
+      {!C.some((c) => !c.alias && (c.ok || (c.phot_sn ?? 0) >= r.photometry_threshold)) && L('nothing above the bar')}
+      {C.some((c) => c.alias) && L(`${C.filter((c) => c.alias).length} more peaks of the sum are the same body at neighbouring distances (aliases), not listed`)}
       {C.map((c, i) => {
-        if (!c.ok && !c.alias && !((c.phot_sn ?? 0) >= r.photometry_threshold)) return null;
+        if (c.alias || (!c.ok && !((c.phot_sn ?? 0) >= r.photometry_threshold))) return null;
         return (
           <div key={i}>
             <button

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { formatDec, formatRA } from '../lib/sky';
 import { binNote, binSpectrum, type Bin } from './spectrum/bins';
 import { CatalogueCheck } from './spectrum/catalogue';
+import { useQuicklook, type Quick } from './spectrum/quicklook';
 import { StampPanels, useStamps } from './spectrum/stamps';
 import type { Source, SpecPoint } from './spectrum/types';
 import './spectrum/extra.css';
@@ -75,7 +76,7 @@ export function useSpectrum(src: Source | null): {
         } catch (e) {
           setError(String(e));
         }
-        await new Promise((res) => setTimeout(res, 700));
+        await new Promise((res) => setTimeout(res, 350));
       }
     };
     void poll();
@@ -86,7 +87,7 @@ export function useSpectrum(src: Source | null): {
   return { view, points, error };
 }
 
-function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]; cur: SpecPoint | null }) {
+function SpectrumChart({ points, bins, cur, quick }: { points: SpecPoint[]; bins: Bin[]; cur: SpecPoint | null; quick: Quick | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
@@ -101,7 +102,7 @@ function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]
     c.clearRect(0, 0, W, H);
     const ok = points.filter((p) => p.ok && p.flux != null);
     const L = 42;
-    const R = 8;
+    const R = quick ? 40 : 8;
     const T = 20;
     const B = 26;
     const x = (lam: number) => L + ((lam - 0.7) / (5.05 - 0.7)) * (W - L - R);
@@ -141,6 +142,37 @@ function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]
       c.moveTo(L, y(0));
       c.lineTo(W - R, y(0));
       c.stroke();
+    }
+    // the quick look of the all-sky cube on its own scale (right axis), faint once the measured spectrum has points of its own
+    if (quick) {
+      const qf = quick.flux.map((v) => (v != null && Number.isFinite(v) ? v : null));
+      const qmax = Math.max(1e-9, ...qf.filter((v): v is number => v != null));
+      const qy = (v: number) => T + (1 - v / (qmax * 1.1)) * (H - T - B);
+      const faint = ok.length >= 20;
+      c.save();
+      c.strokeStyle = faint ? 'rgba(200,215,222,0.22)' : 'rgba(200,215,222,0.7)';
+      c.lineWidth = 1.4;
+      c.beginPath();
+      let pen = false;
+      quick.lam.forEach((lam, i) => {
+        const v = qf[i];
+        if (v == null) {
+          pen = false;
+          return;
+        }
+        if (pen) c.lineTo(x(lam), qy(v));
+        else c.moveTo(x(lam), qy(v));
+        pen = true;
+      });
+      c.stroke();
+      c.fillStyle = faint ? 'rgba(160,185,194,0.4)' : 'rgba(160,185,194,0.9)';
+      c.font = '500 10px ui-monospace, Menlo, monospace';
+      c.textAlign = 'left';
+      for (let k = 0; k <= 2; k++) c.fillText(fmt((qmax * 1.1 * (2 - k)) / 2), W - R + 3, qy((qmax * 1.1 * (2 - k)) / 2) + 3);
+      c.fillText(quick.unit, W - R + 3, 12);
+      c.textAlign = 'right';
+      c.fillText('quick look (all-sky cube)', W - R - 4, T + 10);
+      c.restore();
     }
     for (const p of ok) {
       const col = `hsl(${DET_HUE[p.det - 1]},80%,62%)`;
@@ -201,7 +233,7 @@ function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]
         c.setLineDash([]);
       }
     }
-  }, [points, bins, cur]);
+  }, [points, bins, cur, quick]);
   return <canvas ref={ref} class="spec-chart" aria-label="Spectrum: flux against wavelength" />;
 }
 
@@ -281,7 +313,8 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const [cleared, setCleared] = useState<Source | null>(null);
   const shown = src && src !== cleared ? src : null;
   const { view, points, error } = useSpectrum(shown);
-  const { stamps } = useStamps(shown, view?.state === 'running' || !view);
+  const { stamps, finished: stampsDone } = useStamps(shown, view?.state === 'running' || !view);
+  const quick = useQuicklook(shown);
   const [at, setAt] = useState<number | null>(null); // null: the newest exposure
   const [playing, setPlaying] = useState(false);
   const rows = useMemo(() => [...points].sort((a, b) => a.i - b.i), [points]);
@@ -312,6 +345,8 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const perDet = [1, 2, 3, 4, 5, 6].map((d) => points.filter((p) => p.ok && p.det === d).length);
   const usable = points.filter((p) => p.ok).length;
   const cur = rows[k] ?? null;
+  // a target that saturates the detector has no SPHEREx spectrum: say so once, show none of the per-exposure lines
+  const saturated = !!view && (view.no_spectrum || (view.measured >= 20 && view.saturated > 0.5 * view.measured));
   return (
     <div class="spec">
       <div class="spec-head">
@@ -332,10 +367,16 @@ export function SpectrumTab({ src }: { src: Source | null }) {
               ? `${usable} points from the ${view.total} exposures that cover this place`
               : `Failed: ${view.error}`}
       </div>
-      {(view?.no_spectrum || (view && view.measured >= 20 && view.saturated > 0.5 * view.measured)) && (
+      {(!view || view.state === 'running') && (
+        <div class={`spec-prog${!view || view.total === 0 ? ' indet' : ''}`} aria-label="Measuring the spectrum">
+          <i style={view && view.total > 0 ? `width:${Math.round((100 * view.measured) / view.total)}%` : ''} />
+        </div>
+      )}
+      {saturated && (
         <div class="partial">Saturated in most exposures: no SPHEREx spectrum (the core of this star overflows the detector)</div>
       )}
-      <SpectrumChart points={points} bins={bins} cur={cur} />
+      <SpectrumChart points={points} bins={bins} cur={cur} quick={quick} />
+      {quick?.note && <div class="spec-bin-note">quick look: {quick.note}</div>}
       {bins.length > 0 && <div class="spec-bin-note">{binNote(bins)}</div>}
       <div class="spec-dets">
         {perDet.map((n, i) => (
@@ -344,7 +385,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           </span>
         ))}
       </div>
-      {rows.length > 1 && (
+      {rows.length > 1 && !saturated && (
         <ExposurePlayer
           rows={rows}
           k={k}
@@ -356,20 +397,21 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           }}
         />
       )}
-      {cur && (
+      {cur && !saturated && (
         <StampPanels
           stamp={stamps.get(cur.i)}
           note={!cur.ok ? `no fit: ${cur.why || 'no usable measurement'}` : undefined}
         />
       )}
-      {why.size > 0 && <div class="mono-s">Not used: {[...why.entries()].map(([k2, n]) => `${n} ${k2}`).join(' · ')}</div>}
+      {cur && !saturated && stampsDone && stamps.size === 0 && <div class="mono-s">The pixels were not kept for this spectrum (it was measured before they were stored).</div>}
+      {why.size > 0 && !saturated && <div class="mono-s">Not used: {[...why.entries()].map(([k2, n]) => `${n} ${k2}`).join(' · ')}</div>}
       {error && (
         <div class="mono-s" style={{ color: 'var(--amber)' }}>
           {error}
         </div>
       )}
-      <CatalogueCheck src={shown} ready={view?.state === 'done' && points.length > 0} />
-      {view?.state === 'done' && points.length > 0 && (
+      <CatalogueCheck src={shown} ready={view?.state === 'done' && points.length > 0} saturated={saturated} />
+      {view?.state === 'done' && usable > 0 && (
         <a
           class="lnk"
           download={`spectrum-${formatRA(shown.ra, true)}${formatDec(shown.dec, true)}.csv`}
@@ -403,15 +445,34 @@ function useIdentify(src: Source | null): Identified | null | 'asking' {
     if (!src) return;
     setV('asking');
     const ctl = new AbortController();
-    const q = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6) });
-    if (src.pmra || src.pmdec) {
-      q.set('pmra', String(src.pmra ?? 0));
-      q.set('pmdec', String(src.pmdec ?? 0));
+    // a place on the picture is where the thing is in 2025.9: ask the catalogues at that epoch (they move their stars); a catalogue object
+    // that carries a proper motion has its J2000 place, so epoch 2000
+    const moving = !!(src.pmra || src.pmdec);
+    const cq = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6), epoch: moving ? '2000' : '2025.9', radius: '6' });
+    const old = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6) });
+    if (moving) {
+      old.set('pmra', String(src.pmra ?? 0));
+      old.set('pmdec', String(src.pmdec ?? 0));
     }
-    fetch(`/api/v1/identify?${q}`, { signal: ctl.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: Identified | null) => setV(d))
-      .catch(() => {});
+    const fromContext = (c: {
+      simbad?: { state: string; name?: string; otype?: string; sptype?: string | null; sep?: number };
+      gaia?: Identified['gaia'];
+    }): Identified => ({
+      simbad: c.simbad && { state: c.simbad.state, name: c.simbad.name, type: c.simbad.otype, sp: c.simbad.sptype ?? null, sep: c.simbad.sep },
+      gaia: c.gaia,
+    });
+    fetch(`/api/v1/context?${cq}`, { signal: ctl.signal })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((c) => setV(fromContext(c)))
+      .catch((e) => {
+        if (ctl.signal.aborted) return;
+        // the service has no context route: the older lookup (J2000 place and proper motion)
+        void e;
+        fetch(`/api/v1/identify?${old}`, { signal: ctl.signal })
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d: Identified | null) => setV(d))
+          .catch(() => {});
+      });
     return () => ctl.abort();
   }, [src?.ra, src?.dec, src?.pmra, src?.pmdec]);
   return v;

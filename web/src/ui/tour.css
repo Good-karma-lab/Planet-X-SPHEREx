@@ -1,0 +1,4 @@
+.tour { position: fixed; left: 78px; bottom: 18px; z-index: 50; width: min(360px, calc(100vw - 100px)); padding: 14px 16px; border-radius: 14px; border: 1px solid var(--edge, rgba(140,225,240,0.25)); background: rgba(6, 14, 20, 0.94); box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5); }
+.tour p { margin: 8px 0 12px; font-size: 13px; line-height: 1.45; color: var(--ink, #d6e7ed); }
+.tour-h, .tour-f { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.tour-h b { font: 600 12px var(--mono, monospace); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent-l, #9ff3ea); }

@@ -17,6 +17,8 @@ export interface SearchedField {
   nothing?: boolean;
   best?: { kind: string; label: string; sn?: number } | null;
   searched_at?: string;
+  /** exposures the searches of this field read */
+  exposures?: number;
   /** what the lab address needs to show the result */
   open: { ra: number; dec: number; fov: number; pass?: number | null; film?: number | null };
 }
@@ -153,6 +155,36 @@ export function SearchedCard({ f, onOpen, onClose }: { f: SearchedField; onOpen:
           </button>
         )}
       </div>
+    </div>
+  );
+}
+
+/** The totals of the searched fields: how many, how much sky (the fields' areas added: overlaps count twice), how many exposures and how many leads. */
+export function searchedTotals(fields: SearchedField[]): { fields: number; deg2: number; exposures: number; leads: number } {
+  return {
+    fields: fields.length,
+    deg2: fields.reduce((a, f) => a + (f.fov / 60) ** 2, 0),
+    exposures: fields.reduce((a, f) => a + (f.exposures ?? 0), 0),
+    leads: fields.reduce((a, f) => a + f.found, 0),
+  };
+}
+
+/** «Searched so far»: fields, square degrees, exposures and leads, from /api/v1/searched. Renders nothing while the service has no such list. */
+export function SearchedCounter({ fields }: { fields: SearchedField[] | null }) {
+  if (!fields) return null;
+  const t = searchedTotals(fields);
+  const tile = (b: string, l: string, tip?: string) => (
+    <div title={tip}>
+      <b>{b}</b>
+      <span>{l}</span>
+    </div>
+  );
+  return (
+    <div class="fsum searched-counter" aria-label="Searched so far">
+      {tile(t.fields.toLocaleString('en-US'), 'fields searched so far')}
+      {tile(t.deg2 < 10 ? t.deg2.toFixed(2) : t.deg2.toFixed(0), 'square degrees', 'the areas of the fields added; fields that overlap count twice')}
+      {t.exposures > 0 && tile(t.exposures.toLocaleString('en-US'), 'exposures read')}
+      {tile(t.leads.toLocaleString('en-US'), 'leads (not discoveries)')}
     </div>
   );
 }

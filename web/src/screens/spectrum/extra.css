@@ -19,3 +19,7 @@
 .cattab th { text-align: left; color: var(--muted); font-weight: 600; padding: 3px 4px; border-bottom: 1px solid var(--edge-soft); }
 .cattab td { padding: 4px; border-bottom: 1px solid var(--edge-soft); }
 .cattab td.warn { color: var(--amber); }
+.spec-prog { height: 3px; border-radius: 2px; background: rgba(95, 227, 214, 0.15); overflow: hidden; }
+.spec-prog i { display: block; height: 100%; background: var(--accent); transition: width 0.3s; }
+.spec-prog.indet i { width: 35%; animation: spec-indet 1.4s ease-in-out infinite; }
+@keyframes spec-indet { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }

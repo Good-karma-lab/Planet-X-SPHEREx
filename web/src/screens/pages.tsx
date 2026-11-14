@@ -4,6 +4,16 @@ import { outline } from '../lib/healpix';
 import { formatHash, type Screen } from '../lib/route';
 import { D2R } from '../lib/sky';
 import { NeossatCard } from './neossat';
+import { FindingPicture } from './findings/thumb';
+import './findings/findings.css';
+import { FIELD, useLive } from './findings/live';
+import { AboutBody } from './about/About';
+import { LeadReport, LeadsList, plainLine, rankLeads, useLeadParam } from './findings/leads';
+import { mountTour } from '../ui/Tour';
+import { SearchedCounter, useSearched } from './search/searched';
+
+
+mountTour();
 
 const fmtN = (n: number | undefined | null) => (n ?? 0).toLocaleString('en-US');
 const kv = (k: string, v: string) => (
@@ -109,25 +119,30 @@ function IndexPage({ health }: { health: FullHealth | null }) {
     <>
       <div class="pg-h">
         <h1>Exposure index</h1>
-        <p class="hint">What the sky service can search: every SPHEREx Level-2 exposure with its footprint, time and detector.</p>
+        <p class="hint">
+          How much of the SPHEREx archive this site can search, and how current that is. An exposure is one detector's picture of one pointing; the index lists every one
+          with where on the sky it looks and when, so a field opens in seconds instead of searching the archive each time. The map shows how often each part of the sky has been seen.
+        </p>
       </div>
       <div class="pg-grid">
         <section class="card glass">
           <h3>What can be searched</h3>
+          <p class="hint" style="margin-top:0">Every SPHEREx Level-2 exposure in the public archive, with its footprint, time and detector.</p>
           <dl class="kv">
-            {kv('Exposures indexed', fmtN(ix['files'] as number))}
+            {kv('Exposures we can search', fmtN(ix['files'] as number))}
             {kv('Releases', String(ix['releases'] ?? 'DR1 (year 1), QR3 (after it)'))}
-            {kv('Built', String(ix['built_at'] ?? ix['updated_at'] ?? ix['bootstrap_at'] ?? '—').replace('T', ' '))}
+            {kv('Index updated', String(ix['built_at'] ?? ix['updated_at'] ?? ix['bootstrap_at'] ?? '—').replace('T', ' '))}
             {kv('Source', String(ix['source'] ?? 'IRSA TAP, checked against the archive bucket'))}
           </dl>
         </section>
         <section class="card glass">
-          <h3>Service</h3>
+          <h3>The service behind this site</h3>
+          <p class="hint" style="margin-top:0">Opens fields, runs the searches and measures spectra.</p>
           <dl class="kv">
             {kv('Version', h?.version ?? '—')}
-            {kv('Started', (h?.started_at ?? '—').replace('T', ' '))}
+            {kv('Running since', (h?.started_at ?? '—').replace('T', ' '))}
             {kv(
-              'Product versions',
+              'Searches and products (version)',
               Object.entries(h?.product_versions ?? {})
                 .map(([k, v]) => `${k} ${v}`)
                 .join(' · ') || '—',
@@ -141,77 +156,23 @@ function IndexPage({ health }: { health: FullHealth | null }) {
   );
 }
 
-interface CatObj {
-  n: string;
-  ra: number;
-  dec: number;
-  pmra: number | null;
-  pmdec: number | null;
-  b?: number;
-}
-interface TrackLite {
-  speed: number;
-  pa: number;
-  passes: number[];
-  check: string;
-  gaia: { source_id: string; pm: number; g?: number | null } | null;
-}
-interface AnomalyLite {
-  n: number;
-  score: number;
-  drivers: { lo: number; hi: number; z: number; share: number }[];
-  identified?: { simbad?: { state: string; name?: string; type?: string }; gaia?: { state: string; source_id?: string } };
-}
-interface Live {
-  name: string;
-  ra: number;
-  dec: number;
-  movers: { state: string; result?: { passes: number; sources_per_pass: number[]; tracks: TrackLite[] } } | null;
-  anomalies: {
-    state: string;
-    result?: { with_spectrum: number; threshold: number | null; anomalies: AnomalyLite[]; reason: string } | null;
-  } | null;
-}
-
-const FIELD = 20;
 const CHECK: Record<string, string> = { same: 'Gaia: same motion', none: 'no Gaia motion', pending: 'Gaia not checked yet' };
-
-/** What the searches found in the 20′ fields of the five test targets, read live from the service (nothing is started here). */
-function useLive(): Live[] {
-  const [live, setLive] = useState<Live[]>([]);
-  useEffect(() => {
-    let stop = false;
-    void (async () => {
-      const cat = (await fetch('/catalog.json').then((r) => r.json())) as { catalog: CatObj[] };
-      const targets = cat.catalog.filter((o) => o.b);
-      const out: Live[] = [];
-      for (const o of targets) {
-        const dt = 2025.9 - 2000;
-        const dec = o.dec + ((o.pmdec ?? 0) * dt) / 3.6e6;
-        const ra = (o.ra + ((o.pmra ?? 0) * dt) / 3.6e6 / Math.cos((((dec + o.dec) / 2) * Math.PI) / 180) + 360) % 360;
-        const q = `ra=${ra.toFixed(6)}&dec=${dec.toFixed(6)}&fov=${FIELD}`;
-        const [mv, an] = await Promise.all([
-          fetch(`/api/v1/movers?${q}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null),
-          fetch(`/api/v1/anomalies?${q}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null),
-        ]);
-        out.push({ name: o.n, ra, dec, movers: mv, anomalies: an });
-        if (stop) return;
-        setLive([...out]);
-      }
-    })();
-    return () => {
-      stop = true;
-    };
-  }, []);
-  return live;
-}
 
 function FindingsPage() {
   const live = useLive();
+  const searched = useSearched();
+  const leads = rankLeads(live);
+  const [leadId, setLeadId] = useLeadParam();
+  const open = leads.find((l) => l.id === leadId);
+  if (leadId && open)
+    return (
+      <>
+        <div class="pg-h">
+          <h1>Findings</h1>
+        </div>
+        <LeadReport lead={open} onBack={() => setLeadId(null)} />
+      </>
+    );
   return (
     <>
       <div class="pg-h">
@@ -221,66 +182,75 @@ function FindingsPage() {
           system on SPHEREx Level-2 files.
         </p>
       </div>
+      <div class="fsum">
+        <div><b>{live.length}</b><span>fields searched</span></div>
+        <div><b>{live.reduce((a, l) => a + (l.movers?.result?.tracks.length ?? 0), 0)}</b><span>tracks between passes</span></div>
+        <div><b>{live.reduce((a, l) => a + (l.movers?.result?.tracks.filter((t) => t.check === 'same').length ?? 0), 0)}</b><span>of them a Gaia star with the same motion</span></div>
+        <div><b>{live.reduce((a, l) => a + (l.anomalies?.result?.anomalies.length ?? 0), 0)}</b><span>spectral anomalies</span></div>
+      </div>
+      <SearchedCounter fields={searched} />
+      <LeadsList leads={leads} onOpen={setLeadId} />
       <div class="pg-grid">
         {live.map((l) => {
           const mv = l.movers?.result;
           const an = l.anomalies?.result;
+          const chips: [string, string][] = [];
+          if (mv && mv.passes >= 3) {
+            for (const t of mv.tracks) chips.push([t.check === 'same' ? 'good' : 'warn', `${t.speed.toFixed(2)}″/yr · ${CHECK[t.check] ?? t.check}`]);
+            if (mv.pairs?.length) chips.push(['warn', `${mv.pairs.length} pair${mv.pairs.length === 1 ? '' : 's'} changing in place`]);
+          }
+          if (an?.anomalies?.length) chips.push(['warn', `${an.anomalies.length} spectral anomal${an.anomalies.length === 1 ? 'y' : 'ies'}`]);
           return (
-            <section class="card glass" key={l.name}>
-              <h3>
-                {l.name} · {FIELD}′ field
-              </h3>
-              <a href={lab(l.ra, l.dec, FIELD)} title="Open this field in the lab">
-                <img
-                  class="fimg"
-                  src={`/findings/${l.name
-                    .normalize('NFKD')
-                    .replace(/[^\w]+/g, '-')
-                    .replace(/^-|-$/g, '')
-                    .toLowerCase()}.jpg`}
-                  alt={`The lab's picture of the ${FIELD}′ field of ${l.name}: SPHEREx stacks, the target ringed`}
-                  loading="lazy"
-                />
-              </a>
-              <dl class="kv">
-                {kv(
-                  'Movers',
-                  !l.movers || l.movers.state === 'waiting'
-                    ? 'field not built yet'
-                    : !mv
-                      ? l.movers.state
-                      : mv.passes < 3
-                        ? `${mv.passes} passes: a track needs 3`
-                        : mv.tracks.length
-                          ? mv.tracks
-                              .map(
-                                (t) =>
-                                  `${t.speed.toFixed(2)}″/yr toward ${t.pa.toFixed(0)}° in ${t.passes.length} passes (${CHECK[t.check] ?? t.check})`,
-                              )
-                              .join('; ')
-                          : `none among ${mv.sources_per_pass.join(' / ')} sources per pass`,
-                )}
-                {kv(
-                  'Anomalies',
-                  !l.anomalies || l.anomalies.state === 'waiting' || l.anomalies.state === 'idle'
-                    ? 'not searched yet'
-                    : !an
-                      ? l.anomalies.state
-                      : an.reason ||
-                        (an.anomalies.length
-                          ? an.anomalies
-                              .slice(0, 3)
-                              .map(
-                                (a) =>
-                                  `${a.n}. ${a.identified?.simbad?.name ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')} (score ${a.score.toFixed(1)})`,
-                              )
-                              .join('; ')
-                          : `none of ${an.with_spectrum} spectra above ${an.threshold?.toFixed(2)}`),
-                )}
-              </dl>
-              <p>
-                <a href={lab(l.ra, l.dec, FIELD)}>Open in the lab</a>
-              </p>
+            <section class="card glass fcard" key={l.name}>
+              <FindingPicture name={l.name} href={lab(l.ra, l.dec, FIELD)} fieldKey={mv?.field ?? null} passes={mv?.passes ?? 0} />
+              <div class="fbody">
+                <h3>
+                  {l.name} · {FIELD}′ field
+                </h3>
+                <p class="plain">{plainLine(l)}</p>
+                <div class="fchips">
+                  {chips.length ? chips.map(([k, t], i) => <span key={i} class={`badge ${k === 'good' ? 'green' : 'orange'}`}>{t}</span>) : <span class="mono-s">nothing marked: nothing above the bar</span>}
+                </div>
+                <dl class="kv">
+                  {kv(
+                    'Movers',
+                    !l.movers || l.movers.state === 'waiting'
+                      ? 'field not built yet'
+                      : !mv
+                        ? l.movers.state
+                        : mv.passes < 3
+                          ? `${mv.passes} passes: a track needs 3`
+                          : mv.tracks.length
+                            ? mv.tracks
+                                .map(
+                                  (t) =>
+                                    `${t.speed.toFixed(2)}″/yr toward ${t.pa.toFixed(0)}° in ${t.passes.length} passes (${CHECK[t.check] ?? t.check})`,
+                                )
+                                .join('; ')
+                            : `none among ${mv.sources_per_pass.join(' / ')} sources per pass`,
+                  )}
+                  {kv(
+                    'Anomalies',
+                    !l.anomalies || l.anomalies.state === 'waiting' || l.anomalies.state === 'idle'
+                      ? 'not searched yet'
+                      : !an
+                        ? l.anomalies.state
+                        : an.reason ||
+                          (an.anomalies.length
+                            ? an.anomalies
+                                .slice(0, 3)
+                                .map(
+                                  (a) =>
+                                    `${a.n}. ${a.identified?.simbad?.name ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')} (score ${a.score.toFixed(1)})`,
+                                )
+                                .join('; ')
+                            : `none of ${an.with_spectrum} spectra above ${an.threshold?.toFixed(2)}`),
+                  )}
+                </dl>
+                <p>
+                  <a href={lab(l.ra, l.dec, FIELD)}>Open in the lab</a>
+                </p>
+              </div>
             </section>
           );
         })}
@@ -316,6 +286,15 @@ function FindingsPage() {
       </div>
     </>
   );
+}
+
+/** The full account is 300 kB of text: loaded when the Method page opens, not with the app. */
+function LazyMethodFull() {
+  const [C, setC] = useState<null | (() => preact.JSX.Element)>(null);
+  useEffect(() => {
+    void import('./method/MethodFull').then((m) => setC(() => m.MethodFull));
+  }, []);
+  return C ? <C /> : <div class="mono-s">Loading the full account…</div>;
 }
 
 function MethodPage() {
@@ -402,6 +381,10 @@ function MethodPage() {
       "The spectrum averaged under the 2MASS J, H, Ks and WISE W1, W2 filters (photon counting) against the catalogue magnitudes at each survey's epoch, quality A or B only. An ordinary star gives 0.99, 1.02, 1.03 and 0.985.",
     ],
     [
+      'Find Planet X',
+      "Exposures of one pass are added along trial distances (30–300 au) and own motions; the visits of all passes along one orbit. On Eris, one pass finds it at 12.2σ with 9.4σ in photometry but cannot fix its distance (the knob is flat from 46 to 165 au); linking two passes gives 95.9 ± 0.6 au (JPL 95.5). The depth reached is about V 20–21 in reflected light: the search makes no claim of a Planet X, and a Planet Nine of the predicted brightness is fainter (margin 1.4–1.7× over WISE only in D4, 3 µm).",
+    ],
+    [
       'Other missions',
       "CSA's NEOSSat frame of 3I/ATLAS on 14 Dec 2025 (CADC): its pointing refitted on Gaia DR3 stars, the comet found 5.6″ from JPL's place at G ≈ 12.4. A 15 s NEOSSat frame reaches only G ≈ 15–16, so it confirms bright comets, not the V 18–20 asteroids SPHEREx sees.",
     ],
@@ -414,9 +397,10 @@ function MethodPage() {
     <>
       <div class="pg-h">
         <h1>Method</h1>
-        <p class="hint">How every picture and number is computed, step by step.</p>
+        <p class="hint">How every picture and number is computed, step by step: what the live site does today, then the full account with its checks, videos and numbers.</p>
       </div>
       <section class="card glass">
+        <h3>In production today</h3>
         <table class="tbl">
           <tbody>
             {steps.map(([k, v]) => (
@@ -428,40 +412,13 @@ function MethodPage() {
           </tbody>
         </table>
       </section>
+      <LazyMethodFull />
     </>
   );
 }
 
 function AboutPage() {
-  return (
-    <>
-      <div class="pg-h">
-        <h1>About</h1>
-        <p class="hint">
-          SPHEREx Sky: real SPHEREx exposures of any patch of the sky, as a video of the seasons and the spectral bands inside them. Not
-          affiliated with or endorsed by NASA.
-        </p>
-      </div>
-      <div class="pg-grid">
-        <section class="card glass">
-          <h3>Data</h3>
-          <ul>
-            <li>SPHEREx Level-2 spectral images: NASA / JPL-Caltech, served by NASA/IPAC Infrared Science Archive (IRSA).</li>
-            <li>Object catalogue: SIMBAD, CDS Strasbourg.</li>
-            <li>Globe backgrounds: DSS2, 2MASS, AllWISE and IRIS all-sky surveys (HiPS), CDS and IRSA.</li>
-          </ul>
-        </section>
-        <section class="card glass">
-          <h3>Team</h3>
-          <ul>
-            <li>Good Karma Lab · NASA Space Apps Challenge 2026, Barcelona.</li>
-            <li>Licence: Apache-2.0.</li>
-            <li>Icons: Phosphor (MIT).</li>
-          </ul>
-        </section>
-      </div>
-    </>
-  );
+  return <AboutBody />;
 }
 
 export function InfoPage({ screen, health }: { screen: Screen; health: Health | null }) {
