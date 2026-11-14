@@ -444,6 +444,8 @@ export function Lab({ route }: { route: Route }) {
   const [trackSel, setTrackSel] = useState(-1);
   const [note, setNote] = useState('');
   const [wallWait, setWallWait] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(false);
+  const [bandsWait, setBandsWait] = useState(false);
   const [pairSel, setPairSel] = useState<number | null>(null);
   // the asteroid search runs on its own for the middle pass of the field (in Days: the pass on show)
   const astMjd = film ? film : meta?.passes[Math.floor((meta?.passes.length ?? 1) / 2)]?.mjd_mid;
@@ -741,6 +743,10 @@ export function Lab({ route }: { route: Route }) {
         if (st.view === 'picture')
           stack = allOn ? (r.loaded('picture').length >= 2 || r.loaded('quick').length === 0 ? 'picture' : 'quick') : 'bands';
         else stack = st.view === 'bands' ? 'bands' : 'dets';
+        // chosen bands whose pictures are still on their way: the picture stays as it was (no black frame), the status says so
+        const bandsPending = st.view === 'picture' && stack === 'bands' && !r.loaded('bands').length;
+        if (bandsPending) stack = r.loaded('picture').length ? 'picture' : 'quick';
+        setBandsWait((w) => (w === bandsPending ? w : bandsPending));
         const all = r.loaded(stack);
         // Difference: the reference pass shows no change, so the loop plays the passes compared with it
         const loaded = st.time === 'diff' && all.length > 1 && st.frame === null ? all.filter((k) => k > 0) : all;
@@ -1166,32 +1172,49 @@ export function Lab({ route }: { route: Route }) {
             ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
             ctx.fill();
           }
-        } else if (mk.motion) {
-          // too short to see beside the star (and never drawn inside a saturated core): an arrow from the ring along the motion
-          const ux = -mk.motion[0];
-          const uy = -mk.motion[1];
-          const un = Math.hypot(ux, uy) || 1;
-          const dx = ux / un;
-          const dy = uy / un;
-          const x0 = x + dx * (rr + 4);
-          const y0 = y + dy * (rr + 4);
-          const x1 = x + dx * (rr + 24);
-          const y1 = y + dy * (rr + 24);
-          const arrow = () => {
-            ctx.beginPath();
-            ctx.moveTo(x0, y0);
-            ctx.lineTo(x1, y1);
-            ctx.lineTo(x1 - dx * 7 - dy * 4, y1 - dy * 7 + dx * 4);
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x1 - dx * 7 + dy * 4, y1 - dy * 7 - dx * 4);
-            ctx.stroke();
+        }
+        if (mk.motion && !days) {
+          // the motion over the decades (2000 to 2050) as a dashed line with year ticks, never inside the ring: the trajectory
+          // can be seen even when the passes of 2025–26 lie inside the star's own disc
+          const [ve, vn] = mk.motion;
+          const at = (yr: number): [number, number] => {
+            const dt = yr - year;
+            const d = mk.dec + (vn * dt) / 3.6e6;
+            const r0 = mk.ra + (ve * dt) / 3.6e6 / Math.cos((d * Math.PI) / 180);
+            const [u, v] = uvOf(r0, d);
+            return [box.x + u * box.w, box.y + v * box.h];
           };
+          const years = [2000, 2010, 2020, 2030, 2040, 2050];
+          const pts = years.map((yr) => [yr, ...at(yr)] as const);
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(box.x, box.y, box.w, box.h);
+          ctx.arc(x, y, rr + 3, 0, 2 * Math.PI, true); // outside the ring only
+          ctx.clip('evenodd');
+          ctx.setLineDash([5, 4]);
           ctx.lineWidth = 3;
-          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-          arrow();
-          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+          ctx.beginPath();
+          pts.forEach(([, px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+          ctx.stroke();
+          ctx.lineWidth = 1.3;
           ctx.strokeStyle = mk.colour;
-          arrow();
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.font = '600 10px ui-monospace, Menlo, monospace';
+          for (const [yr, px, py] of pts) {
+            if (Math.hypot(px - x, py - y) < rr + 8) continue;
+            ctx.fillStyle = mk.colour;
+            ctx.beginPath();
+            ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
+            ctx.fill();
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#000';
+            ctx.strokeText(String(yr), px + 5, py - 4);
+            ctx.fillStyle = '#e8f6f4';
+            ctx.fillText(String(yr), px + 5, py - 4);
+          }
+          ctx.restore();
         }
       };
       const wall = !days && st.view !== 'picture';
@@ -1308,8 +1331,11 @@ export function Lab({ route }: { route: Route }) {
     if (view === 'bands' || bands.length < BANDS.length || fov <= 10) c.want('bands_');
     if (view === 'det' || fov <= 10) c.want('dets_');
     if (time === 'diff') c.want('diff');
+    // the band pictures are fetched soon after the field opens, so choosing bands shows them at once
+    const t = meta ? setTimeout(() => c.want('bands_'), 2500) : 0;
     if (opts.artifacts) c.want('flags_');
     if (tab === 'obj') c.want('dets_');
+    return () => clearTimeout(t);
   }, [view, time, fov, meta, bands.length, opts.artifacts, tab]);
 
   // the Days scale: the visits of the pass shown (the film), drawn by the lab's renderer; no reload of the field
@@ -1818,7 +1844,16 @@ export function Lab({ route }: { route: Route }) {
     const gx = g.n / 2 - ((((pra - g.ra0 + 540) % 360) - 180) * Math.cos((g.dec0 * Math.PI) / 180) * 3600) / g.step_arcsec;
     const gy = g.n / 2 - ((pdec - g.dec0) * 3600) / g.step_arcsec;
     if (gx < 0 || gy < 0 || gx >= g.n || gy >= g.n) return null;
-    const data: PortraitData = { n: d.n, dets: d.dets, sat: satData.current.get(k), stepArcsec: g.step_arcsec };
+    const pic = pictures.current.get(k);
+    const wbq = meta.passes.find((x) => x.index === k)?.white_balance;
+    const data: PortraitData = {
+      n: d.n,
+      dets: d.dets,
+      sat: satData.current.get(k),
+      stepArcsec: g.step_arcsec,
+      rgb: pic && pic.n === d.n ? pic.rgb : undefined,
+      wb: wbq ? { kr: wbq.kr, kb: wbq.kb } : undefined,
+    };
     return <Portrait data={data} x={gx} y={gy} label={label} />;
   };
   const half = fov / 120;
@@ -2008,36 +2043,6 @@ export function Lab({ route }: { route: Route }) {
                 </span>
               </div>
               <div class="float factions">
-                <button
-                  class="mini"
-                  onClick={() => {
-                    const done = (t: string) => {
-                      setCopied(t);
-                      setTimeout(() => setCopied(''), 2000);
-                    };
-                    try {
-                      navigator.clipboard.writeText(location.href).then(
-                        () => done('Copied'),
-                        () => done('Copy blocked'),
-                      );
-                    } catch {
-                      done('Copy blocked');
-                    }
-                  }}
-                  title="Copy a link to this exact view"
-                >
-                  <span dangerouslySetInnerHTML={{ __html: icon('link', 14) }} style={{ display: 'contents' }} />
-                  <span class="t">{copied || 'Copy link'}</span>
-                </button>
-                <button
-                  class="mini"
-                  disabled={recording || film !== null || !passes.length}
-                  onClick={() => void recordVideo()}
-                  title="Download one full cycle of the seasons as a video (WebM)"
-                >
-                  <span dangerouslySetInnerHTML={{ __html: icon('download-simple', 14) }} style={{ display: 'contents' }} />
-                  <span class="t">{recording ? 'Recording…' : 'Download video'}</span>
-                </button>
                 <label class="fovsel" title="Field of view">
                   <span>Field</span>
                   <select
@@ -2055,7 +2060,7 @@ export function Lab({ route }: { route: Route }) {
                 </label>
               </div>
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
-                {note || (film !== null ? daysStatus : status)}
+                {note || (bandsWait ? 'loading the pictures of the chosen bands…' : film !== null ? daysStatus : status)}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
                     <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter
@@ -2204,7 +2209,7 @@ export function Lab({ route }: { route: Route }) {
                           setFrame(q.index);
                         }}
                       >
-                        {season(q.mjd_mid)}
+                        {frameIndex === q.index || passes.length <= 2 ? season(q.mjd_mid) : '·'}
                       </span>
                     ))}
                   </div>
@@ -2272,6 +2277,40 @@ export function Lab({ route }: { route: Route }) {
                 <option value={String(v)}>{`${v}×`}</option>
               ))}
             </select>
+            <span class="acts">
+              <button
+                class="mini"
+                onClick={() => {
+                  const done = (t: string) => {
+                    setCopied(t);
+                    setTimeout(() => setCopied(''), 2000);
+                  };
+                  try {
+                    navigator.clipboard.writeText(location.href).then(
+                      () => done('Copied'),
+                      () => done('Copy blocked'),
+                    );
+                  } catch {
+                    done('Copy blocked');
+                  }
+                }}
+                title="Copy a link to this exact view"
+                aria-label="Copy link"
+              >
+                <span dangerouslySetInnerHTML={{ __html: icon('link', 14) }} style={{ display: 'contents' }} />
+                {copied && <span class="t">{copied}</span>}
+              </button>
+              <button
+                class="mini"
+                disabled={recording || film !== null || !passes.length}
+                onClick={() => void recordVideo()}
+                title="Download one full cycle of the seasons as a video (WebM)"
+                aria-label="Download video"
+              >
+                <span dangerouslySetInnerHTML={{ __html: icon('download-simple', 14) }} style={{ display: 'contents' }} />
+                {recording && <span class="t">Recording…</span>}
+              </button>
+            </span>
           </div>
         </div>
         <aside class="panel">
@@ -2502,6 +2541,27 @@ export function Lab({ route }: { route: Route }) {
             <div class="pbody">
               {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                 <>
+                  {(() => {
+                    // what it is and why it is an anomaly, first
+                    const a = an.result.anomalies.find((x) => x.n === selAn)!;
+                    const name = a.identified?.simbad?.name
+                      ? `${a.identified.simbad.name}${a.identified.simbad.type ? ` · ${a.identified.simbad.type}` : ''}`
+                      : a.identified?.gaia?.state === 'ok'
+                        ? `Gaia DR3 ${a.identified.gaia.source_id}`
+                        : 'not in SIMBAD or Gaia';
+                    return (
+                      <div class="why-card" data-testid="anomaly-why">
+                        <b>
+                          Anomaly {a.n} · {name}
+                        </b>
+                        <span>
+                          score {a.score.toFixed(1)} against the field's bar {an.result.threshold?.toFixed(1) ?? '—'} (median{' '}
+                          {an.result.median?.toFixed(2) ?? '—'})
+                        </span>
+                        <span class="w">{driverWords(a).join('; ') || 'its spectrum differs from the ordinary star of the field'}</span>
+                      </div>
+                    );
+                  })()}
                   {portraitOf(
                     an.result.anomalies.find((a) => a.n === selAn)!,
                     `Anomaly ${selAn}`,
@@ -2720,75 +2780,120 @@ export function Lab({ route }: { route: Route }) {
               </section>
             </div>
           )}
-          <div class="sbar" onClick={() => setTab('find')} title="Open the findings of this field">
-            <div class="sbh">
-              <span>Scans</span>
-              <em>start by themselves</em>
+          <div class={`sbar ${trayOpen ? '' : 'tray'}`}>
+            <div
+              class="tray-line"
+              onClick={() => setTrayOpen((o) => !o)}
+              title={trayOpen ? 'Fold the scans' : 'Show every scan'}
+              data-testid="scans"
+            >
+              <b>Scans</b>
+              {(
+                [
+                  ['Movers', mv?.state === 'done' ? String(mvr?.tracks.length ?? 0) : null],
+                  ['Pairs', mv?.state === 'done' ? String(pairs.length) : null],
+                  ['Red', redv?.state === 'done' ? String(redv.result?.red.length ?? 0) : null],
+                  [
+                    'Anomalies',
+                    an?.state === 'done'
+                      ? String(an.result?.anomalies.length ?? 0)
+                      : an?.state === 'running'
+                        ? `${pct(anFrac) ?? 0}%`
+                        : null,
+                  ],
+                  [
+                    'Asteroids',
+                    ast.state === 'done'
+                      ? String(ast.tracks?.length ?? 0)
+                      : ast.state === 'none'
+                        ? '–'
+                        : ast.frac !== null && ast.state !== 'idle'
+                          ? `${pct(ast.frac)}%`
+                          : null,
+                  ],
+                ] as const
+              ).map(([n, v]) => (
+                <span class="it" key={n}>
+                  <i class={v === null || v.endsWith('%') ? 'busy' : ''} />
+                  {n} {v ?? '…'}
+                </span>
+              ))}
+              <span class="tg">{trayOpen ? '▾' : '▴'}</span>
             </div>
-            {srow(
-              'Movers',
-              !mv ? 0 : mv.state === 'done' ? 1 : mv.state === 'failed' ? 0 : null,
-              !mv ? 'waiting' : mv.state === 'done' ? `${mvr?.tracks.length ?? 0} found` : mv.state === 'failed' ? 'failed' : 'searching',
-              'Between passes: sources that move in a straight line over the passes (3–120 ″/yr), checked against Gaia DR3',
-              'search-movers',
-            )}
-            {srow(
-              'Pairs',
-              !mv ? 0 : mv.state === 'done' ? 1 : null,
-              !mv || mv.state !== 'done' ? 'waiting' : pairs.length ? `${pairs.length} found` : 'none',
-              'Two sources close together whose brightness changes in place between passes, against chance pairs',
-              'search-pairs',
-            )}
-            {srow(
-              'Red sources',
-              !redv ? 0 : redv.state === 'done' ? 1 : redv.state === 'failed' ? 0 : null,
-              !redv
-                ? 'waiting'
-                : redv.state === 'done'
-                  ? `${redv.result!.red.length} found`
-                  : redv.state === 'failed'
-                    ? 'failed'
-                    : 'measuring',
-              'Red sources: bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (cold brown dwarfs and the like)',
-              'search-red',
-            )}
-            {srow(
-              'Spectral anomalies',
-              anFrac,
-              !an
-                ? 'waiting'
-                : an.state === 'done'
-                  ? an.result?.reason
-                    ? 'too few spectra'
-                    : `${an.result?.anomalies.length ?? 0} found`
-                  : an.state === 'running'
-                    ? `${pct(anFrac) ?? 0} %`
-                    : an.state === 'failed'
-                      ? 'failed'
-                      : 'waiting',
-              an?.result?.reason ||
-                (an?.result
-                  ? `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)} (median ${an.result.median?.toFixed(2)})`
-                  : 'Every source of the field measured in every exposure; spectra unlike the field’s ordinary star'),
-              'search-anomalies',
-            )}
-            {srow(
-              `Asteroids${astMjd ? ` · pass of ${season(astMjd)}` : ''}`,
-              ast.state === 'done' ? 1 : ast.state === 'none' || ast.state === 'failed' || ast.state === 'idle' ? 0 : ast.frac,
-              ast.state === 'done'
-                ? `${ast.tracks?.length ?? 0} found`
-                : ast.state === 'none'
-                  ? 'too few visits'
-                  : ast.state === 'failed'
-                    ? 'failed'
-                    : ast.state === 'idle'
-                      ? 'waiting'
-                      : pct(ast.frac) !== null
-                        ? `${pct(ast.frac)} %`
-                        : 'running',
-              ast.text ||
-                'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
-              'search-asteroids',
+            {trayOpen && (
+              <div onClick={() => setTab('find')} title="Open the findings of this field">
+                {srow(
+                  'Movers',
+                  !mv ? 0 : mv.state === 'done' ? 1 : mv.state === 'failed' ? 0 : null,
+                  !mv
+                    ? 'waiting'
+                    : mv.state === 'done'
+                      ? `${mvr?.tracks.length ?? 0} found`
+                      : mv.state === 'failed'
+                        ? 'failed'
+                        : 'searching',
+                  'Between passes: sources that move in a straight line over the passes (3–120 ″/yr), checked against Gaia DR3',
+                  'search-movers',
+                )}
+                {srow(
+                  'Pairs',
+                  !mv ? 0 : mv.state === 'done' ? 1 : null,
+                  !mv || mv.state !== 'done' ? 'waiting' : pairs.length ? `${pairs.length} found` : 'none',
+                  'Two sources close together whose brightness changes in place between passes, against chance pairs',
+                  'search-pairs',
+                )}
+                {srow(
+                  'Red sources',
+                  !redv ? 0 : redv.state === 'done' ? 1 : redv.state === 'failed' ? 0 : null,
+                  !redv
+                    ? 'waiting'
+                    : redv.state === 'done'
+                      ? `${redv.result!.red.length} found`
+                      : redv.state === 'failed'
+                        ? 'failed'
+                        : 'measuring',
+                  'Red sources: bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (cold brown dwarfs and the like)',
+                  'search-red',
+                )}
+                {srow(
+                  'Spectral anomalies',
+                  anFrac,
+                  !an
+                    ? 'waiting'
+                    : an.state === 'done'
+                      ? an.result?.reason
+                        ? 'too few spectra'
+                        : `${an.result?.anomalies.length ?? 0} found`
+                      : an.state === 'running'
+                        ? `${pct(anFrac) ?? 0} %`
+                        : an.state === 'failed'
+                          ? 'failed'
+                          : 'waiting',
+                  an?.result?.reason ||
+                    (an?.result
+                      ? `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)} (median ${an.result.median?.toFixed(2)})`
+                      : 'Every source of the field measured in every exposure; spectra unlike the field’s ordinary star'),
+                  'search-anomalies',
+                )}
+                {srow(
+                  `Asteroids${astMjd ? ` · pass of ${season(astMjd)}` : ''}`,
+                  ast.state === 'done' ? 1 : ast.state === 'none' || ast.state === 'failed' || ast.state === 'idle' ? 0 : ast.frac,
+                  ast.state === 'done'
+                    ? `${ast.tracks?.length ?? 0} found`
+                    : ast.state === 'none'
+                      ? 'too few visits'
+                      : ast.state === 'failed'
+                        ? 'failed'
+                        : ast.state === 'idle'
+                          ? 'waiting'
+                          : pct(ast.frac) !== null
+                            ? `${pct(ast.frac)} %`
+                            : 'running',
+                  ast.text ||
+                    'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
+                  'search-asteroids',
+                )}
+              </div>
             )}
           </div>
         </aside>
