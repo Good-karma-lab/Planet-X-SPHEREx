@@ -89,6 +89,9 @@ def fwhm_of_stars(white: np.ndarray, sat: np.ndarray, step: float) -> tuple[floa
 
 
 def lattice(b: FieldBuild) -> float:
+    """The weight lattice: the relative rms of each detector stack's weight in the band of spatial frequencies around one cycle per
+    detector pixel (0.8–1.25 × 1/6.15″), central half of the field; the largest over all stacks. Coverage edges and masked pixels vary
+    on other scales and do not count."""
     worst = 0.0
     for p in b.passes:
         for k, d in p.den.items():
@@ -98,8 +101,15 @@ def lattice(b: FieldBuild) -> float:
             core = d[n // 4 : 3 * n // 4, n // 4 : 3 * n // 4].astype(float)
             if core.mean() <= 0:
                 continue
-            ratio = core / np.maximum(gaussian_filter(core, 6.0), 1e-12)
-            worst = max(worst, float(ratio.std()))
+            ratio = core / max(core.mean(), 1e-12) - 1.0
+            f = np.fft.fft2(ratio)
+            fy = np.fft.fftfreq(core.shape[0])[:, None]
+            fx = np.fft.fftfreq(core.shape[1])[None, :]
+            fr = np.hypot(fx, fy)
+            f0 = b.grid.step_arcsec / 6.15  # cycles per grid pixel at the detector-pixel period
+            band = (fr > 0.8 * f0) & (fr < 1.25 * f0)
+            amp = float(np.sqrt((np.abs(f[band]) ** 2).sum()) / ratio.size)
+            worst = max(worst, amp)
     return worst
 
 
@@ -204,7 +214,9 @@ async def run_field(name: str, index: Index, store: Path, png: Path, workers: in
     p0 = b.passes[0]
     fw, nst = fwhm_of_stars(p0.white(b.cdet), p0.sat_share(b.cdet), b.grid.step_arcsec)
     lines.append(f"- FWHM of isolated unsaturated stars in the white frame of pass 1: {fw:.1f}″ ({nst} stars)")
-    lines.append(f"- weight lattice (largest relative rms of a detector stack's weight in the central half): {100 * lattice(b):.1f} %")
+    lines.append(
+        f"- weight lattice (largest relative rms at the detector-pixel period of a detector stack's weight): {100 * lattice(b):.1f} %"
+    )
     lines.append(
         f"- time: cold {cold:.0f} s (reading {b.timings['read_s']:.0f} s, computing {b.timings['compute_s']:.0f} s), warm {warm:.0f} s"
     )
