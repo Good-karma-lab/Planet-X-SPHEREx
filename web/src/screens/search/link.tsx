@@ -92,7 +92,7 @@ export function LinkPanel({ keys, onPick }: { keys: string[]; onPick?: (e: LinkE
   return (
     <div class="dsbox">
       <div class="srrow" title="Two candidates of different passes belong together if one orbit passes through both; the fit gives the distance.">
-        <span class="srt">Link of the passes</span>
+        <span class="srt">Find Planet X · link of the passes</span>
         {(a.state === 'idle' || a.state === 'none' || a.state === 'error') && (
           <button class="btn sm" onClick={() => void run()}>
             Link {keys.length} passes
@@ -231,7 +231,7 @@ export function JumpView({ distKey, i, mjd, corridor = 5 }: { distKey: string; i
   if (has !== true) return null;
   return (
     <div class="dsbox">
-      <div class="search-h">Where it is in the other pass</div>
+      <div class="search-h">Find Planet X · where it is in the other pass</div>
       {j === 'asking' && <div class="mono-s">asking the service…</div>}
       {j === 'error' && <div class="mono-s">The service could not draw the line of places.</div>}
       {j && j !== 'asking' && j !== 'error' && (

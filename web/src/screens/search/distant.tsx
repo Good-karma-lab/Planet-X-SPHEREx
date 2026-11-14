@@ -306,8 +306,8 @@ export function DistantPanel({
   if (ds.state === 'idle')
     return (
       <div class="dsbox">
-        <div class="srrow" title="Too faint for any single frame, a body beyond Neptune shows only when the visits of a pass are added along its motion. Drag a distance slider and watch a point come into focus. Reads every exposure of this field (D1–D3, all passes): a few minutes the first time.">
-          <span class="srt">Bodies beyond Neptune</span>
+        <div class="srrow" title="Too faint for any single frame, a body this far out shows only when the visits of a pass are added along its motion. Drag a distance slider and watch a point come into focus. Reads every exposure of this field (D1–D3, all passes): a few minutes the first time.">
+          <span class="srt">Find Planet X</span>
           <button class="btn sm" onClick={() => void d.start(null)}>
             Search
           </button>
@@ -318,7 +318,7 @@ export function DistantPanel({
   return (
     <div class="dsbox">
       <div class="sechead">
-        <span class="search-h">Bodies beyond Neptune</span>
+        <span class="search-h">Find Planet X</span>
         <span class="mono-s">{ds.state === 'ok' ? `pass ${ds.r.pass + 1} · ${ds.r.n_visits} visits` : ''}</span>
       </div>
       {ds.state === 'loading' && (

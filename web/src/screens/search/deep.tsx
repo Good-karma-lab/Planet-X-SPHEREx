@@ -125,7 +125,7 @@ export function DeepSumPanel({
     return (
       <div class="dsbox">
         <div class="srrow" title="A body too faint in every pass alone can be found by adding the passes along one orbit. Reads every exposure of every pass and tries about a million orbits; the estimate of the time is shown before anything starts.">
-          <span class="srt">Deep sum of the passes</span>
+          <span class="srt">Find Planet X · deep sum of the passes</span>
           <button class="btn sm" onClick={() => void plan(60, 110)}>
             Plan
           </button>
@@ -134,7 +134,7 @@ export function DeepSumPanel({
     );
   return (
     <div class="dsbox">
-      <div class="search-h">Deep sum of the passes</div>
+      <div class="search-h">Find Planet X · deep sum of the passes</div>
       {d.state === 'planning' && <div class="mono-s">{d.text}</div>}
       {(d.state === 'none' || d.state === 'error') && (
         <>

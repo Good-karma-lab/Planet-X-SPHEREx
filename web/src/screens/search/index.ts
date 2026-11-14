@@ -8,3 +8,4 @@ export { DistantCanvas, DistantLines, DistantPanel, peakRows, useDistant, type D
 export { about, progressText, runJob, useProduct } from './jobs';
 export { DeepSumPanel, type DeepCandidate, type DeepResult } from './deep';
 export { JumpView, LinkCard, LinkPanel, type Jump, type LinkEntry, type LinkResult } from './link';
+export { BACKDROP_YEAR, SPHEREX_YEARS, drawMovingPath, placeAt, type MovingObject } from './path';
