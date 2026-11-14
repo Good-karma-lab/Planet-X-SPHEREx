@@ -24,6 +24,42 @@
   Planet Nine field and the ecliptic field of the 394 au peak; log in `/tmp/planet_nine_night.log` on the VM; results go to the
   searched layer and Findings.
 
+## Checklist status (star-test docs/PROD_CHECKLIST.md), live at 8cbe33a
+
+Done and deployed (commit):
+- QA round 5: Copy link / Download video / speed reachable at 800 px (the time bar wraps), NONE draws black and says no band is
+  chosen, the phone puts the band buttons under the picture, compact buttons with short band names in small pictures, the passport
+  names the object once, the brown-dwarf summary wording — 8cbe33a.
+- User list of 18:2x: rail fonts — 0101eab, 37c93c2; frame never jumps (one square in every view) — 56401e4; trajectory as the
+  2000–2050 path with year ticks outside the ring — 0101eab; Copy link / Download video away from FIELD — 0101eab; Scans as a one-line
+  tray — 0101eab; ε Indi B portrait in the picture's colours — 0101eab; passport opens with name, type and why — 0101eab, 8cbe33a;
+  band toggles show the real band pictures without jump or flash — 0101eab; landing at `/`, globe at `#/explore` — 02824c6, b42b9fe;
+  globe of real data only, one tone at every zoom — 07e24aa, 312e121.
+- Lab: walls 3 × 2 with markers on the stars, floating rows clear of the panels — cb721d0, 56401e4; one marker per object with rate ±
+  error and the Gaia tension in σ — e387fd3, 56401e4; 2′ zoom inset, Months | Days, anomaly click → passport, portrait, artifacts —
+  e387fd3; Findings tab, square view buttons, one-line scans, Motion only — 25f4a2c; searches start by themselves — 827e9e1, af07bcd;
+  archive images on the timeline with path and offset — e5841cc; Difference shows only real changes — e43cf88, 0c0b1fe; numbered track
+  badges, click selects — 81e70aa, cc580cb; person-first priority — cb721d0.
+- Speed: compute in worker processes — 299049c, ddcd434; Find Planet X in workers — 26e7e5f; film search in short stages — 4177964;
+  the page is never served stale — 608dcd2.
+- Globe: pins at the backdrop date, path 1950→2050, tiles from IRSA, no idle swaps, Show area epoch, re-entry, cutouts — 60b3d15;
+  dust map, comets/asteroids list, searched layer — abec778.
+- Searches and data: film search 4/4 blind — 08f4b6c; pairs, Find Planet X, context, known bodies — ea5da88; brown dwarf candidates —
+  57c9bb7, 8a9e271, af07bcd; /searched and the sky scan tool — 93d035c, b15e982; Planet Nine prior and 1° fields — def66b8, c9f91f8;
+  quick-look cube spectrum — 86de98c; extras — b59072b, 65b84d8.
+- Warm set with every test field's searches, target and anomaly spectra — 62ac577, af07bcd. Pages: Method of this service — d156b3c;
+  Findings cards, leads, tour, About — 794b8fa, d348017.
+
+Open, with owner (the app pauses this session's messages to the other sessions, so these are the hand-over notes):
+- lab-ui / design-review: the landing's "Watch a star move" (`path=1`) should draw Barnard's path on the globe at once; the hero card
+  is cut on the right; the film slot waits for the new video; the landing quotes 10.4 / 10.7″/yr while the lab's 5′ track is
+  11.4 ± 0.5 on a saturated core, 2.1σ from Gaia — quote the 20′ value (10.7 ± 0.8) or Gaia's.
+- sky-service: Find Planet X in workers is slower on 5′ fields (43 s per block) and its ETA does not move; the ε Indi B 20′
+  brown-dwarf scan finds nothing (the T dwarf should come out as known); WISE 0855 5′ movers find no track (blend).
+- prod-build: Sunday video, slides and texts; Download video not clicked by QA (it writes a file).
+- Overnight on the VM: IRAS/AKARI field done, nothing above threshold (best 6.6σ against 6.74σ, ceiling 6.41σ, 250–800 au, passes 1
+  and 3); the ecliptic field of the 394 au peak follows.
+
 ## Next
 
 1. Remaining items of the user's list (PROD_CHECKLIST "U, 18:2x"): band toggles checked on every combination and target; landing
