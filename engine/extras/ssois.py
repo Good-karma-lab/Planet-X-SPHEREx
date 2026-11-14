@@ -31,7 +31,7 @@ class SsoisError(RuntimeError):
 
 @dataclass(frozen=True)
 class Elements:
-    """Heliocentric ecliptic J2000 elements at `epoch` (YYYY-MM-DD): a in au; e; i, node, argument of perihelion, mean anomaly in degrees."""
+    """Heliocentric ecliptic J2000 elements at `epoch` (YYYY-MM-DD): a in au; e; i, node, peri, anom in degrees."""
 
     epoch: str
     a: float
