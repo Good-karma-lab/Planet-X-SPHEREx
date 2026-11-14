@@ -30,11 +30,11 @@ interface Survey {
   frame?: 'galactic';
 }
 
-/** The surveys the globe and the lab read (the same map the service's tile cache uses). */
+/** The surveys the globe and the lab read (the same map the service's tile cache uses). The three colour surveys start at order 3: the whole-sky view is the Allsky image (as on the research globe), not IRSA's order 0–2 tiles, which carry a different colour cast. */
 export const HIPS: Record<string, Survey> = {
-  dss2: { path: 'CDS/DSS2/color', max: 9, min: 0, w: 512 },
-  '2mass': { path: 'CDS/2MASS/Color', max: 9, min: 0, w: 512 },
-  wise: { path: 'CDS/AllWISE/RGB-W4-W2-W1', max: 8, min: 0, w: 512 },
+  dss2: { path: 'CDS/DSS2/color', max: 9, min: 3, w: 512 },
+  '2mass': { path: 'CDS/2MASS/Color', max: 9, min: 3, w: 512 },
+  wise: { path: 'CDS/AllWISE/RGB-W4-W2-W1', max: 8, min: 3, w: 512 },
   dust: { path: 'CDS/IRIS/color', max: 3, min: 3, w: 256, frame: 'galactic' },
   dss2red: { path: 'CDS/DSS2/red', max: 9, min: 0, w: 512 },
   '2massk': { path: 'CDS/2MASS/K', max: 9, min: 0, w: 512 },
@@ -485,6 +485,10 @@ export const tiles = {
   onTile(f: () => void): () => void {
     listeners.add(f);
     return () => listeners.delete(f);
+  },
+  /** asks for the whole-sky (Allsky) image of surveys now, so that the globe has a picture the moment it opens */
+  preload(ids: string[]): void {
+    for (const id of ids) if (HIPS[id]) want(id, ALLSKY, 0, 4);
   },
   /** tiles on their way or waiting */
   busy: () => inflight.size + queue.size,
