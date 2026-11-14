@@ -70,6 +70,7 @@ export class FieldClient {
     const body = (await r.json()) as { key: string; state?: string; meta?: FieldMeta; job?: JobView };
     this.key = body.key;
     if (body.state === 'done' && body.meta) {
+      this.ev.onPhase('loading the seasons…');
       this.ev.onMeta(body.meta);
       this.ready = this.partsFromMeta(body.meta);
       await this.fetchParts(this.ready);
