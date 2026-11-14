@@ -110,7 +110,7 @@ def stack_with_rejection(exposures: list[Exposure], n: int, step_arcsec: float, 
     peak_size = max(3, round(NATIVE_PIXEL_ARCSEC / step_arcsec) | 1)
     raw_num, raw_den = np.zeros((n, n)), np.zeros((n, n))
     for e in exposures:
-        a, b = deposit(n, e.u, e.v, e.val, np.full(e.val.size, e.weight))
+        a, b = deposit(n, e.u[e.keep], e.v[e.keep], e.val[e.keep], np.full(int(e.keep.sum()), e.weight))
         raw_num += a
         raw_den += b
     s_num, s_den = smooth(raw_num, sig), smooth(raw_den, sig)
