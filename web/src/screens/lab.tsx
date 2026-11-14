@@ -1132,6 +1132,8 @@ export function Lab({ route }: { route: Route }) {
         // right of the ring, else left; moved down past labels already placed
         let lx = x + rr + 8;
         if (lx + tw > box.x + box.w - 4) lx = Math.max(box.x + 4, x - rr - 8 - tw);
+        // a label never leaves the picture, on either side (a phone's picture is narrower than a long name)
+        lx = Math.max(box.x + 4, Math.min(lx, box.x + box.w - 4 - tw));
         let ly = y - rr * 0.35 - 9;
         for (let tries = 0; tries < 8; tries++) {
           const hit = placed.find((p) => lx < p.x1 && lx + tw > p.x0 && ly < p.y1 && ly + th > p.y0);

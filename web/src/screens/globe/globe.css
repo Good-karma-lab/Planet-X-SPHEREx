@@ -28,3 +28,5 @@
 /* the frame of the sky: a soft darkening towards the edges, and the credits */
 .globe-wrap > .globe-vig { position: absolute; inset: 0; pointer-events: none; border-radius: inherit; background: radial-gradient(120% 100% at 55% 45%, transparent 52%, rgba(0, 0, 0, 0.55) 100%); }
 .map-help .globe-credit { display: block; margin-top: 3px; font: 500 10.5px var(--mono); color: rgba(233, 241, 244, 0.45); }
+.near-box { border-bottom: 1px solid var(--edge-soft); margin-bottom: 4px; }
+.near-h { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px 2px; }

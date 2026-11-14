@@ -93,6 +93,64 @@ export function glowOf(src: HTMLCanvasElement, gen: number, blackPct = 0.3): HTM
   return out;
 }
 
+let toneCache: { gen: number; canvas: HTMLCanvasElement } | null = null;
+/** The night ramp as a lookup: luminance after the stretch (0..1, 1024 steps) to RGB. */
+const RAMP = (() => {
+  const t = new Uint8ClampedArray(1024 * 3);
+  for (let i = 0; i < 1024; i++) {
+    const x = i / 1023;
+    const v = (Math.asinh(x / 0.08) / ASINH_K) * 0.92;
+    const w = Math.min(1, 1.25 * v);
+    t[i * 3] = (92 + 86 * w) * v;
+    t[i * 3 + 1] = (128 + 58 * w) * v;
+    t[i * 3 + 2] = (186 + 14 * w) * v;
+  }
+  return t;
+})();
+
+/**
+ * The same night palette at full resolution and without the blur or the halo: for the close view, where the detail of the survey is the content. Every survey picture
+ * goes through the same stretch (its own 30th and 99.97th percentile) and the same ramp, so no texture looks different from its neighbour.
+ */
+export function toneOf(src: HTMLCanvasElement, gen: number, blackPct = 0.3): HTMLCanvasElement {
+  if (toneCache && toneCache.gen === gen) return toneCache.canvas;
+  const w = src.width;
+  const h = src.height;
+  const out = document.createElement('canvas');
+  out.width = w;
+  out.height = h;
+  const d = src.getContext('2d', { willReadFrequently: true })!.getImageData(0, 0, w, h).data;
+  const n = w * h;
+  const L = new Float32Array(n);
+  const sample: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (d[i * 4 + 3]! < 8) continue;
+    const l = (0.3 * d[i * 4]! + 0.55 * d[i * 4 + 1]! + 0.15 * d[i * 4 + 2]!) / 255;
+    L[i] = l;
+    if (i % 5 === 0) sample.push(l);
+  }
+  if (sample.length < 100) return (toneCache = { gen, canvas: out }).canvas;
+  const sorted = Float32Array.from(sample).sort();
+  const at = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * (sorted.length - 1)))]!;
+  const lo = at(blackPct);
+  const hi = Math.max(lo + 1e-4, at(0.9997));
+  const k = 1023 / (hi - lo);
+  const o = out.getContext('2d')!;
+  const img = o.createImageData(w, h);
+  const q = img.data;
+  for (let i = 0; i < n; i++) {
+    if (d[i * 4 + 3]! < 8) continue;
+    const idx = Math.max(0, Math.min(1023, Math.round((L[i]! - lo) * k))) * 3;
+    q[i * 4] = RAMP[idx]!;
+    q[i * 4 + 1] = RAMP[idx + 1]!;
+    q[i * 4 + 2] = RAMP[idx + 2]!;
+    q[i * 4 + 3] = 255;
+  }
+  o.putImageData(img, 0, 0);
+  toneCache = { gen, canvas: out };
+  return out;
+}
+
 /** The deep navy ground: rgb(9,20,36) at (55 %, 45 %) darkening to rgb(3,8,15) at the edges. */
 export function paintGround(ctx: CanvasRenderingContext2D, W: number, H: number): void {
   const g = ctx.createRadialGradient(W * 0.55, H * 0.45, 0, W * 0.55, H * 0.45, Math.hypot(W, H) * 0.62);
@@ -101,3 +159,6 @@ export function paintGround(ctx: CanvasRenderingContext2D, W: number, H: number)
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, W, H);
 }
+
+/** Screen field of view in degrees across a canvas W wide of the camera inside the sphere (stereographic, R pixels per radian at the centre). */
+export const fovOfGlobe = (W: number, R: number) => Math.min(180, (4 * Math.atan(W / (4 * Math.max(1, R))) * 180) / Math.PI);

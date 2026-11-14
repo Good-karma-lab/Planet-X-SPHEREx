@@ -5,8 +5,7 @@ import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVE
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, type SkyLayer } from './globe/sky';
-import { glowOf, paintGround } from './globe/glow';
-import { drawStars, fovOfGlobe, loadStars } from './globe/stars';
+import { fovOfGlobe, glowOf, paintGround, toneOf } from './globe/glow';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
 import { KnownList } from './search/known';
@@ -158,6 +157,12 @@ function spanOf(o: Obj, fov: number): number {
   return Math.max((fov / 60) * 1.2, (Math.hypot(mo.pmra, mo.pmdec) * (2050 - y0)) / 3.6e6);
 }
 
+/** How interesting a catalogue object is on the globe: the test targets, then the fast and the cold, then the variable, then the rest by motion. */
+function importance(o: Obj): number {
+  const pm = Math.hypot(o.pmra ?? 0, o.pmdec ?? 0);
+  return (o.b ? 1000 : 0) + (o.k === 'fast' ? 40 : o.k === 'bd' ? 30 : o.k === 'young' || o.k === 'mira' || o.k === 'var' ? 15 : 0) + Math.log10(1 + pm) * 5;
+}
+
 export function Globe() {
   const [catalog, setCatalog] = useState<Obj[]>(catalogNow);
   const [a, setA] = useState<AimState>(aim.get());
@@ -184,8 +189,10 @@ export function Globe() {
   const searched = useSearched(true);
   const [searchedOn, setSearchedOn] = useState(false);
   const [searchedSel, setSearchedSel] = useState<SearchedField | null>(null);
-  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel });
-  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel };
+  // a click on an empty place of the sky: the real catalogue objects around it (the most important are labelled)
+  const [nearby, setNearby] = useState<Obj[] | null>(null);
+  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel, nearby });
+  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel, nearby };
   const dirty = useRef(true);
   const view = useRef(kept.view ?? { ra: a.ra, dec: a.dec, zoom: 1.6 });
   kept.view = view.current;
@@ -199,7 +206,6 @@ export function Globe() {
   useEffect(() => {
     void loadCatalog().then((c) => setCatalog((old) => (old === c ? old : c)));
     void loadCoverage().then(() => (dirty.current = true));
-    void loadStars().then(() => (dirty.current = true));
     const offDates = onImageDates(() => {
       dirty.current = true;
       setDatesTick((t) => t + 1);
@@ -243,7 +249,7 @@ export function Globe() {
 
   useEffect(() => {
     dirty.current = true;
-  }, [survey, proj, covOn, sel, catalog, bodyPath, searched, searchedOn, searchedSel]);
+  }, [survey, proj, covOn, sel, catalog, bodyPath, searched, searchedOn, searchedSel, nearby]);
 
   // the sky canvas
   useEffect(() => {
@@ -329,7 +335,6 @@ export function Globe() {
     // where each test target's pin and the selected object's pin were drawn: the click finds them there
     let pins: { o: Obj; x: number; y: number }[] = [];
     let drag: { x: number; y: number; ra: number; dec: number; moved: boolean } | null = null;
-    let starTier = 0;
     let glowMix = 1;
     let lastBreath = 0;
     let lastLoop = performance.now();
@@ -353,9 +358,12 @@ export function Globe() {
       if (sky.shown) {
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        if (glowMix < 1) {
-          ctx.globalAlpha = 1 - glowMix;
-          ctx.drawImage(sky.canvas, 0, 0, W, H);
+        {
+          // the survey's own detail in the night palette at every zoom (stronger the closer the view), over the glow of the wide view
+          ctx.globalAlpha = 1 - 0.45 * glowMix;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.drawImage(toneOf(sky.canvas, sky.gen, st.survey === 'dss2' ? 0.45 : 0.3), 0, 0, W, H);
+          ctx.globalCompositeOperation = 'source-over';
         }
         if (glowMix > 0) {
           ctx.globalAlpha = glowMix;
@@ -366,17 +374,6 @@ export function Globe() {
         ctx.globalAlpha = 1;
       }
       const b = basis();
-      // the stars: the real Hipparcos catalogue as points of light (no grid, no catalogue dots); a slow frame drops to a lower tier
-      const t0 = performance.now();
-      drawStars(ctx, (ra, dec) => project(ra, dec, b), {
-        W,
-        H,
-        fov: st.proj === 'globe' ? fovOfGlobe(W, R()) : 150,
-        tier: starTier,
-      });
-      const dt = performance.now() - t0;
-      if (dt > 20) starTier = 1;
-      else if (dt < 8) starTier = 0;
       if (st.proj !== 'globe') {
         ctx.strokeStyle = 'rgba(255,255,255,.14)';
         ctx.lineWidth = 1;
@@ -509,6 +506,36 @@ export function Globe() {
       if (breathing && tNow - lastBreath > 40) {
         lastBreath = tNow;
         dirty.current = true;
+      }
+      // the objects around the last click: a small ring each, a name for the first five (no name on top of another)
+      if (st.nearby && st.nearby.length) {
+        const boxes: [number, number, number, number][] = [];
+        ctx.textBaseline = 'middle';
+        st.nearby.forEach((o, i) => {
+          const p = project(...shownPlace(o, st.survey), b);
+          if (!p[2] || p[0] < 0 || p[1] < 0 || p[0] > W || p[1] > H) return;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(3,8,15,.45)';
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], 5, 0, 7);
+          ctx.stroke();
+          ctx.lineWidth = 1.3;
+          ctx.strokeStyle = 'rgba(233,241,244,.85)';
+          ctx.stroke();
+          if (i >= 5 || anim || (drag && drag.moved)) return;
+          ctx.font = `600 12px ${font}`;
+          const w = ctx.measureText(o.n).width;
+          const box: [number, number, number, number] = [p[0] + 9, p[1] - 8, p[0] + 9 + w, p[1] + 8];
+          if (boxes.some((q) => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1])) return;
+          boxes.push(box);
+          ctx.lineWidth = 3;
+          ctx.lineJoin = 'round';
+          ctx.strokeStyle = 'rgba(3,8,15,.75)';
+          ctx.strokeText(o.n, p[0] + 9, p[1]);
+          ctx.fillStyle = 'rgba(233,241,244,.92)';
+          ctx.fillText(o.n, p[0] + 9, p[1]);
+        });
+        ctx.textBaseline = 'alphabetic';
       }
       // aim frame
       const p = project(st.a.ra, st.a.dec, b);
@@ -695,6 +722,15 @@ export function Globe() {
           if (s) {
             setSel(null);
             aim.set({ ra: s[0], dec: s[1] }, 'map');
+            // the catalogue objects within about 40 px of the click (and at most 25° away): the most important first
+            const rad = Math.min(25, Math.max(0.05, 40 / (st.proj === 'globe' ? R() : mw() / 6.28) / D2R));
+            const found = st.catalog
+              .map((o) => ({ o, d: separation(...shownPlace(o, st.survey), s[0], s[1]) }))
+              .filter((x) => x.d <= rad)
+              .sort((a, b) => importance(b.o) - importance(a.o) || a.d - b.d)
+              .slice(0, 12)
+              .map((x) => x.o);
+            setNearby(found);
           }
         }
       }
@@ -887,7 +923,7 @@ export function Globe() {
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
           ★ are test targets.
           <span class="globe-credit">
-            {survey === 'spherex' ? 'Backdrop: SPHEREx DR1 (IRSA)' : `Backdrop: ${sv.name} (IRSA / CDS HiPS)`} · Stars: Hipparcos (ESA)
+            {survey === 'spherex' ? 'Backdrop: SPHEREx DR1 (IRSA)' : `Backdrop: ${sv.name} (IRSA / CDS HiPS)`}
           </span>
         </div>
         <button class="btn primary big map-open" onClick={showArea} title="Open the field under the frame in the spectral lab">
@@ -972,6 +1008,28 @@ export function Globe() {
           </div>
         </div>
         <div class="cat-list">
+          {nearby && (
+            <div class="near-box">
+              <div class="near-h">
+                <span class="mono-s">{nearby.length ? `Near the click · ${nearby.length} catalogue object${nearby.length === 1 ? '' : 's'}` : 'No catalogue object near the click'}</span>
+                <button class="lnk" onClick={() => setNearby(null)}>
+                  Clear
+                </button>
+              </div>
+              {nearby.map((o) => (
+                <div key={o.n} class="row" onClick={() => select(o)}>
+                  <div class="nm">
+                    <span class="t">{o.n}</span>
+                    {o.b ? <span class="badge orange">target</span> : null}
+                  </div>
+                  <div class="co">
+                    <span>{o.c}</span>
+                    {o.pmra != null ? <span> · {(Math.hypot(o.pmra, o.pmdec ?? 0) / 1000).toFixed(2)}″/yr</span> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
           {searchedSel && (
             <SearchedCard
               f={searchedSel}
