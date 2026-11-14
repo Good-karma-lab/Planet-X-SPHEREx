@@ -131,17 +131,6 @@ so each place on the sky has a fixed direction of own motion for each inclinatio
 
 [figure: p9-orbits | The Solar System with the predicted Planet Nine orbit and the fields searched for it]
 
-## What the search has done
-
-Each row is one run, with the method that gave it. Runs are not merged.
-
-Planet Nine searches, deep sum of the passes of each field, nothing found above the bar:
-
-| Field | Parameters | Result | Source |
-|---|---|---|---|
-| Ecliptic field, RA 60.94, Dec +8.39 | 18 arcmin, D1-D3, 250-800 au, 3 passes, 620,160 orbits | sum peak 7.21 sigma against a threshold of 7.52 sigma (ceiling 7.16 sigma); no control track reaches 5 sigma; the strongest photometry is 6.7 sigma at 648 au (RA 60.8063, Dec +8.4559, 0.022 mJy), above the photometry threshold of 5.39 sigma but below the sum threshold, while the negated sums reach 5.1 sigma in photometry: a lead to re-observe, not a detection | overnight run on the production machine (tools/planet_nine_night.py), recorded in docs/PROGRESS.md |
-| IRAS/AKARI Planet Nine field, RA 34.72, Dec -49.79 | 18 arcmin, D1-D3, 250-800 au, passes 1 and 3 | best 6.6 sigma against a threshold of 6.74 sigma (ceiling 6.41 sigma) | the same overnight run |
-
 ## What it can and cannot say
 
 - A blind search reaches a limited depth. A body fainter than that is not found, and a search that finds nothing does not show that nothing is there. The depth of a given field is the noise ceiling and the bar of that run, printed with every result.

@@ -26,10 +26,6 @@ The wavelength of the point is the calibrated wavelength of the pixel. The PSF o
 
 The background is a constant in the 7 × 7 window; a neighbouring star inside the window spoils that point, and the residual rejection is the only protection. Finally we look at the whole spectrum once: a point more than 5 robust sigma from the median of its 7 neighbours in wavelength (the robust sigma of those residuals over the spectrum) is marked "deviates from its neighbours" and not used.
 
-**Result:** the isolated star 2MASS J17572542+0446559 (J 11.53) gives 357 usable points from 385 exposures, and its spectrum averaged under the 2MASS and WISE filters is within 3 % of the catalogue: J 0.99, H 1.02, Ks 1.03, W1 0.985. Source: docs/PROGRESS.md, catalogue check of the live spectrum.
-
-**Result:** ε Indi B gives 415 usable points from 445 exposures, with ratios J 0.92, H 0.94, Ks 0.98 and W1 1.18. Source: live measurement on spherex.space, 2026-11-14, catalogue check of the spectrum.
-
 Where the detector saturates, the measurement stops: the exposure shows OVERFLOW from about 70–90 MJy/sr in D1–D3 and about 50 in D4. A star that saturates in most exposures has no SPHEREx spectrum.
 
 ## Saturated sources

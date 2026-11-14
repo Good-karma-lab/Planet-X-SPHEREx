@@ -73,7 +73,7 @@ The moving (non-stationary) sources of every pass are put at uniform random plac
 | Barnard's Star, 5′ | 11.37 ± 0.47 ″/yr | Gaia 10.393 ″/yr | live service, 2026-11-14 |
 | ε Indi B, 5′ | 4.59 ± 0.49 ″/yr | Gaia 4.684 ″/yr | live service, 2026-11-14 |
 | Barnard's Star, 20′ | 10.66 ″/yr toward 353° | Gaia: same motion | docs/PROGRESS.md, state of 2026-11-14 afternoon |
-| Barnard's Star, 20′ | 10.7 ± 0.8 ″/yr | Gaia 10.4 ″/yr | docs/PROGRESS.md, QA round 6 |
+| Barnard's Star, 20′ | 10.7 ± 0.8 ″/yr | Gaia 10.4 ″/yr | live service, 2026-11-14 |
 
 **Result:** chance makes 0.0 tracks per field in 20 trials on all five 5′ test fields and on ε Indi at 10′, 20′ and 60′ (Source: live service, 2026-11-14).
 
