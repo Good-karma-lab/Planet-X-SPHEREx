@@ -132,3 +132,10 @@ def test_a_fast_star_is_found_where_it_stands_at_the_epoch_not_where_it_was_cata
 
 def test_a_wide_gaia_answer_without_the_star_is_none_but_a_failed_query_is_not() -> None:
     assert ctx.parse_gaia_rows([], 10.0, 10.0, 2025.9, 6.0, "x") == {"state": "none", "source": "x"}
+
+
+def test_the_primary_of_a_system_is_shown_with_its_component_letter() -> None:
+    assert ctx.display_name("* eps Ind", ["HD 209100", "GJ 845", "GJ 845 A", "* eps Ind"]) == "eps Ind A"
+    assert ctx.display_name("* eps Ind B", ["GJ 845 B"]) == "eps Ind B"  # already a component
+    assert ctx.display_name("V* RW Aur", ["HD 240764", "* RW Aur A"]) == "RW Aur A"
+    assert ctx.display_name("NAME Barnard's star", ["GJ 699", "HIP 87937"]) == "Barnard's star"
