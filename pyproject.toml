@@ -1,0 +1,62 @@
+[project]
+name = "spherex-sky"
+version = "0.1.0"
+description = "A public web tool to see the sky change in SPHEREx images"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=2.1",
+    "scipy>=1.14",
+    "astropy>=6.1",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "hypothesis>=6.112",
+    "ruff>=0.7",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["engine", "service", "indexer"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["web"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "N", "SIM", "RUF"]
+ignore = ["RUF001", "RUF002", "RUF003"]  # Greek letters and typographic symbols are used on purpose in texts
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+packages = ["engine", "service", "indexer"]
+plugins = ["pydantic.mypy"]
+
+[[tool.mypy.overrides]]
+module = ["scipy.*", "astropy.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --strict-markers"
+filterwarnings = [
+    "error",
+    # starlette suggests a new test-client package; httpx is kept until that package has been reviewed
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning",
+]
+markers = [
+    "network: needs the live archive or external services (skipped unless SKY_NET=1)",
+]

@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.hypothesis/
+*.egg-info/
+dist/
+build/
+
+# Web
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+
+# Local data and caches (never in git)
+store/
+cache/
+*.local.toml
+.env
+.env.*
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/
