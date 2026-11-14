@@ -84,9 +84,64 @@ const ROWS: Row[] = [
   { key: 'ned', name: 'NED', ok: (p) => `${p.name} · ${p.type || ''}${p.z != null ? ` · z ${p.z}` : ''}${sepText(p.sep)}` },
 ];
 
+/** AllWISE (with its 2MASS magnitudes) read from the cloud copy on AWS (no TAP service in the path): the rows of 2MASS and AllWISE when
+ *  IRSA's TAP does not answer. null while asked, or when the cloud copy does not answer either. */
+interface CloudRow {
+  designation?: string;
+  w1mpro?: number | null;
+  w2mpro?: number | null;
+  w3mpro?: number | null;
+  w4mpro?: number | null;
+  j_m_2mass?: number | null;
+  h_m_2mass?: number | null;
+  k_m_2mass?: number | null;
+  sep_arcsec?: number;
+}
+type Cloud = { state: 'ok'; row: CloudRow } | { state: 'none' } | null;
+function useCloudAllwise(ra: number, dec: number, pmra: number, pmdec: number, radius = 6): Cloud {
+  const [c, setC] = useState<Cloud>(null);
+  useEffect(() => {
+    setC(null);
+    const ctl = new AbortController();
+    // the place at J2000 with its motion: the service moves it to the catalogue's epoch
+    const q = new URLSearchParams({
+      ra: ra.toFixed(6),
+      dec: dec.toFixed(6),
+      pmra: String(Math.round(pmra)),
+      pmdec: String(Math.round(pmdec)),
+      radius: String(radius),
+      cats: 'allwise',
+    });
+    fetch(`/api/v1/xmatch?${q}`, { signal: ctl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { allwise?: { state: string; nearest?: CloudRow } } | null) => {
+        const a = j?.allwise;
+        if (a?.state === 'ok' && a.nearest) setC({ state: 'ok', row: a.nearest });
+        else if (a?.state === 'none') setC({ state: 'none' });
+      })
+      .catch(() => {});
+    return () => ctl.abort();
+  }, [ra, dec, pmra, pmdec, radius]);
+  return c;
+}
+const mag = (v: number | null | undefined) => (typeof v === 'number' ? v.toFixed(2) : '—');
+
 /** What else is known at a place: one row per catalogue (SIMBAD, Gaia, 2MASS, AllWISE, CatWISE, VSX, NED). A catalogue that did not answer is said, never left out. */
-export function ContextRows({ ra, dec, epoch }: { ra: number; dec: number; epoch?: number }) {
+export function ContextRows({
+  ra,
+  dec,
+  epoch,
+  pmra = 0,
+  pmdec = 0,
+}: {
+  ra: number;
+  dec: number;
+  epoch?: number;
+  pmra?: number;
+  pmdec?: number;
+}) {
   const a = useContext(ra, dec, epoch);
+  const cloud = useCloudAllwise(ra, dec, pmra, pmdec);
   if (a.state === 'absent') return null;
   return (
     <div class="ctxbox">
@@ -102,7 +157,22 @@ export function ContextRows({ ra, dec, epoch }: { ra: number; dec: number; epoch
               let text = 'not asked';
               let tip: string | undefined;
               let href: string | undefined;
-              if (p?.state === 'unavailable') {
+              const fromCloud = p?.state === 'unavailable' && (row.key === 'twomass' || row.key === 'allwise') ? cloud : null;
+              if (fromCloud?.state === 'ok') {
+                const c = fromCloud.row;
+                const sep = typeof c.sep_arcsec === 'number' ? ` · ${c.sep_arcsec.toFixed(1)}″ away` : '';
+                text =
+                  row.key === 'twomass'
+                    ? c.j_m_2mass == null && c.h_m_2mass == null && c.k_m_2mass == null
+                      ? 'no 2MASS match in the AllWISE copy'
+                      : `J ${mag(c.j_m_2mass)} · H ${mag(c.h_m_2mass)} · Ks ${mag(c.k_m_2mass)}${sep}`
+                    : `W1 ${mag(c.w1mpro)} · W2 ${mag(c.w2mpro)} · W3 ${mag(c.w3mpro)} · W4 ${mag(c.w4mpro)}${sep}`;
+                text += ' · from the AllWISE copy on AWS';
+                tip =
+                  "IRSA's catalogue service did not answer; these come from the AllWISE catalogue on AWS (cloud Parquet), which carries the 2MASS magnitudes";
+              } else if (fromCloud?.state === 'none') {
+                text = `nothing within ${radius}″ · from the AllWISE copy on AWS`;
+              } else if (p?.state === 'unavailable') {
                 text = 'did not answer';
                 tip = p.error;
               } else if (p?.state === 'none') {

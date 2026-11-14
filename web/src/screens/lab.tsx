@@ -2784,13 +2784,15 @@ export function Lab({ route }: { route: Route }) {
                   <ContextRows
                     ra={an.result.anomalies.find((a) => a.n === selAn)!.ra}
                     dec={an.result.anomalies.find((a) => a.n === selAn)!.dec}
+                    pmra={an.result.anomalies.find((a) => a.n === selAn)!.pmra}
+                    pmdec={an.result.anomalies.find((a) => a.n === selAn)!.pmdec}
                   />
                 </>
               ) : (
                 <>
                   {sel && portraitOf(sel, sel.name ?? 'selected source')}
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
-                  {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={2000} />}
+                  {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={2000} pmra={sel.pmra ?? 0} pmdec={sel.pmdec ?? 0} />}
                   {sel && <LightCurves src={sel} />}
                   {sel && (
                     <div class="xlinks">
