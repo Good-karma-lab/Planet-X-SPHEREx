@@ -170,9 +170,9 @@ def against_catalogue(
 
 async def run_field(name: str, index: Index, store: Path, png: Path, workers: int) -> list[str]:
     label, ra, dec, fov, saturated, target = FIELDS[name]
-    t = TARGETS[target]
-    cat_rate = math.hypot(t["pmra_mas_yr"], t["pmdec_mas_yr"]) / 1000
-    cat_pa = math.degrees(math.atan2(t["pmra_mas_yr"], t["pmdec_mas_yr"])) % 360
+    cat = TARGETS[target]
+    cat_rate = math.hypot(cat["pmra_mas_yr"], cat["pmdec_mas_yr"]) / 1000
+    cat_pa = math.degrees(math.atan2(cat["pmra_mas_yr"], cat["pmdec_mas_yr"])) % 360
     lines = [f"### {label} — RA {ra}, Dec {dec}, {fov:.0f}′", ""]
     s3 = S3(max_in_flight=48)
     fr = FileReader(s3, store)
@@ -202,8 +202,8 @@ async def run_field(name: str, index: Index, store: Path, png: Path, workers: in
         )
     tr = target_track(b, saturated)
     if len(tr) >= 2:
-        res, rate, pa, rms = against_catalogue(tr, t)
-        lines.append(f"- target place per pass against the catalogue (SIMBAD place, proper motion and parallax {t['plx_mas']:.1f} mas):")
+        res, rate, pa, rms = against_catalogue(tr, cat)
+        lines.append(f"- target place per pass against the catalogue (SIMBAD place, proper motion and parallax {cat['plx_mas']:.1f} mas):")
         for (mjd, *_, n), (rx, ry) in zip(tr, res, strict=True):
             lines.append(f"  - MJD {mjd:.1f}: ΔRA·cosδ {rx:+.2f}″, ΔDec {ry:+.2f}″ ({n} exposures fitted)")
         lines.append(
