@@ -124,6 +124,8 @@ export function onImageDates(f: () => void): () => void {
 /** The date of a backdrop at a place: the image's own date when known, else the middle of the survey; SPHEREx (and the dust map, which shows no stars) at the survey epoch. */
 export function backdropYear(survey: string, imgs?: ArchiveImage[] | null): number {
   if (survey === 'spherex' || survey === 'dust') return SURVEY_EPOCH;
+  // the star map is Gaia DR2's (epoch 2015.5) with Hipparcos and Tycho under it
+  if (survey === 'svs') return 2015.5;
   return imgs?.find((x) => x.backdrop === survey)?.year ?? BACKDROP_YEAR[survey] ?? SURVEY_EPOCH;
 }
 

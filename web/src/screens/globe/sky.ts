@@ -6,7 +6,7 @@
 // slices of a few milliseconds per frame and replaces the picture when it is done. Nothing is painted while nothing changes.
 
 import { D2R } from '../../lib/sky';
-import { FROM_NOTHING, HIPS, facePt, orderFor, Sampler, tiles, type FacePt } from '../../lib/hips';
+import { FROM_NOTHING, HIPS, bakedOf, facePt, orderFor, Sampler, tiles, type FacePt } from '../../lib/hips';
 
 export interface SkyView {
   ra: number;
@@ -14,6 +14,8 @@ export interface SkyView {
   /** globe radius, CSS pixels */
   R: number;
   proj: 'globe' | 'moll';
+  /** the globe seen from its centre: a perspective view of the sky with R as the focal length (pixels per radian at the centre) */
+  inside?: boolean;
   W: number;
   H: number;
   /** the Mollweide map's zoom and the shift of its centre from the middle of the picture, CSS pixels */
@@ -83,7 +85,12 @@ export function projectIn(v: SkyView, ra: number, dec: number): [number, number,
   const x = Math.cos(d) * Math.cos(r);
   const y = Math.cos(d) * Math.sin(r);
   const z = Math.sin(d);
-  if (x * b.c[0] + y * b.c[1] + z * b.c[2] < 0.02) return [0, 0, false];
+  const zc = x * b.c[0] + y * b.c[1] + z * b.c[2];
+  if (v.inside) {
+    if (zc < 0.05) return [0, 0, false];
+    return [v.W / 2 - ((x * b.e[0] + y * b.e[1]) / zc) * v.R, v.H / 2 - ((x * b.n[0] + y * b.n[1] + z * b.n[2]) / zc) * v.R, true];
+  }
+  if (zc < 0.02) return [0, 0, false];
   return [v.W / 2 - (x * b.e[0] + y * b.e[1]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
 }
 
@@ -159,7 +166,9 @@ class SkyPainter {
 
   private begin(view: SkyView, layer: SkyLayer[], s: number): Pass {
     tiles.frame();
-    if (layer[0]!.id === 'dust') {
+    // the dust map is the all-sky picture (the look of the globe) until its baked tiles are there
+    const dustPic = layer[0]!.id === 'dust' && !bakedOf('dust');
+    if (dustPic) {
       loadDust();
       DUST.onLoad = () => (this.stale = true);
     }
@@ -167,7 +176,7 @@ class SkyPainter {
     const sh = Math.ceil(view.H / s);
     const R = view.proj === 'globe' ? view.R : mw(view) / 5;
     // the SPHEREx backdrop is three frames of the cube: one sampler per colour
-    const samplers = layer[0]!.id === 'dust' ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
+    const samplers = dustPic ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
     return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0 };
   }
 
@@ -183,7 +192,7 @@ class SkyPainter {
     const one = layer.length === 1;
     const l0 = layer[0]!;
     // a survey whose tiles are in galactic coordinates (the dust map) is looked up at the galactic place of each pixel
-    const dust = l0.id === 'dust';
+    const dust = l0.id === 'dust' && !bakedOf('dust');
     const gal = !dust && layer.every((l) => HIPS[l.id]?.frame === 'galactic');
     const g0 = (l0.gain * 255) / (255 - l0.black);
     while (p.row < sh) {
@@ -199,11 +208,20 @@ class SkyPainter {
           z = (2 * th + Math.sin(2 * th)) / Math.PI;
           ra = 180 - ((Math.PI * X) / Math.cos(th)) / D2R;
         } else {
-          const sx = (sw / 2 - i) / Rs;
-          const sy = (sh / 2 - j) / Rs;
-          const rr = sx * sx + sy * sy;
-          if (rr > 1) continue;
-          const zz = Math.sqrt(1 - rr);
+          let sx = (sw / 2 - i) / Rs;
+          let sy = (sh / 2 - j) / Rs;
+          let zz: number;
+          if (v.inside) {
+            // seen from the centre: the ray through the pixel, the focal length being Rs
+            const n = Math.sqrt(1 + sx * sx + sy * sy);
+            zz = 1 / n;
+            sx /= n;
+            sy /= n;
+          } else {
+            const rr = sx * sx + sy * sy;
+            if (rr > 1) continue;
+            zz = Math.sqrt(1 - rr);
+          }
           const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
           const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
           z = zz * b.c[2] + sy * b.n[2];
@@ -226,14 +244,19 @@ class SkyPainter {
           o[q + 2] = dd[t + 2]!;
         } else if (one) {
           if (samplers[0]!.at(f, rgb, 0) === FROM_NOTHING) continue;
-          o[q] = Math.max(0, rgb[0]! - l0.black) * g0;
-          o[q + 1] = Math.max(0, rgb[1]! - l0.black) * g0;
-          o[q + 2] = Math.max(0, rgb[2]! - l0.black) * g0;
+          // a baked tile has its tone already; a live one (deeper than the baked orders, or while the baked ones are not read) gets the layer's
+          const bk = samplers[0]!.lastBaked;
+          const bl = bk ? 0 : l0.black;
+          const gg = bk ? 1 : g0;
+          o[q] = Math.max(0, rgb[0]! - bl) * gg;
+          o[q + 1] = Math.max(0, rgb[1]! - bl) * gg;
+          o[q + 2] = Math.max(0, rgb[2]! - bl) * gg;
         } else {
           let ok = true;
           for (let c = 0; c < 3 && ok; c++) {
             const l = layer[c]!;
             if (samplers[c]!.at(f, rgb, 0) === FROM_NOTHING) ok = false;
+            else if (samplers[c]!.lastBaked) o[q + c] = rgb[0]!;
             else o[q + c] = Math.max(0, rgb[0]! - l.black) * ((l.gain * 255) / (255 - l.black));
           }
           if (!ok) continue;
@@ -265,10 +288,11 @@ class SkyPainter {
     nx.height = Math.max(1, Math.round(v.H));
     const x = nx.getContext('2d')!;
     const old = this.shown;
-    if (old && same && old.proj === v.proj) {
+    if (old && same && old.proj === v.proj && !!old.inside === !!v.inside) {
       x.save();
       x.beginPath();
-      if (v.proj === 'globe') x.arc(v.W / 2, v.H / 2, v.R, 0, 7);
+      if (v.proj === 'globe' && v.inside) x.rect(0, 0, v.W, v.H);
+      else if (v.proj === 'globe') x.arc(v.W / 2, v.H / 2, v.R, 0, 7);
       else x.ellipse(mcx(v), mcy(v), mw(v) / 2, mw(v) / 4, 0, 0, 7);
       x.clip();
       x.imageSmoothingEnabled = true;
