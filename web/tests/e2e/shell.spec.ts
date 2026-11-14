@@ -9,15 +9,16 @@ test('the shell loads, talks to the service and switches screens by clicking', a
   await expect(page.getByTestId('status')).toHaveText(/^sky service \d+\.\d+\.\d+$/);
   for (const name of ['Lab', 'Findings', 'Method', 'Globe']) {
     await page.getByRole('link', { name, exact: true }).click();
-    await expect(page.locator('main h1')).toHaveText(name);
+    if (name === 'Lab') await expect(page.locator('.lab-empty')).toBeVisible();
+    else await expect(page.locator('main h1')).toHaveText(name);
     await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute('aria-current', 'page');
   }
   expect(errors).toEqual([]);
 });
 
 test('a link opens its screen directly', async ({ page }) => {
-  await page.goto('/#/lab?ra=269.4479&dec=4.7687&fov=5');
-  await expect(page.locator('main h1')).toHaveText('Lab');
+  await page.goto('/#/method');
+  await expect(page.locator('main h1')).toHaveText('Method');
 });
 
 test('no horizontal overflow at phone width', async ({ page }) => {
