@@ -34,8 +34,8 @@ export function Validation() {
           v={built.length ? `${same} of ${tracks.length} tracks found on the ${built.length} test fields searched` : 'the test fields are not searched yet'}
           live
         />
-        <Row k="Barnard's Star" v="10.08 ″/yr toward 355° measured on the stacks; SIMBAD 10.39 ″/yr toward 356° (3 passes, 386 exposures)" />
-        <Row k="ε Indi B" v="4.58 ″/yr toward 122° measured; SIMBAD 4.68 ″/yr toward 122° (4 passes, 494 exposures)" />
+        <Row k="Barnard's Star" v="10.7 ± 0.8 ″/yr toward 353° in its 20′ field (search between 3 passes); Gaia DR3 10.4 ″/yr: the same motion" />
+        <Row k="ε Indi B" v="4.7 ± 0.5 ″/yr toward 125° in its 20′ field (search between 4 passes); Gaia DR3 4.7 ″/yr: the same motion" />
         <Row k="Registration of the passes" v="0.14–0.26″ scatter on field stars; star width 8.8″ (FWHM, isolated unsaturated stars)" />
         <div class="search-h">Known asteroids are found, and counted the way IRSA counts them</div>
         <Row k="SPHEREx images of a known body" v="119, 107, 118 and 121 detector images for four asteroids on 14–20 Dec 2025: the same count as IRSA's Moving Object Search Tool" />

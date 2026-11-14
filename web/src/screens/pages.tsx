@@ -171,8 +171,8 @@ function FindingsPage() {
         <section class="card glass">
           <h3>Motion measured on the stacks (validation)</h3>
           <dl class="kv">
-            {kv("Barnard's Star", '10.08 ″/yr toward 355° (SIMBAD 10.39 ″/yr, 356°); 3 passes, 386 exposures')}
-            {kv('ε Indi B', '4.58 ″/yr toward 122° (SIMBAD 4.68 ″/yr, 122°); 4 passes, 494 exposures')}
+            {kv("Barnard's Star", '10.7 ± 0.8 ″/yr toward 353° in its 20′ field (Gaia DR3 10.4 ″/yr); 3 passes')}
+            {kv('ε Indi B', '4.7 ± 0.5 ″/yr toward 125° in its 20′ field (Gaia DR3 4.7 ″/yr); 4 passes')}
             {kv('Star width (FWHM)', '8.8″, isolated unsaturated stars')}
             {kv('Pass-to-pass registration', '0.14–0.26″ scatter')}
           </dl>
