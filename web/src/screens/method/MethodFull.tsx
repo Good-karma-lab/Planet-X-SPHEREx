@@ -239,30 +239,45 @@ export function MethodFull() {
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   };
 
-  // the part on show and the progress, from the scroll of the page
+  // the part on show and the progress, from the scroll of the page. What scrolls depends on the screen: the page's own container on a
+  // desktop, the whole document on a phone; it is asked at every turn, and again once the layout and the pictures have settled
   useEffect(() => {
     const sc = scroller();
-    if (!sc) return;
     let raf = 0;
     const spy = () => {
       raf = 0;
-      const top = sc.getBoundingClientRect().top;
-      const y = top + sc.clientHeight * 0.3;
+      const own = !!sc && sc.scrollHeight > sc.clientHeight + 2 && getComputedStyle(sc).overflowY !== 'visible';
+      const top = own ? sc!.getBoundingClientRect().top : 0;
+      const h = own ? sc!.clientHeight : window.innerHeight;
+      const y = top + h * 0.3;
       let c = '01';
       for (const p of partsRef.current) {
         const el = root.current?.querySelector(`#m-${p.meta.id}`);
         if (el && el.getBoundingClientRect().top < y) c = p.meta.id;
       }
       setCur(c);
-      setProg((100 * sc.scrollTop) / Math.max(1, sc.scrollHeight - sc.clientHeight));
+      const st = own ? sc!.scrollTop : window.scrollY;
+      const range = own ? sc!.scrollHeight - sc!.clientHeight : document.documentElement.scrollHeight - window.innerHeight;
+      setProg(Math.max(0, Math.min(100, (100 * st) / Math.max(1, range))));
     };
     const on = () => {
       if (!raf) raf = requestAnimationFrame(spy);
     };
-    sc.addEventListener('scroll', on, { passive: true });
+    sc?.addEventListener('scroll', on, { passive: true });
+    window.addEventListener('scroll', on, { passive: true });
+    window.addEventListener('resize', on);
+    root.current?.addEventListener('load', on, true);
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(on);
+    if (root.current) ro?.observe(root.current);
     spy();
+    const t = [setTimeout(on, 300), setTimeout(on, 1200), setTimeout(on, 3000)];
     return () => {
-      sc.removeEventListener('scroll', on);
+      sc?.removeEventListener('scroll', on);
+      window.removeEventListener('scroll', on);
+      window.removeEventListener('resize', on);
+      root.current?.removeEventListener('load', on, true);
+      ro?.disconnect();
+      t.forEach(clearTimeout);
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);
