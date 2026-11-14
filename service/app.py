@@ -137,6 +137,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.scheduler = scheduler
         st.scheduler.start()
         st.searched = Searched(st.store, cfg.store_dir, st.scheduler, st.movers, st.pairs, st.dwarfs)
+        st.searched.prime()
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         warm_task = None

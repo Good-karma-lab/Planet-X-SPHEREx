@@ -171,8 +171,23 @@ class Searched:
         self._at = 0.0
         self._body: dict[str, Any] | None = None
         self._lock = asyncio.Lock()
+        self._refresh: asyncio.Task[dict[str, Any]] | None = None
 
     async def get(self) -> dict[str, Any]:
+        """The list at once: the last one built, refreshed in the background once it is a minute old (a person never waits behind the
+        workers for it); only the very first call builds it while the caller waits."""
+        if self._body is not None:
+            if time.monotonic() - self._at >= CACHE_S and (self._refresh is None or self._refresh.done()):
+                self._refresh = asyncio.create_task(self._build())
+            return self._body
+        return await self._build()
+
+    def prime(self) -> None:
+        """Builds the list once in the background (at the service's start), so that the first visitor gets it at once."""
+        if self._refresh is None or self._refresh.done():
+            self._refresh = asyncio.create_task(self._build())
+
+    async def _build(self) -> dict[str, Any]:
         async with self._lock:
             if self._body is not None and time.monotonic() - self._at < CACHE_S:
                 return self._body
