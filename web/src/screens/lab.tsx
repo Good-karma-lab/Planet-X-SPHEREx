@@ -1064,9 +1064,11 @@ export function Lab({ route }: { route: Route }) {
       const near = (ra: number, dec: number, arcsec: number) =>
         marks.find((k) => Math.hypot((k.ra - ra) * Math.cos((dec * Math.PI) / 180), k.dec - dec) * 3600 < arcsec);
       const anv = anRef.current;
+      // a big field keeps its picture readable: the strongest few anomalies and red sources are ringed, the full lists are in Candidates
+      const ringMax = fovArc >= 3000 ? 5 : fovArc >= 1100 ? 8 : Infinity;
       // anomalies and red sources belong to the passes (Months); the Days scale shows the visit's own movers
       if (st.opts.anomalies && anv?.result && !days) {
-        for (const a of anv.result.anomalies) {
+        for (const a of anv.result.anomalies.filter((q) => q.n <= ringMax)) {
           const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
           const k = near(ara, adec, 10);
           if (k) k.lines.push(`spectral anomaly ${a.n}`);
@@ -1086,6 +1088,7 @@ export function Lab({ route }: { route: Route }) {
       const rv = redRef.current;
       if (rv?.result && !days) {
         rv.result.red.forEach((x, i) => {
+          if (i >= ringMax) return;
           const [rra, rdec] =
             x.moves && x.ra_j2000 != null && x.dec_j2000 != null
               ? atEpoch(x.ra_j2000, x.dec_j2000, x.pmra ?? 0, x.pmdec ?? 0, year)
