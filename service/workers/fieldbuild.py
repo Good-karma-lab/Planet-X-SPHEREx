@@ -12,6 +12,7 @@ from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor
 from dataclasses import dataclass, field
+from typing import Any
 
 import numpy as np
 
@@ -128,13 +129,25 @@ async def build_field(
         for i in p.members:
             groups[exps[i].det].append(i)
         parts = []
-        for det, members in sorted(groups.items()):
+        dets = sorted(groups)
+        # reading overlaps computing: the next detector's exposures are read while this one is stacked
+        reads: dict[int, asyncio.Task[Any]] = {}
+
+        def start_read(d: int, reads: dict[int, asyncio.Task[Any]] = reads, groups: dict[int, list[int]] = groups) -> None:
+            if d not in reads:
+                reads[d] = asyncio.ensure_future(asyncio.gather(*(one(i) for i in groups[d])))
+
+        if dets:
+            start_read(dets[0])
+        for k, det in enumerate(dets):
             if checkpoint is not None:
                 await checkpoint()
             ts = time.time()
-            await asyncio.gather(*(one(i) for i in members))
+            await reads.pop(det)
             t_read += time.time() - ts
-            group = [natives.pop(i) for i in members if i in natives]  # pop: only this detector's exposures stay in memory
+            if k + 1 < len(dets):
+                start_read(dets[k + 1])
+            group = [natives.pop(i) for i in groups[det] if i in natives]  # pop: only this detector's exposures stay in memory
             if not group:
                 continue
             if keep_natives:

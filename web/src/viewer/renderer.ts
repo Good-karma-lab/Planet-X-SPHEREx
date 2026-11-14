@@ -38,8 +38,9 @@ vec4 passColour(int k) {
     vec3 lin = vec3(r * uWB[k].x, g, b * uWB[k].y);
     vec3 s = vec3(law(lin.r), law(lin.g), law(lin.b));
     float l = dot(s, vec3(0.3333));
-    float fade = 1.0 - smoothstep(0.55, 0.9, l);          // no colour boost on very bright pixels
-    c = clamp(mix(vec3(l), s, 1.0 + (uBoost - 1.0) * fade), 0.0, 1.0);
+    float fade = 1.0 - smoothstep(0.55, 0.9, l);          // no colour boost on very bright pixels (wings of saturated cores)
+    float faint = smoothstep(0.04, 0.16, l);               // nor at the noise level: noise keeps its natural (weak) colour
+    c = clamp(mix(vec3(l), s, 1.0 + (uBoost - 1.0) * fade * faint), 0.0, 1.0);
   } else {
     float w = texture(uVal, vec3(uv, float(k))).r;
     if (isnan(w)) return vec4(NODATA, 0.0);
