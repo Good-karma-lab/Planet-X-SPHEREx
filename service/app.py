@@ -24,6 +24,7 @@ from indexer.store import Index
 from service import __version__, cpu
 from service.anomalies import Anomalies
 from service.bodies import KnownBodies
+from service.browndwarfs import BrownDwarfs
 from service.catalogue_check import check as catalogue_check
 from service.config import Config, load
 from service.context import CatalogueContext
@@ -42,6 +43,7 @@ from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
+from service.routes_dwarfs import make_dwarfs_router
 from service.routes_extras import register as register_extras
 from service.routes_known import make_known_router
 from service.routes_pairs import make_pairs_router
@@ -78,6 +80,7 @@ class State:
         self.catalogue: CatalogueContext | None = None
         self.known: Known | None = None
         self.pairs: Pairs | None = None
+        self.dwarfs: BrownDwarfs | None = None
         self.warm: WarmRunner | None = None
         self.hips: HipsTiles | None = None
         self.coverage: dict[str, Any] | None = None
@@ -110,6 +113,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.pairs = Pairs(st.store, cfg.store_dir, st.catalogue)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
         st.movers = Movers(st.store, cfg.store_dir)
+        st.dwarfs = BrownDwarfs(st.store, cfg.store_dir, st.movers)
         st.bodies = KnownBodies(cfg.store_dir, st.index)
         if st.index is not None:
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
@@ -335,6 +339,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_router(st))
     app.include_router(make_known_router(st))
     app.include_router(make_pairs_router(st))
+    app.include_router(make_dwarfs_router(st))
     app.include_router(make_planetx_router(st))
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
     register_extras(app)

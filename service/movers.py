@@ -201,6 +201,10 @@ class Movers:
                 return
         t["check"] = "none"
 
+    async def check_track(self, t: dict[str, Any]) -> None:
+        """The Gaia verdict of a track (positions at every pass: mjd, ra, dec; rate: v_east, v_north, speed): sets check and gaia."""
+        await self._check(t)
+
     def view(self, run: Run) -> dict[str, Any]:
         out: dict[str, Any] = {"key": run.key, "state": run.state, "error": run.error}
         if run.result:
