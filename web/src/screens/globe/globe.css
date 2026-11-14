@@ -30,8 +30,9 @@
 .map-ui .tgl { padding: 6px 11px; border-radius: 10px; color: var(--muted); font-size: 11.5px; }
 .map-ui .tgl:hover { color: var(--ink); }
 .map-ui .tgl.on { color: var(--accent-l); border-color: var(--edge-hi); }
-.searched-float { position: absolute; right: 16px; bottom: 74px; z-index: 5; padding: 8px 11px; border-radius: 10px; font-size: 11.5px; max-width: 260px; }
-@media (max-width: 860px), (max-aspect-ratio: 1/1) { .searched-float { right: 10px; bottom: 66px; } }
+.map-ui .searched-float { position: static; padding: 8px 11px; border-radius: 10px; font-size: 11.5px; width: fit-content; max-width: min(280px, 100%); max-height: 46vh; overflow-y: auto; }
+.map-ui.map-tr .searched-float { align-self: flex-end; }
+@media (max-width: 1100px) { .map-ui.map-tr .searched-float { align-self: flex-start; } }
 
 /* layout: the aim (coordinates and field size) floats at the top left, the view mode and the layer rows at the top right, the readout and the help at the bottom left;
    the catalogue is a drawer that starts closed */
@@ -66,3 +67,13 @@
 /* with the catalogue open the globe is narrower: the rows stack */
 .screen .globe-wrap.cat-open > .map-ui.map-tr { left: 16px; right: 16px; top: 66px; align-items: flex-start; }
 .screen .globe-wrap.cat-open > .map-ui.map-tl { right: 16px; }
+
+/* the top-right column never reaches the bottom row (readout, help, Show area): the legend and a zone's card scroll inside it */
+.map-ui.map-tr { bottom: 76px; min-height: 0; }
+.map-ui.map-tr .searched-float { flex: 0 1 auto; min-height: 0; max-height: none; overflow-y: auto; }
+@media (max-width: 1100px) { .map-ui.map-tr { bottom: 150px; } }
+@media (max-width: 860px), (max-aspect-ratio: 1/1) { .map-ui.map-tr { bottom: 130px; } }
+@media (max-width: 860px), (max-aspect-ratio: 1/1) { .map-bl { max-width: calc(100% - 170px); } }
+/* the column is tall now: only its contents take the pointer, the globe below it stays draggable */
+.map-ui.map-tr { pointer-events: none; }
+.map-ui.map-tr > * { pointer-events: auto; }

@@ -848,24 +848,24 @@ export function Globe() {
               </button>
             )}
           </div>
+          {searched && searchedOn && (
+            <div class="searched-float dark-glass">
+              {!searchedSel && <SearchedLegend fields={searched} />}
+      {searchedSel && (
+        <SearchedCard
+          f={searchedSel}
+          onClose={() => setSearchedSel(null)}
+          onOpen={(o) => {
+            location.hash = formatHash({
+              screen: 'lab',
+              params: { ra: o.ra.toFixed(5), dec: o.dec.toFixed(5), fov: String(o.fov), ...(o.film ? { film: String(o.film) } : {}) },
+            });
+          }}
+        />
+      )}
+            </div>
+          )}
         </div>
-        {searched && searchedOn && (
-          <div class="searched-float dark-glass">
-            <SearchedLegend fields={searched} />
-    {searchedSel && (
-      <SearchedCard
-        f={searchedSel}
-        onClose={() => setSearchedSel(null)}
-        onOpen={(o) => {
-          location.hash = formatHash({
-            screen: 'lab',
-            params: { ra: o.ra.toFixed(5), dec: o.dec.toFixed(5), fov: String(o.fov), ...(o.film ? { film: String(o.film) } : {}) },
-          });
-        }}
-      />
-    )}
-          </div>
-        )}
         <div class="map-bl">
           {(count || sel) && (
             <div class="map-read">
