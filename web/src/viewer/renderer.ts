@@ -27,6 +27,11 @@ uniform float uT;              // mix of B over A
 uniform vec2 uWB[16];          // per pass (kR, kB)
 uniform float uLo, uHi, uSoft, uBoost;
 uniform vec3 uNoData;          // flat blue-grey inside the Picture; black in wall panels (outside coverage)
+uniform int uTime;             // 0 pendulum, 1 Difference (pass against the first), 2 Co-add (all passes)
+uniform int uPasses;           // passes loaded (Co-add)
+uniform sampler2DArray uDiff;  // R8: 128 + 12.7 z, 0 = no data; layer = pass * uDiffPer + uDiffLayer
+uniform int uDiffPer, uDiffLayer;
+uniform int uHasDiff;
 
 float law(float x) { return clamp(asinh((x - uLo) / uSoft) / asinh((uHi - uLo) / uSoft), 0.0, 1.0); }
 
@@ -50,7 +55,30 @@ vec3 passColour(int k) {
   return clamp(l * mix(vec3(1.0), uTint, 0.35 * (1.0 - smoothstep(0.6, 0.95, l))), 0.0, 1.0);
 }
 
+vec3 diffColour(int k) {
+  vec3 base = vec3(dot(passColour(k), vec3(0.3333)) * 0.35);  // the pass, dimmed and grey, under the significance
+  if (k == 0 || uHasDiff == 0) return base;                    // the first pass is the reference and shows nothing
+  float e = texture(uDiff, vec3(uv, float(k * uDiffPer + uDiffLayer))).r * 255.0;
+  if (e < 0.5) return base;
+  float z = (e - 128.0) / 12.7;
+  float a = clamp((abs(z) - 4.0) / 6.0, 0.0, 1.0) * step(4.0, abs(z));
+  vec3 c = z > 0.0 ? vec3(1.0, 0.15, 0.85) : vec3(0.1, 0.9, 1.0);  // magenta brighter, cyan fainter
+  return mix(base, c, a > 0.0 ? 0.35 + 0.65 * a : 0.0);
+}
+
 void main() {
+  if (uTime == 2) {
+    vec3 acc = vec3(0.0);
+    for (int k = 0; k < 16; k++) { if (k >= uPasses) break; acc += passColour(k); }
+    color = vec4(acc / float(max(uPasses, 1)), 1.0);
+    return;
+  }
+  if (uTime == 1) {
+    vec3 a = diffColour(uA);
+    vec3 b = uT > 0.0 ? diffColour(uB) : a;
+    color = vec4(mix(a, b, uT), 1.0);
+    return;
+  }
   vec3 a = passColour(uA);
   vec3 b = uT > 0.0 ? passColour(uB) : a;
   color = vec4(mix(a, b, uT), 1.0);
@@ -77,6 +105,9 @@ export interface Panel {
   tint?: [number, number, number];
   /** colour of places without data (default: the Picture's flat blue-grey) */
   noData?: [number, number, number];
+  time?: 'pendulum' | 'difference' | 'coadd';
+  /** layer of the Difference maps within a pass (0 white, 1.. the bands) */
+  diffLayer?: number;
 }
 
 export class Renderer {
@@ -85,6 +116,8 @@ export class Renderer {
   private stacks = new Map<StackName, Stack>();
   private sat: WebGLTexture | null = null;
   private satLoaded = new Set<number>();
+  private diff: WebGLTexture | null = null;
+  private diffPer = 1;
   private n = 0;
   private passCount = 0;
   private wb: number[] = new Array(32).fill(1);
@@ -144,6 +177,8 @@ export class Renderer {
     for (const s of this.stacks.values()) gl.deleteTexture(s.tex);
     this.stacks.clear();
     if (this.sat) gl.deleteTexture(this.sat);
+    if (this.diff) gl.deleteTexture(this.diff);
+    this.diff = null;
     this.n = n;
     this.passCount = passes;
     this.sat = this.newArray(gl.R8, passes);
@@ -187,6 +222,26 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.sat);
     gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, pass, this.n, this.n, 1, gl.RED, gl.UNSIGNED_BYTE, sat);
     this.satLoaded.add(pass);
+  }
+
+  /** The Difference maps: `layers[pass][k]` uint8 n×n (k 0 white, 1.. bands); pass 0 is the reference (no map). */
+  uploadDiff(per: number, maps: Map<string, Uint8Array>, names: string[]): void {
+    const gl = this.gl;
+    if (this.diff) gl.deleteTexture(this.diff);
+    this.diffPer = per;
+    this.diff = this.newArray(gl.R8, this.passCount * per);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.diff);
+    for (let p = 1; p < this.passCount; p++) {
+      names.forEach((name, k) => {
+        const m = maps.get(`p${p}_${name}`);
+        if (m) gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, p * per + k, this.n, this.n, 1, gl.RED, gl.UNSIGNED_BYTE, m);
+      });
+    }
+  }
+
+  get hasDiff(): boolean {
+    return this.diff !== null;
   }
 
   setWhiteBalance(pass: number, kr: number, kb: number): void {
@@ -243,6 +298,14 @@ export class Renderer {
     gl.uniform1f(this.u('uHi'), HI);
     gl.uniform1f(this.u('uSoft'), SOFT);
     gl.uniform1f(this.u('uBoost'), this.boost);
+    gl.uniform1i(this.u('uTime'), p.time === 'difference' ? 1 : p.time === 'coadd' ? 2 : 0);
+    gl.uniform1i(this.u('uPasses'), s.loaded.size);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.diff ?? this.sat);
+    gl.uniform1i(this.u('uDiff'), 2);
+    gl.uniform1i(this.u('uHasDiff'), this.diff ? 1 : 0);
+    gl.uniform1i(this.u('uDiffPer'), this.diffPer);
+    gl.uniform1i(this.u('uDiffLayer'), p.diffLayer ?? 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 }

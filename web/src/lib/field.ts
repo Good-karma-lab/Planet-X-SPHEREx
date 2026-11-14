@@ -78,7 +78,7 @@ export class FieldClient {
   }
 
   private partsFromMeta(meta: FieldMeta): string[] {
-    return meta.passes.flatMap((p) => ['picture', 'dets', 'bands'].map((k) => `${k}_p${p.index}`));
+    return [...meta.passes.flatMap((p) => ['picture', 'dets', 'bands'].map((k) => `${k}_p${p.index}`)), 'diff'];
   }
 
   /** Fetch the parts whose names start with `prefix` (e.g. "dets_") from now on, and those already ready. */

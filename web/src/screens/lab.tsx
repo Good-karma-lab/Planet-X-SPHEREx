@@ -12,6 +12,12 @@ const VIEWS: { key: View; name: string; tip: string }[] = [
   { key: 'bands', name: 'Wall of bands', tip: 'One panel per named band: in which light the object is bright.' },
   { key: 'det', name: 'Wall of detectors', tip: 'One panel per detector: a real object jumps in all six at once.' },
 ];
+type Time = 'pendulum' | 'difference' | 'coadd';
+const TIMES: { key: Time; name: string; tip: string }[] = [
+  { key: 'pendulum', name: 'Pendulum', tip: 'The passes back and forth: 1 → 2 → 3 → 2.' },
+  { key: 'difference', name: 'Difference', tip: 'Each pass against the first: magenta brighter, cyan fainter (|z| above 4).' },
+  { key: 'coadd', name: 'Co-add', tip: 'All passes stacked into one still picture.' },
+];
 const DETECTORS = [
   { name: 'very near infrared', range: '0.75–1.11 µm' },
   { name: 'near infrared', range: '1.11–1.64 µm' },
@@ -42,6 +48,7 @@ export function Lab({ route }: { route: Route }) {
   const dec = Number(route.params['dec']);
   const fov = SIZES.includes(Number(route.params['fov'])) ? Number(route.params['fov']) : 5;
   const view: View = (['picture', 'bands', 'det'] as const).find((v) => v === route.params['view']) ?? 'picture';
+  const time: Time = (['pendulum', 'difference', 'coadd'] as const).find((v) => v === route.params['time']) ?? 'pendulum';
   const canvas = useRef<HTMLCanvasElement>(null);
   const clientRef = useRef<FieldClient | null>(null);
   const [phase, setPhase] = useState('');
@@ -51,8 +58,8 @@ export function Lab({ route }: { route: Route }) {
   const [playing, setPlaying] = useState(true);
   const [fixed, setFixed] = useState<number | null>(null);
   const valid = Number.isFinite(ra) && Number.isFinite(dec);
-  const state = useRef({ view, playing, fixed, meta: null as FieldMeta | null });
-  state.current = { view, playing, fixed, meta };
+  const state = useRef({ view, time, playing, fixed, meta: null as FieldMeta | null });
+  state.current = { view, time, playing, fixed, meta };
 
   useEffect(() => {
     if (!valid || !canvas.current) return;
@@ -87,7 +94,16 @@ export function Lab({ route }: { route: Route }) {
           place(x.name, x.part);
         }
       },
-      onPart: place,
+      onPart: (name, part) => {
+        if (name === 'diff') {
+          const bandKeys = (state.current.meta?.bands ?? []).map((b) => b.key);
+          const names = ['white', ...bandKeys];
+          const maps = new Map(Object.entries(part.arrays).map(([k, a]) => [k, a.data as Uint8Array]));
+          if (r.size) r.uploadDiff(names.length, maps, names);
+          return;
+        }
+        place(name, part);
+      },
     });
     clientRef.current = client;
     void client.open(ra, dec, fov);
@@ -105,7 +121,8 @@ export function Lab({ route }: { route: Route }) {
         let a = loaded[0]!;
         let b = a;
         let t = 0;
-        if (st.fixed !== null && loaded.includes(st.fixed)) a = b = st.fixed;
+        if (st.time === 'coadd') a = b = loaded[0]!;
+        else if (st.fixed !== null && loaded.includes(st.fixed)) a = b = st.fixed;
         else if (st.playing && loaded.length > 1) {
           const f = frameAt(performance.now() - t0, loaded.length);
           a = loaded[f.a]!;
@@ -115,12 +132,12 @@ export function Lab({ route }: { route: Route }) {
         let panels: (Panel & { label?: string; sub?: string })[] = [];
         if (st.view === 'picture') {
           const s = Math.min(w, h);
-          panels = [{ x: (w - s) / 2, y: (h - s) / 2, w: s, h: s, stack, mode: stack === 'picture' ? 'colour' : 'layer' }];
+          panels = [{ x: (w - s) / 2, y: (h - s) / 2, w: s, h: s, stack, mode: stack === 'picture' ? 'colour' : 'layer', time: st.time, diffLayer: 0 }];
         } else if (st.view === 'bands') {
           const bands = st.meta?.bands ?? [];
-          panels = wallLayout(bands.length, w, h).map((c, i) => ({ x: c.x, y: c.y, w: c.size, h: c.size, stack, mode: 'layer', layer: i, tint: hueRgb(bands[i]!.hue), noData: [0, 0, 0], label: bands[i]!.name, sub: bands[i]!.label }));
+          panels = wallLayout(bands.length, w, h).map((c, i) => ({ x: c.x, y: c.y, w: c.size, h: c.size, stack, mode: 'layer', layer: i, tint: hueRgb(bands[i]!.hue), noData: [0, 0, 0], time: st.time, diffLayer: i + 1, label: bands[i]!.name, sub: bands[i]!.label }));
         } else {
-          panels = wallLayout(6, w, h).map((c, i) => ({ x: c.x, y: c.y, w: c.size, h: c.size, stack, mode: 'layer', layer: i, noData: [0, 0, 0], label: `D${i + 1} ${DETECTORS[i]!.name}`, sub: DETECTORS[i]!.range }));
+          panels = wallLayout(6, w, h).map((c, i) => ({ x: c.x, y: c.y, w: c.size, h: c.size, stack, mode: 'layer', layer: i, noData: [0, 0, 0], time: st.time, diffLayer: 0, label: `D${i + 1} ${DETECTORS[i]!.name}`, sub: DETECTORS[i]!.range }));
         }
         for (const p of panels) {
           r.panel(p, a, b, t);
@@ -148,7 +165,8 @@ export function Lab({ route }: { route: Route }) {
     if (!c) return;
     if (view === 'bands' || fov <= 10) c.want('bands_');
     if (view === 'det' || fov <= 10) c.want('dets_');
-  }, [view, fov, meta]);
+    if (time === 'difference') c.want('diff');
+  }, [view, time, fov, meta]);
 
   if (!valid) return <div class="lab-empty">Open a place from the globe, or give ra and dec in the address.</div>;
 
@@ -157,7 +175,9 @@ export function Lab({ route }: { route: Route }) {
   };
   const passMeta = meta?.passes.find((p) => p.index === shown?.pass);
   const what = shown?.stack === 'picture' ? 'colour' : shown?.stack === 'quick' ? 'white light' : shown?.stack === 'bands' ? 'bands' : 'detectors';
-  const status = phase || (shown && meta ? `Pass ${shown.pass + 1} of ${meta.passes.length} · ${passMeta ? monthYear(passMeta.mjd_mid) : ''} · ${what} · ${meta.exposures} exposures` : '');
+  const when = time === 'coadd' ? 'all passes' : `Pass ${(shown?.pass ?? 0) + 1} of ${meta?.passes.length ?? 0} · ${passMeta ? monthYear(passMeta.mjd_mid) : ''}`;
+  const mode = time === 'difference' ? (shown?.pass === 0 ? ' · Difference: reference pass' : ' · Difference against the first pass') : time === 'coadd' ? ' · Co-add' : '';
+  const status = phase || (shown && meta ? `${when} · ${what}${mode} · ${meta.exposures} exposures` : '');
   return (
     <div class="lab">
       <div class="lab-picture">
@@ -193,6 +213,15 @@ export function Lab({ route }: { route: Route }) {
             <button key={v.key} class={`chip ${v.key === view ? 'on' : ''}`} title={v.tip} onClick={() => set({ view: v.key })} data-testid={`view-${v.key}`}>{v.name}</button>
           ))}
         </div>
+        <div class="row">
+          <span class="label">Time</span>
+          {TIMES.map((t) => (
+            <button key={t.key} class={`chip ${t.key === time ? 'on' : ''}`} title={t.tip} onClick={() => set({ time: t.key })} data-testid={`time-${t.key}`}>{t.name}</button>
+          ))}
+        </div>
+        {time === 'difference' && (
+          <div class="row key"><span class="sw mag" /> brighter <span class="sw cyan" /> fainter</div>
+        )}
         <div class="row dim">RA {ra.toFixed(5)} · Dec {dec.toFixed(5)}</div>
       </aside>
     </div>
