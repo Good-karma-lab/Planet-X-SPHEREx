@@ -13,6 +13,7 @@ A body beyond Neptune is too faint for one exposure, and it does not stand still
      low); kept per sky point: the best S/N and its hypothesis. The same for the negated differences gives the height that noise alone reaches (the null); candidates are the peaks
      above it (1.05 times the best negated peak)
 The photometry of each candidate on the exposures themselves is done by the service (on - off along the track, control tracks beside it)."""
+
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -21,7 +22,7 @@ from scipy.ndimage import binary_dilation, maximum_filter
 
 from . import orbit
 
-S = 3.075                               # grid step, arcsec (half a SPHEREx pixel)
+S = 3.075  # grid step, arcsec (half a SPHEREx pixel)
 CLIP, STEP, SN_MIN, STAR_SIG = 5.0, 3.0, 5.0, 4.0
 ARC = 206264.806
 # a static source brighter than `sigma` is masked together with a margin of `points` grid points around its contour (the wings of a bright star reach far)
@@ -67,7 +68,7 @@ class TooManyHypotheses(ValueError):
     """the grid of (distance, own motion) would not fit in memory or time; raise the nearest distance"""
 
 
-HMAX = 1_000_000                         # hypotheses of one pass the service will scan: about 13 min and 1.5 GB on this machine (Eris, pass of July 2025, 30-300 au: 3.6e5, 276 s)
+HMAX = 1_000_000  # hypotheses of one pass the service will scan: about 13 min and 1.5 GB on this machine (Eris, pass of July 2025, 30-300 au: 3.6e5, 276 s)
 
 
 def estimate_hypotheses(dmin, dmax, tv, Rv, i0, T, step=STEP, mu_scale=1.0):
@@ -77,7 +78,7 @@ def estimate_hypotheses(dmin, dmax, tv, Rv, i0, T, step=STEP, mu_scale=1.0):
     K = max(np.hypot(pu, pv).max() * dm, 1e-6)
     q = np.arange(1 / dmax, 1 / dmin + 1e-12, step / K) if step / K < (1 / dmin - 1 / dmax) else np.array([1 / dm])
     span = np.abs(tv - tv[i0]).max()
-    return int(sum(np.pi * (mu_scale * 5016.0 / d ** 1.5 * span / step + 1) ** 2 for d in 1 / q))
+    return int(sum(np.pi * (mu_scale * 5016.0 / d**1.5 * span / step + 1) ** 2 for d in 1 / q))
 
 
 def fit_dmin(dmin, dmax, tv, Rv, i0, T, step=STEP, mu_scale=1.0, hmax=HMAX):
@@ -94,15 +95,15 @@ def hypotheses(dmin, dmax, tv, Rv, i0, T, step=STEP, mu_scale=1.0, hmax=None):
     """grid of (distance, own motion): neighbouring hypotheses differ by at most `step` arcsec in any visit -> array (nh, 3) of d (au), mu_u, mu_v (arcsec/day)"""
     dm = np.sqrt(dmin * dmax)
     pu, pv = parallax(dm, Rv, Rv[i0], T)
-    K = max(np.hypot(pu, pv).max() * dm, 1e-6)                                 # arcsec * au: the offsets go as 1/d
+    K = max(np.hypot(pu, pv).max() * dm, 1e-6)  # arcsec * au: the offsets go as 1/d
     q = np.arange(1 / dmax, 1 / dmin + 1e-12, step / K) if step / K < (1 / dmin - 1 / dmax) else np.array([1 / dm])
     span = np.abs(tv - tv[i0]).max()
-    est = int(sum(np.pi * (mu_scale * 5016.0 / d ** 1.5 * span / step + 1) ** 2 for d in 1 / q))
-    if hmax is not None and est > hmax:                                        # the count grows as 1/dmin^3: 30 au is about 1e5 hypotheses a pass, 8 au several million
+    est = int(sum(np.pi * (mu_scale * 5016.0 / d**1.5 * span / step + 1) ** 2 for d in 1 / q))
+    if hmax is not None and est > hmax:  # the count grows as 1/dmin^3: 30 au is about 1e5 hypotheses a pass, 8 au several million
         raise TooManyHypotheses(est)
     H = []
     for d in 1 / q:
-        mmax = mu_scale * 5016.0 / d ** 1.5                                    # a bound body cannot move faster than the escape speed
+        mmax = mu_scale * 5016.0 / d**1.5  # a bound body cannot move faster than the escape speed
         dm_ = step / span
         n = int(np.ceil(mmax / dm_))
         for a in range(-n, n + 1):
@@ -136,6 +137,7 @@ def static_and_differences(vis, p, tpl=(1, 1, 1, 1, 1, 1), min_good=500):
             continue
         st = np.array(refs)
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             med = np.nanmedian(st, 0)
@@ -161,10 +163,22 @@ def static_and_differences(vis, p, tpl=(1, 1, 1, 1, 1, 1), min_good=500):
             md = np.median(d[good])
             sg = 1.4826 * np.median(np.abs(d[good] - md))
             d0 = np.where(good, d - md, 0.0).astype("f4")
-            if v["n"] < 3:                                                          # no median over a visit: a cosmic ray is still there; far points are left out
+            if v["n"] < 3:  # no median over a visit: a cosmic ray is still there; far points are left out
                 good = good & ~binary_dilation(np.abs(d0) > CLIP * sg, iterations=1)
                 d0 = np.where(good, d0, 0.0).astype("f4")
-            out.append(dict(k=k, t=v["t"], R=v["R"], d=np.clip(d0, -CLIP * sg, CLIP * sg).astype("f4"), d0=d0, good=good, sg=float(sg), s=float(tpl[k]), masked=float(star.sum() / max(fr.sum(), 1))))
+            out.append(
+                dict(
+                    k=k,
+                    t=v["t"],
+                    R=v["R"],
+                    d=np.clip(d0, -CLIP * sg, CLIP * sg).astype("f4"),
+                    d0=d0,
+                    good=good,
+                    sg=float(sg),
+                    s=float(tpl[k]),
+                    masked=float(star.sum() / max(fr.sum(), 1)),
+                )
+            )
     return sorted(out, key=lambda v: v["t"]), notes
 
 
@@ -180,18 +194,18 @@ def _stack_block(A, B, sh, wsum):
         num[:] = 0
         den[:] = 0
         for i in range(nv):
-            sx, sy = int(sh[h, i, 0]), int(sh[h, i, 1])                           # sum(x) += A_i(x + shift)
+            sx, sy = int(sh[h, i, 0]), int(sh[h, i, 1])  # sum(x) += A_i(x + shift)
             if abs(sx) >= N or abs(sy) >= N:
                 continue
             dy0, dy1 = max(0, -sy), N - max(0, sy)
             dx0, dx1 = max(0, -sx), N - max(0, sx)
-            num[dy0:dy1, dx0:dx1] += A[i, dy0 + sy:dy1 + sy, dx0 + sx:dx1 + sx]
-            den[dy0:dy1, dx0:dx1] += B[i, dy0 + sy:dy1 + sy, dx0 + sx:dx1 + sx]
-        ok = den >= 0.6 * wsum                                                    # at least 60 % of the weight must be there
+            num[dy0:dy1, dx0:dx1] += A[i, dy0 + sy : dy1 + sy, dx0 + sx : dx1 + sx]
+            den[dy0:dy1, dx0:dx1] += B[i, dy0 + sy : dy1 + sy, dx0 + sx : dx1 + sx]
+        ok = den >= 0.6 * wsum  # at least 60 % of the weight must be there
         sn = np.where(ok, num / np.sqrt(np.maximum(den, 1e-12)), 0.0)
         q = sn[::3, ::3][ok[::3, ::3]]
         if q.size > 200:
-            sn /= max(1.4826 * float(np.median(np.abs(q - np.median(q)))), 0.5)    # the sum is scaled by its own robust spread
+            sn /= max(1.4826 * float(np.median(np.abs(q - np.median(q)))), 0.5)  # the sum is scaled by its own robust spread
         m = sn > best
         best[m] = sn[m]
         arg[m] = h
@@ -199,12 +213,15 @@ def _stack_block(A, B, sh, wsum):
     return best, arg, neg
 
 
-SEARCH_BLOCKS = 48  # the hypotheses of a scan are cut into this many blocks (each its own call, spread over the worker processes)
+SEARCH_BLOCKS = 96  # at most this many blocks (each its own call, spread over the worker processes)
+BLOCK_SECONDS = 4.0  # a block should take about this long on one core, so that progress moves and the pool stays busy
+SEC_PER_VISIT_PIXEL = 1.2e-9  # one hypothesis on one core: this many seconds per visit and per pixel of the field
 
 
-def search_prepare(DV, T, N, dmin, dmax, workdir, step=STEP, mu_scale=1.0, hmax=HMAX):
+def search_prepare(DV, T, N, dmin, dmax, workdir, step=STEP, mu_scale=1.0, hmax=HMAX, workers=4):
     """The first stage of `search` for a service that spreads the blocks over processes: the hypotheses and the arrays every block reads
-    (written to `workdir` as .npy files, read in place by the blocks) -> dict(H, OFF, tv, Rv, i0, w, wa, cuts, wsum)"""
+    (written to `workdir` as .npy files, read in place by the blocks) -> dict(H, OFF, tv, Rv, i0, w, wa, cuts, wsum, N, est_s): the blocks are as many as the work needs (about BLOCK_SECONDS each, at least one
+    per worker, at most SEARCH_BLOCKS) and est_s is the time of the scan on one core"""
     tv = np.array([v["t"] for v in DV])
     Rv = np.array([v["R"] for v in DV])
     i0 = int(np.argmin(np.abs(tv - 0.5 * (tv.min() + tv.max()))))
@@ -219,8 +236,10 @@ def search_prepare(DV, T, N, dmin, dmax, workdir, step=STEP, mu_scale=1.0, hmax=
     np.save(f"{workdir}/A.npy", A)
     np.save(f"{workdir}/B.npy", B)
     np.save(f"{workdir}/SH.npy", SH)
-    cuts = np.linspace(0, len(H), max(1, min(len(H), SEARCH_BLOCKS)) + 1).astype(int)
-    return dict(H=H, OFF=OFF, tv=tv, Rv=Rv, i0=i0, w=w, wa=wa, cuts=cuts, wsum=float(w.sum()), N=N)
+    est = len(H) * SEC_PER_VISIT_PIXEL * len(DV) * N * N
+    nb = int(np.clip(np.ceil(est / BLOCK_SECONDS), max(1, workers), SEARCH_BLOCKS))
+    cuts = np.linspace(0, len(H), max(1, min(len(H), nb)) + 1).astype(int)
+    return dict(H=H, OFF=OFF, tv=tv, Rv=Rv, i0=i0, w=w, wa=wa, cuts=cuts, wsum=float(w.sum()), N=N, est_s=float(est))
 
 
 def search_block(workdir, a, b, wsum):
@@ -243,7 +262,19 @@ def search_merge(prep, parts, secs):
         best[m] = b_[m]
         arg[m] = a + g_[m]
         neg = np.maximum(neg, n_)
-    return dict(H=prep["H"], OFF=prep["OFF"], tv=prep["tv"], Rv=prep["Rv"], i0=prep["i0"], best=best, arg=arg, neg=neg, w=prep["w"], wa=prep["wa"], secs=secs)
+    return dict(
+        H=prep["H"],
+        OFF=prep["OFF"],
+        tv=prep["tv"],
+        Rv=prep["Rv"],
+        i0=prep["i0"],
+        best=best,
+        arg=arg,
+        neg=neg,
+        w=prep["w"],
+        wa=prep["wa"],
+        secs=secs,
+    )
 
 
 def search(DV, T, N, dmin, dmax, step=STEP, mu_scale=1.0, workers=6, progress=None, cancel=None, hmax=HMAX):
@@ -257,7 +288,7 @@ def search(DV, T, N, dmin, dmax, step=STEP, mu_scale=1.0, workers=6, progress=No
     SH = np.round(OFF / S).astype("i4")
     w0 = np.array([1 / v["sg"] ** 2 for v in DV])
     sv = np.array([v["s"] for v in DV])
-    wa, w = w0 * sv, w0 * sv * sv                                                  # matched filter: sum(wa * d) / sqrt(sum(w))
+    wa, w = w0 * sv, w0 * sv * sv  # matched filter: sum(wa * d) / sqrt(sum(w))
     A = np.array([v["d"] * wi for v, wi in zip(DV, wa)], "f4")
     B = np.array([v["good"] * wi for v, wi in zip(DV, w)], "f4")
     nch = max(workers, min(len(H), workers * 4))
@@ -318,8 +349,14 @@ def knob(R, DV, x, y, half=6):
     B = np.array([np.pad(v["good"] * wi, pad) for v, wi in zip(DV, w)])
     X, Y = int(round(x)) + pad, int(round(y)) + pad
     for n in range(len(H)):
-        num = sum(A[i, Y - half + SH[n, i, 1]:Y + half + 1 + SH[n, i, 1], X - half + SH[n, i, 0]:X + half + 1 + SH[n, i, 0]] for i in range(len(DV)))
-        den = sum(B[i, Y - half + SH[n, i, 1]:Y + half + 1 + SH[n, i, 1], X - half + SH[n, i, 0]:X + half + 1 + SH[n, i, 0]] for i in range(len(DV)))
+        num = sum(
+            A[i, Y - half + SH[n, i, 1] : Y + half + 1 + SH[n, i, 1], X - half + SH[n, i, 0] : X + half + 1 + SH[n, i, 0]]
+            for i in range(len(DV))
+        )
+        den = sum(
+            B[i, Y - half + SH[n, i, 1] : Y + half + 1 + SH[n, i, 1], X - half + SH[n, i, 0] : X + half + 1 + SH[n, i, 0]]
+            for i in range(len(DV))
+        )
         s = float(np.where(den >= 0.6 * w.sum(), num / np.sqrt(np.maximum(den, 1e-12)), 0).max())
         j = int(np.searchsorted(ds, H[n, 0]))
         out[j] = max(out[j], s)
@@ -332,6 +369,7 @@ def refine(c, R, DV, N):
     (3 arcsec) and the photometry along the track loses flux. Updates c in place (x, y, mu, sn_unclipped, refined)."""
     from scipy.ndimage import map_coordinates
     from scipy.optimize import minimize
+
     dt = R["tv"] - R["tv"][R["i0"]]
     w, wa = R["w"], R["wa"]
     Pu = R["OFF"][c["h"], :, 0] - c["mu"][0] * dt
@@ -350,8 +388,19 @@ def refine(c, R, DV, N):
             s += wa[i] * map_coordinates(v["d0"], [[yi], [xi]], order=1)[0]
             ws += w[i]
         return -s / np.sqrt(ws) if ws > 0.5 * w.sum() else 0.0
+
     x0 = np.array([c["x"], c["y"], c["mu"][0], c["mu"][1]], "f8")
     st = STEP / max(np.abs(dt).max(), 1e-6)
-    r = minimize(cost, x0, method="Nelder-Mead", options=dict(initial_simplex=[x0, x0 + [1, 0, 0, 0], x0 + [0, 1, 0, 0], x0 + [0, 0, st, 0], x0 + [0, 0, 0, st]], xatol=0.02, fatol=0.01, maxiter=600))
+    r = minimize(
+        cost,
+        x0,
+        method="Nelder-Mead",
+        options=dict(
+            initial_simplex=[x0, x0 + [1, 0, 0, 0], x0 + [0, 1, 0, 0], x0 + [0, 0, st, 0], x0 + [0, 0, 0, st]],
+            xatol=0.02,
+            fatol=0.01,
+            maxiter=600,
+        ),
+    )
     if np.hypot(r.x[0] - x0[0], r.x[1] - x0[1]) <= 5 and np.hypot(r.x[2] - x0[2], r.x[3] - x0[3]) <= 4 * st and -r.fun > -cost(x0):
         c.update(x=float(r.x[0]), y=float(r.x[1]), mu=(float(r.x[2]), float(r.x[3])), sn_unclipped=float(-r.fun), refined=True)

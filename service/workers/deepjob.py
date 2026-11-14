@@ -338,7 +338,7 @@ async def run_deep(
         grid = px.grid_for(a, d, p["fov"])
         pv = await px.build_visits(ctx, fr, wl, exps, pno, grid, f"Find Planet X, field {fi + 1} of {nf}")
         if pv.failed:
-            res["notes"].append(f"field {fi + 1}: {pv.failed} exposures were not read")
+            res["notes"].append(px.skipped_note(pv.failed, len(exps), f"field {fi + 1}: "))
         ctx.phase(f"field {fi + 1} of {nf}: static sky and differences")
         DV, notes = await ctx.compute(edist.static_and_differences, pv.vis, pk)
         res["notes"] += [f"field {fi + 1}: {n_}" for n_ in notes]
