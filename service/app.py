@@ -42,6 +42,7 @@ from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
+from service.routes_extras import register as register_extras
 from service.routes_known import make_known_router
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
@@ -335,6 +336,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_known_router(st))
     app.include_router(make_pairs_router(st))
     app.include_router(make_planetx_router(st))
+    # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
+    register_extras(app)
 
     @app.middleware("http")
     async def headers_and_people(request: Request, call_next: Any) -> Response:
