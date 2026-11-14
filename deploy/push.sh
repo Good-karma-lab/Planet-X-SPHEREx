@@ -3,6 +3,7 @@
 # sync the Python environment there and restart the API. The store on the VM (index, products) stays.
 #   deploy/push.sh ubuntu@HOST [--index] [--now]   --index also copies a consistent snapshot of the local exposure index;
 #                                                  without --now the main instance restarts only when no job is running (up to 20 min)
+#   deploy/push.sh ubuntu@HOST --web-only            only the web bundle (the API serves it from disk): no restart, running jobs go on
 set -euo pipefail
 HOST="${1:?usage: deploy/push.sh user@host [--index]}"
 KEY="${SKY_SSH_KEY:-$HOME/.ssh/oci_spherex_ed25519}"
@@ -13,6 +14,12 @@ cd "$ROOT"
 (cd web && npm run build >/dev/null)
 rev="$(git rev-parse --short HEAD)$(git diff --quiet || echo '-dirty')"
 echo "$rev" > web/dist/release.txt
+
+if [ "${2:-}" = "--web-only" ]; then
+  rsync -az --delete -e "$SSH" --rsync-path="sudo -u sky rsync" web/dist/ "$HOST:/opt/sky/web/dist/"
+  echo "released web $rev to $HOST (no restart)"
+  exit 0
+fi
 
 rsync -az --delete -e "$SSH" --rsync-path="sudo -u sky rsync" \
   --exclude .git --exclude .venv --exclude store --exclude 'web/node_modules' --exclude '__pycache__' --exclude '.pytest_cache' \
