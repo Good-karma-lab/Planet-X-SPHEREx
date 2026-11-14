@@ -66,7 +66,7 @@ def main() -> int:
             b = r.json() if r.status_code == 200 else {"state": f"http {r.status_code}"}
             state = b.get("state") or b.get("status")
             log(f["name"], state, (b.get("job") or {}).get("phase", ""))
-            if state in ("done", "ok", "error", "failed") or b.get("result"):
+            if state not in ("running", "queued", "waiting", "paused", None) or b.get("result"):
                 log(f["name"], "result:", json.dumps(b.get("result") or b)[:2000])
                 break
             time.sleep(60)
