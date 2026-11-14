@@ -259,7 +259,8 @@ def orbit_tracks(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Link the candidates that on − off photometry found positive in every exposure of their visit (at least PRE_NSIG sigma) with the orbit
     model (the observer is the Earth plus the spacecraft at the frame), follow each track into the visits where the orbit predicts it,
-    and keep the tracks that chance does not make: the same linking on the same candidates at chance places, `trials` times. -> (tracks, control)."""
+    and keep the tracks that chance does not make: the same linking on the same candidates at chance places, `trials`
+    times. -> (tracks, control)."""
     from engine import onoff
     from engine import orbit as _orbit
 
