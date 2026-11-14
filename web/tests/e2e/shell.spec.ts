@@ -1,20 +1,34 @@
 import { expect, test } from '@playwright/test';
 
-test('the shell loads, talks to the service and switches screens by clicking', async ({ page }) => {
+// The test service runs on an empty store: no exposure index, so the coverage endpoints answer 503 and the survey tiles may be
+// unreachable. Those failed loads are expected; any other console error fails the test.
+const expected = (t: string) => /Failed to load resource/.test(t);
+
+test('the rail switches screens by clicking', async ({ page }) => {
   const errors: string[] = [];
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('console', (m) => { if (m.type() === 'error' && !expected(m.text())) errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(e.message));
 
   await page.goto('/');
-  await expect(page.getByTestId('status')).toHaveText(/^sky service \d+\.\d+\.\d+$/);
-  for (const name of ['Lab', 'Findings', 'Method', 'Globe']) {
+  await expect(page.getByTestId('chip-bench')).toHaveText('Test targets (5)');
+  for (const name of ['Lab', 'Findings', 'Index', 'Method', 'About', 'Globe']) {
     await page.getByRole('link', { name, exact: true }).click();
-    if (name === 'Lab') await expect(page.locator('.lab-empty')).toBeVisible();
-    else if (name === 'Globe') await expect(page.getByText('Test targets')).toBeVisible();
-    else await expect(page.locator('main h1')).toHaveText(name);
+    if (name === 'Lab') await expect(page.getByText('Open a place from the globe')).toBeVisible();
+    else if (name === 'Globe') await expect(page.getByTestId('sky')).toBeVisible();
+    else await expect(page.locator('main h1')).toHaveText(name === 'Index' ? 'Exposure index' : name);
     await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute('aria-current', 'page');
   }
   expect(errors).toEqual([]);
+});
+
+test('a test target opens the lab with its controls', async ({ page }) => {
+  await page.goto('/');
+  await page.getByTestId("target-Barnard's Star").getByRole('button', { name: 'Open in lab' }).click();
+  await expect(page).toHaveURL(/#\/lab\?ra=269\.4/);
+  for (const t of ['Controls', 'Object', 'Spectrum', 'Picture', 'Wall of bands', 'Wall of detectors', 'Blink', 'Difference', 'Co-add', 'Colour blend', 'Mono sum']) {
+    await expect(page.getByRole('button', { name: t, exact: true })).toBeVisible();
+  }
+  await expect(page.getByTestId('band-ch4')).toContainText('Methane');
 });
 
 test('a link opens its screen directly', async ({ page }) => {

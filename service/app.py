@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from indexer.store import Index
 from service import __version__
 from service.config import Config, load
+from service.coverage import coverage_map
 from service.jobs.scheduler import Priority, Scheduler
 from service.products.store import Store, product_key
 from service.products.versions import VERSIONS
@@ -26,6 +27,7 @@ from service.ratelimit import Buckets, client_id
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
+from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
 from service.workers import fieldjob, filmjob
 
@@ -48,6 +50,9 @@ class State:
         self.scheduler: Scheduler | None = None
         self.executor: ProcessPoolExecutor | None = None
         self.warm: WarmRunner | None = None
+        self.hips: HipsTiles | None = None
+        self.coverage: dict[str, Any] | None = None
+        self.coverage_lock = asyncio.Lock()
 
 
 def create_app(config: Config | None = None, scheduler: Scheduler | None = None, s3: S3 | None = None) -> FastAPI:
@@ -57,6 +62,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         st.store = Store(cfg.store_dir)
+        st.hips = HipsTiles(cfg.store_dir / "hips")
         st.store.purge_stale()
         index_path = cfg.store_dir / "index" / "exposures.sqlite"
         if index_path.is_file():
@@ -242,6 +248,45 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             media_type="application/json" if name.endswith(".json") else "application/octet-stream",
             headers={"Cache-Control": "public, max-age=31536000, immutable" if immutable else "no-store"},
         )
+
+    @app.get(f"{API_PREFIX}/coverage")
+    def coverage_here(
+        ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90), fov: float = Query(5, gt=0, le=60)
+    ) -> dict[str, Any]:
+        """How many exposures of the index overlap a field, by release."""
+        if st.index is None:
+            raise HTTPException(503, "no exposure index")
+        found = st.index.overlapping(ra, dec, fov / 60.0 * 0.7072)
+        by: dict[str, int] = {}
+        for e in found:
+            by[e.release] = by.get(e.release, 0) + 1
+        return {"ra": ra, "dec": dec, "fov": fov, "n_exposures": len(found), "by_release": by}
+
+    @app.get(f"{API_PREFIX}/coverage/map")
+    async def coverage_all() -> Response:
+        """Exposure centres per HEALPix cell (nested, order 3) and release: the globe's coverage layer."""
+        index_path = cfg.store_dir / "index" / "exposures.sqlite"
+        if not index_path.is_file():
+            raise HTTPException(503, "no exposure index")
+        async with st.coverage_lock:
+            if st.coverage is None:
+                st.coverage = await asyncio.to_thread(coverage_map, index_path)
+        return JSONResponse(st.coverage, headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.get(f"{API_PREFIX}/hips/{{survey}}/{{order}}/{{tile}}")
+    async def hips(survey: str, order: int, tile: str) -> Response:
+        """A tile of an all-sky survey for the globe's background (kept on disk after the first request)."""
+        if st.hips is None:
+            raise HTTPException(503)
+        try:
+            data = await asyncio.to_thread(st.hips.get, survey, order, tile)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        except Exception as e:  # the mirror is down or slow: the globe keeps the coarser tiles it has
+            raise HTTPException(502, "survey tiles unavailable") from e
+        if data is None:
+            raise HTTPException(404)
+        return Response(data, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=2592000, immutable"})
 
     if cfg.serve_web and cfg.web_dist.is_dir():
         app.mount("/", StaticFiles(directory=cfg.web_dist, html=True), name="web")

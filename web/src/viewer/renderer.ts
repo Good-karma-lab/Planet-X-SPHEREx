@@ -32,6 +32,10 @@ uniform int uPasses;           // passes loaded (Co-add)
 uniform sampler2DArray uDiff;  // R8: 128 + 12.7 z, 0 = no data; layer = pass * uDiffPer + uDiffLayer
 uniform int uDiffPer, uDiffLayer;
 uniform int uHasDiff;
+uniform int uBandMask;         // mode 2: bit k = band k on
+uniform vec3 uHues[8];         // mode 2: colour of each band
+uniform int uMono;             // mode 2: sum the chosen bands in grey instead of blending their colours
+uniform int uWhiteCores;       // a saturated core is drawn white (1) or as no data (0)
 
 float law(float x) { return clamp(asinh((x - uLo) / uSoft) / asinh((uHi - uLo) / uSoft), 0.0, 1.0); }
 
@@ -39,7 +43,7 @@ float val(int pass, int ch) { return texture(uVal, vec3(uv, float(pass * uPerPas
 
 vec3 passColour(int k) {
   float sat = texture(uSat, vec3(uv, float(k))).r;
-  if (sat > 0.5) return vec3(1.0);                         // a saturated core is white, never a hole
+  if (sat > 0.5) return uWhiteCores == 1 ? vec3(1.0) : uNoData;  // a saturated core is white, never a hole
   if (uMode == 0) {
     float r = val(k, 0), g = val(k, 1), b = val(k, 2);
     if (isnan(r) || isnan(g) || isnan(b)) return uNoData;
@@ -48,6 +52,22 @@ vec3 passColour(int k) {
     float fade = 1.0 - smoothstep(0.55, 0.9, l);          // no colour boost on very bright pixels (wings of saturated cores)
     float faint = smoothstep(0.04, 0.16, l);               // nor at the noise level: noise keeps its natural (weak) colour
     return clamp(mix(vec3(l), s, 1.0 + (uBoost - 1.0) * fade * faint), 0.0, 1.0);
+  }
+  if (uMode == 2) {
+    vec3 acc = vec3(0.0);
+    float sum = 0.0; int n = 0;
+    for (int j = 0; j < 8; j++) {
+      if (j >= uPerPass) break;
+      if ((uBandMask & (1 << j)) == 0) continue;
+      float v = val(k, j);
+      if (isnan(v)) continue;
+      float l = law(v);
+      acc = 1.0 - (1.0 - acc) * (1.0 - l * uHues[j]);   // screen blend of the bands' colours
+      sum += v; n++;
+    }
+    if (n == 0) return uNoData;
+    if (uMono == 1) return vec3(law(sum / float(n)));
+    return clamp(acc, 0.0, 1.0);
   }
   float w = val(k, uLayer);
   if (isnan(w)) return uNoData;
@@ -100,7 +120,11 @@ export interface Panel {
   w: number;
   h: number;
   stack: StackName;
-  mode: 'colour' | 'layer';
+  mode: 'colour' | 'layer' | 'blend';
+  /** mode blend: which bands (bit k) and their colours; mono sums them in grey */
+  bandMask?: number;
+  hues?: [number, number, number][];
+  mono?: boolean;
   layer?: number;
   tint?: [number, number, number];
   /** colour of places without data (default: the Picture's flat blue-grey) */
@@ -123,6 +147,9 @@ export class Renderer {
   private wb: number[] = new Array(32).fill(1);
   private loc = new Map<string, WebGLUniformLocation | null>();
   boost = 2.4;
+  whiteCores = true;
+  hi = HI;
+  soft = SOFT;
 
   constructor(private canvas: HTMLCanvasElement) {
     const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: true });
@@ -286,7 +313,13 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.sat);
     gl.uniform1i(this.u('uSat'), 1);
     gl.uniform1i(this.u('uPerPass'), PER_PASS[p.stack]);
-    gl.uniform1i(this.u('uMode'), p.mode === 'colour' ? 0 : 1);
+    gl.uniform1i(this.u('uMode'), p.mode === 'colour' ? 0 : p.mode === 'blend' ? 2 : 1);
+    gl.uniform1i(this.u('uBandMask'), p.bandMask ?? 0);
+    const hues = new Float32Array(24).fill(1);
+    (p.hues ?? []).forEach((h, i) => hues.set(h, 3 * i));
+    gl.uniform3fv(this.u('uHues'), hues);
+    gl.uniform1i(this.u('uMono'), p.mono ? 1 : 0);
+    gl.uniform1i(this.u('uWhiteCores'), this.whiteCores ? 1 : 0);
     gl.uniform1i(this.u('uLayer'), p.layer ?? 0);
     gl.uniform3fv(this.u('uTint'), new Float32Array(p.tint ?? [1, 1, 1]));
     gl.uniform3fv(this.u('uNoData'), new Float32Array(p.noData ?? [0.36, 0.4, 0.44]));
@@ -295,8 +328,8 @@ export class Renderer {
     gl.uniform1f(this.u('uT'), t);
     gl.uniform2fv(this.u('uWB'), new Float32Array(this.wb));
     gl.uniform1f(this.u('uLo'), LO);
-    gl.uniform1f(this.u('uHi'), HI);
-    gl.uniform1f(this.u('uSoft'), SOFT);
+    gl.uniform1f(this.u('uHi'), this.hi);
+    gl.uniform1f(this.u('uSoft'), this.soft);
     gl.uniform1f(this.u('uBoost'), this.boost);
     gl.uniform1i(this.u('uTime'), p.time === 'difference' ? 1 : p.time === 'coadd' ? 2 : 0);
     gl.uniform1i(this.u('uPasses'), s.loaded.size);

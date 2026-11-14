@@ -1,73 +1,145 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
-import { FieldClient, monthYear, type FieldMeta } from '../lib/field';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { aim } from '../lib/aim';
+import { FieldClient, mjdToDate, type FieldMeta } from '../lib/field';
 import { formatHash, type Route } from '../lib/route';
+import { formatDec, formatRA, parseDec, parseRA } from '../lib/sky';
 import type { SxpPart } from '../lib/sxp';
-import { frameAt } from '../viewer/pendulum';
+import { icon } from '../ui/icons';
+import { starBalance } from '../viewer/balance';
+import { FADE_MS, HOLD_MS, order } from '../viewer/pendulum';
 import { Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
 import { FilmView } from './film';
 
 const SIZES = [2, 5, 10, 20, 60];
-type View = 'picture' | 'bands' | 'det' | 'film';
-const VIEWS: { key: View; name: string; tip: string }[] = [
-  { key: 'picture', name: 'Picture', tip: 'The passes one after another in spectral colour: what moved jumps, the rest stands still.' },
-  { key: 'bands', name: 'Wall of bands', tip: 'One panel per named band: in which light the object is bright.' },
-  { key: 'det', name: 'Wall of detectors', tip: 'One panel per detector: a real object jumps in all six at once.' },
-  { key: 'film', name: 'Film of one pass', tip: 'One frame per visit of one pass: a body that crosses the field in days hops from frame to frame.' },
-];
-type Time = 'pendulum' | 'difference' | 'coadd';
-const TIMES: { key: Time; name: string; tip: string }[] = [
-  { key: 'pendulum', name: 'Pendulum', tip: 'The passes back and forth: 1 → 2 → 3 → 2.' },
-  { key: 'difference', name: 'Difference', tip: 'Each pass against the first: magenta brighter, cyan fainter (|z| above 4).' },
-  { key: 'coadd', name: 'Co-add', tip: 'All passes stacked into one still picture.' },
-];
-const DETECTORS = [
-  { name: 'very near infrared', range: '0.75–1.11 µm' },
-  { name: 'near infrared', range: '1.11–1.64 µm' },
-  { name: 'near infrared', range: '1.64–2.42 µm' },
-  { name: 'mid infrared', range: '2.42–3.82 µm' },
-  { name: 'mid infrared', range: '3.82–4.42 µm' },
-  { name: 'mid infrared', range: '4.42–5.00 µm' },
+type View = 'picture' | 'bands' | 'det';
+type Time = 'loop' | 'diff' | 'sum';
+type Tab = 'ctl' | 'obj' | 'spec';
+
+const ICON_DET =
+  '<svg viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="8" aria-hidden="true"><rect x="28" y="64" width="62" height="56" rx="8"/><rect x="97" y="64" width="62" height="56" rx="8"/><rect x="166" y="64" width="62" height="56" rx="8"/><rect x="28" y="136" width="62" height="56" rx="8"/><rect x="97" y="136" width="62" height="56" rx="8"/><rect x="166" y="136" width="62" height="56" rx="8"/></svg>';
+
+const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
+  { id: 'picture', name: 'Picture', icon: icon('square', 22), tip: 'One picture of the field in the light of the bands you choose: the quickest way to see what moves.' },
+  { id: 'bands', name: 'Wall of bands', icon: icon('squares-four', 22), tip: 'One panel for each named band: what the object is made of and in which light it is bright.' },
+  { id: 'det', name: 'Wall of detectors', icon: ICON_DET, tip: 'One panel for each of the six detectors: an artefact lives in one detector; a real object moves the same way in all six.' },
 ];
 
-function hueRgb(h: number): [number, number, number] {
-  const f = (n: number) => {
-    const k = (n + h / 30) % 12;
-    return 0.5 - 0.5 * Math.max(-1, Math.min(k - 3, 9 - k, 1));
-  };
+const BANDS = [
+  { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
+  { key: 'h2o', name: 'Water vapor', band: '1.4·1.9·2.7 µm', hue: 205, icon: 'drop' },
+  { key: 'ch4', name: 'Methane', band: '1.6 and 3.3 µm', hue: 24, icon: 'flame' },
+  { key: 'ice', name: 'Water ice', band: '≈3.0 µm', hue: 185, icon: 'snowflake' },
+  { key: 'pah', name: 'Dust (PAH)', band: '3.3 µm', hue: 140, icon: 'dots-nine' },
+  { key: 'co2', name: 'CO₂', band: '4.2–4.3 µm', hue: 275, icon: 'cloud-fog' },
+  { key: 'co', name: 'CO', band: '4.6–4.8 µm', hue: 345, icon: 'cloud-slash' },
+];
+
+const DETECTORS = [
+  { name: 'very near infrared', range: '0.75–1.11 µm', hue: 270 },
+  { name: 'near infrared', range: '1.11–1.64 µm', hue: 220 },
+  { name: 'near infrared', range: '1.64–2.42 µm', hue: 175 },
+  { name: 'mid infrared', range: '2.42–3.82 µm', hue: 95 },
+  { name: 'mid infrared', range: '3.82–4.42 µm', hue: 40 },
+  { name: 'mid infrared', range: '4.42–5.00 µm', hue: 5 },
+];
+
+/** hsl(h, 80 %, 60 %) as linear-ish rgb 0..1 (the band colour of the tabs, used to tint panels and blend bands). */
+function hslRgb(h: number): [number, number, number] {
+  const s = 0.8;
+  const l = 0.6;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
   return [f(0), f(8), f(4)];
 }
 
-interface Label {
-  x: number;
-  y: number;
-  w: number;
-  text: string;
-  sub: string;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+/** A season by the month it starts: "Aug ’25". */
+const season = (mjd: number) => {
+  const d = mjdToDate(mjd);
+  return `${MONTHS[d.getUTCMonth()]} ’${String(d.getUTCFullYear()).slice(2)}`;
+};
+
+interface Opts {
+  boost: boolean;
+  sat: boolean;
+  rings: boolean;
+  morph: boolean;
+  mono: boolean;
 }
 
 export function Lab({ route }: { route: Route }) {
-  const ra = Number(route.params['ra']);
-  const dec = Number(route.params['dec']);
-  const fov = SIZES.includes(Number(route.params['fov'])) ? Number(route.params['fov']) : 5;
-  const view: View = (['picture', 'bands', 'det', 'film'] as const).find((v) => v === route.params['view']) ?? 'picture';
-  const time: Time = (['pendulum', 'difference', 'coadd'] as const).find((v) => v === route.params['time']) ?? 'pendulum';
+  const p = route.params;
+  const ra = Number(p['ra']);
+  const dec = Number(p['dec']);
+  const valid = Number.isFinite(ra) && Number.isFinite(dec);
+  const fov = SIZES.includes(Number(p['fov'])) ? Number(p['fov']) : 5;
+  const view: View = (['picture', 'bands', 'det'] as const).find((v) => v === p['view']) ?? 'picture';
+  const time: Time = (['loop', 'diff', 'sum'] as const).find((v) => v === p['time']) ?? 'loop';
+  const film = p['film'] ? Number(p['film']) : null;
+  const allBands = BANDS.map((b) => b.key);
+  const bands = p['bands'] ? p['bands'].split(',').filter((k) => allBands.includes(k)) : allBands;
+  const dets = p['dets'] ? p['dets'].split(',').map(Number).filter((d) => d >= 1 && d <= 6) : [1, 2, 3, 4, 5, 6];
+  const opts: Opts = { boost: p['boost'] === '1', sat: p['sat'] !== '0', rings: p['rings'] === '1', morph: p['morph'] !== '0', mono: p['blend'] === 'mono' };
+
+  const set = (params: Record<string, string | null>) => {
+    const next: Record<string, string> = { ...p };
+    for (const [k, v] of Object.entries(params)) {
+      if (v === null) delete next[k];
+      else next[k] = v;
+    }
+    location.hash = formatHash({ screen: 'lab', params: next });
+  };
+
+  const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
+  const overlay = useRef<HTMLCanvasElement>(null);
   const clientRef = useRef<FieldClient | null>(null);
+  const [side, setSide] = useState(400);
+  const [tab, setTab] = useState<Tab>('ctl');
   const [phase, setPhase] = useState('');
   const [meta, setMeta] = useState<FieldMeta | null>(null);
   const [shown, setShown] = useState<{ pass: number; stack: StackName } | null>(null);
-  const [labels, setLabels] = useState<Label[]>([]);
+  const [labels, setLabels] = useState<{ x: number; y: number; w: number; text: string; sub: string; hue: number }[]>([]);
   const [playing, setPlaying] = useState(true);
-  const [fixed, setFixed] = useState<number | null>(null);
+  const [frame, setFrame] = useState<number | null>(null);
+  const [speed, setSpeed] = useState(1);
   const [filmStatus, setFilmStatus] = useState('');
-  const valid = Number.isFinite(ra) && Number.isFinite(dec);
-  const state = useRef({ view, time, playing, fixed, meta: null as FieldMeta | null });
-  state.current = { view, time, playing, fixed, meta };
+  const [raIn, setRaIn] = useState('');
+  const [decIn, setDecIn] = useState('');
+  const [stretch, setStretch] = useState(0.4);
+  const [recording, setRecording] = useState(false);
+  const state = useRef({ view, time, bands, dets, opts, playing, frame, speed, stretch, meta: null as FieldMeta | null });
+  state.current = { view, time, bands, dets, opts, playing, frame, speed, stretch, meta };
+
+  useEffect(() => {
+    if (valid) {
+      setRaIn(formatRA(ra));
+      setDecIn(formatDec(dec));
+      aim.set({ ra, dec, fov }, 'lab');
+    }
+  }, [ra, dec, fov, valid]);
+
+  // the picture is always square and as large as the free space allows
+  useLayoutEffect(() => {
+    const el = wrap.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => setSide(Math.max(160, Math.floor(Math.min(el.clientWidth, el.clientHeight) - 24))));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     if (!valid || !canvas.current) return;
     const r = new Renderer(canvas.current);
     const pending: { name: string; part: SxpPart }[] = [];
+    let diffPart: SxpPart | null = null;
+    const balanced = new Set<number>();
+    const uploadDiff = () => {
+      if (!diffPart || !r.size || !state.current.meta) return;
+      const names = ['white', ...state.current.meta.bands.map((b) => b.key)];
+      r.uploadDiff(names.length, new Map(Object.entries(diffPart.arrays).map(([k, a]) => [k, a.data as Uint8Array])), names);
+    };
     const place = (name: string, part: SxpPart) => {
       const k = Number(part.meta['pass']);
       const first = Object.values(part.arrays)[0]!;
@@ -76,7 +148,7 @@ export function Lab({ route }: { route: Route }) {
       if (r.size !== n || r.passes < Math.max(np, k + 1)) {
         if (r.size === n && r.passes > 0) {
           pending.push({ name, part });
-          return; // a field with more passes than allocated: re-allocate once the meta says how many
+          return;
         }
         r.setup(n, Math.max(np, k + 1, 4));
       }
@@ -84,6 +156,13 @@ export function Lab({ route }: { route: Route }) {
       const arr = part.arrays[stack === 'picture' ? 'rgb' : stack === 'quick' ? 'white' : stack]!;
       r.upload(stack, k, arr.data as Uint16Array);
       if (part.arrays['sat']) r.uploadSat(k, part.arrays['sat'].data as Uint8Array);
+      if (stack === 'picture') {
+        const wb = starBalance(arr.data as Uint16Array, n, part.arrays['sat']?.data as Uint8Array | undefined);
+        if (wb) {
+          balanced.add(k);
+          r.setWhiteBalance(k, wb.kr, wb.kb);
+        }
+      }
     };
     const client = new FieldClient({
       onPhase: setPhase,
@@ -91,18 +170,17 @@ export function Lab({ route }: { route: Route }) {
       onMeta: (m) => {
         setMeta(m);
         state.current.meta = m;
-        for (const p of m.passes) r.setWhiteBalance(p.index, p.white_balance.kr, p.white_balance.kb);
+        for (const q of m.passes) if (!balanced.has(q.index)) r.setWhiteBalance(q.index, q.white_balance.kr, q.white_balance.kb);
         while (pending.length) {
           const x = pending.shift()!;
           place(x.name, x.part);
         }
+        uploadDiff();
       },
       onPart: (name, part) => {
         if (name === 'diff') {
-          const bandKeys = (state.current.meta?.bands ?? []).map((b) => b.key);
-          const names = ['white', ...bandKeys];
-          const maps = new Map(Object.entries(part.arrays).map(([k, a]) => [k, a.data as Uint8Array]));
-          if (r.size) r.uploadDiff(names.length, maps, names);
+          diffPart = part;
+          uploadDiff();
           return;
         }
         place(name, part);
@@ -112,42 +190,75 @@ export function Lab({ route }: { route: Route }) {
     void client.open(ra, dec, fov);
 
     let raf = 0;
-    const t0 = performance.now();
+    let clock = 0;
+    let last = performance.now();
     let lastLabels = '';
     const tick = () => {
+      const now = performance.now();
       const st = state.current;
+      if (st.playing && st.frame === null) clock += (now - last) * st.speed;
+      last = now;
+      r.boost = 2.4;
+      r.whiteCores = st.opts.sat;
+      r.hi = st.opts.boost ? 40 : 400;
+      r.soft = st.stretch;
       const { w, h } = r.begin();
-      const stack: StackName = st.view === 'picture' ? (r.loaded('picture').length >= 2 || r.loaded('quick').length === 0 ? 'picture' : 'quick') : st.view === 'bands' ? 'bands' : 'dets';
+      const allOn = st.bands.length === BANDS.length;
+      let stack: StackName;
+      if (st.view === 'picture') stack = allOn ? (r.loaded('picture').length >= 2 || r.loaded('quick').length === 0 ? 'picture' : 'quick') : 'bands';
+      else stack = st.view === 'bands' ? 'bands' : 'dets';
       const loaded = r.loaded(stack);
-      const out: Label[] = [];
+      const out: typeof labels = [];
       if (loaded.length) {
         let a = loaded[0]!;
         let b = a;
         let t = 0;
-        if (st.time === 'coadd') a = b = loaded[0]!;
-        else if (st.fixed !== null && loaded.includes(st.fixed)) a = b = st.fixed;
-        else if (st.playing && loaded.length > 1) {
-          const f = frameAt(performance.now() - t0, loaded.length);
-          a = loaded[f.a]!;
-          b = loaded[f.b]!;
-          t = f.t;
+        if (st.time === 'sum') a = b = loaded[0]!;
+        else if (st.frame !== null && loaded.includes(st.frame)) a = b = st.frame;
+        else if (loaded.length > 1) {
+          const seq = order(loaded.length);
+          const slot = HOLD_MS + FADE_MS;
+          const k = Math.floor(clock / slot) % seq.length;
+          const within = clock % slot;
+          a = loaded[seq[k]!]!;
+          b = loaded[seq[(k + 1) % seq.length]!]!;
+          if (within >= HOLD_MS && st.opts.morph) {
+            const x = (within - HOLD_MS) / FADE_MS;
+            t = x * x * (3 - 2 * x);
+          } else if (within >= HOLD_MS) {
+            t = 0;
+          }
         }
-        let panels: (Panel & { label?: string; sub?: string })[] = [];
+        const timeMode = st.time === 'diff' ? 'difference' : st.time === 'sum' ? 'coadd' : 'pendulum';
+        let panels: (Panel & { label?: string; sub?: string; hue?: number })[] = [];
         if (st.view === 'picture') {
-          const s = Math.min(w, h);
-          panels = [{ x: (w - s) / 2, y: (h - s) / 2, w: s, h: s, stack, mode: stack === 'picture' ? 'colour' : 'layer', time: st.time, diffLayer: 0 }];
+          const mask = BANDS.reduce((m, bd, i) => (st.bands.includes(bd.key) ? m | (1 << i) : m), 0);
+          panels = [
+            stack === 'bands'
+              ? { x: 0, y: 0, w, h, stack, mode: 'blend', bandMask: mask, hues: BANDS.map((bd) => hslRgb(bd.hue)), mono: st.opts.mono, time: timeMode, diffLayer: 0 }
+              : { x: 0, y: 0, w, h, stack, mode: stack === 'picture' && !st.opts.mono ? 'colour' : 'layer', time: timeMode, diffLayer: 0 },
+          ];
+          if (stack === 'picture' && st.opts.mono) panels[0]!.stack = r.loaded('quick').length ? 'quick' : 'picture';
         } else if (st.view === 'bands') {
-          const bands = st.meta?.bands ?? [];
-          panels = wallLayout(bands.length, w, h).map((c, i) => ({ x: c.x, y: c.y, w: c.size, h: c.size, stack, mode: 'layer', layer: i, tint: hueRgb(bands[i]!.hue), noData: [0, 0, 0], time: st.time, diffLayer: i + 1, label: bands[i]!.name, sub: bands[i]!.label }));
+          const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
+          panels = wallLayout(shownBands.length, w, h).map((c, j) => {
+            const { bd, i } = shownBands[j]!;
+            return { x: c.x, y: c.y + 22, w: c.size, h: c.size - 22, stack, mode: 'layer', layer: i, tint: hslRgb(bd.hue), noData: [0, 0, 0], time: timeMode, diffLayer: i + 1, label: bd.name, sub: bd.band, hue: bd.hue };
+          });
         } else {
-          panels = wallLayout(6, w, h).map((c, i) => ({ x: c.x, y: c.y, w: c.size, h: c.size, stack, mode: 'layer', layer: i, noData: [0, 0, 0], time: st.time, diffLayer: 0, label: `D${i + 1} ${DETECTORS[i]!.name}`, sub: DETECTORS[i]!.range }));
+          const shownDets = st.dets.slice().sort();
+          panels = wallLayout(shownDets.length, w, h).map((c, j) => {
+            const d = shownDets[j]! - 1;
+            return { x: c.x, y: c.y + 22, w: c.size, h: c.size - 22, stack, mode: 'layer', layer: d, noData: [0, 0, 0], time: timeMode, diffLayer: 0, label: `D${d + 1} ${DETECTORS[d]!.name}`, sub: DETECTORS[d]!.range, hue: DETECTORS[d]!.hue };
+          });
         }
-        for (const p of panels) {
-          r.panel(p, a, b, t);
-          if (p.label) out.push({ x: p.x, y: p.y, w: p.w, text: p.label, sub: p.sub ?? '' });
+        for (const q of panels) {
+          r.panel(q, a, b, t);
+          if (q.label) out.push({ x: q.x, y: q.y - 20, w: q.w, text: q.label, sub: q.sub ?? '', hue: q.hue ?? 0 });
         }
         setShown((s) => (s && s.pass === a && s.stack === stack ? s : { pass: a, stack }));
       }
+      drawRings();
       const key = JSON.stringify(out);
       if (key !== lastLabels) {
         lastLabels = key;
@@ -155,6 +266,41 @@ export function Lab({ route }: { route: Route }) {
       }
       raf = requestAnimationFrame(tick);
     };
+
+    const drawRings = () => {
+      const ov = overlay.current;
+      const st = state.current;
+      if (!ov) return;
+      const wcss = ov.clientWidth;
+      const hcss = ov.clientHeight;
+      if (ov.width !== Math.round(wcss * devicePixelRatio)) {
+        ov.width = Math.round(wcss * devicePixelRatio);
+        ov.height = Math.round(hcss * devicePixelRatio);
+      }
+      const ctx = ov.getContext('2d')!;
+      ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+      ctx.clearRect(0, 0, wcss, hcss);
+      const m = st.meta;
+      if (!st.opts.rings || !m || st.view !== 'picture' || m.passes.length < 2) return;
+      // speed rings: how far a body of that speed moves between the first and the last pass, centred on the field
+      const dt = (m.passes[m.passes.length - 1]!.mjd_mid - m.passes[0]!.mjd_mid) / 365.25;
+      const fovArcsec = m.grid.n * m.grid.step_arcsec;
+      ctx.strokeStyle = 'rgba(255,180,84,0.75)';
+      ctx.fillStyle = 'rgba(255,200,130,0.95)';
+      ctx.font = '600 10px ui-monospace, Menlo, monospace';
+      ctx.lineWidth = 1;
+      for (const v of [1, 3, 10, 30, 100, 300]) {
+        const rpx = ((v * dt) / fovArcsec) * wcss;
+        if (rpx < 14 || rpx > wcss * 0.72) continue;
+        ctx.beginPath();
+        ctx.setLineDash([4, 4]);
+        ctx.arc(wcss / 2, hcss / 2, rpx, 0, 2 * Math.PI);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillText(`${v}″/yr`, wcss / 2 + rpx * 0.7071 + 3, hcss / 2 - rpx * 0.7071 - 3);
+      }
+    };
+
     raf = requestAnimationFrame(tick);
     return () => {
       cancelAnimationFrame(raf);
@@ -166,68 +312,360 @@ export function Lab({ route }: { route: Route }) {
   useEffect(() => {
     const c = clientRef.current;
     if (!c) return;
-    if (view === 'bands' || fov <= 10) c.want('bands_');
+    if (view === 'bands' || bands.length < BANDS.length || fov <= 10) c.want('bands_');
     if (view === 'det' || fov <= 10) c.want('dets_');
-    if (time === 'difference') c.want('diff');
-  }, [view, time, fov, meta]);
+    if (time === 'diff') c.want('diff');
+  }, [view, time, fov, meta, bands.length]);
 
-  if (!valid) return <div class="lab-empty">Open a place from the globe, or give ra and dec in the address.</div>;
+  // keyboard: space plays / pauses, arrows step through the passes
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      const n = meta?.passes.length ?? 0;
+      if (e.code === 'Space') {
+        e.preventDefault();
+        setFrame(null);
+        setPlaying((x) => !x);
+      } else if ((e.code === 'ArrowRight' || e.code === 'ArrowLeft') && n) {
+        setPlaying(false);
+        setFrame((f) => ((f ?? shown?.pass ?? 0) + (e.code === 'ArrowRight' ? 1 : n - 1)) % n);
+      }
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, [meta, shown]);
 
-  const set = (params: Record<string, string>) => {
-    location.hash = formatHash({ screen: 'lab', params: { ...route.params, ...params } });
-  };
-  const passMeta = meta?.passes.find((p) => p.index === shown?.pass);
-  const what = shown?.stack === 'picture' ? 'colour' : shown?.stack === 'quick' ? 'white light' : shown?.stack === 'bands' ? 'bands' : 'detectors';
-  const when = time === 'coadd' ? 'all passes' : `Pass ${(shown?.pass ?? 0) + 1} of ${meta?.passes.length ?? 0} · ${passMeta ? monthYear(passMeta.mjd_mid) : ''}`;
-  const mode = time === 'difference' ? (shown?.pass === 0 ? ' · Difference: reference pass' : ' · Difference against the first pass') : time === 'coadd' ? ' · Co-add' : '';
-  const status = phase || (shown && meta ? `${when} · ${what}${mode} · ${meta.exposures} exposures` : '');
-  return (
-    <div class="lab">
-      <div class="lab-picture">
-        <div class="picture-wrap">
-          <canvas ref={canvas} class="picture" data-testid="picture" style={view === 'film' ? { visibility: 'hidden' } : undefined} />
-          {view === 'film' && <FilmView ra={ra} dec={dec} fov={fov} mjd={Number(route.params['film']) || undefined} playing={playing} onStatus={setFilmStatus} />}
-          {view !== 'film' && labels.map((l) => (
-            <div class="panel-label" style={{ left: `${l.x + 4}px`, top: `${l.y + 3}px`, maxWidth: `${l.w - 8}px` }}>
-              {l.text}
-              <span>{l.sub}</span>
-            </div>
-          ))}
-        </div>
-        <div class="status-line" data-testid="lab-status">{view === 'film' ? filmStatus : status}</div>
-        <div class="timeline">
-          <button class="play" onClick={() => { setFixed(null); setPlaying(!playing); }} aria-label={playing ? 'Pause' : 'Play'}>{playing ? '❚❚' : '▶'}</button>
-          {(meta?.passes ?? []).map((p) => (
-            <button key={p.index} class={`pass ${shown?.pass === p.index ? 'on' : ''}`} onClick={() => { setPlaying(false); setFixed(p.index); }} title={`MJD ${p.mjd0.toFixed(1)}–${p.mjd1.toFixed(1)}`}>
-              {monthYear(p.mjd_mid)}
-            </button>
-          ))}
+  if (!valid) {
+    return (
+      <div class="screen">
+        <div class="lab" style={{ display: 'grid', placeItems: 'center', color: 'var(--muted)' }}>
+          <span>
+            <a href="#/globe">Open a place from the globe</a>
+          </span>
         </div>
       </div>
-      <aside class="lab-panel">
-        <div class="row">
-          <span class="label">Field</span>
-          {SIZES.map((s) => (
-            <button key={s} class={`chip ${s === fov ? 'on' : ''}`} onClick={() => set({ fov: String(s) })} data-testid={`fov-${s}`}>{s}′</button>
-          ))}
+    );
+  }
+
+  /** One full cycle of the seasons, recorded from the picture as it plays, saved as a WebM file. */
+  const recordVideo = async () => {
+    const c = canvas.current;
+    if (!c || typeof MediaRecorder === 'undefined') return;
+    setRecording(true);
+    setFrame(null);
+    setPlaying(true);
+    const stream = c.captureStream(30);
+    const type = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm';
+    const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 8e6 });
+    const chunks: Blob[] = [];
+    rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+    const done = new Promise<void>((res) => (rec.onstop = () => res()));
+    rec.start();
+    const n = Math.max(2, passes.length);
+    await new Promise((res) => setTimeout(res, (order(n).length * (HOLD_MS + FADE_MS)) / speed + 200));
+    rec.stop();
+    await done;
+    const url = URL.createObjectURL(new Blob(chunks, { type: 'video/webm' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `spherex-${formatRA(ra, true)}${formatDec(dec, true)}-${fov}arcmin.webm`;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    setRecording(false);
+  };
+  const goAim = () => {
+    const a = parseRA(raIn);
+    const d = parseDec(decIn);
+    if (a === null || d === null) return;
+    set({ ra: a.toFixed(5), dec: d.toFixed(5) });
+  };
+  const toggleBand = (key: string) => {
+    const next = bands.includes(key) ? bands.filter((k) => k !== key) : [...bands, key];
+    set({ bands: next.length === BANDS.length ? null : next.length ? next.join(',') : BANDS[0]!.key });
+  };
+  const toggleDet = (d: number) => {
+    const next = dets.includes(d) ? dets.filter((x) => x !== d) : [...dets, d];
+    set({ dets: next.length === 6 ? null : next.length ? next.sort().join(',') : '1' });
+  };
+  const passes = meta?.passes ?? [];
+  const passMeta = passes.find((q) => q.index === shown?.pass);
+  const colourWord = shown?.stack === 'picture' ? 'spectral colour' : shown?.stack === 'quick' ? 'white light' : bands.length < BANDS.length && view === 'picture' ? (opts.mono ? 'chosen bands, mono sum' : 'chosen bands') : shown?.stack === 'bands' ? 'bands' : 'detectors';
+  const seq = passes.length > 1 ? order(passes.length).map((i) => i + 1).join('→') + '→' + '1' : '';
+  const status = phase
+    ? phase
+    : shown && meta
+      ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd0) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}`
+      : '';
+  const frameIndex = frame ?? shown?.pass ?? 0;
+  const fName = 'Sky field';
+  const fCls = ` · ${formatRA(ra)} ${formatDec(dec)}`;
+
+  const dchk = (id: string, ico: string, text: string, title: string, checked: boolean, onChange: ((v: boolean) => void) | null) => (
+    <label class={`chk ${onChange ? '' : 'disabled'}`} title={onChange ? title : `${title} (available once the searches of this field are built)`}>
+      <input type="checkbox" id={id} checked={checked} disabled={!onChange} onChange={(e) => onChange?.((e.target as HTMLInputElement).checked)} />
+      <span dangerouslySetInnerHTML={{ __html: icon(ico, 16) }} style={{ display: 'contents' }} />
+      {text}
+    </label>
+  );
+
+  return (
+    <div class="screen">
+      <div class="lab">
+        <div class="vwrap" ref={wrap}>
+          <div class="vsq" style={{ width: `${side}px`, height: `${side}px` }}>
+            <canvas ref={canvas} class="vid" role="img" aria-label="Video of the field built from real SPHEREx exposures" data-testid="picture" style={film !== null ? { visibility: 'hidden' } : undefined} />
+            <canvas ref={overlay} class="ov" />
+            {film === null &&
+              labels.map((l) => (
+                <div class="panel-label" style={{ left: `${l.x + 2}px`, top: `${l.y + 2}px`, maxWidth: `${l.w - 4}px` }}>
+                  <span class="sw" style={{ background: `hsl(${l.hue},80%,60%)`, boxShadow: `0 0 8px hsl(${l.hue},80%,60%)` }} />
+                  <b>{l.text}</b>
+                  <em>{l.sub}</em>
+                </div>
+              ))}
+            {film === null && view === 'picture' && passMeta && <div class="vlabel">{time === 'sum' ? 'all seasons' : season(passMeta.mjd0)}</div>}
+            {film !== null && (
+              <div style={{ position: 'absolute', inset: 0 }}>
+                <FilmView ra={ra} dec={dec} fov={fov} mjd={film || undefined} playing={playing} onStatus={setFilmStatus} />
+              </div>
+            )}
+          </div>
         </div>
-        <div class="row">
-          <span class="label">View</span>
-          {VIEWS.map((v) => (
-            <button key={v.key} class={`chip ${v.key === view ? 'on' : ''}`} title={v.tip} onClick={() => set({ view: v.key })} data-testid={`view-${v.key}`}>{v.name}</button>
-          ))}
-        </div>
-        <div class="row">
-          <span class="label">Time</span>
-          {TIMES.map((t) => (
-            <button key={t.key} class={`chip ${t.key === time ? 'on' : ''}`} title={t.tip} onClick={() => set({ time: t.key })} data-testid={`time-${t.key}`}>{t.name}</button>
-          ))}
-        </div>
-        {time === 'difference' && (
-          <div class="row key"><span class="sw mag" /> brighter <span class="sw cyan" /> fainter</div>
-        )}
-        <div class="row dim">RA {ra.toFixed(5)} · Dec {dec.toFixed(5)}</div>
-      </aside>
+        <aside class="panel">
+          <div class="panel-head">
+            <div class="ptitle">
+              <b>{fName}</b>
+              <span>{fCls}</span>
+            </div>
+            <div class="seg sm" role="group" aria-label="Panel">
+              {(
+                [
+                  ['ctl', 'Controls'],
+                  ['obj', 'Object'],
+                  ['spec', 'Spectrum'],
+                ] as const
+              ).map(([k, n]) => (
+                <button key={k} class={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+          {tab === 'ctl' && (
+            <div class="pbody">
+              <section class="aim">
+                <div class="coords">
+                  <div class="field">
+                    <label for="raIn">RA</label>
+                    <input id="raIn" class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`} spellcheck={false} value={raIn} onInput={(e) => setRaIn((e.target as HTMLInputElement).value)} onKeyDown={(e) => e.key === 'Enter' && goAim()} onBlur={goAim} />
+                  </div>
+                  <div class="field">
+                    <label for="decIn">Dec</label>
+                    <input id="decIn" class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`} spellcheck={false} value={decIn} onInput={(e) => setDecIn((e.target as HTMLInputElement).value)} onKeyDown={(e) => e.key === 'Enter' && goAim()} onBlur={goAim} />
+                  </div>
+                </div>
+                <div class="field">
+                  <label>FOV</label>
+                  <div class="seg fov">
+                    {SIZES.map((s) => (
+                      <button key={s} class={s === fov ? 'on' : ''} onClick={() => set({ fov: String(s) })} data-testid={`fov-${s}`} title={`${s}′ field`}>
+                        {s}′
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </section>
+              <div class="vswitch">
+                {VIEWS.map((v) => (
+                  <button key={v.id} class={v.id === view && film === null ? 'on' : ''} title={v.tip} onClick={() => set({ view: v.id === 'picture' ? null : v.id, film: null })} data-testid={`view-${v.id}`}>
+                    <span dangerouslySetInnerHTML={{ __html: v.icon }} style={{ display: 'contents' }} />
+                    <span>
+                      <b>{v.name}</b>
+                    </span>
+                  </button>
+                ))}
+              </div>
+              <div class="seg" role="group" aria-label="Time">
+                {(
+                  [
+                    ['loop', 'eye', 'Blink', 'Blink: seasons play one after another. Look for sources that move or vary'],
+                    ['diff', 'plus-minus', 'Difference', 'Difference against season 1: per-pixel significance, |z| > 4 (cyan fainter, magenta brighter)'],
+                    ['sum', 'sigma', 'Co-add', 'Co-add all seasons into one frame: the faintest sources emerge'],
+                  ] as const
+                ).map(([k, ico, n, tip]) => (
+                  <button key={k} class={time === k ? 'on' : ''} title={tip} onClick={() => set({ time: k === 'loop' ? null : k })} data-testid={`time-${k}`}>
+                    <span dangerouslySetInnerHTML={{ __html: icon(ico, 16) }} style={{ display: 'contents' }} />
+                    {n}
+                  </button>
+                ))}
+              </div>
+              {time === 'diff' && (
+                <div class="diffkey">
+                  <span>
+                    <span class="sw" style={{ background: 'var(--magenta)' }} />
+                    brighter
+                  </span>
+                  <span>
+                    <span class="sw" style={{ background: 'var(--cyan)' }} />
+                    fainter
+                  </span>
+                </div>
+              )}
+              {view === 'det' ? (
+                <>
+                  <div class="sechead">
+                    <span class="h2">Detectors</span>
+                    <span>
+                      <button class="lnk" onClick={() => set({ dets: null })}>
+                        All
+                      </button>
+                    </span>
+                  </div>
+                  <div class="bgrid">
+                    {DETECTORS.map((d, i) => (
+                      <button key={i} class={`btab ${dets.includes(i + 1) ? 'on' : ''}`} style={{ '--c': `hsl(${d.hue},80%,60%)` }} aria-pressed={dets.includes(i + 1)} onClick={() => toggleDet(i + 1)} title={`Detector D${i + 1}: ${d.name}, ${d.range}`}>
+                        <span class="tx">
+                          <b>
+                            D{i + 1} · {d.name}
+                          </b>
+                          <em>{d.range}</em>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div class="sechead">
+                    <span class="h2">Spectral bands</span>
+                    <span style={{ display: 'flex', gap: '12px' }}>
+                      <button class="lnk" onClick={() => set({ bands: null })} title="Switch every band on">
+                        All
+                      </button>
+                      <button class="lnk" onClick={() => set({ bands: BANDS[0]!.key })} title="Only Starlight">
+                        None
+                      </button>
+                    </span>
+                  </div>
+                  <div class="bgrid">
+                    {BANDS.map((bd) => (
+                      <button key={bd.key} class={`btab ${bands.includes(bd.key) ? 'on' : ''}`} style={{ '--c': `hsl(${bd.hue},80%,60%)` }} aria-pressed={bands.includes(bd.key)} onClick={() => toggleBand(bd.key)} data-testid={`band-${bd.key}`}>
+                        <span class="ti" dangerouslySetInnerHTML={{ __html: icon(bd.icon, 20) }} />
+                        <span class="tx">
+                          <b>{bd.name}</b>
+                          <em>{bd.band}</em>
+                        </span>
+                      </button>
+                    ))}
+                    <button class="btab mask" style={{ '--c': 'hsl(0,0%,70%)' }} disabled title="Artifact mask: where the SPHEREx pipeline flagged the pixel in many exposures (available once the mask view is built)">
+                      <span class="ti" dangerouslySetInnerHTML={{ __html: icon('warning', 20) }} />
+                      <span class="tx">
+                        <b>Artifact mask</b>
+                        <em>flagged pixels</em>
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
+              <div class="dgroup">
+                <div class="sechead">
+                  <span class="h2">Display</span>
+                </div>
+                <div class="dchecks">
+                  {dchk('boostChk', 'sun', 'Brighten', 'Brighten: a lower white point, so faint sources stand out (bright stars saturate)', opts.boost, (v) => set({ boost: v ? '1' : null }))}
+                  {dchk('satChk', 'sparkle', 'White cores', 'Saturated cores white: pixels saturated in most exposures are drawn white, never as missing data', opts.sat, (v) => set({ sat: v ? null : '0' }))}
+                  {dchk('ringChk', 'target', 'Marker', 'Marker ring on the selected source', false, null)}
+                  {dchk('ringsChk', 'target', 'Speed rings', 'Speed rings: 1, 3, 10, 30, 100 and 300 ″/yr: how far a body of that speed moves between the first and the last season', opts.rings, (v) => set({ rings: v ? '1' : null }))}
+                  {dchk('trailChk', 'path', 'Trajectory', 'Trajectory of the selected source over the seasons', false, null)}
+                  {dchk('movChk', 'binoculars', 'Mover rings', 'Mover rings: a ring and a path for every track the searches found', false, null)}
+                  {dchk('anoChk', 'sparkle', 'Anomalies', 'Anomaly rings: sources whose spectrum differs from an ordinary star of the field', false, null)}
+                  {dchk('maskChk', 'warning', 'Artifacts', 'Artifact mask: red where the pipeline flagged the pixel in many exposures', false, null)}
+                  {dchk('morphChk', 'waveform', 'Interpolate', 'Interpolate: cross-fade between seasons instead of stepping', opts.morph, (v) => set({ morph: v ? null : '0' }))}
+                  {dchk('refChk', 'scan', 'Reference', 'Reference: an archive picture of the same place for comparison', false, null)}
+                  {dchk('sharpChk', 'sparkle', 'Sharpen', 'Sharpen: faint stars crisper on screen (off until its check on every frame passes)', false, null)}
+                </div>
+                <div class="seg" role="group" aria-label="Blend">
+                  <button class={opts.mono ? '' : 'on'} onClick={() => set({ blend: null })} title="Each band keeps its colour; bands are screen-blended">
+                    <span dangerouslySetInnerHTML={{ __html: icon('palette', 16) }} style={{ display: 'contents' }} />
+                    Colour blend
+                  </button>
+                  <button class={opts.mono ? 'on' : ''} onClick={() => set({ blend: 'mono' })} title="Sum the bands into one grayscale image">
+                    <span dangerouslySetInnerHTML={{ __html: icon('circle-half', 16) }} style={{ display: 'contents' }} />
+                    Mono sum
+                  </button>
+                </div>
+                <div class="stretch">
+                  <span>Stretch</span>
+                  <input type="range" min={-3} max={1.5} step={0.05} value={Math.log(stretch)} aria-label="Stretch" onInput={(e) => setStretch(Math.exp(Number((e.target as HTMLInputElement).value)))} onDblClick={() => setStretch(0.4)} title="Softness of the display law: left shows faint light, right keeps bright stars apart (double-click resets)" />
+                  <span class="mono-s">asinh {stretch.toFixed(2)}</span>
+                </div>
+                <div class="dacts">
+                  <select class="inp" value={String(speed)} onChange={(e) => setSpeed(Number((e.target as HTMLSelectElement).value))} title="Playback speed">
+                    {[0.25, 0.5, 1, 2, 4].map((v) => (
+                      <option value={String(v)}>Speed {v}×</option>
+                    ))}
+                  </select>
+                  <button class="lnk" onClick={() => void navigator.clipboard?.writeText(location.href)} title="Copy a link to this exact view">
+                    <span dangerouslySetInnerHTML={{ __html: icon('link', 16) }} style={{ display: 'contents' }} />
+                    Copy link
+                  </button>
+                  <button class="lnk" disabled={recording || film !== null || !passes.length} onClick={() => void recordVideo()} title="Download one full cycle of the seasons as a video (WebM)">
+                    <span dangerouslySetInnerHTML={{ __html: icon('download-simple', 16) }} style={{ display: 'contents' }} />
+                    {recording ? 'Recording…' : 'Download video'}
+                  </button>
+                </div>
+              </div>
+              <div class="searches">
+                <div class="sechead">
+                  <span class="h2">Searches</span>
+                </div>
+                <button class="btn primary wide" disabled title="Find spectral anomalies here: sources whose spectrum differs from an ordinary star of the field (available once the anomaly search is built)">
+                  <span dangerouslySetInnerHTML={{ __html: icon('sparkle', 16) }} style={{ display: 'contents' }} />
+                  Find spectral anomalies here
+                </button>
+                <div class="srow">
+                  <b>Movers</b>
+                  <span class="st">inside a pass: the film of the visits</span>
+                  <button class="btn sm" onClick={() => set({ film: film === null ? '0' : null })} data-testid="film">
+                    {film === null ? 'Film' : 'Close film'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+          {tab === 'obj' && (
+            <div class="pbody">
+              <div class="mono-s">Click a source in the picture</div>
+            </div>
+          )}
+          {tab === 'spec' && (
+            <div class="pbody">
+              <div class="mono-s">Click a source in the picture</div>
+            </div>
+          )}
+          {tab === 'ctl' && (
+            <div class="panel-foot">
+              <div class="prow">
+                <button class="play" onClick={() => { setFrame(null); setPlaying(!playing); }} title="Play / pause (Space)" dangerouslySetInnerHTML={{ __html: icon(playing && frame === null ? 'pause' : 'play', 18) }} />
+                <div class="tl-mid">
+                  <div class="tl-labels">
+                    {passes.map((q, i) => (
+                      <span key={q.index} class={frameIndex === q.index ? 'on' : ''} style={{ left: passes.length > 1 ? `${(i / (passes.length - 1)) * 100}%` : '0%', transform: `translateX(${i === 0 ? 0 : i === passes.length - 1 ? -100 : -50}%)` }} onClick={() => { setPlaying(false); setFrame(q.index); }}>
+                        {season(q.mjd0)}
+                      </span>
+                    ))}
+                  </div>
+                  <input type="range" min={0} max={Math.max(0, passes.length - 1)} step={1} value={frameIndex} aria-label="Season" onInput={(e) => { setPlaying(false); setFrame(Number((e.target as HTMLInputElement).value)); }} />
+                </div>
+              </div>
+              <div class="status" data-testid="lab-status" title={film !== null ? filmStatus : status}>
+                {film !== null ? filmStatus : status}
+              </div>
+              <div class="readout" />
+            </div>
+          )}
+        </aside>
+      </div>
     </div>
   );
 }
