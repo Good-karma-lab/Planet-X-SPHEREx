@@ -27,6 +27,7 @@ from service.ratelimit import Buckets, client_id
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
+from service.spectrum import Spectra, spectrum_params
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
 from service.workers import fieldjob, filmjob
@@ -52,6 +53,7 @@ class State:
         self.warm: WarmRunner | None = None
         self.hips: HipsTiles | None = None
         self.coverage: dict[str, Any] | None = None
+        self.spectra: Spectra | None = None
         self.coverage_lock = asyncio.Lock()
 
 
@@ -70,6 +72,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.s3 = s3 or S3()
         st.files = FileReader(st.s3, cfg.store_dir)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
+        if st.index is not None:
+            st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
         if scheduler is None:
             st.executor = ProcessPoolExecutor(max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2))))
             st.scheduler = Scheduler(executor=st.executor)
@@ -248,6 +252,30 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             media_type="application/json" if name.endswith(".json") else "application/octet-stream",
             headers={"Cache-Control": "public, max-age=31536000, immutable" if immutable else "no-store"},
         )
+
+    @app.get(f"{API_PREFIX}/spectrum")
+    async def spectrum(
+        request: Request,
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        pmra: float = Query(0.0, ge=-20000, le=20000),
+        pmdec: float = Query(0.0, ge=-20000, le=20000),
+        epoch: float = Query(2000.0, ge=1900, le=2100),
+        since: int = Query(0, ge=0),
+    ) -> Any:
+        """The spectrum of a place: the points measured so far (from `since` on); the first request starts the measurement."""
+        if st.spectra is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        params = spectrum_params(ra, dec, pmra, pmdec, epoch)
+        run = st.spectra.get(params)
+        if run is None:
+            wait = st.new_work.take(client_id(request, st.salt))
+            if wait > 0:
+                return JSONResponse(
+                    {"error": "too many new measurements from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
+                )
+            run = st.spectra.start(params)
+        return run.view(since)
 
     @app.get(f"{API_PREFIX}/coverage")
     def coverage_here(

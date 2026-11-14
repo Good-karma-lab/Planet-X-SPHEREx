@@ -10,11 +10,13 @@ from __future__ import annotations
 VERSIONS: dict[str, str] = {
     "field": "f2",  # the stacks of a field (all parts). f2: band hues in the meta
     "film": "v2",  # the frames of the visits of one pass. v2: no motion at coverage edges
+    "spectrum": "s1",  # PSF photometry of a place in every exposure that covers it
 }
 
 DEPENDS: dict[str, tuple[str, ...]] = {
     "field": (),
     "film": (),
+    "spectrum": (),
 }
 
 
