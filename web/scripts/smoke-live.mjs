@@ -34,12 +34,13 @@ const lab = async (q) => {
 await check('globe: catalogue and test targets', async () => {
   await page.goto(`${BASE}/#/globe`);
   // the catalogue is a drawer, closed by default
-  if (!(await page.getByTestId('chip-bench').isVisible())) await page.getByRole('button', { name: 'Catalogue', exact: true }).click();
+  if (!(await page.getByTestId('chip-bench').isVisible())) await page.locator('.cat-handle').click();
   await page.getByTestId('chip-bench').waitFor({ timeout: 30000 });
   return await page.getByTestId('chip-bench').innerText();
 });
 await check('globe: SPHEREx background', async () => {
-  await page.getByRole('button', { name: 'SPHEREx — DR1', exact: true }).click();
+  await page.locator('.cat-handle').click(); // the drawer slides away
+  await page.getByRole('group', { name: 'Sky background' }).getByRole('button', { name: /SPHEREx/ }).click();
   await page.waitForTimeout(3000);
 });
 await check('lab: Barnard 5′ opens (warm)', async () => {
