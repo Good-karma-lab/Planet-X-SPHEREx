@@ -267,23 +267,21 @@ export function IndexV2({ health }: { health: unknown }) {
       <header class="ix-top">
         <h1>Exposure index</h1>
         <div class="ix-kpi">
-          <b>{fmt(h?.index?.files ?? 0)}</b>
+          <b>{h?.index?.files != null ? fmt(h.index.files) : '…'}</b>
           <span>SPHEREx exposures indexed</span>
         </div>
         <div class="ix-kpi" style="--c:#5fe3d6">
           <i />
-          <b>{cov ? fmt(tot[0]!) : '—'}</b>
+          <b>{cov ? fmt(tot[0]!) : '…'}</b>
           <span>DR1 · first year</span>
         </div>
         <div class="ix-kpi" style="--c:#ffb454">
           <i />
-          <b>{cov ? fmt(tot[1]!) : '—'}</b>
+          <b>{cov ? fmt(tot[1]!) : '…'}</b>
           <span>QR3 · after DR1</span>
         </div>
         <div class="ix-kpi">
-          <b>
-            {fmt(cells)} / {fmt(allCells)}
-          </b>
+          <b>{cov ? `${fmt(cells)} / ${fmt(allCells)}` : '…'}</b>
           <span>sky cells covered</span>
         </div>
         <div class="ix-fresh">{running ? 'ingesting new files from IRSA' : `index built ${dt(h?.index?.bootstrap_at)} from IRSA TAP`}</div>

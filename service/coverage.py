@@ -6,7 +6,10 @@ an exposure 3.5°, so the centre decides the cell) and kept until the index chan
 
 from __future__ import annotations
 
+import hashlib
+import json
 import math
+import os
 import sqlite3
 from pathlib import Path
 
@@ -64,3 +67,30 @@ def coverage_map(index_path: Path, order: int = ORDER) -> dict[str, object]:
     finally:
         db.close()
     return {"order": order, "releases": releases, "cells": {str(k): v for k, v in sorted(cells.items())}}
+
+
+def index_key(index_path: Path) -> str:
+    """Identifies this state of the index file: the map is valid for as long as the key is unchanged."""
+    st = index_path.stat()
+    return f"{st.st_mtime_ns}-{st.st_size}"
+
+
+def coverage_payload(index_path: Path) -> tuple[bytes, str, str]:
+    """(JSON body, ETag, index key) of the map: the disk copy beside the index when it matches its state, else computed and saved."""
+    key = index_key(index_path)
+    disk = index_path.with_name("coverage_map.json")
+    try:
+        saved = json.loads(disk.read_text())
+        if saved.get("key") == key and isinstance(saved.get("body"), str):
+            body = saved["body"].encode()
+            return body, '"' + hashlib.sha1(body).hexdigest()[:16] + '"', key
+    except (OSError, ValueError):
+        pass
+    body = json.dumps(coverage_map(index_path), separators=(",", ":")).encode()
+    tmp = disk.with_name(disk.name + f".{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps({"key": key, "body": body.decode()}))
+        os.replace(tmp, disk)
+    except OSError:
+        pass
+    return body, '"' + hashlib.sha1(body).hexdigest()[:16] + '"', key
