@@ -44,6 +44,7 @@ class NativeExposure:
     sat_v: NDArray[np.float64] = field(default_factory=lambda: np.zeros(0))
     census: Mapping[str, tuple[NDArray[np.float64], NDArray[np.float64]]] = field(default_factory=dict)  # flag -> (u, v) of flagged pixels
     footprint_uv: tuple[NDArray[np.float64], NDArray[np.float64]] | None = None  # all in-footprint pixel positions (for the census)
+    fit_ok: NDArray[np.bool_] | None = None  # usable pixels without TRANSIENT/SUR_ERROR flags (kept in stacks near cores, not fitted)
 
 
 @dataclass

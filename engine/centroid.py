@@ -1,8 +1,8 @@
 """The position of a source in one exposure (docs/plan/02-methods/2.2-cleaning-and-stacks.md 2.2.11, 2.3-views.md 2.3.5).
 
-A Moffat profile is fitted to the usable (unsaturated) native pixels within 8 detector pixels with a robust loss, in field-grid
-coordinates; the pass position is the median over the exposures of the pass. A saturated core has no pixels: the centre is found from
-the wings.
+A Moffat profile is fitted to the usable (unsaturated) native pixels within 8 detector pixels (12 around a saturated core) with a robust
+loss, in field-grid coordinates; the pass position is the median over the exposures of the pass. Pixels flagged TRANSIENT or SUR_ERROR
+are left out of the fit (near a saturated core they are kept in the stacks, but their values bias a profile fit by 1–3″: validation V4).
 """
 
 from __future__ import annotations
@@ -17,13 +17,22 @@ RADIUS_NATIVE_PX = 8.0
 MIN_PIXELS = 12
 
 
+RADIUS_SATURATED_NATIVE_PX = 12.0  # a saturated core loses its flagged inner wing: fit out to 12 px (validation V4)
+
+
 def moffat_centre(
-    u: NDArray[np.floating], v: NDArray[np.floating], val: NDArray[np.floating], x0: float, y0: float, step_arcsec: float
+    u: NDArray[np.floating],
+    v: NDArray[np.floating],
+    val: NDArray[np.floating],
+    x0: float,
+    y0: float,
+    step_arcsec: float,
+    radius_native_px: float = RADIUS_NATIVE_PX,
 ) -> tuple[float, float] | None:
     """(x, y) grid position of the source near (x0, y0), or None when the fit is not possible."""
     scale = NATIVE_PIXEL_ARCSEC / step_arcsec
     r = np.hypot(u - x0, v - y0)
-    sel = (r < RADIUS_NATIVE_PX * scale) & np.isfinite(val)
+    sel = (r < radius_native_px * scale) & np.isfinite(val)
     if sel.sum() < MIN_PIXELS:
         return None
     uu, vv, f = u[sel], v[sel], np.asarray(val, float)[sel]

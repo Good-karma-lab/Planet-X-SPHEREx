@@ -73,3 +73,19 @@ def test_moffat_centre_from_the_wings_of_a_saturated_star() -> None:
     got = moffat_centre(e.u[~core], e.v[~core], e.val[~core], 61.0, 59.0, STEP)
     assert got is not None
     assert got[0] == pytest.approx(60.3, abs=0.3) and got[1] == pytest.approx(59.6, abs=0.3)
+
+
+def test_parallax_sign_barnards_star() -> None:
+    """In early March the Sun is near RA 345°, so a star at RA 269° appears displaced east of its proper-motion place by up to its
+    parallax in RA (Δα·cosδ = ϖ(X sinα − Y cosα) > 0); half a year later the sign reverses."""
+    from engine.astrometry import offset_arcsec, place
+
+    ra0, dec0 = 269.4520769586187, 4.693364966576667
+    pm = (-801.551, 10362.394)
+    r1, d1 = place(ra0, dec0, 2000.0, pm[0], pm[1], 546.9759, 61105.0)  # 2026-03-05
+    r0, d0 = place(ra0, dec0, 2000.0, pm[0], pm[1], 0.0, 61105.0)
+    dx, _ = offset_arcsec(r1[0], d1[0], r0[0], d0[0])
+    assert 0.3 < dx < 0.6
+    r2, d2 = place(ra0, dec0, 2000.0, pm[0], pm[1], 546.9759, 61288.0)  # 2026-09-04
+    r3, d3 = place(ra0, dec0, 2000.0, pm[0], pm[1], 0.0, 61288.0)
+    assert offset_arcsec(r2[0], d2[0], r3[0], d3[0])[0] < -0.3

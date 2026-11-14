@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import math
 import time
 from concurrent.futures import ProcessPoolExecutor
@@ -21,7 +22,8 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from engine.centroid import moffat_centre
+from engine.astrometry import offset_arcsec, place
+from engine.centroid import RADIUS_NATIVE_PX, RADIUS_SATURATED_NATIVE_PX, moffat_centre
 from engine.colour import STAR_THRESHOLD, white_balance
 from engine.halo import saturated_zones
 from engine.register import STAR_FWHM_ARCSEC, stars
@@ -33,10 +35,11 @@ from service.workers.fieldbuild import FieldBuild, build_field
 from validation.png import write_png
 
 ROOT = Path(__file__).resolve().parent.parent
-FIELDS = {
-    "barnard": ("Barnard's Star", 269.4479, 4.7687, 7.0, True, (10.39, 356.0)),
-    "epsindi": ("ε Indi B", 331.077, -56.794, 7.0, False, (4.58, 126.0)),
+FIELDS = {  # label, RA, Dec, fov, saturated, label in data/targets.json
+    "barnard": ("Barnard's Star", 269.4479, 4.7687, 7.0, True, "Barnard's Star"),
+    "epsindi": ("ε Indi B", 331.077, -56.794, 7.0, False, "ε Indi B"),
 }
+TARGETS = {t["label"]: t for t in json.loads((ROOT / "data" / "targets.json").read_text(encoding="utf-8"))["targets"]}
 
 
 def stretch(x: np.ndarray, lo: float = -0.05, hi: float = 400.0, soft: float = 0.4) -> np.ndarray:
@@ -100,7 +103,7 @@ def lattice(b: FieldBuild) -> float:
     return worst
 
 
-def target_track(b: FieldBuild, saturated: bool) -> list[tuple[float, float, float]]:
+def target_track(b: FieldBuild, saturated: bool) -> list[tuple[float, float, float, int]]:
     """(mjd_mid, ra, dec) of the target per pass: a Moffat fit to the usable pixels of every exposure (the wings of a saturated core),
     in registered grid coordinates, median over the pass. First guess: the saturated zone (or brightest source) near the centre."""
     out = []
@@ -121,31 +124,45 @@ def target_track(b: FieldBuild, saturated: bool) -> list[tuple[float, float, flo
         reg = p.registration
         dx, dy = (reg.dx, reg.dy) if reg else (0.0, 0.0)
         fits = []
+        times = []
+        rad = RADIUS_SATURATED_NATIVE_PX if saturated else RADIUS_NATIVE_PX
         for e in b.natives.get(p.index, []):
-            got = moffat_centre(e.u, e.v, e.val, gx - dx, gy - dy, step)
+            ok = e.fit_ok if e.fit_ok is not None else np.ones(e.u.size, bool)
+            got = moffat_centre(e.u[ok], e.v[ok], e.val[ok], gx - dx, gy - dy, step, rad)
             if got is not None:
                 fits.append((got[0] + dx, got[1] + dy))
+                times.append(e.mjd)
         if not fits:
             continue
         x, y = np.median(np.asarray(fits), axis=0)
         ra, dec = b.grid.grid_to_sky([x], [y])
-        out.append((0.5 * (p.mjd0 + p.mjd1), float(ra[0]), float(dec[0])))
+        out.append((float(np.median(times)), float(ra[0]), float(dec[0]), len(fits)))
     return out
 
 
-def motion(track: list[tuple[float, float, float]]) -> tuple[float, float, float]:
-    """(rate ″/yr, PA °, shift first→last ″) of a straight-line fit."""
-    t = np.array([(m - track[0][0]) / 365.25 for m, _, _ in track])
-    dec0 = track[0][2]
-    x = np.array([(ra - track[0][1]) * math.cos(math.radians(dec0)) * 3600 for _, ra, _ in track])
-    y = np.array([(dec - track[0][2]) * 3600 for _, _, dec in track])
-    vx, vy = np.polyfit(t, x, 1)[0], np.polyfit(t, y, 1)[0]
-    shift = math.hypot(x[-1] - x[0], y[-1] - y[0])
-    return math.hypot(vx, vy), math.degrees(math.atan2(vx, vy)) % 360, shift
+def against_catalogue(
+    track: list[tuple[float, float, float, int]], t: dict[str, float]
+) -> tuple[list[tuple[float, float]], float, float, float]:
+    """Residuals (ΔRA·cosδ, ΔDec) of each pass against the catalogue place (proper motion and parallax) and the proper motion that fits
+    the measured places with the catalogue parallax: (residuals, pm total ″/yr, PA °, rms of the residuals after that fit ″)."""
+    res = []
+    for mjd, ra, dec, _ in track:
+        pr, pd = place(t["ra_deg"], t["dec_deg"], t["epoch"], t["pmra_mas_yr"], t["pmdec_mas_yr"], t["plx_mas"] or 0.0, mjd)
+        res.append(offset_arcsec(ra, dec, float(pr[0]), float(pd[0])))
+    yrs = np.array([(m - track[0][0]) / 365.25 for m, *_ in track])
+    rx, ry = np.array([r[0] for r in res]), np.array([r[1] for r in res])
+    sx, sy = np.polyfit(yrs, rx, 1)[0], np.polyfit(yrs, ry, 1)[0]
+    pmx, pmy = t["pmra_mas_yr"] / 1000 + sx, t["pmdec_mas_yr"] / 1000 + sy
+    fx = rx - (np.polyval(np.polyfit(yrs, rx, 1), yrs))
+    fy = ry - (np.polyval(np.polyfit(yrs, ry, 1), yrs))
+    return res, math.hypot(pmx, pmy), math.degrees(math.atan2(pmx, pmy)) % 360, float(np.sqrt(np.mean(fx**2 + fy**2)))
 
 
 async def run_field(name: str, index: Index, store: Path, png: Path, workers: int) -> list[str]:
-    label, ra, dec, fov, saturated, (cat_rate, cat_pa) = FIELDS[name]
+    label, ra, dec, fov, saturated, target = FIELDS[name]
+    t = TARGETS[target]
+    cat_rate = math.hypot(t["pmra_mas_yr"], t["pmdec_mas_yr"]) / 1000
+    cat_pa = math.degrees(math.atan2(t["pmra_mas_yr"], t["pmdec_mas_yr"])) % 360
     lines = [f"### {label} — RA {ra}, Dec {dec}, {fov:.0f}′", ""]
     s3 = S3(max_in_flight=48)
     fr = FileReader(s3, store)
@@ -175,11 +192,14 @@ async def run_field(name: str, index: Index, store: Path, png: Path, workers: in
         )
     tr = target_track(b, saturated)
     if len(tr) >= 2:
-        rate, pa, shift = motion(tr)
-        years = (tr[-1][0] - tr[0][0]) / 365.25
+        res, rate, pa, rms = against_catalogue(tr, t)
+        lines.append(f"- target place per pass against the catalogue (SIMBAD place, proper motion and parallax {t['plx_mas']:.1f} mas):")
+        for (mjd, *_, n), (rx, ry) in zip(tr, res, strict=True):
+            lines.append(f"  - MJD {mjd:.1f}: ΔRA·cosδ {rx:+.2f}″, ΔDec {ry:+.2f}″ ({n} exposures fitted)")
         lines.append(
-            f"- target motion: **{rate:.2f} ″/yr toward {pa:.0f}°** (catalogue {cat_rate} ″/yr, {cat_pa:.0f}°); "
-            f"shift first→last {shift:.2f}″ over {years:.2f} yr"
+            f"- proper motion with the catalogue parallax: **{rate:.2f} ″/yr toward {pa:.0f}°** "
+            f"(catalogue {cat_rate:.2f} ″/yr, {cat_pa:.0f}°); "
+            f"rms of the places about that fit {rms:.2f}″"
         )
     p0 = b.passes[0]
     fw, nst = fwhm_of_stars(p0.white(b.cdet), p0.sat_share(b.cdet), b.grid.step_arcsec)

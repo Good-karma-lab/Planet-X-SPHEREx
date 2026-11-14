@@ -95,6 +95,8 @@ async def read_native(
         if m.any():
             census[name] = (u[m].astype(np.float32), v[m].astype(np.float32))
     satm = sat & inside
+    unreliable = spxflags.mask_of(table, ("TRANSIENT", "SUR_ERROR"))
+    fit_ok = ((flags_flat & unreliable) == 0)[usable]
     return NativeExposure(
         key=key,
         det=lay.detector,
@@ -109,4 +111,5 @@ async def read_native(
         sat_v=v[satm].astype(np.float32),
         census=census,
         footprint_uv=(u[inside].astype(np.float32), v[inside].astype(np.float32)),
+        fit_ok=fit_ok,
     )
