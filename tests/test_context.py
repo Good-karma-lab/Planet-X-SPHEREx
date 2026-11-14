@@ -78,3 +78,30 @@ def test_the_route_answers_and_validates() -> None:
     app2 = FastAPI()
     app2.include_router(make_router(SimpleNamespace()))
     assert TestClient(app2).get("/api/v1/context", params={"ra": 10, "dec": 20}).status_code == 503
+
+
+def test_allwise_copy_answers_when_irsa_does_not() -> None:
+    from service.context import from_allwise
+
+    rows = [
+        {
+            "sep_arcsec": 0.3,
+            "designation": "J050749.54+302404.7",
+            "w1mpro": 6.2,
+            "w2mpro": 5.2,
+            "w3mpro": 3.4,
+            "w4mpro": 1.4,
+            "cc_flags": "0000",
+            "j_m_2mass": 8.4,
+            "h_m_2mass": 7.6,
+            "k_m_2mass": 7.0,
+        }
+    ]
+    a = from_allwise("allwise", rows, 6.0)
+    assert a is not None and a["state"] == "ok" and a["W1"] == 6.2 and "AWS" in a["via"]
+    t = from_allwise("twomass", rows, 6.0)
+    assert t is not None and (t["J"], t["H"], t["Ks"]) == (8.4, 7.6, 7.0)
+    nothing = from_allwise("allwise", [], 6.0)
+    assert nothing == {"state": "none", "via": nothing["via"]} if nothing else False
+    no_2mass = [dict(rows[0], j_m_2mass=None, h_m_2mass=None, k_m_2mass=None)]
+    assert from_allwise("twomass", no_2mass, 6.0) is None  # a source with no 2MASS match does not say 2MASS has none
