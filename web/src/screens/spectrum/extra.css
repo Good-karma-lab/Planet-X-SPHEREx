@@ -9,3 +9,13 @@
 .spec-play button.pp svg { width: 14px; height: 14px; fill: currentColor; }
 .spec-play input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; }
 .spec-play .spec-line { grid-column: 1 / -1; font: 500 11px var(--mono); color: var(--muted); }
+.spec-stamps { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-start; }
+.spec-stamp { margin: 0; }
+.spec-stamp canvas { width: 78px; height: 78px; image-rendering: pixelated; border: 1px solid var(--edge-soft); border-radius: 4px; display: block; }
+.spec-stamp figcaption { font: 500 10.5px var(--mono); color: var(--muted); margin-top: 3px; text-align: center; }
+.spec-stamp-note { flex-basis: 100%; }
+.spec-sub { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 8px 0 4px; }
+.cattab { width: 100%; border-collapse: collapse; font: 500 11.5px var(--mono); }
+.cattab th { text-align: left; color: var(--muted); font-weight: 600; padding: 3px 4px; border-bottom: 1px solid var(--edge-soft); }
+.cattab td { padding: 4px; border-bottom: 1px solid var(--edge-soft); }
+.cattab td.warn { color: var(--amber); }
