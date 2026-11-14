@@ -11,13 +11,14 @@ To keep it affordable the sum is made in two levels:
          S/N = sum / sqrt(sum of weights), scaled by its own spread
 The same on the negated data gives the height that noise alone reaches. A hypothesis is tried only if the orbit lands inside the field of every pass. A pass is a dict
 (T: distant.Tangent of its field, N, tv, Rv, i0, W, Z: array (2, visits, N, N) of weighted differences and weights)."""
+
 import numpy as np
 
 from . import orbit
 from .distant import S, ARC
 
 STEP_X, MIN_PASS = 4.5, 0.4
-STEP = 3.0                                    # arcsec: the cell of own motion is this many arcsec over the length of the longest pass
+STEP = 3.0  # arcsec: the cell of own motion is this many arcsec over the length of the longest pass
 
 
 def crop(a, y0, y1, x0, x1):
@@ -28,7 +29,7 @@ def crop(a, y0, y1, x0, x1):
     out = np.zeros(a.shape[:-2] + (y1 - y0, x1 - x0), a.dtype)
     ya, yb, xa, xb = max(y0, 0), min(y1, H), max(x0, 0), min(x1, W)
     if yb > ya and xb > xa:
-        out[..., ya - y0:yb - y0, xa - x0:xb - x0] = a[..., ya:yb, xa:xb]
+        out[..., ya - y0 : yb - y0, xa - x0 : xb - x0] = a[..., ya:yb, xa:xb]
     return out
 
 
@@ -54,6 +55,7 @@ class Geometry:
         self.Rr = P[self.r]["Rv"][P[self.r]["i0"]]
         self.f = None
         self.dq = None
+        self.prior = None  # make_prior(): only the own motions an orbit like the predicted Planet Nine can have
 
     def start(self, d, uv):
         """body at heliocentric distance d au seen at (u, v) of the middle pass at its middle visit -> position km, distance from the telescope km"""
@@ -82,13 +84,47 @@ class Geometry:
         return out
 
 
-def cells(d, cs):
-    """coarse own motions for the distance d: all a bound body can have (escape speed)"""
-    mmax = 5016.0 / d ** 1.5
+EPS = np.radians(23.4392911)
+ZECL = np.array([0.0, -np.sin(EPS), np.cos(EPS)])  # the pole of the ecliptic in equatorial axes
+
+
+def make_prior(T, imin, imax, fmin, fmax):
+    """The own motions an orbit like the predicted Planet Nine can have at the place with tangent plane T: prograde, inclined to the ecliptic
+    by imin..imax degrees, with fmin..fmax of the escape speed. A prograde orbit of inclination i crosses ecliptic latitude b at the angle psi
+    to the ecliptic, cos(psi) = cos(i) / cos(b); it does not reach |b| > i at all."""
+    E = np.cross(ZECL, T.n0)
+    E = E / np.linalg.norm(E)
+    Nn = np.cross(T.n0, E)  # noqa: F841 (the ecliptic north of the place; kept for symmetry with E)
+    cb = np.cos(np.arcsin(float(T.n0 @ ZECL)))
+    if np.cos(np.radians(imax)) > cb:
+        return dict(none=True)
+
+    def psi(i):
+        return float(np.arccos(min(1.0, np.cos(np.radians(i)) / cb)))
+
+    return dict(
+        none=False, e=np.array([-(E @ T.e), E @ T.n]), psi=(psi(imin), psi(imax)), f=(fmin, fmax)
+    )  # e: ecliptic east, u to the west
+
+
+def prior_ok(pr, mu_u, mu_v, d, tol):
+    """which own motions pass the prior (tol: arcsec/day of slack)"""
+    r = np.hypot(mu_u, mu_v)
+    mesc = 5016.0 / d**1.5
+    ang = np.arccos(np.clip((mu_u * pr["e"][0] + mu_v * pr["e"][1]) / np.maximum(r, 1e-12), -1, 1))
+    da = np.arcsin(np.minimum(1.0, tol / np.maximum(r, 1e-12)))
+    return (r >= pr["f"][0] * mesc - tol) & (r <= pr["f"][1] * mesc + tol) & (ang >= pr["psi"][0] - da) & (ang <= pr["psi"][1] + da)
+
+
+def cells(d, cs, prior=None):
+    """coarse own motions for the distance d: all a bound body can have (escape speed), or those the prior allows"""
+    mmax = 5016.0 / d**1.5
     n = int(np.ceil(mmax / cs)) + 1
     a = np.arange(-n, n + 1) * cs
     A, B = np.meshgrid(a, a)
     m = np.hypot(A, B) <= mmax + 0.71 * cs
+    if prior is not None:
+        m &= np.zeros(A.shape, bool) if prior["none"] else prior_ok(prior, A, B, d, 0.71 * cs)
     return np.stack([A[m], B[m]], 1)
 
 
@@ -127,13 +163,15 @@ def scan(G, job):
     fo = (np.arange(nf) - (nf - 1) / 2) * cs / nf
     ctr = np.array([(x0 + x1) / 2, (y0 + y1) / 2])
     h = cs
+    pr = G.prior
+    FU, FV = np.meshgrid(fo, fo, indexing="ij")
     for d in job["d"]:
-        MU = cells(d, cs)
+        MU = cells(d, cs, pr)
         if not len(MU):
             continue
         O0 = G.tracks(d, anc, MU)
         land = np.ones(len(MU), bool)
-        for k, p in enumerate(P):                                                  # cells whose orbit leaves a field are dropped at once
+        for k, p in enumerate(P):  # cells whose orbit leaves a field are dropped at once
             if k != r:
                 b = (O0[k][:, p["i0"]] - anc) / S + (p["N"] - Nr) / 2 + ctr
                 land &= (b[:, 0] >= 0) & (b[:, 0] < p["N"]) & (b[:, 1] >= 0) & (b[:, 1] < p["N"])
@@ -142,7 +180,7 @@ def scan(G, job):
         if not len(idx):
             continue
         if count:
-            nh += len(idx) * nf * nf
+            nh += len(idx) * nf * nf if pr is None else int(sum(prior_ok(pr, MU[c, 0] + FU, MU[c, 1] + FV, d, f / 2).sum() for c in idx))
             continue
         MU = MU[idx]
         O0 = [o[idx] for o in O0]
@@ -167,6 +205,8 @@ def scan(G, job):
             scale = None
             for du in fo:
                 for dv in fo:
+                    if pr is not None and not bool(prior_ok(pr, MU[c, 0] + du, MU[c, 1] + dv, d, f / 2)):
+                        continue
                     NUM, DEN, ok = nr.copy(), dr.copy(), okr.copy()
                     for k, p in enumerate(P):
                         if k == r:
@@ -214,6 +254,7 @@ def refine(G, x, y, d, mu, sign=1):
     images read at fractional positions (S/N of the sum along the orbit, all passes). sign -1: a peak of the negated data. -> x, y, d, mu, S/N tuned"""
     from scipy.ndimage import map_coordinates
     from scipy.optimize import minimize
+
     P = G.P
     Nr = P[G.r]["N"]
 
@@ -235,11 +276,22 @@ def refine(G, x, y, d, mu, sign=1):
                 return 0.0
             ws += wp
         return -sign * s / np.sqrt(ws)
+
     x0 = np.array([x, y, 1 / d, mu[0], mu[1]], "f8")
     st = [1.0, 1.0, G.dq, G.f, G.f]
     c0 = cost(x0)
-    r = minimize(cost, x0, method="Nelder-Mead", options=dict(initial_simplex=[x0] + [x0 + np.eye(5)[i] * st[i] for i in range(5)], xatol=0.02, fatol=0.005, maxiter=500))
-    if r.fun < c0 and np.hypot(r.x[0] - x, r.x[1] - y) <= 4 and abs(r.x[2] - x0[2]) <= 4 * G.dq and np.hypot(r.x[3] - mu[0], r.x[4] - mu[1]) <= 6 * G.f:
+    r = minimize(
+        cost,
+        x0,
+        method="Nelder-Mead",
+        options=dict(initial_simplex=[x0] + [x0 + np.eye(5)[i] * st[i] for i in range(5)], xatol=0.02, fatol=0.005, maxiter=500),
+    )
+    if (
+        r.fun < c0
+        and np.hypot(r.x[0] - x, r.x[1] - y) <= 4
+        and abs(r.x[2] - x0[2]) <= 4 * G.dq
+        and np.hypot(r.x[3] - mu[0], r.x[4] - mu[1]) <= 6 * G.f
+    ):
         return float(r.x[0]), float(r.x[1]), float(1 / r.x[2]), (float(r.x[3]), float(r.x[4])), float(-r.fun)
     return x, y, d, mu, float(-c0)
 
@@ -251,21 +303,24 @@ _W = None
 def save_geometry(G, path, zpaths):
     """write the passes (images to .npy files, the rest to a pickle) for the worker processes"""
     import pickle
+
     P = []
     for p, zp in zip(G.P, zpaths):
         np.save(zp, p["Z"])
         P.append({k: v for k, v in p.items() if k != "Z"} | {"zpath": zp})
-    pickle.dump(dict(P=P, r=G.r, f=G.f, dq=G.dq), open(path, "wb"))
+    pickle.dump(dict(P=P, r=G.r, f=G.f, dq=G.dq, prior=G.prior), open(path, "wb"))
 
 
 def init_worker(path):
     import pickle
+
     global _W
     d = pickle.load(open(path, "rb"))
     for p in d["P"]:
         p["Z"] = np.load(p["zpath"], mmap_mode="r")
     _W = Geometry(d["P"], d["r"])
     _W.f, _W.dq = d["f"], d["dq"]
+    _W.prior = d.get("prior")
 
 
 def scan_job(job):

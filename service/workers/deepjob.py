@@ -54,6 +54,7 @@ HYPOTHESES_MAX = 40_000_000
 SEC_PER_HYPOTHESIS = 3.5e-4  # whole job on six worker processes of a busy machine: 4.4e6 orbits and 212 exposures took 1639 s
 SEC_PER_EXPOSURE = 0.6
 MAX_FIELDS = 6
+MAX_GRID = 1250  # a field of one degree on the 3.075 arcsec grid
 WORKERS = int(os.environ.get("SKY_DEEP_WORKERS", "6"))
 WORKER_NICE = int(os.environ.get("SKY_DEEP_NICE", "10"))
 AU_KM = 1.495978707e8
@@ -83,9 +84,18 @@ def auto_fields(ra0: float, dec0: float, m0: float, mjds: list[float], d_au: flo
 
 
 def deep_params(
-    fields: list[list[float]], fov: float, dmin: float, dmax: float, det: tuple[int, ...], keep: float, nmax: int
+    fields: list[list[float]],
+    fov: float,
+    dmin: float,
+    dmax: float,
+    det: tuple[int, ...],
+    keep: float,
+    nmax: int,
+    prior: tuple[float, float, float, float] | None = None,
 ) -> dict[str, Any]:
-    return {
+    """`prior` = (imin, imax, fmin, fmax): only prograde orbits of that inclination to the ecliptic (degrees) and that share of the escape
+    speed, as the predicted Planet Nine has; left out of the parameters when there is none."""
+    out = {
         "fields": [[round(a % 360.0, 5), round(d, 5), round(m, 3)] for a, d, m in fields],
         "fov": round(fov, 2),
         "dmin": round(dmin, 1),
@@ -94,6 +104,9 @@ def deep_params(
         "keep": round(keep, 1),
         "nmax": int(nmax),
     }
+    if prior is not None:
+        out["prior"] = [round(float(x), 3) for x in prior]
+    return out
 
 
 def selections(index: Index, p: dict[str, Any]) -> list[tuple[list[Exposure], Any, int, list[dict[str, Any]], str | None]]:
@@ -120,7 +133,7 @@ def plan_geometry_input(index: Index, p: dict[str, Any]) -> dict[str, Any]:
         if len(tv) < 4:
             return {"error": {"status": "few-visits", "error": f"field {fi + 1}: fewer than four visits in its pass ({len(tv)})"}}
         n = px.grid_for(a, d, p["fov"]).n
-        if n > 800:
+        if n > MAX_GRID:
             return {"error": {"status": "too-large", "error": "the field is too large"}}
         fields.append(
             {
@@ -179,6 +192,8 @@ def plan_geometry_numbers(inp: dict[str, Any], p: dict[str, Any]) -> tuple[Any, 
     order = sorted(range(len(P)), key=lambda k: P[k]["tv"][P[k]["i0"]])
     P = [P[k] for k in order]
     G = edeep.Geometry(P)
+    if p.get("prior"):
+        G.prior = edeep.make_prior(P[G.r]["T"], *p["prior"])
     D, cs, fstep = edeep.distances(G, p["dmin"], p["dmax"])
     n_r = P[G.r]["N"]
     nh = edeep.scan(G, {"box": (0, n_r, 0, n_r), "anchor": (0.0, 0.0), "d": D, "cs": cs, "f": fstep, "count": True})
@@ -335,6 +350,8 @@ async def run_deep(
         del pv, DV
     FD.sort(key=lambda x: x["mid"])
     G = edeep.Geometry([x["P"] for x in FD])
+    if p.get("prior"):
+        G.prior = edeep.make_prior(G.P[G.r]["T"], *p["prior"])
     D, cs, fstep = edeep.distances(G, p["dmin"], p["dmax"])
     N = G.P[G.r]["N"]
     ctx.phase("counting the orbits that land inside every field")
