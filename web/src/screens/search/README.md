@@ -5,7 +5,7 @@ Self-contained pieces for the lab and the globe. Each fetches its own data from 
 | piece | exports | route(s) it reads | mounted in |
 |---|---|---|---|
 | context rows | `ContextRows`, `useContext` | `GET /api/v1/context?ra&dec&epoch&radius` (each catalogue `{state: ok|none|unavailable}`) | object / anomaly passport |
-| found tracks of a film (the Days scale) | `useFilmTracks`, `FilmTracks` (`compact` under the timeline), `daysStatus`, `visitMarks`, `drawTracks`, `drawBlink` | `GET /api/v1/film/<key>/tracks` → `{state, phase, tracks[], control}`; track `pts[{f,x,y}]` in the film's grid (index = f·n·n + y·n + x, row 0 north) | under the film; draw on the film's overlay |
+| found tracks of a film (the Days scale) | `useFilmTracks`, `FilmTracks` (`compact` under the timeline), `daysStatus`, `visitMarks`, `drawTracks` (numbered badges), `hitTrack`, `drawBlink` | `GET /api/v1/film/<key>/tracks` → `{state, phase, tracks[], control}`; track `pts[{f,x,y}]` in the film's grid (index = f·n·n + y·n + x, row 0 north) | under the film; draw on the film's overlay |
 | pair card | `PairCard`, `PairButton` | pair objects from `GET /api/v1/movers` (`pairs[]`, `chance_pairs`, `mjd[]`) | find card |
 | Find Planet X (distance search) | `useDistant`, `DistantPanel`, `DistantCanvas`, `peakRows` | `GET /api/v1/distant?ra&dec&fov&pass|mjd&dmin&dmax` (job; `result.bin_url`) | side panel + canvas over the picture |
 | Find Planet X · deep sum | `DeepSumPanel` | `GET /api/v1/deep?…&plan=1` (plan), `…&fields=…` (job) | side panel |
