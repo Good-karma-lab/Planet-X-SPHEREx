@@ -17,7 +17,7 @@ def test_barnards_star_at_epoch_2025_9_is_where_the_lab_opens_it() -> None:
 def test_warm_set_has_the_five_targets_at_five_sizes_and_the_demo_fields() -> None:
     w = warm_set()
     assert len([f for f in w if f.label in ("Barnard's Star", "R Draconis")]) == 10
-    assert len(w) == 25 + 3 + 2  # five targets at five sizes, three demo fields, two films
+    assert len(w) == 25 + 3 + 3  # five targets at five sizes, three demo fields, three films
 
 
 def test_runner_counts_and_retries_failures() -> None:
