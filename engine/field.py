@@ -130,21 +130,23 @@ class DetectorContribution:
     visit_dropped: int
 
 
-def build_detector(exposures: Sequence[NativeExposure], grid: Grid, bands: Sequence[Band], test: bool = True) -> DetectorContribution:
+def build_detector(
+    exposures: Sequence[NativeExposure], grid: Grid, bands: Sequence[Band], test: bool = True, sigma_native_px: float | None = None
+) -> DetectorContribution:
     """The leave-one-out test, the per-visit test (fields ≤ 12′), the detector layer and this detector's share of the band stacks, the
     saturated weight and the census, for the exposures of ONE detector of ONE pass. Only these exposures are held in memory."""
     n = grid.n
     step = grid.step_arcsec
     det = exposures[0].det
     exps = [Exposure(u=e.u, v=e.v, val=e.val, weight=_weight(e), sigma=e.sigma) for e in exposures]
-    res = stack_with_rejection(exps, n, step, test=test)
+    res = stack_with_rejection(exps, n, step, test=test, sigma_native_px=sigma_native_px)
     dropped = 0
-    if test and grid.fov_arcmin <= MAX_FOV_ARCMIN + 0.5:
+    if test and sigma_native_px is None and grid.fov_arcmin <= MAX_FOV_ARCMIN + 0.5:
         visits: dict[int, list[int]] = defaultdict(list)
         for k, e in enumerate(exposures):
             visits[e.visit].append(k)
         dropped = visit_test(exps, list(visits.values()), n, step)
-    s = sigma_grid(len(exps), step)
+    s = sigma_grid(len(exps), step) if sigma_native_px is None else sigma_native_px * NATIVE_PIXEL_ARCSEC / step
     a, b = np.zeros((n, n)), np.zeros((n, n))
     for x in exps:
         da, db = deposit(n, x.u[x.keep], x.v[x.keep], x.val[x.keep], np.full(int(x.keep.sum()), x.weight))
@@ -283,15 +285,26 @@ def _presence(n: int, u: NDArray[np.float64], v: NDArray[np.float64]) -> NDArray
     return m.reshape(n, n)
 
 
+def quick_per_detector(fov_arcmin: float) -> tuple[int, float]:
+    """(exposures per pass and detector, kernel in detector pixels) of the quick part."""
+    per = next(k for lim, k in sorted(QUICK_PER_DETECTOR.items()) if fov_arcmin <= lim)
+    return per, QUICK_SIGMA_NATIVE[per]
+
+
+def pick_spread(mjd: Sequence[float], k: int) -> list[int]:
+    """k indices spread evenly in time."""
+    order = sorted(range(len(mjd)), key=lambda i: mjd[i])
+    take = np.unique(np.linspace(0, len(order) - 1, min(k, len(order))).round().astype(int))
+    return [order[t] for t in take]
+
+
 def quick_subset(exposures: Sequence[NativeExposure], fov_arcmin: float) -> tuple[list[int], float]:
     """Indices of the quick part (a few exposures per detector, spread in time) and its kernel in detector pixels."""
-    per = next(k for lim, k in sorted(QUICK_PER_DETECTOR.items()) if fov_arcmin <= lim)
+    per, sig = quick_per_detector(fov_arcmin)
     by_det: dict[int, list[int]] = defaultdict(list)
     for i, e in enumerate(exposures):
         by_det[e.det].append(i)
     out: list[int] = []
     for idx in by_det.values():
-        idx = sorted(idx, key=lambda i: exposures[i].mjd)
-        take = np.unique(np.linspace(0, len(idx) - 1, min(per, len(idx))).round().astype(int))
-        out += [idx[t] for t in take]
-    return sorted(out), QUICK_SIGMA_NATIVE[per]
+        out += [idx[t] for t in pick_spread([exposures[i].mjd for i in idx], per)]
+    return sorted(out), sig

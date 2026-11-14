@@ -1,6 +1,6 @@
 """List what goes into an R2 snapshot: every file of the pinned (warm-set) products, relative to the store.
 
-    python -m service.snapshot list STORE   -> one relative path per line
+python -m service.snapshot list STORE   -> one relative path per line
 """
 
 from __future__ import annotations

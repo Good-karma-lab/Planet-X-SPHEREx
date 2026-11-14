@@ -1,6 +1,7 @@
 """The field job: builds a field and publishes its parts pass by pass (docs/plan/05-architecture.md 5.5, 5.7).
 
 Parts (SXP1, row 0 = north, column 0 = east):
+    quick_p{k}.sxp       the quick white frame of pass k (2–4 exposures per detector, published first) and its saturated share
     meta.json            grid, passes, detectors of the white frame, bands, counts, timings, white balance per pass
     picture_p{k}.sxp     R, G, B (float16, NaN = no data) and the saturated share (uint8 × 255) of pass k
     dets_p{k}.sxp        the six detector stacks (float16, NaN = no data) and their model noise
@@ -115,6 +116,15 @@ async def run_field(ctx: Context, index: Index, fr: FileReader, store: Store, pa
             ctx.part_ready(f"{part}_p{k}")
         ctx.phase(f"pass {k + 1}: published", len(passes_meta), None)
 
+    async def on_quick(pp: PassProducts, cdet: tuple[int, ...]) -> None:
+        k = pp.index
+        white = pp.white(cdet)
+        sat = pp.sat_share(cdet)
+        store.write_part(
+            KIND, key, f"quick_p{k}.sxp", encode({"white": _f16(white), "sat": (np.clip(sat, 0, 1) * 255).astype(np.uint8)}, {"pass": k})
+        )
+        ctx.part_ready(f"quick_p{k}")
+
     def progress(text: str) -> None:
         ctx.phase(text)
 
@@ -128,6 +138,7 @@ async def run_field(ctx: Context, index: Index, fr: FileReader, store: Store, pa
         progress=progress,
         checkpoint=ctx.checkpoint,
         on_pass=on_pass,
+        on_quick=on_quick,
     )
     ctx.phase("comparing passes")
     if len(built) >= 2:

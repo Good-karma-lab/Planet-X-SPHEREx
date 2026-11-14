@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from engine.bands import Band, load_bands
-from engine.field import NativeExposure, PassProducts, build_detector, reduce_pass
+from engine.field import NativeExposure, PassProducts, build_detector, pick_spread, quick_per_detector, reduce_pass
 from engine.grid import Grid, grid_for_fov
 from engine.passes import common_detectors, detectors_per_pass, split_passes, split_visits
 from engine.register import register, stars
@@ -68,6 +68,7 @@ async def build_field(
     keep_natives: bool = False,
     checkpoint: Callable[[], Awaitable[None]] | None = None,
     on_pass: Callable[[PassProducts, tuple[int, ...]], Awaitable[None]] | None = None,
+    on_quick: Callable[[PassProducts, tuple[int, ...]], Awaitable[None]] | None = None,
 ) -> FieldBuild:
     t0 = time.time()
     grid = grid_for_fov(ra, dec, fov_arcmin)
@@ -97,6 +98,31 @@ async def build_field(
     cdet = common_detectors(counts)
     kept: dict[int, list[NativeExposure]] = {}
     tc_total = 0.0
+    if on_quick is not None:
+        # the quick part: a few exposures per pass and detector, built and published before the full build (white light only)
+        per, sig_q = quick_per_detector(fov_arcmin)
+        for p in passes:
+            groups_q: dict[int, list[int]] = defaultdict(list)
+            for i in p.members:
+                groups_q[exps[i].det].append(i)
+            chosen = [g[t] for g in groups_q.values() for t in pick_spread([exps[i].mjd0 for i in g], per)]
+            ts = time.time()
+            await asyncio.gather(*(one(i) for i in chosen))
+            t_read += time.time() - ts
+            parts_q = []
+            for det in sorted(groups_q):
+                group = [natives[i] for i in chosen if i in natives and exps[i].det == det]
+                if group:
+                    if executor is not None:
+                        parts_q.append(await loop.run_in_executor(executor, build_detector, group, grid, [], True, sig_q))
+                    else:
+                        parts_q.append(build_detector(group, grid, [], True, sig_q))
+            for i in chosen:
+                natives.pop(i, None)
+            if parts_q:
+                await on_quick(reduce_pass(p.index, parts_q, grid, cdet), cdet)
+            if progress:
+                progress(f"quick picture of pass {p.index + 1} of {len(passes)}")
     for p in passes:
         groups: dict[int, list[int]] = defaultdict(list)
         for i in p.members:

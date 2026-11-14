@@ -73,7 +73,8 @@ def test_field_life_cycle(tmp_path: Path) -> None:
                 break
             time.sleep(0.1)
         assert v["state"] == "done", v
-        assert {"picture_p0", "picture_p1", "dets_p0", "meta", "diff"} <= set(v["parts"])
+        assert {"quick_p0", "quick_p1", "picture_p0", "picture_p1", "dets_p0", "meta", "diff"} <= set(v["parts"])
+        assert v["parts"].index("quick_p0") < v["parts"].index("picture_p0")  # the quick picture comes first
         pic = c.get(f"/api/v1/fields/{key}/parts/picture_p0")
         assert pic.status_code == 200 and pic.headers["cache-control"].endswith("immutable")
         meta, arrays = decode(pic.content)

@@ -98,14 +98,16 @@ def _box(e: Exposure, n: int, pad: int) -> tuple[int, int, int, int]:
     return i0, i1, j0, j1
 
 
-def stack_with_rejection(exposures: list[Exposure], n: int, step_arcsec: float, test: bool = True) -> StackResult:
+def stack_with_rejection(
+    exposures: list[Exposure], n: int, step_arcsec: float, test: bool = True, sigma_native_px: float | None = None
+) -> StackResult:
     """Stack of one (pass, detector) with the online leave-one-out test.
 
     Smoothing is linear, so the smoothed sums S_NUM, S_DEN are kept, and an exposure's own smoothed deposit is subtracted from them in
     its bounding box only. A rejected pixel's smoothed deposit leaves S_NUM, S_DEN at once, so the exposures tested after it see the
     stack without it.
     """
-    sig = sigma_grid(len(exposures), step_arcsec)
+    sig = sigma_grid(len(exposures), step_arcsec) if sigma_native_px is None else sigma_native_px * NATIVE_PIXEL_ARCSEC / step_arcsec
     pad = int(np.ceil(3 * sig)) + 2
     peak_size = max(3, round(NATIVE_PIXEL_ARCSEC / step_arcsec) | 1)
     raw_num, raw_den = np.zeros((n, n)), np.zeros((n, n))
