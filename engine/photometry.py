@@ -31,6 +31,9 @@ class Point:
     ok: bool
     why: str  # "" | "saturated core" | "no usable pixels" | "little of the PSF on good pixels"
     chi2: float | None = None
+    amp: float | None = None  # the fitted amplitude (MJy/sr at the PSF's peak normalisation) and the constant sky of the window
+    sky: float | None = None
+    used: NDArray[np.bool_] | None = None  # the pixels the final fit used
 
 
 def fit(
@@ -84,7 +87,7 @@ def fit(
         ok = new
     chi2 = float((w * (stamp - a * psf - b) ** 2)[ok].sum()) / max(1, int(ok.sum()) - 2)
     k = omega_sr * 1e9  # MJy/sr × sr -> mJy
-    return Point(float(a * k), float(err * k), True, "", chi2)
+    return Point(float(a * k), float(err * k), True, "", chi2, float(a), float(b), ok.copy())
 
 
 def neighbour_outliers(lam: NDArray[np.floating], flux: NDArray[np.floating]) -> NDArray[np.bool_]:

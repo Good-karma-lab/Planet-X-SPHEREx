@@ -20,6 +20,7 @@ from indexer.store import Index
 from service import __version__
 from service.anomalies import Anomalies
 from service.bodies import KnownBodies
+from service.catalogue_check import check as catalogue_check
 from service.config import Config, load
 from service.coverage import coverage_map
 from service.jobs.scheduler import Priority, Scheduler
@@ -425,6 +426,43 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if not st.store.is_complete(key):
             return {"state": "waiting", "error": "", "field": key}
         return st.movers.view(st.movers.get_or_start(key))
+
+    @app.get(f"{API_PREFIX}/spectrum/catalogue")
+    async def spectrum_catalogue(
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        pmra: float = Query(0.0, ge=-20000, le=20000),
+        pmdec: float = Query(0.0, ge=-20000, le=20000),
+        epoch: float = Query(2000.0, ge=1900, le=2100),
+    ) -> Any:
+        """The spectrum averaged under 2MASS and WISE filters against the catalogue magnitudes ("pending" until it is measured)."""
+        if st.spectra is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        run = st.spectra.get(spectrum_params(ra, dec, pmra, pmdec, epoch))
+        if run is None:
+            raise HTTPException(404, "no such spectrum: ask for /api/v1/spectrum first")
+        if run.state != "done":
+            return {"state": "pending", "rows": [], "notes": []}
+        if run.catalogue is None or any("unavailable" in str(r.get("note", "")) for r in run.catalogue["rows"]):
+            run.catalogue = await catalogue_check(run.params, run.points, st.spectra.client)
+        return run.catalogue
+
+    @app.get(f"{API_PREFIX}/spectrum/stamps")
+    async def spectrum_stamps(
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        pmra: float = Query(0.0, ge=-20000, le=20000),
+        pmdec: float = Query(0.0, ge=-20000, le=20000),
+        epoch: float = Query(2000.0, ge=1900, le=2100),
+        since: int = Query(0, ge=0, alias="from"),
+    ) -> Any:
+        """The pixels behind every point of a spectrum (the spectrum must have been asked for)."""
+        if st.spectra is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        run = st.spectra.get(spectrum_params(ra, dec, pmra, pmdec, epoch))
+        if run is None:
+            raise HTTPException(404, "no such spectrum: ask for /api/v1/spectrum first")
+        return run.stamps_view(since)
 
     @app.get(f"{API_PREFIX}/spectrum")
     async def spectrum(
