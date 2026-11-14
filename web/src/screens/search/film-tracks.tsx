@@ -42,6 +42,19 @@ export function useFilmTracks(filmKey: string | null): Ask {
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 
+/** The status of the Days scale of the timeline: "Days · 24 visits · 3 asteroids found". */
+export function daysStatus(nVisits: number, tracks: FilmTrack[] | null): string {
+  const found = tracks == null ? '' : tracks.length ? ` · ${plural(tracks.length, 'asteroid')} found` : ' · no asteroid found';
+  return `Days · ${plural(nVisits, 'visit')}${found}`;
+}
+
+/** For the ticks of the Days scale (one tick per visit): the tracks seen in each visit (indices into `tracks`); a visit with some is drawn amber. */
+export function visitMarks(nVisits: number, tracks: FilmTrack[]): number[][] {
+  const m: number[][] = Array.from({ length: nVisits }, () => []);
+  tracks.forEach((t, i) => t.pts.forEach((q) => m[q.f]?.push(i)));
+  return m;
+}
+
 /** What chance makes: the tracks of at least `min_visits_drawn` visits per field in the control runs. */
 export function chanceText(c: FilmControl | null, nt: number): string {
   if (!c) return '';
@@ -76,6 +89,7 @@ export function FilmTracks({
   blink,
   onBlink,
   onAround,
+  compact,
 }: {
   tracks: FilmTrack[];
   control: FilmControl | null;
@@ -90,14 +104,15 @@ export function FilmTracks({
   onBlink: (on: boolean) => void;
   /** open the film of the same pass again around the chosen track, in a field of `fov` arcminutes */
   onAround: (track: FilmTrack, fov: number) => void;
+  /** inside the Days scale of the timeline: the status line (daysStatus) is the timeline's, so only the chance line, switches and chips are drawn */
+  compact?: boolean;
 }) {
   const nt = tracks.length;
   const tr = tracks[sel];
   return (
     <div class="ftracks">
       <div class="ft-line" title={tracks.map(trackLine).join('; ')}>
-        {nVisits} visits · {nt ? `${plural(nt, 'track')} found` : 'no track found'}
-        {control ? ` · ${chanceText(control, nt)}` : ''}
+        {compact ? chanceText(control, nt) : `${nVisits} visits · ${nt ? `${plural(nt, 'track')} found` : 'no track found'}${control ? ` · ${chanceText(control, nt)}` : ''}`}
       </div>
       {nt === 0 && control && <div class="mono-s">Nothing is marked: the search found no track longer than what chance makes here. Look for a spot that hops.</div>}
       <div class="ft-switches">
