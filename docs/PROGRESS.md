@@ -1,13 +1,19 @@
 # Progress
 
-## State (2026-11-14)
+## State (2026-11-14, afternoon)
 
-- **Phase 1 (the plan): accepted** by the supervisor (04b3f54); decisions on the open questions recorded (03dc702,
-  `docs/plan/06-build-plan.md` 6.2). Q1 (cloud account and domain) is the user's and still open: until then M0–M3 and the parts of M4
-  that need no VM are built.
-- **M0, M1: done.** **M2 Exposure index: built, full bootstrap running** (validation after it ends). **M3 Field engine: built and run on
-  real exposures (first pass of Barnard's Star 5′ and 20′); full validation V4–V12 waits for the index.** **M4: the parts that need no VM
-  are built** (scheduler, product store, field job, API, warm runner, deployment kit); the cloud gate waits for Q1.
+- **NASA Space Apps 2026: submission closes Sun 15 Nov 23:59 CET** (team Good Karma Lab, Local Event Barcelona). Drafts in
+  `docs/submission/`, requirements with sources in `docs/plan/07-submission-and-pitch.md`. The organisers rule out work before 9:00 local
+  on 14 Nov (GH #1981, #2009, #2011, #2057); this repository starts after that. Whether earlier research code may be brought in is put
+  to the user (reported to the supervisor); nothing has been brought in.
+- **M0, M1, M2: done.** M2: index of 1,628,230 files bootstrapped from IRSA; reconciliation against the bucket exact for every period
+  (DR1 1,179,406, QR3 448,824); footprint margin 34.9″ worst of 60 files (all detectors), index margin 60″.
+- **M3: validated on real fields** (report `docs/validation/2026-11-14-m3-field.md`): ε Indi B 4.58″/yr toward 122° (catalogue 4.68, 122°;
+  rms 0.05″); Barnard's Star 10.08″/yr toward 355° (catalogue 10.39, 356°: 0.3″/yr low, outside the ±0.2 tolerance, open); FWHM 8.8″;
+  registration residuals 0.14–0.26″; weight lattice 4.6–10.9 % in thin stacks (open). V1 closed against CWAVE.
+- **M4:** service core without the VM done; the VM (Oracle A1, Madrid) is being created by the supervisor.
+- **M5 (in progress):** Lab with pendulum, colour, walls of bands and detectors, Difference, Co-add; entry screen with the five targets
+  and the demo fields.
 
 ## M0 — Foundations (done)
 
@@ -115,10 +121,10 @@ come from each file's header when it is first used (cached).
 |---|---|---|
 | M0 Foundations | done | this file, 2026-11-14 |
 | M1 Level-2 access | done (V1 partly) | this file, 2026-11-14 |
-| M2 Exposure index | built; bootstrap running | this file |
-| M3 Field engine | built; validation pending | this file |
+| M2 Exposure index | done | this file, `docs/validation/2026-11-14-m2-index.md` |
+| M3 Field engine | done except Barnard's motion (−0.3″/yr) and the thin-stack lattice | `docs/validation/2026-11-14-m3-field.md` |
 | M4 Service core, cloud gate | parts without VM built; gate waits for Q1 | this file |
-| M5 Lab picture | not started | |
+| M5 Lab picture | in progress | this file |
 | M6 Globe | not started | |
 | M7 Sources, Object card, archive images | not started | |
 | M8 Spectra | not started | |
