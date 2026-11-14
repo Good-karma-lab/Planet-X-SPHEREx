@@ -79,7 +79,18 @@ export function Tour({ auto = true }: { auto?: boolean }) {
     return () => window.removeEventListener('spherex:tour', on);
   }, [auto]);
   useEffect(() => {
-    if (k != null) location.hash = STEPS[k]!.hash;
+    if (k == null) return;
+    location.hash = STEPS[k]!.hash;
+    // a visitor who leaves the step's screen on their own has left the tour: it ends (and counts as seen)
+    const screen = (h: string) => h.replace(/\?.*/, '').replace('#/globe', '#/explore');
+    const left = () => {
+      if (screen(location.hash) !== screen(STEPS[k]!.hash)) {
+        mark();
+        setK(null);
+      }
+    };
+    window.addEventListener('hashchange', left);
+    return () => window.removeEventListener('hashchange', left);
   }, [k]);
   if (k == null) return null;
   const s = STEPS[k]!;
