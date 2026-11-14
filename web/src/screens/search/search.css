@@ -7,3 +7,10 @@
 .ft-line { font: 500 11.5px var(--mono); color: var(--muted); }
 .ft-switches { display: flex; gap: 14px; flex-wrap: wrap; }
 .ft-sw { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.paircard .ohead { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 6px; }
+.paircard .oname { font-size: 14px; }
+.pair-crops { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0; }
+.pair-crop { margin: 0; }
+.pair-crop canvas { width: 96px; height: 96px; image-rendering: pixelated; border: 1px solid var(--edge-soft); border-radius: 4px; display: block; }
+.pair-crop figcaption { font: 500 10.5px var(--mono); color: var(--muted); margin-top: 3px; }
+.leadbtn { white-space: normal; text-align: left; }
