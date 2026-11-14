@@ -27,7 +27,7 @@ from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.warm import WarmField, WarmRunner, warm_set
-from service.workers import fieldjob
+from service.workers import fieldjob, filmjob
 
 SERVICE_NAME = "spherex-sky"
 API_PREFIX = "/api/v1"
@@ -174,6 +174,51 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if job is None:
             return {"key": key, "state": "done", "params": params, "meta": st.store.read_meta(fieldjob.KIND, key)}
         return {"key": key, "params": params, "job": job.view()}
+
+    @app.get(f"{API_PREFIX}/film")
+    def film(
+        request: Request,
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        fov: float = Query(20, gt=0, le=60),
+        mjd: float | None = Query(None, ge=60000, le=70000),
+    ) -> Any:
+        """The film of one pass at (ra, dec): the finished product or the job that makes it (create or attach)."""
+        if st.index is None or st.store is None or st.scheduler is None or st.files is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        params = filmjob.film_params(ra, dec, fov, mjd)
+        exps, _ = filmjob.pass_exposures(st.index, params)
+        if not exps:
+            return {"state": "none", "params": params, "note": "no exposures of detectors D1–D3 here"}
+        key = product_key(filmjob.KIND, params, extra=(filmjob.signature(exps),))
+        if st.store.is_complete(key):
+            return {"key": key, "state": "done", "params": params, "meta": st.store.read_meta(filmjob.KIND, key)}
+        if key not in st.scheduler.by_key:
+            wait = st.new_work.take(client_id(request, st.salt))
+            if wait > 0:
+                return JSONResponse(
+                    {"error": "too many new jobs from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
+                )
+        index, files, store, wl = st.index, st.files, st.store, st.wavelengths
+
+        async def fn(ctx: Any) -> dict[str, Any]:
+            return await filmjob.run_film(ctx, index, files, store, params, wl)
+
+        job = st.scheduler.submit(filmjob.KIND, key, params, fn, Priority.P0, "heavy", 1500)
+        return {"key": key, "params": params, "job": job.view()}
+
+    @app.get(f"{API_PREFIX}/film/{{key}}/parts/{{name}}")
+    def film_part(key: str, name: str) -> Response:
+        if st.store is None or not key.isalnum() or name not in ("film", "film.sxp", "meta.json"):
+            raise HTTPException(400)
+        data = st.store.read_part(filmjob.KIND, key, "film.sxp" if name == "film" else name)
+        if data is None:
+            raise HTTPException(404, "part not ready or unknown")
+        return Response(
+            data,
+            media_type="application/octet-stream",
+            headers={"Cache-Control": "public, max-age=31536000, immutable" if st.store.is_complete(key) else "no-store"},
+        )
 
     @app.get(f"{API_PREFIX}/jobs/{{job_id}}")
     def job(job_id: str) -> Any:
