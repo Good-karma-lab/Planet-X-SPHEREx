@@ -49,3 +49,24 @@ def test_grid_orientation_and_round_trip() -> None:
     x2, y2 = g.sky_to_grid(ra, dec)
     np.testing.assert_allclose(x2, [3.3, 150.7], atol=1e-8)
     np.testing.assert_allclose(y2, [99.1, 7.2], atol=1e-8)
+
+
+def test_seasons_near_the_pole_keep_those_that_share_detectors() -> None:
+    from engine.passes import Pass, common_detectors, detectors_per_pass, seasons_with_common_detectors
+
+    # six seasons whose detectors rotate: D3 and D6 are shared by seasons 0, 2, 3 and 4
+    dets = [[3, 6, 1], [1, 4], [3, 6], [3, 6], [1, 3, 6], [1, 4]]
+    det: list[int] = []
+    passes = []
+    for k, ds in enumerate(dets):
+        members = []
+        for d in ds:
+            for _ in range(5):
+                members.append(len(det))
+                det.append(d)
+        passes.append(Pass(k, 100.0 * k, 100.0 * k + 30, tuple(members)))
+    assert common_detectors(detectors_per_pass(passes, det)) == ()
+    kept = seasons_with_common_detectors(passes, det)
+    assert [p.mjd0 for p in kept] == [0.0, 200.0, 300.0, 400.0]
+    assert [p.index for p in kept] == [0, 1, 2, 3]
+    assert common_detectors(detectors_per_pass(kept, det)) == (3, 6)

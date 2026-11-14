@@ -19,7 +19,7 @@ import numpy as np
 from engine.bands import Band, load_bands
 from engine.field import NativeExposure, PassProducts, build_detector, pick_spread, quick_per_detector, reduce_pass
 from engine.grid import Grid, grid_for_fov
-from engine.passes import common_detectors, detectors_per_pass, split_passes, split_visits
+from engine.passes import common_detectors, detectors_per_pass, seasons_with_common_detectors, split_passes, split_visits
 from engine.register import register, stars
 from indexer.store import Exposure, Index
 from service.reader.calib import WavelengthMaps
@@ -79,7 +79,7 @@ async def build_field(
     found = index.overlapping(ra, dec, radius)
     exps = thin(found)
     bands = bands if bands is not None else load_bands()
-    passes = split_passes([e.mjd0 for e in exps])
+    passes = seasons_with_common_detectors(split_passes([e.mjd0 for e in exps]), [e.det for e in exps])
     visits_all = split_visits([e.mjd0 for e in exps], [e.det for e in exps])
     visit_of = {i: k for k, v in enumerate(visits_all) for i in v}
     loop = asyncio.get_running_loop()

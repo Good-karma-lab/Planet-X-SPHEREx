@@ -85,3 +85,27 @@ def common_detectors(counts: Sequence[dict[int, int]], minimum: int = MIN_EXPOSU
     for c in counts:
         dets &= {k for k, n in c.items() if n >= minimum}
     return tuple(sorted(dets))
+
+
+def seasons_with_common_detectors(
+    passes: Sequence[Pass], det: Sequence[int], minimum: int = MIN_EXPOSURES_PER_DETECTOR
+) -> list[Pass]:
+    """The passes to build when no detector covers the field in every pass (near the ecliptic poles the focal plane turns over the
+    field, so each season sees it with other detectors): the largest set of passes that share at least one detector, then the most
+    shared detectors, then the most exposures. Passes are renumbered in time order. Unchanged when a common detector exists."""
+    counts = detectors_per_pass(passes, det)
+    if common_detectors(counts, minimum) or len(passes) < 2:
+        return list(passes)
+    best: tuple[int, int, int] | None = None
+    keep: list[int] = []
+    for size in range(1, 7):
+        for s in itertools.combinations(range(1, 7), size):
+            idx = [k for k, c in enumerate(counts) if all(c.get(d, 0) >= minimum for d in s)]
+            if len(idx) < 2:
+                continue
+            score = (len(idx), size, sum(len(passes[k].members) for k in idx))
+            if best is None or score > best:
+                best, keep = score, idx
+    if not keep:
+        return list(passes)
+    return [Pass(n, passes[k].mjd0, passes[k].mjd1, passes[k].members) for n, k in enumerate(keep)]

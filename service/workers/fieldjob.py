@@ -60,6 +60,8 @@ def _encode_z(z: np.ndarray) -> np.ndarray:
 
 def _white_noise(layers: list[np.ndarray]) -> np.ndarray:
     """Model noise of the white frame (the mean of the detector stacks): sqrt(Σσ²)/m where every detector has a value."""
+    if not layers:
+        raise ValueError("no detector covers the field in every pass")
     st = np.stack(layers).astype(np.float64)
     ok = np.isfinite(st).all(axis=0)
     out = np.sqrt(np.square(np.nan_to_num(st)).sum(axis=0)) / max(1, len(layers))
