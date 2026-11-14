@@ -2268,3 +2268,15 @@ input[type='range']::-moz-range-thumb {
 .fsh { font: 650 12px var(--font); color: var(--ink); }
 .sbar { cursor: pointer; }
 .sbar .sline:hover b { color: var(--accent-l); }
+
+/* narrow phones: six tab labels fit on one line (FINDINGS is the longest) */
+@media (max-width: 480px) {
+  .tab {
+    padding: 4px 1px;
+    letter-spacing: 0;
+    font-size: 8px;
+  }
+  .tab span {
+    text-overflow: clip;
+  }
+}
