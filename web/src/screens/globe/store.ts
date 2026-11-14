@@ -29,6 +29,7 @@ export const kept = {
   survey: '2mass' as SurveyId,
   proj: 'globe' as 'globe' | 'moll',
   covOn: false,
+  catOpen: false,
   filter: 'all',
   query: '',
   page: 1,

@@ -30,3 +30,37 @@
 .map-help .globe-credit { display: block; margin-top: 3px; font: 500 10.5px var(--mono); color: rgba(233, 241, 244, 0.45); }
 .near-box { border-bottom: 1px solid var(--edge-soft); margin-bottom: 4px; }
 .near-h { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px 2px; }
+
+/* layout: the aim (coordinates and field size) floats at the top left, the view mode and the layer rows at the top right, the readout and the help at the bottom left;
+   the catalogue is a drawer that starts closed */
+.map-ui.map-tl { flex-direction: row; align-items: flex-start; right: auto; }
+.map-ui .aimchip { display: flex; flex-direction: row; flex-wrap: nowrap; align-items: center; gap: 6px 12px; padding: 6px 10px; border-radius: 12px; }
+.map-ui .aimchip .coords { grid-template-columns: 148px 148px; }
+.map-ui .aimchip .field > .seg { flex: none; }
+.map-ui.map-tr { left: auto; right: 16px; align-items: flex-end; gap: 8px; }
+.maprow { display: flex; gap: 8px; align-items: center; }
+.catbtn { padding: 7px 12px; border-radius: 10px; color: var(--muted); font-size: 12.5px; }
+.catbtn:hover { color: var(--ink); }
+.catbtn.on { color: var(--accent-l); border-color: var(--edge-hi); }
+.map-bl { position: absolute; left: 16px; bottom: 14px; z-index: 5; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; max-width: min(640px, calc(100% - 250px)); }
+.map-bl .map-help { position: static; max-width: 420px; }
+.map-bl .map-read { white-space: normal; }
+.map-dates { white-space: normal; max-width: min(640px, 100%); line-height: 1.45; }
+.catclose { align-self: flex-end; }
+.screen .globe-wrap > .covsw { top: auto; bottom: 74px; right: 16px; }
+@media (max-width: 1100px) {
+  .screen .map-ui.map-tr { left: 16px; right: 16px; top: 66px; align-items: flex-start; }
+  .screen .map-ui.map-tl { right: 16px; }
+}
+@media (max-width: 860px), (max-aspect-ratio: 1/1) {
+  .map-dates .faint { display: none; }
+  .screen .map-ui.map-tl { left: 10px; right: 10px; top: 10px; }
+  .map-ui .aimchip { flex-wrap: wrap; }
+  .screen .map-ui.map-tr { left: 10px; right: 10px; top: 112px; }
+  .screen .globe-wrap > .covsw { bottom: 66px; right: 10px; }
+  .map-bl { left: 10px; max-width: calc(100% - 20px); bottom: 10px; }
+  .screen .globe-wrap:not(.cat-open) { min-height: calc(100dvh - 100px); }
+}
+/* with the catalogue open the globe is narrower: the rows stack */
+.screen .globe-wrap.cat-open > .map-ui.map-tr { left: 16px; right: 16px; top: 66px; align-items: flex-start; }
+.screen .globe-wrap.cat-open > .map-ui.map-tl { right: 16px; }
