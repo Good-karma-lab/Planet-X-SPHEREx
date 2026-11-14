@@ -87,9 +87,7 @@ def common_detectors(counts: Sequence[dict[int, int]], minimum: int = MIN_EXPOSU
     return tuple(sorted(dets))
 
 
-def seasons_with_common_detectors(
-    passes: Sequence[Pass], det: Sequence[int], minimum: int = MIN_EXPOSURES_PER_DETECTOR
-) -> list[Pass]:
+def seasons_with_common_detectors(passes: Sequence[Pass], det: Sequence[int], minimum: int = MIN_EXPOSURES_PER_DETECTOR) -> list[Pass]:
     """The passes to build when no detector covers the field in every pass (near the ecliptic poles the focal plane turns over the
     field, so each season sees it with other detectors): the largest set of passes that share at least one detector, then the most
     shared detectors, then the most exposures. Passes are renumbered in time order. Unchanged when a common detector exists."""

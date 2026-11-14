@@ -30,6 +30,7 @@ from service.ratelimit import Buckets, client_id
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
+from service.red import find_red
 from service.spectrum import Spectra, spectrum_params
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
@@ -394,6 +395,23 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 raise HTTPException(503, "the sky service is restarting; ask again in a few seconds", headers={"Retry-After": "3"})
             run = st.anomalies.start(key)
         return st.anomalies.view(run)
+
+    @app.get(f"{API_PREFIX}/red")
+    async def red_of(
+        ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90), fov: float = Query(5, gt=0, le=60)
+    ) -> Any:
+        """Red sources of a finished field: bright at 3.8–5 µm, faint at 1.1–1.6 µm (cold brown dwarfs and the like)."""
+        if st.index is None or st.store is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        params = fieldjob.canonical(ra, dec, fov)
+        key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
+        if not st.store.is_complete(key):
+            return {"state": "waiting", "result": None}
+        try:
+            result = await asyncio.to_thread(find_red, st.store, key, cfg.store_dir / "red")
+        except ValueError as e:
+            return {"state": "failed", "error": str(e), "result": None}
+        return {"state": "done", "result": result}
 
     @app.get(f"{API_PREFIX}/movers")
     async def movers_of(

@@ -3,6 +3,7 @@ import type { Health } from '../lib/api';
 import { outline } from '../lib/healpix';
 import { formatHash, type Screen } from '../lib/route';
 import { D2R } from '../lib/sky';
+import { NeossatCard } from './neossat';
 
 const fmtN = (n: number | undefined | null) => (n ?? 0).toLocaleString('en-US');
 const kv = (k: string, v: string) => (
@@ -271,6 +272,19 @@ function FindingsPage() {
             </section>
           );
         })}
+        <section class="card glass">
+          <h3>3I/ATLAS · interstellar comet · 14 Dec 2025</h3>
+          <p>
+            SPHEREx imaged the comet 55 times that day (IRSA's exposure table); the film of the pass rings it where JPL predicts it on every
+            visit. The same day CSA's NEOSSat took it too:
+          </p>
+          <NeossatCard />
+          <p>
+            <a href={formatHash({ screen: 'lab', params: { ra: '166.82740', dec: '5.27870', fov: '60', film: '61023.6' } })}>
+              Open the film in the lab
+            </a>
+          </p>
+        </section>
         <section class="card glass">
           <h3>Motion measured on the stacks (validation)</h3>
           <dl class="kv">

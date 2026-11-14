@@ -11,6 +11,7 @@ import { FADE_MS, HOLD_MS, order } from '../viewer/pendulum';
 import { PER_PASS, Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
 import { atEpoch } from '../lib/sky';
 import { FilmView, type KnownBody } from './film';
+import { NeossatCard } from './neossat';
 import { ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
 import { halfToFloat } from '../lib/sxp';
 
@@ -134,6 +135,23 @@ interface Track {
   saturated: boolean;
   check: 'same' | 'none' | 'pending' | 'still';
   gaia: { source_id: string; pm: number; pa?: number; g?: number | null; offset_arcsec: number } | null;
+}
+interface RedRow {
+  ra: number;
+  dec: number;
+  colour: number;
+  lower_limit: boolean;
+  snr_long: number;
+  moves: boolean;
+  pmra?: number;
+  pmdec?: number;
+  ra_j2000?: number;
+  dec_j2000?: number;
+}
+interface RedView {
+  state: 'waiting' | 'done' | 'failed';
+  error?: string;
+  result: { sources: number; median_colour: number | null; red: RedRow[] } | null;
 }
 interface AnomalyView {
   state: 'waiting' | 'idle' | 'running' | 'done' | 'failed';
@@ -291,6 +309,9 @@ export function Lab({ route }: { route: Route }) {
   const anRef = useRef<AnomalyView | null>(null);
   anRef.current = an;
   const [selAn, setSelAn] = useState<number | null>(null);
+  const [redv, setRedv] = useState<RedView | null>(null);
+  const redRef = useRef<RedView | null>(null);
+  redRef.current = redv;
   const [filmBodies, setFilmBodies] = useState<{ state: string; bodies: KnownBody[]; vLimit: number } | null>(null);
   const archive = useRef<ArchiveSet | null>(null);
   const [archTick, setArchTick] = useState(0);
@@ -806,6 +827,39 @@ export function Lab({ route }: { route: Route }) {
           ctx.restore();
         }
       }
+      const rv = redRef.current;
+      if (m && st.view === 'picture' && rv?.result) {
+        const scale = wcss / m.grid.n;
+        const q = m.passes[shownPass] ?? m.passes[0]!;
+        const year = 2000 + (q.mjd_mid - 51544.5) / 365.25;
+        rv.result.red.forEach((x, k) => {
+          const [rra, rdec] =
+            x.moves && x.ra_j2000 != null && x.dec_j2000 != null
+              ? atEpoch(x.ra_j2000, x.dec_j2000, x.pmra ?? 0, x.pmdec ?? 0, year)
+              : [x.ra, x.dec];
+          const px =
+            (m.grid.n / 2 -
+              ((((rra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec) *
+            scale;
+          const py = (m.grid.n / 2 - ((rdec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale;
+          ctx.save();
+          ctx.lineWidth = 3.5;
+          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+          ctx.beginPath();
+          ctx.arc(px, py, 15, 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = '#ff6b6b';
+          ctx.stroke();
+          ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#000';
+          ctx.fillStyle = '#ffb3b3';
+          ctx.strokeText(`R${k + 1}`, px - 30, py - 12);
+          ctx.fillText(`R${k + 1}`, px - 30, py - 12);
+          ctx.restore();
+        });
+      }
       if (!st.opts.rings || !m || st.view !== 'picture' || m.passes.length < 2) return;
       // speed rings: how far a body of that speed moves between the first and the last pass, centred on the field
       const dt = (m.passes[m.passes.length - 1]!.mjd_mid - m.passes[0]!.mjd_mid) / 365.25;
@@ -911,6 +965,7 @@ export function Lab({ route }: { route: Route }) {
   useEffect(() => {
     setAn(null);
     setSelAn(null);
+    setRedv(null);
     if (!valid || !meta) return;
     void followAnomalies(false);
     return () => {
@@ -918,6 +973,26 @@ export function Lab({ route }: { route: Route }) {
     };
   }, [ra, dec, fov, valid, meta]);
   const startAnomalies = () => followAnomalies(true);
+  const findRed = async () => {
+    setRedv({ state: 'waiting', error: 'busy', result: null });
+    try {
+      const r = await fetch(`/api/v1/red?ra=${ra}&dec=${dec}&fov=${fov}`, { cache: 'no-store' });
+      setRedv(r.ok ? ((await r.json()) as RedView) : { state: 'failed', error: `the sky service answered ${r.status}`, result: null });
+    } catch (e) {
+      setRedv({ state: 'failed', error: String(e), result: null });
+    }
+  };
+  const pickRed = (k: number) => {
+    const x = redv?.result?.red[k];
+    if (!x) return;
+    setSelAn(null);
+    setSel(
+      x.moves && x.ra_j2000 != null && x.dec_j2000 != null
+        ? { ra: x.ra_j2000, dec: x.dec_j2000, pmra: x.pmra, pmdec: x.pmdec, name: `Red source ${k + 1}` }
+        : { ra: x.ra, dec: x.dec, name: `Red source ${k + 1}` },
+    );
+    setTab('spec');
+  };
   const pickAnomaly = (n: number) => {
     const a = an?.result?.anomalies.find((x) => x.n === n);
     if (!a) return;
@@ -1705,6 +1780,43 @@ export function Lab({ route }: { route: Route }) {
                   </>
                 )}
                 <MoversRows mv={mv} names={trackNames} onPick={pickTrack} />
+                <div
+                  class="srow"
+                  title="Red sources: bright at 3.8–5 µm and faint at 1.1–1.6 µm, against the field's own stars (cold brown dwarfs and the like)"
+                >
+                  <b>Red sources</b>
+                  <span class="st">
+                    {!redv
+                      ? '3.8–5 µm against 1.1–1.6 µm'
+                      : redv.state === 'waiting'
+                        ? redv.error === 'busy'
+                          ? 'measuring…'
+                          : 'starts when the field is finished'
+                        : redv.state === 'failed'
+                          ? `failed: ${redv.error}`
+                          : `${redv.result!.red.length} of ${redv.result!.sources} sources far redder than the field's stars`}
+                  </span>
+                  <button class="btn sm" disabled={!meta || redv?.state === 'done'} onClick={() => void findRed()} data-testid="red">
+                    Find
+                  </button>
+                </div>
+                {redv?.result?.red.map((x, k) => (
+                  <button
+                    key={k}
+                    class="anrow"
+                    onClick={() => pickRed(k)}
+                    title="Select this source: its spectrum is measured in every exposure"
+                  >
+                    <b>Red source {k + 1}</b>
+                    <span class="t">
+                      {redv.result!.median_colour
+                        ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
+                        : ''}
+                      {x.moves && x.pmra != null ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr` : ''}
+                    </span>
+                    <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
+                  </button>
+                ))}
                 <div class="srow">
                   <b>Film</b>
                   <span class="st">inside a pass: the visits, asteroids hop</span>
@@ -1727,6 +1839,7 @@ export function Lab({ route }: { route: Route }) {
                             : `${filmBodies.bodies.length} predicted (V ≤ ${filmBodies.vLimit}) · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen on at least one of their visits`}
                       </span>
                     </div>
+                    {filmBodies.bodies.some((b) => b.name.includes('3I/ATLAS')) && <NeossatCard />}
                     {[...filmBodies.bodies]
                       .sort((a, b) => b.seen.length - a.seen.length || (a.v ?? 99) - (b.v ?? 99))
                       .slice(0, 8)

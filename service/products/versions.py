@@ -13,6 +13,7 @@ VERSIONS: dict[str, str] = {
     "spectrum": "s1",  # PSF photometry of a place in every exposure that covers it
     "movers": "m2",  # the search between passes of a field and the Gaia check of its tracks. m2: chance control
     "anomalies": "a1",  # the spectral anomaly map of a field and the identification of its anomalies
+    "red": "r1",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm
 }
 
 DEPENDS: dict[str, tuple[str, ...]] = {
@@ -21,6 +22,7 @@ DEPENDS: dict[str, tuple[str, ...]] = {
     "spectrum": (),
     "movers": ("field",),
     "anomalies": ("field",),
+    "red": ("field",),
 }
 
 
