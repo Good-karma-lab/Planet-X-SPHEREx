@@ -21,6 +21,7 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+from engine.colour import STAR_THRESHOLD, white_balance
 from engine.halo import saturated_zones
 from engine.register import STAR_FWHM_ARCSEC, centroid, stars
 from indexer.store import Index
@@ -45,6 +46,10 @@ def render(b: FieldBuild, out: Path, tag: str) -> list[Path]:
     for p in b.passes:
         rgb = p.rgb(b.cdet)
         sat = p.sat_share(b.cdet) > 0.5
+        r, g, bl = rgb
+        star = np.isfinite(r) & (g > STAR_THRESHOLD) & ~sat
+        kr, kb = white_balance(r, g, bl, star)
+        rgb = np.stack([r * kr, g, bl * kb])
         img = np.stack([stretch(gaussian_filter(np.nan_to_num(c), 0.5)) for c in rgb], -1)
         img[~np.isfinite(rgb[0])] = (0.36, 0.40, 0.44)  # no data: flat blue-grey
         img[sat] = 1.0  # saturated: white

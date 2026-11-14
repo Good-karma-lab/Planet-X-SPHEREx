@@ -67,12 +67,16 @@ def pixel_mask(
     table: Mapping[str, int],
     r_target_px: NDArray[np.floating] | None = None,
     keep_outlier: bool = False,
+    r_bright_px: NDArray[np.floating] | None = None,
 ) -> tuple[NDArray[np.bool_], NDArray[np.bool_]]:
     """(usable, saturated) for the stacks of the fixed sky.
 
-    usable = finite & not saturated & no BAD_ALWAYS flag & no BAD_FAR flag farther than 6 px from the target.
-    saturated = (OVERFLOW or no value) within 4.5 px of the target, or anywhere when no target is given (a saturated core goes into no
-    stack; it feeds the saturated share instead). `keep_outlier`: searches for moving objects keep OUTLIER pixels.
+    usable = finite & not saturated & no BAD_ALWAYS flag & no BAD_FAR flag farther than 6 px from a bright core.
+    saturated = OVERFLOW, or no value where no bad-pixel flag explains it; within 4.5 px of the target when a target is given, anywhere
+    otherwise (a saturated core goes into no stack; it feeds the saturated share instead).
+    `r_bright_px`: distance to the nearest saturated pixel of the exposure (fields opened by coordinates: every bright star's core
+    counts); `r_target_px`: distance to the named target. BAD_FAR flags are set almost always around a bright core, so they are masked
+    only farther than 6 px from it (otherwise the stack has a hole there). `keep_outlier`: searches for moving objects keep OUTLIER.
     """
     f = np.asarray(flags).astype(np.int64)
     bad_always = spxflags.mask_of(table, [n for n in spxflags.BAD_ALWAYS if not (keep_outlier and n in spxflags.MOVER_KEEP)])
@@ -84,8 +88,11 @@ def pixel_mask(
     sat = ((f & overflow) != 0) | (~finite & ~flagged_bad)
     if r_target_px is not None:
         sat &= r_target_px < SAT_CORE_RADIUS_PX
-        far = r_target_px > BAD_FAR_RADIUS_PX
-    else:
-        far = np.ones(f.shape, bool)
+    near = np.full(f.shape, np.inf)
+    if r_target_px is not None:
+        near = np.minimum(near, r_target_px)
+    if r_bright_px is not None:
+        near = np.minimum(near, r_bright_px)
+    far = near > BAD_FAR_RADIUS_PX
     usable = finite & ~sat & ~flagged_bad & ~(((f & bad_far) != 0) & far)
     return usable, sat

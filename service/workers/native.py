@@ -4,6 +4,7 @@ and wavelength of every pixel (docs/plan/02-methods/2.1-data-and-reading.md 2.1.
 from __future__ import annotations
 
 import numpy as np
+from scipy.ndimage import distance_transform_edt
 
 from engine import clean
 from engine.field import NativeExposure
@@ -66,7 +67,11 @@ async def read_native(
     if target is not None:
         tx, ty = spxwcs.sky2pix(w, [target[0]], [target[1]])
         r_t = np.hypot(xd - tx[0], yd - ty[0])
-    usable, sat = clean.pixel_mask(flags_flat, vals, table, r_t, keep_outlier=keep_outlier)
+    overflow = spxflags.mask_of(table, spxflags.SATURATION)
+    bad_always = spxflags.mask_of(table, spxflags.BAD_ALWAYS)
+    sat0 = ((flg & overflow) != 0) | (~np.isfinite(img) & ((flg & bad_always) == 0))
+    r_bright = distance_transform_edt(~sat0).ravel() if sat0.any() else None
+    usable, sat = clean.pixel_mask(flags_flat, vals, table, r_t, keep_outlier=keep_outlier, r_bright_px=r_bright)
     inside = (u > -1.5) & (u < grid.n + 0.5) & (v > -1.5) & (v < grid.n + 0.5)
     usable &= inside
     bins = clean.LAMBDA_BINS if grid.fov_arcmin >= LAMBDA_BG_MIN_FOV_ARCMIN else 0
