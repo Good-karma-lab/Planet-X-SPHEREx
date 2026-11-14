@@ -2375,3 +2375,8 @@ input[type='range']::-moz-range-thumb {
 /* a tile of a wall whose detector or band has no exposure in the season shown says so (it is never a black tile with only a marker) */
 .vsq .panel-empty { position: absolute; z-index: 2; display: grid; place-items: center; padding: 10px; text-align: center; pointer-events: none; }
 .vsq .panel-empty span { font: 500 12px var(--mono); color: var(--muted); background: rgba(6, 10, 14, 0.6); border: 1px dashed var(--edge); border-radius: 8px; padding: 5px 9px; max-width: 90%; }
+/* About: references and team */
+.about-h { margin: 22px 0 10px; font-size: 18px; letter-spacing: 0.01em; }
+.about-refs, .about-team { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; }
+.about-refs a, .about-team a { color: var(--accent-l); }
+.about-grid { align-items: start; }
