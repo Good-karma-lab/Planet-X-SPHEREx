@@ -9,7 +9,7 @@ from __future__ import annotations
 
 VERSIONS: dict[str, str] = {
     "field": "f2",  # the stacks of a field (all parts). f2: band hues in the meta
-    "film": "v1",  # the frames of the visits of one pass
+    "film": "v2",  # the frames of the visits of one pass. v2: no motion at coverage edges
 }
 
 DEPENDS: dict[str, tuple[str, ...]] = {

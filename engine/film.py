@@ -15,7 +15,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from numpy.typing import NDArray
-from scipy.ndimage import binary_dilation, gaussian_filter, label
+from scipy.ndimage import binary_dilation, binary_erosion, gaussian_filter, label
 from scipy.ndimage import shift as nd_shift
 
 from engine.field import NativeExposure
@@ -31,6 +31,8 @@ MASK_GROW = 1
 HALO_RADIUS_ARCSEC = 150.0
 HALO_GROW = 0.4
 MAX_ALIGN_PX = 2.0
+MIN_FRAMES_FOR_STATIC = 3  # the static sky needs at least this many frames (and 30 % of them) at a place
+EDGE_TRIM_PX = 2  # a frame's own coverage edge is not compared (partial pixels at the edge imitate motion)
 FILM_MAX_PX = 600  # 60′ at 6″; smaller fields keep the 3.075″ floor
 FILM_MIN_STEP_ARCSEC = 3.075
 
@@ -144,11 +146,15 @@ def build_film(exposures: Sequence[NativeExposure], grid: Grid) -> list[Frame]:
                 moved = nd_shift(np.nan_to_num(f.sky), (dy, dx), order=1, mode="constant", cval=0.0)
                 okm = nd_shift(ok.astype(float), (dy, dx), order=1, mode="constant", cval=0.0) > 0.5
                 f.sky = np.where(okm, moved, np.nan).astype(np.float32)
+        stack = np.stack([f.sky for f in fs])
+        cover = np.isfinite(stack).sum(axis=0)
         with np.errstate(all="ignore"):
-            static = np.nanmedian(np.stack([f.sky for f in fs]), axis=0).astype(np.float32)
+            static = np.nanmedian(stack, axis=0).astype(np.float32)
+        static[cover < max(MIN_FRAMES_FOR_STATIC, int(np.ceil(0.3 * len(fs))))] = np.nan
         mask = static_mask(static, grid.step_arcsec)
         for f in fs:
-            d = f.sky - static
+            inner = binary_erosion(np.isfinite(f.sky), iterations=EDGE_TRIM_PX)
+            d = np.where(inner, f.sky - static, np.nan)
             v = d[np.isfinite(d) & ~mask]
             sig = float(1.4826 * np.median(np.abs(v - np.median(v)))) if v.size > 100 else float("nan")
             f.motion = np.where(mask | ~np.isfinite(d), np.nan, d / sig if sig > 0 else np.nan).astype(np.float32)
