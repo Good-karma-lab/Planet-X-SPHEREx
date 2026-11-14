@@ -8,7 +8,7 @@ import { FindingPicture } from './findings/thumb';
 import './findings/findings.css';
 import { FIELD, useLive } from './findings/live';
 import { AboutBody } from './about/About';
-import { LeadReport, LeadsList, plainLine, rankLeads, useLeadParam } from './findings/leads';
+import { LeadPanel, LeadsList, rankLeads, useLeadParam } from './findings/leads';
 import { mountTour } from '../ui/Tour';
 import { SearchedCounter, useSearched } from './search/searched';
 
@@ -156,104 +156,54 @@ function IndexPage({ health }: { health: FullHealth | null }) {
   );
 }
 
-const CHECK: Record<string, string> = { same: 'Gaia: same motion', none: 'no Gaia motion', pending: 'Gaia not checked yet' };
-
 function FindingsPage() {
   const live = useLive();
   const searched = useSearched();
   const leads = rankLeads(live);
   const [leadId, setLeadId] = useLeadParam();
   const open = leads.find((l) => l.id === leadId);
-  if (leadId && open)
-    return (
-      <>
-        <div class="pg-h">
-          <h1>Findings</h1>
-        </div>
-        <LeadReport lead={open} onBack={() => setLeadId(null)} />
-      </>
-    );
   return (
     <>
       <div class="pg-h">
         <h1>Findings</h1>
-        <p class="hint">
-          What the searches find in real SPHEREx exposures. The cards below are read live from the service; every number is measured by this
-          system on SPHEREx Level-2 files.
-        </p>
-      </div>
-      <div class="fsum">
-        <div><b>{live.length}</b><span>fields searched</span></div>
-        <div><b>{live.reduce((a, l) => a + (l.movers?.result?.tracks.length ?? 0), 0)}</b><span>tracks between passes</span></div>
-        <div><b>{live.reduce((a, l) => a + (l.movers?.result?.tracks.filter((t) => t.check === 'same').length ?? 0), 0)}</b><span>of them a Gaia star with the same motion</span></div>
-        <div><b>{live.reduce((a, l) => a + (l.anomalies?.result?.anomalies.length ?? 0), 0)}</b><span>spectral anomalies</span></div>
+        <p class="hint">What the searches find in real SPHEREx exposures. Every number is measured by this system on SPHEREx Level-2 files.</p>
       </div>
       <SearchedCounter fields={searched} />
-      <LeadsList leads={leads} onOpen={setLeadId} />
-      <div class="pg-grid">
+      <LeadsList leads={leads} onOpen={setLeadId} openId={open?.id ?? null} />
+      {open && <LeadPanel lead={open} onClose={() => setLeadId(null)} />}
+      <div class="fgrid">
         {live.map((l) => {
           const mv = l.movers?.result;
           const an = l.anomalies?.result;
           const chips: [string, string][] = [];
           if (mv && mv.passes >= 3) {
-            for (const t of mv.tracks) chips.push([t.check === 'same' ? 'good' : 'warn', `${t.speed.toFixed(2)}″/yr · ${CHECK[t.check] ?? t.check}`]);
-            if (mv.pairs?.length) chips.push(['warn', `${mv.pairs.length} pair${mv.pairs.length === 1 ? '' : 's'} changing in place`]);
+            for (const t of mv.tracks) chips.push([t.check === 'same' ? 'good' : 'warn', `${t.speed.toFixed(2)}″/yr · ${t.check === 'same' ? 'Gaia match' : t.check === 'none' ? 'no Gaia match' : 'unchecked'}`]);
+            if (mv.pairs?.length) chips.push(['warn', `${mv.pairs.length} pair${mv.pairs.length === 1 ? '' : 's'} in-place change`]);
           }
-          if (an?.anomalies?.length) chips.push(['warn', `${an.anomalies.length} spectral anomal${an.anomalies.length === 1 ? 'y' : 'ies'}`]);
+          const nTracks = mv?.tracks.length ?? 0;
+          const nAn = an?.anomalies.length ?? 0;
           return (
-            <section class="card glass fcard" key={l.name}>
-              <FindingPicture name={l.name} href={lab(l.ra, l.dec, FIELD)} fieldKey={mv?.field ?? null} passes={mv?.passes ?? 0} />
-              <div class="fbody">
-                <h3>
-                  {l.name} · {FIELD}′ field
-                </h3>
-                <p class="plain">{plainLine(l)}</p>
-                <div class="fchips">
-                  {chips.length ? chips.map(([k, t], i) => <span key={i} class={`badge ${k === 'good' ? 'green' : 'orange'}`}>{t}</span>) : <span class="mono-s">nothing marked: nothing above the bar</span>}
+            <section class="card glass fc" key={l.name}>
+              <FindingPicture name={l.name} href={lab(l.ra, l.dec, FIELD)} fieldKey={mv?.field ?? null} passes={mv?.passes ?? 0} size={96} />
+              <div class="fc-body">
+                <h3 title={`${l.name} · ${FIELD}′ field`}>{l.name}</h3>
+                <div class="fc-nums">
+                  <span><b>{mv?.passes ?? '–'}</b> passes</span>
+                  <span><b>{mv && mv.passes >= 3 ? nTracks : '–'}</b> movers</span>
+                  <span><b>{an ? nAn : '–'}</b> odd spectra</span>
                 </div>
-                <dl class="kv">
-                  {kv(
-                    'Movers',
-                    !l.movers || l.movers.state === 'waiting'
-                      ? 'field not built yet'
-                      : !mv
-                        ? l.movers.state
-                        : mv.passes < 3
-                          ? `${mv.passes} passes: a track needs 3`
-                          : mv.tracks.length
-                            ? mv.tracks
-                                .map(
-                                  (t) =>
-                                    `${t.speed.toFixed(2)}″/yr toward ${t.pa.toFixed(0)}° in ${t.passes.length} passes (${CHECK[t.check] ?? t.check})`,
-                                )
-                                .join('; ')
-                            : `none among ${mv.sources_per_pass.join(' / ')} sources per pass`,
-                  )}
-                  {kv(
-                    'Anomalies',
-                    !l.anomalies || l.anomalies.state === 'waiting' || l.anomalies.state === 'idle'
-                      ? 'not searched yet'
-                      : !an
-                        ? l.anomalies.state
-                        : an.reason ||
-                          (an.anomalies.length
-                            ? an.anomalies
-                                .slice(0, 3)
-                                .map(
-                                  (a) =>
-                                    `${a.n}. ${a.identified?.simbad?.name ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')} (score ${a.score.toFixed(1)})`,
-                                )
-                                .join('; ')
-                            : `none of ${an.with_spectrum} spectra above ${an.threshold?.toFixed(2)}`),
-                  )}
-                </dl>
-                <p>
-                  <a href={lab(l.ra, l.dec, FIELD)}>Open in the lab</a>
-                </p>
+                <div class="fchips">
+                  {chips.length ? chips.map(([k, t], i) => <span key={i} title={t} class={`badge ${k === 'good' ? 'green' : 'orange'}`}>{t}</span>) : <span class="mono-s">no movers above the bar</span>}
+                </div>
+                <a class="btn sm" href={lab(l.ra, l.dec, FIELD)}>
+                  Open in the lab
+                </a>
               </div>
             </section>
           );
         })}
+      </div>
+      <div class="pg-grid">
         <section class="card glass">
           <h3>3I/ATLAS · interstellar comet · 14 Dec 2025</h3>
           <p>

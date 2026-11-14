@@ -50,7 +50,7 @@ export function rankLeads(live: Live[]): Lead[] {
           ['Rate', `${t.speed.toFixed(2)} ″/yr toward ${t.pa.toFixed(0)}° (east ${t.v_east?.toFixed(2) ?? '?'}, north ${t.v_north?.toFixed(2) ?? '?'})`],
           ['Seen in', `${t.passes.length} passes${t.mjd ? `: ${t.mjd.map(ut).join(', ')}` : ''}`],
           ['Straight-line fit', t.rms_arcsec != null ? `rms ${t.rms_arcsec}″ about a straight line` : 'n/a'],
-          ['Signal', t.snr ? `S/N ${t.snr.map((v) => (v == null ? '–' : v.toFixed(0))).join(' · ')} in the passes` : 'n/a'],
+          ['Signal', t.snr?.some((v) => v != null) ? `S/N ${t.snr.map((v) => (v == null ? '–' : v.toFixed(0))).join(' · ')} in the passes` : 'n/a'],
           [
             'Gaia check',
             t.check === 'same' && t.gaia
@@ -108,65 +108,68 @@ export function useLeadParam(): [string | null, (id: string | null) => void] {
   return [id, (v) => (location.hash = v ? `#/findings?lead=${encodeURIComponent(v)}` : '#/findings')];
 }
 
-const TIER = ['Unexplained', 'Odd spectrum', 'Known mover recovered'];
+const TIER = ['Unexplained', 'Odd spectrum', 'Known mover'];
 
-/** The ranked list of leads with a thumbnail each; a click opens its report. */
-export function LeadsList({ leads, onOpen }: { leads: Lead[]; onOpen: (id: string) => void }) {
+/** The ranked list of leads, one dense row each; a click opens the lead in the side panel. */
+export function LeadsList({ leads, onOpen, openId }: { leads: Lead[]; onOpen: (id: string) => void; openId: string | null }) {
   if (!leads.length) return null;
   return (
     <section class="card glass leads">
-      <h3>Leads, ranked</h3>
-      <p class="hint" style="margin-top:0">Unexplained movers first, then odd spectra by how far over the bar they are, then known movers the search recovered. A lead is not a discovery.</p>
+      <h3>Leads in the test fields, ranked</h3>
       <ol class="leadlist">
         {leads.slice(0, 12).map((l, i) => (
           <li key={l.id}>
-            <button class="leadrow" onClick={() => onOpen(l.id)}>
+            <button class="leadrow" aria-current={l.id === openId ? 'true' : undefined} title={`${l.title} · ${l.sub}`} onClick={() => onOpen(l.id)}>
               <span class="rank">{i + 1}</span>
               <span class="lt">
                 <b>{l.title}</b>
-                <span class="mono-s">{l.sub}</span>
+                <span class="mono-s">{l.field}</span>
               </span>
               <span class={`badge ${l.tier === 2 ? 'green' : 'orange'}`}>{TIER[l.tier]}</span>
             </button>
           </li>
         ))}
       </ol>
+      <p class="hint leadnote">A lead is not a discovery.</p>
     </section>
   );
 }
 
-/** The report of one lead: the picture of the field, every number and check, the link into the lab, and the report as JSON. */
-export function LeadReport({ lead, onBack }: { lead: Lead; onBack: () => void }) {
+/** The lead slid in from the right: the picture of the field, every number and check, the link into the lab, and the report as JSON. Closes with × or Esc. */
+export function LeadPanel({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [onClose]);
   const json = () => JSON.stringify({ title: lead.title, field: lead.field, ra: lead.ra, dec: lead.dec, kind: lead.kind, rows: Object.fromEntries(lead.rows), note: 'a lead, not a discovery', generated: new Date().toISOString() }, null, 2);
   return (
-    <section class="card glass">
-      <button class="lnk" onClick={onBack}>
-        ← All findings
+    <aside class="leadpanel glass" role="dialog" aria-label="Lead report">
+      <button class="leadpanel-x" aria-label="Close" onClick={onClose}>
+        ×
       </button>
-      <div class="fcard" style="margin-top:8px">
-        <FieldThumb fieldKey={lead.fieldKey} passes={lead.passes} size={220} />
-        <div class="fbody">
-          <h3 style="margin-top:0">{lead.title}</h3>
-          <div class="mono-s">{lead.sub} · {TIER[lead.tier]} · a lead, not a discovery</div>
-          <dl class="kv">
-            {lead.rows.map(([k, v]) => (
-              <div class="kvr" key={k}>
-                <dt>{k}</dt>
-                <dd>{v}</dd>
-              </div>
-            ))}
-          </dl>
-          <div class="chips">
-            <a class="btn sm primary" href={labHref(lead)}>
-              Open in the lab
-            </a>
-            <a class="btn sm" download={`lead-${lead.id.replace(/[^a-z0-9]+/gi, '_')}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(json())}`}>
-              Download the report (JSON)
-            </a>
-          </div>
-        </div>
+      <FieldThumb fieldKey={lead.fieldKey} passes={lead.passes} size={200} />
+      <h3 class="lp-title">{lead.title}</h3>
+      <div class="mono-s">
+        {lead.sub} · {TIER[lead.tier]} · a lead, not a discovery
       </div>
-    </section>
+      <dl class="lp-kv">
+        {lead.rows.map(([k, v]) => (
+          <div class="kvr" key={k}>
+            <dt>{k}</dt>
+            <dd>{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <div class="chips">
+        <a class="btn sm primary" href={labHref(lead)}>
+          Open in the lab
+        </a>
+        <a class="btn sm" download={`lead-${lead.id.replace(/[^a-z0-9]+/gi, '_')}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(json())}`}>
+          Download JSON
+        </a>
+      </div>
+    </aside>
   );
 }
 
