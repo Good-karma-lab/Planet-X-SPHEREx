@@ -64,11 +64,14 @@ export function DeepSumPanel({
   fov,
   passes,
   onPick,
+  autoPlan,
 }: {
   ra: number;
   dec: number;
   fov: number;
   passes: number[];
+  /** a link asked for this distance range: plan it at once (the plan and its time are shown; the person starts it) */
+  autoPlan?: [number, number];
   /** a peak was chosen: the owner opens its card with these rows */
   onPick?: (title: string, c: DeepCandidate, rows: [string, string, string][]) => void;
 }) {
@@ -80,16 +83,37 @@ export function DeepSumPanel({
     tok.current++;
     setD({ state: 'idle' });
   }, [ra, dec, fov]);
+  const planned = useRef('');
+  useEffect(() => {
+    const k = autoPlan ? `${ra},${dec},${fov},${autoPlan.join('-')}` : '';
+    if (!autoPlan || has !== true || passes.length < 3 || d.state !== 'idle' || planned.current === k) return;
+    planned.current = k;
+    void plan(autoPlan[0], autoPlan[1]);
+  });
   if (has !== true || passes.length < 3) return null;
   const f = Math.min(fov, 18);
   const plan = async (dmin: number, dmax: number) => {
     const my = ++tok.current;
     setD({ state: 'planning', text: 'Planning: reading the times of the visits of every pass (about a minute)…' });
     try {
-      const q = new URLSearchParams({ centre: `${ra.toFixed(5)},${dec.toFixed(5)},${passes[0]}`, passes: passes.join(';'), fov: String(f), dmin: String(dmin), dmax: String(dmax), plan: '1' });
+      const q = new URLSearchParams({
+        centre: `${ra.toFixed(5)},${dec.toFixed(5)},${passes[0]}`,
+        passes: passes.join(';'),
+        fov: String(f),
+        dmin: String(dmin),
+        dmax: String(dmax),
+        plan: '1',
+      });
       const r = await fetch(`/api/v1/deep?${q}`, { cache: 'no-store' });
       if (r.status === 404) return setD({ state: 'none', text: 'The service does not make this search yet.' });
-      const j = (await r.json()) as { status?: string; error?: string; plan?: Plan['plan']; fields?: Plan['fields']; estimate_s?: number; limit?: number };
+      const j = (await r.json()) as {
+        status?: string;
+        error?: string;
+        plan?: Plan['plan'];
+        fields?: Plan['fields'];
+        estimate_s?: number;
+        limit?: number;
+      };
       if (my !== tok.current) return;
       if (j.status !== 'plan' || !j.plan || !j.fields) return setD({ state: 'none', text: j.error || 'No plan for this field.' });
       inputs.current = j.fields.map((x) => [deg(x[0]), deg(x[1])]);
@@ -116,7 +140,11 @@ export function DeepSumPanel({
       if (my !== tok.current) return;
       if (!j) return setD({ state: 'none', text: 'The service does not make this search yet.' });
       const r = j.result as unknown as DeepResult;
-      setD(r?.status === 'ok' ? { state: 'done', r: { ...r, total_secs: r.scan_secs ?? r.total_secs ?? (Date.now() - t0) / 1000 }, sel: null } : { state: 'none', text: (r?.notes ?? []).join(' ') || 'No result.' });
+      setD(
+        r?.status === 'ok'
+          ? { state: 'done', r: { ...r, total_secs: r.scan_secs ?? r.total_secs ?? (Date.now() - t0) / 1000 }, sel: null }
+          : { state: 'none', text: (r?.notes ?? []).join(' ') || 'No result.' },
+      );
     } catch (e) {
       if ((e as Error).message !== 'cancelled') setD({ state: 'error', text: (e as Error).message });
     }
@@ -128,7 +156,10 @@ export function DeepSumPanel({
   if (d.state === 'idle')
     return (
       <div class="dsbox">
-        <div class="srrow" title="A body too faint in every pass alone can be found by adding the passes along one orbit. Reads every exposure of every pass and tries about a million orbits; the estimate of the time is shown before anything starts.">
+        <div
+          class="srrow"
+          title="A body too faint in every pass alone can be found by adding the passes along one orbit. Reads every exposure of every pass and tries about a million orbits; the estimate of the time is shown before anything starts."
+        >
           <span class="srt">Find Planet X · deep sum of the passes</span>
           <button class="btn sm" onClick={() => void plan(60, 110)}>
             Plan
@@ -149,7 +180,14 @@ export function DeepSumPanel({
         </>
       )}
       {d.state === 'plan' && (
-        <PlanForm d={d} passes={passes} inputs={inputs} onStart={(fields) => void run(d.dmin, d.dmax, d.p.estimate_s, fields)} onReplan={(a, b) => void plan(a, b)} onCancel={close} />
+        <PlanForm
+          d={d}
+          passes={passes}
+          inputs={inputs}
+          onStart={(fields) => void run(d.dmin, d.dmax, d.p.estimate_s, fields)}
+          onReplan={(a, b) => void plan(a, b)}
+          onCancel={close}
+        />
       )}
       {d.state === 'running' && (
         <>
@@ -190,13 +228,30 @@ function PlanForm({
   const fields = () => inputs.current.map((x, i) => `${(+x[0]).toFixed(5)},${(+x[1]).toFixed(5)},${d.p.fields[i]![2]}`).join(';');
   return (
     <>
-      <div class="mono-s stl" title="The centres of the passes are a guess (a circular prograde orbit at the middle distance); a body whose own motion is larger or smaller than that can leave the 18′ field. Change them if you know better.">
+      <div
+        class="mono-s stl"
+        title="The centres of the passes are a guess (a circular prograde orbit at the middle distance); a body whose own motion is larger or smaller than that can leave the 18′ field. Change them if you know better."
+      >
         distance range and centres guessed, editable
       </div>
       <div class="mono-s">
         distance{' '}
-        <input class="ds-in" type="text" value={lo} aria-label="Nearest distance, au" onInput={(e) => setLo((e.currentTarget as HTMLInputElement).value)} /> –{' '}
-        <input class="ds-in" type="text" value={hi} aria-label="Farthest distance, au" onInput={(e) => setHi((e.currentTarget as HTMLInputElement).value)} /> au{' '}
+        <input
+          class="ds-in"
+          type="text"
+          value={lo}
+          aria-label="Nearest distance, au"
+          onInput={(e) => setLo((e.currentTarget as HTMLInputElement).value)}
+        />{' '}
+        –{' '}
+        <input
+          class="ds-in"
+          type="text"
+          value={hi}
+          aria-label="Farthest distance, au"
+          onInput={(e) => setHi((e.currentTarget as HTMLInputElement).value)}
+        />{' '}
+        au{' '}
         <button class="btn sm" onClick={() => onReplan(Math.max(20, +lo || d.dmin), +hi || d.dmax)}>
           Update the plan
         </button>
@@ -219,7 +274,8 @@ function PlanForm({
         </div>
       ))}
       <div class="mono-s">
-        {d.p.plan.hypotheses.toLocaleString('en')} orbits · {d.p.plan.exposures} exposures to read · {over ? 'too many: narrow the distance range' : about(d.p.estimate_s)}
+        {d.p.plan.hypotheses.toLocaleString('en')} orbits · {d.p.plan.exposures} exposures to read ·{' '}
+        {over ? 'too many: narrow the distance range' : about(d.p.estimate_s)}
       </div>
       <div class="chips">
         <button class="btn sm" disabled={over} onClick={() => onStart(fields())}>
@@ -251,11 +307,14 @@ function DeepResultView({
     <>
       {L(`done in ${about(r.total_secs ?? 0).replace('about ', '')} · ${r.hypotheses ? r.hypotheses.toLocaleString('en') : '?'} orbits`)}
       {L(`${r.n_peaks ?? 0} peaks measured · ${r.n_peaks_negated ?? 0} of the negated sum`)}
-      {L(`bar: S/N ${r.photometry_threshold} · control tracks: ${r.control ? `${r.control.reach_sn5} of ${r.control.measured} reach S/N 5` : 'n/a'}`)}
+      {L(
+        `bar: S/N ${r.photometry_threshold} · control tracks: ${r.control ? `${r.control.reach_sn5} of ${r.control.measured} reach S/N 5` : 'n/a'}`,
+      )}
       {L('blind limit about V 20–21 · reflected light')}
       {L('Planet Nine: margin 1.4–1.7× only in D4 (3 µm)')}
       {!C.some((c) => !c.alias && (c.ok || (c.phot_sn ?? 0) >= r.photometry_threshold)) && L('nothing above the bar')}
-      {C.some((c) => c.alias) && L(`${C.filter((c) => c.alias).length} more peaks of the sum are the same body at neighbouring distances (aliases), not listed`)}
+      {C.some((c) => c.alias) &&
+        L(`${C.filter((c) => c.alias).length} more peaks of the sum are the same body at neighbouring distances (aliases), not listed`)}
       {C.map((c, i) => {
         if (c.alias || (!c.ok && !((c.phot_sn ?? 0) >= r.photometry_threshold))) return null;
         return (
@@ -267,13 +326,17 @@ function DeepResultView({
                 if (d.sel !== i) onPick?.(`Deep sum · peak ${i + 1}`, c, peakRows(c, r));
               }}
             >
-              <b>Peak {i + 1}</b> · sum S/N {c.sn} · photometry {c.phot_sn != null ? `${c.phot_sn}σ` : 'n/a'} · {c.d} au{c.ok ? ' · above the threshold' : ''}
+              <b>Peak {i + 1}</b> · sum S/N {c.sn} · photometry {c.phot_sn != null ? `${c.phot_sn}σ` : 'n/a'} · {c.d} au
+              {c.ok ? ' · above the threshold' : ''}
             </button>
             {d.sel === i && (
               <div class="mono-s" style="margin:2px 0 8px 8px">
-                {c.ra.toFixed(4)} {c.dec.toFixed(4)} (middle pass) · own motion {c.mu[0]}, {c.mu[1]} ″/day{c.flux_mjy != null ? ` · ${c.flux_mjy} ± ${c.err_mjy} mJy` : ''}
+                {c.ra.toFixed(4)} {c.dec.toFixed(4)} (middle pass) · own motion {c.mu[0]}, {c.mu[1]} ″/day
+                {c.flux_mjy != null ? ` · ${c.flux_mjy} ± ${c.err_mjy} mJy` : ''}
                 <br />
-                {c.by_pass.map((q, k) => `pass ${k + 1}: ${q.sn != null ? `${q.sn}σ` : 'n/a'}${q.flux_mjy != null ? ` (${q.flux_mjy} mJy)` : ''}`).join(' · ')}
+                {c.by_pass
+                  .map((q, k) => `pass ${k + 1}: ${q.sn != null ? `${q.sn}σ` : 'n/a'}${q.flux_mjy != null ? ` (${q.flux_mjy} mJy)` : ''}`)
+                  .join(' · ')}
                 <br />
                 control tracks: {c.control_sn?.length ? `${c.control_sn.join(', ')}σ` : 'n/a'}
               </div>
@@ -291,7 +354,11 @@ function DeepResultView({
 /** The rows of the card of a deep-sum peak. */
 export function peakRows(c: DeepCandidate, r: DeepResult): [string, string, string][] {
   return [
-    ['Signal', `${c.sn} in the sum · ${c.phot_sn != null ? `${c.phot_sn} σ` : 'n/a'} in photometry`, 'the sum over the passes along one orbit, and PSF photometry along it'],
+    [
+      'Signal',
+      `${c.sn} in the sum · ${c.phot_sn != null ? `${c.phot_sn} σ` : 'n/a'} in photometry`,
+      'the sum over the passes along one orbit, and PSF photometry along it',
+    ],
     ['Bar and noise', `bar ${r.photometry_threshold} · from the negated sum`, 'the highest peak of the negated sum'],
     ['Control tracks', c.control_sn?.length ? `${c.control_sn.join(', ')} σ` : 'n/a', 'tracks beside the peak'],
     ['Distance', `${c.d} au`, 'of the best orbit'],

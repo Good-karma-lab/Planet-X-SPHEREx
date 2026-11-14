@@ -41,6 +41,10 @@ export interface DistantResult {
   dmin?: number;
   dmin_used?: number;
   dmax?: number;
+  /** the parameters the search ran with (its distance range) */
+  params?: { dmin?: number; dmax?: number };
+  /** the time the visits of the pass span */
+  span_days?: number;
   scan_secs: number;
   threshold: number;
   null?: number[];
@@ -500,6 +504,8 @@ export function noteText(notes: string[]): string {
 /** The status lines of a result, in the words of the search: what it did, what the noise reaches, how many peaks, how far a blind search reaches. */
 export function DistantLines({ r }: { r: DistantResult }) {
   const nl = r.null?.[0];
+  const lo = r.dmin_used ?? r.params?.dmin ?? r.dmin ?? DMIN;
+  const hi = r.params?.dmax ?? r.dmax ?? DMAX;
   const L = (t: string, tip?: string) => (
     <div class="mono-s stl" title={tip}>
       {t}
@@ -508,9 +514,13 @@ export function DistantLines({ r }: { r: DistantResult }) {
   return (
     <>
       {L(
-        `${r.n_hypotheses.toLocaleString('en-US')} orbits · ${r.dmin_used ?? r.dmin ?? DMIN}–${r.dmax ?? DMAX} au · ${r.scan_secs} s`,
+        `${r.n_hypotheses.toLocaleString('en-US')} orbits · ${lo}–${hi} au · ${r.scan_secs} s`,
         'Hypotheses of distance and own motion scanned for this pass.',
       )}
+      {r.n_hypotheses < 10 &&
+        L(
+          `one pass spans ${r.span_days != null ? `${r.span_days.toFixed(1)} days` : 'a few days'}: at ${lo}–${hi} au a body moves less than a pixel in that time, so this pass alone cannot tell the distances apart — the deep sum of the passes can`,
+        )}
       {L(
         `noise reaches S/N ${nl != null ? nl.toFixed(1) : '?'} · bar ${r.threshold.toFixed(1)}`,
         'The same sum of the negated differences gives the noise ceiling; a peak counts above the bar.',

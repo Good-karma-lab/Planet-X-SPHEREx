@@ -2991,7 +2991,15 @@ export function Lab({ route }: { route: Route }) {
               <section class="psec fsec">
                 <div class="fsh">Planet X · bodies beyond Neptune</div>
                 <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
-                {passes.length >= 3 && <DeepSumPanel ra={ra} dec={dec} fov={fov} passes={passes.map((q) => q.mjd_mid)} />}
+                {passes.length >= 3 && (
+                  <DeepSumPanel
+                    ra={ra}
+                    dec={dec}
+                    fov={fov}
+                    passes={passes.map((q) => q.mjd_mid)}
+                    autoPlan={fpx && (fpxRange.dmin ?? 0) >= 200 ? [fpxRange.dmin!, fpxRange.dmax ?? 2000] : undefined}
+                  />
+                )}
                 {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
               </section>
             </div>
