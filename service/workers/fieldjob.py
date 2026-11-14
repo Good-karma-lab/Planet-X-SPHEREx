@@ -167,7 +167,7 @@ async def run_field(ctx: Context, index: Index, fr: FileReader, store: Store, pa
             "orientation": "row 0 north, column 0 east (east left)",
         },
         "cdet": list(b.cdet),
-        "bands": [{"key": bd.key, "name": bd.name} for bd in bands],
+        "bands": [{"key": bd.key, "name": bd.name, "label": bd.label, "hue": bd.hue} for bd in bands],
         "passes": sorted(passes_meta, key=lambda m: m["index"]),
         "exposures": len(b.exposures),
         "overlapping": b.thinned_from,

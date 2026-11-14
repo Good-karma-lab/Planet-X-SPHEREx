@@ -20,7 +20,7 @@ def test_key_depends_on_parameters_and_versions(monkeypatch: pytest.MonkeyPatch)
 def test_lineage_includes_dependencies(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(versions.VERSIONS, "sources", "s1")
     monkeypatch.setitem(versions.DEPENDS, "sources", ("field",))
-    assert versions.lineage("sources") == ("field:f1", "sources:s1")
+    assert versions.lineage("sources") == ("field:f2", "sources:s1")
 
 
 def test_write_complete_read_and_purge_on_bump(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -32,7 +32,7 @@ def test_write_complete_read_and_purge_on_bump(tmp_path: Path, monkeypatch: pyte
     s.complete(key)
     assert s.is_complete(key) and s.read_part("field", key, "quick.sxp") == b"abc"
     assert s.purge_stale() == {}
-    monkeypatch.setitem(versions.VERSIONS, "field", "f2")  # a version bump
+    monkeypatch.setitem(versions.VERSIONS, "field", "f999")  # a version bump
     assert s.purge_stale() == {"field": 1}
-    assert not (tmp_path / "products" / "field" / "f1").exists()
+    assert not (tmp_path / "products" / "field" / "f2").exists()
     assert s.stats() == {}

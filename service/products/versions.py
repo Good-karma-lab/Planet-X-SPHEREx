@@ -8,7 +8,7 @@ set. Bump a version whenever the product's output changes, and add a change-log 
 from __future__ import annotations
 
 VERSIONS: dict[str, str] = {
-    "field": "f1",  # the stacks of a field (all parts)
+    "field": "f2",  # the stacks of a field (all parts). f2: band hues in the meta
 }
 
 DEPENDS: dict[str, tuple[str, ...]] = {

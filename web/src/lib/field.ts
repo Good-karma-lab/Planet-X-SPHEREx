@@ -11,9 +11,17 @@ export interface PassMeta {
   white_balance: { kr: number; kb: number };
 }
 
+export interface BandMeta {
+  key: string;
+  name: string;
+  label: string;
+  hue: number;
+}
+
 export interface FieldMeta {
   grid: { ra0: number; dec0: number; step_arcsec: number; n: number };
   cdet: number[];
+  bands: BandMeta[];
   passes: PassMeta[];
   exposures: number;
   overlapping: number;
@@ -42,6 +50,8 @@ const POLL_MS = 700;
 export class FieldClient {
   private parts = new Map<string, Promise<SxpPart>>();
   private stopped = false;
+  private wanted = new Set<string>(['quick_', 'picture_']);
+  private ready: string[] = [];
   key: string | null = null;
   private asked: [number, number, number] = [0, 0, 0];
 
@@ -60,21 +70,30 @@ export class FieldClient {
     this.key = body.key;
     if (body.state === 'done' && body.meta) {
       this.ev.onMeta(body.meta);
-      await this.fetchParts(this.partsFromMeta(body.meta));
+      this.ready = this.partsFromMeta(body.meta);
+      await this.fetchParts(this.ready);
       return this.ev.onPhase('');
     }
     if (body.job) await this.follow(body.job);
   }
 
   private partsFromMeta(meta: FieldMeta): string[] {
-    return meta.passes.flatMap((p) => [`picture_p${p.index}`]);
+    return meta.passes.flatMap((p) => ['picture', 'dets', 'bands'].map((k) => `${k}_p${p.index}`));
+  }
+
+  /** Fetch the parts whose names start with `prefix` (e.g. "dets_") from now on, and those already ready. */
+  want(prefix: string): void {
+    if (this.wanted.has(prefix)) return;
+    this.wanted.add(prefix);
+    void this.fetchParts(this.ready);
   }
 
   private async follow(job: JobView): Promise<void> {
     let view = job;
     while (!this.stopped) {
       this.ev.onPhase(view.state === 'error' ? `failed: ${view.error}` : view.phase);
-      await this.fetchParts(view.parts.filter((p) => p.startsWith('quick_') || p.startsWith('picture_')));
+      this.ready = view.parts;
+      await this.fetchParts(this.ready);
       if (view.state === 'done') {
         const m = await fetch(`/api/v1/fields/${this.key}/parts/meta.json`);
         if (m.ok) this.ev.onMeta((await m.json()) as FieldMeta);
@@ -91,7 +110,7 @@ export class FieldClient {
 
   private async fetchParts(names: string[]): Promise<void> {
     for (const name of names) {
-      if (this.parts.has(name)) continue;
+      if (this.parts.has(name) || ![...this.wanted].some((w) => name.startsWith(w))) continue;
       const p = fetch(`/api/v1/fields/${this.key}/parts/${name}`).then(async (r) => {
         if (!r.ok) throw new Error(`${name}: ${r.status}`);
         return parseSxp(await r.arrayBuffer());
