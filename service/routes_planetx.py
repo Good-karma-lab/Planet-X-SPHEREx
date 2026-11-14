@@ -98,6 +98,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         det: str = Query("123"),
         mu_scale: float = Query(1.0, ge=0.2, le=2.0),
         plan: int = Query(0, ge=0, le=1),
+        bg: int = Query(0, ge=0, le=1, description="1: a background run (overnight scans): it gives way to every person's job"),
     ) -> Any:
         """Find Planet X, one pass: the distance search (create or attach); plan=1 answers at once with the number of hypotheses and the
         time."""
@@ -130,7 +131,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             async def fn(ctx: Any) -> dict[str, Any]:
                 return await distantjob.run_distant(ctx, index, files, store, wl, ps, params)
 
-            job = st.scheduler.submit(distantjob.KIND, key, params, fn, Priority.P0, "heavy", 2500)
+            job = st.scheduler.submit(distantjob.KIND, key, params, fn, Priority.P2 if bg else Priority.P0, "heavy", 2500)
         return job_reply(key, job, estimates.get(key))
 
     @r.get(f"{prefix}/deep")
@@ -146,6 +147,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         keep: float = Query(6.0, ge=4, le=12),
         nmax: int = Query(15, ge=4, le=60),
         plan: int = Query(0, ge=0, le=1),
+        bg: int = Query(0, ge=0, le=1, description="1: a background run (overnight scans): it gives way to every person's job"),
     ) -> Any:
         """Find Planet X, the sum of passes: plan=1 (or `centre` + `passes` without `fields`) answers at once with the guessed field
         centres, the number of orbits and the time; `fields` starts the job."""
@@ -192,7 +194,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             async def fn(ctx: Any) -> dict[str, Any]:
                 return await deepjob.run_deep(ctx, index, files, store, wl, ps, params)
 
-            job = st.scheduler.submit(deepjob.KIND, key, params, fn, Priority.P0, "heavy", 4000)
+            job = st.scheduler.submit(deepjob.KIND, key, params, fn, Priority.P2 if bg else Priority.P0, "heavy", 4000)
         return job_reply(key, job, estimates.get(key))
 
     @r.get(f"{prefix}/distant/{{key}}/bin")
