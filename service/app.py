@@ -708,8 +708,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             raise HTTPException(404, str(e)) from e
         except Exception as e:  # the bucket did not answer: said, never cached
             raise HTTPException(502, f"the all-sky cube could not be read: {type(e).__name__}") from e
-        if all(v is None for v in out["flux"]):
-            out["note"] = "no value in the all-sky cube at this pixel (a saturated core or a gap of the map)"
+        filled = sum(1 for v in out["flux"] if v is not None)
+        if filled < 0.5 * len(out["flux"]):
+            out["note"] = "most planes of the all-sky cube are empty at this pixel (a saturated core or a gap of the map)"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(out, separators=(",", ":")))
         return out

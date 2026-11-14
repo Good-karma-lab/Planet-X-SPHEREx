@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { formatDec, formatRA } from '../lib/sky';
 import { binNote, binSpectrum, type Bin } from './spectrum/bins';
-import { CatalogueCheck } from './spectrum/catalogue';
-import { useQuicklook, type Quick } from './spectrum/quicklook';
+import { CatalogueCheck, REF_LAM, useCatalogue, useReferencePhotometry } from './spectrum/catalogue';
+import { quickPoints, useQuicklook, type QuickPoint } from './spectrum/quicklook';
 import { StampPanels, useStamps } from './spectrum/stamps';
 import type { Source, SpecPoint } from './spectrum/types';
 import './spectrum/extra.css';
@@ -87,7 +87,27 @@ export function useSpectrum(src: Source | null): {
   return { view, points, error };
 }
 
-function SpectrumChart({ points, bins, cur, quick }: { points: SpecPoint[]; bins: Bin[]; cur: SpecPoint | null; quick: Quick | null }) {
+interface RefPoint {
+  band: string;
+  lam: number;
+  mjy: number;
+}
+
+function SpectrumChart({
+  points,
+  bins,
+  cur,
+  quick,
+  refs,
+}: {
+  points: SpecPoint[];
+  bins: Bin[];
+  cur: SpecPoint | null;
+  /** the all-sky cube's own values in mJy per cube pixel, only while no measured point exists */
+  quick: QuickPoint[] | null;
+  /** catalogue photometry (mJy) drawn as open diamonds: the reference of a saturated star */
+  refs: RefPoint[];
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
@@ -102,16 +122,18 @@ function SpectrumChart({ points, bins, cur, quick }: { points: SpecPoint[]; bins
     c.clearRect(0, 0, W, H);
     const ok = points.filter((p) => p.ok && p.flux != null);
     const L = 42;
-    const R = quick ? 40 : 8;
+    const R = 8;
     const T = 20;
     const B = 26;
     const x = (lam: number) => L + ((lam - 0.7) / (5.05 - 0.7)) * (W - L - R);
     let lo = 0;
     let hi = 1;
-    if (ok.length) {
-      const f = ok.map((p) => p.flux!).sort((a, b) => a - b);
-      lo = Math.min(0, f[Math.floor(0.01 * (f.length - 1))]!);
-      hi = f[Math.floor(0.99 * (f.length - 1))]! * 1.15;
+    const vals = [...ok.map((p) => p.flux!), ...(quick ?? []).map((q) => q.mjy), ...refs.map((r) => r.mjy)].sort((a, b) => a - b);
+    if (vals.length) {
+      // measured points and quick look: the 1st to 99th percentile; catalogue references always stay inside the axis
+      const ref = refs.map((r) => r.mjy);
+      lo = Math.min(0, vals[Math.floor(0.01 * (vals.length - 1))]!);
+      hi = Math.max(vals[Math.floor(0.99 * (vals.length - 1))]!, ...ref) * 1.15;
       if (hi <= lo) hi = lo + 1;
     }
     const y = (v: number) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
@@ -143,35 +165,44 @@ function SpectrumChart({ points, bins, cur, quick }: { points: SpecPoint[]; bins
       c.lineTo(W - R, y(0));
       c.stroke();
     }
-    // the quick look of the all-sky cube on its own scale (right axis), faint once the measured spectrum has points of its own
+    // the quick look of the all-sky cube, in the chart's own unit (mJy in one 12.9″ cube pixel), only while nothing is measured yet
     if (quick) {
-      const qf = quick.flux.map((v) => (v != null && Number.isFinite(v) ? v : null));
-      const qmax = Math.max(1e-9, ...qf.filter((v): v is number => v != null));
-      const qy = (v: number) => T + (1 - v / (qmax * 1.1)) * (H - T - B);
-      const faint = ok.length >= 20;
       c.save();
-      c.strokeStyle = faint ? 'rgba(200,215,222,0.22)' : 'rgba(200,215,222,0.7)';
+      c.strokeStyle = 'rgba(200,215,222,0.7)';
       c.lineWidth = 1.4;
       c.beginPath();
-      let pen = false;
-      quick.lam.forEach((lam, i) => {
-        const v = qf[i];
-        if (v == null) {
-          pen = false;
-          return;
-        }
-        if (pen) c.lineTo(x(lam), qy(v));
-        else c.moveTo(x(lam), qy(v));
-        pen = true;
+      quick.forEach((q, i) => {
+        if (i === 0) c.moveTo(x(q.lam), y(q.mjy));
+        else c.lineTo(x(q.lam), y(q.mjy));
       });
       c.stroke();
-      c.fillStyle = faint ? 'rgba(160,185,194,0.4)' : 'rgba(160,185,194,0.9)';
+      c.fillStyle = 'rgba(160,185,194,0.9)';
       c.font = '500 10px ui-monospace, Menlo, monospace';
-      c.textAlign = 'left';
-      for (let k = 0; k <= 2; k++) c.fillText(fmt((qmax * 1.1 * (2 - k)) / 2), W - R + 3, qy((qmax * 1.1 * (2 - k)) / 2) + 3);
-      c.fillText(quick.unit, W - R + 3, 12);
       c.textAlign = 'right';
-      c.fillText('quick look (all-sky cube)', W - R - 4, T + 10);
+      c.fillText('quick look: all-sky map, one 12.9″ pixel', W - R - 4, T + 10);
+      c.restore();
+    }
+    // catalogue photometry of a saturated star: open diamonds with the band's name
+    if (refs.length) {
+      c.save();
+      c.strokeStyle = '#f3d27a';
+      c.fillStyle = '#f3d27a';
+      c.lineWidth = 1.6;
+      c.font = '600 10px ui-monospace, Menlo, monospace';
+      for (const r of refs) {
+        const px = x(r.lam);
+        const py = y(r.mjy);
+        c.beginPath();
+        c.moveTo(px, py - 5);
+        c.lineTo(px + 5, py);
+        c.lineTo(px, py + 5);
+        c.lineTo(px - 5, py);
+        c.closePath();
+        c.stroke();
+        c.fillText(r.band, px - 6, py - 9);
+      }
+      c.textAlign = 'right';
+      c.fillText('◇ catalogue (2MASS, WISE)', W - R - 4, T + 10);
       c.restore();
     }
     for (const p of ok) {
@@ -231,9 +262,15 @@ function SpectrumChart({ points, bins, cur, quick }: { points: SpecPoint[]; bins
         c.lineTo(x(cur.lam), H - B);
         c.stroke();
         c.setLineDash([]);
+        // the dotted line says what it is: the exposure on show, which gave no point
+        c.fillStyle = '#ffffff';
+        c.font = '500 10px ui-monospace, Menlo, monospace';
+        c.textAlign = x(cur.lam) > W / 2 ? 'right' : 'left';
+        c.fillText('this exposure: no point', x(cur.lam) + (x(cur.lam) > W / 2 ? -4 : 4), H - B - 4);
+        c.textAlign = 'left';
       }
     }
-  }, [points, bins, cur, quick]);
+  }, [points, bins, cur, quick, refs]);
   return <canvas ref={ref} class="spec-chart" aria-label="Spectrum: flux against wavelength" />;
 }
 
@@ -319,6 +356,21 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const [playing, setPlaying] = useState(false);
   const rows = useMemo(() => [...points].sort((a, b) => a.i - b.i), [points]);
   const bins = useMemo(() => binSpectrum(points), [points]);
+  // a target that saturates the detector has no SPHEREx spectrum: say so once, show none of the per-exposure lines
+  const saturated = !!view && (view.no_spectrum || (view.measured >= 20 && view.saturated > 0.5 * view.measured));
+  // the all-sky quick look is only a placeholder: gone as soon as a measured point exists, never drawn from a mostly empty column
+  const qpts = useMemo(() => quickPoints(quick), [quick]);
+  const showQuick = qpts && !points.some((p) => p.ok);
+  const done = view?.state === 'done';
+  const cat = useCatalogue(shown, done && points.length > 0 && !saturated);
+  const reference = useReferencePhotometry(shown, done && saturated);
+  const refs = useMemo<RefPoint[]>(
+    () =>
+      !saturated || reference.state !== 'done'
+        ? []
+        : reference.rows.filter((r) => r.cat_mjy != null && REF_LAM[r.band] != null).map((r) => ({ band: r.band, lam: REF_LAM[r.band]!, mjy: r.cat_mjy! })),
+    [saturated, reference],
+  );
   const k = at == null ? Math.max(0, rows.length - 1) : Math.min(at, Math.max(0, rows.length - 1));
   useEffect(() => {
     setAt(null);
@@ -345,8 +397,6 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const perDet = [1, 2, 3, 4, 5, 6].map((d) => points.filter((p) => p.ok && p.det === d).length);
   const usable = points.filter((p) => p.ok).length;
   const cur = rows[k] ?? null;
-  // a target that saturates the detector has no SPHEREx spectrum: say so once, show none of the per-exposure lines
-  const saturated = !!view && (view.no_spectrum || (view.measured >= 20 && view.saturated > 0.5 * view.measured));
   return (
     <div class="spec">
       <div class="spec-head">
@@ -375,8 +425,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
       {saturated && (
         <div class="partial">Saturated in most exposures: no SPHEREx spectrum (the core of this star overflows the detector)</div>
       )}
-      <SpectrumChart points={points} bins={bins} cur={cur} quick={quick} />
-      {quick?.note && <div class="spec-bin-note">quick look: {quick.note}</div>}
+      <SpectrumChart points={points} bins={bins} cur={saturated ? null : cur} quick={showQuick ? qpts : null} refs={refs} />
       {bins.length > 0 && <div class="spec-bin-note">{binNote(bins)}</div>}
       <div class="spec-dets">
         {perDet.map((n, i) => (
@@ -410,7 +459,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           {error}
         </div>
       )}
-      <CatalogueCheck src={shown} ready={view?.state === 'done' && points.length > 0} saturated={saturated} />
+      <CatalogueCheck a={saturated ? reference : cat} ready={done && (points.length > 0 || saturated)} saturated={saturated} />
       {view?.state === 'done' && usable > 0 && (
         <a
           class="lnk"
