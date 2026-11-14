@@ -248,28 +248,98 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   );
 }
 
+interface Identified {
+  simbad?: { state: string; name?: string; type?: string; sp?: string | null; sep?: number; error?: string };
+  gaia?: {
+    state: string;
+    source_id?: string;
+    g?: number | null;
+    bp_rp?: number | null;
+    parallax?: number | null;
+    ruwe?: number | null;
+    error?: string;
+  };
+}
+
+/** What SIMBAD and Gaia DR3 call a place, asked once per selection. */
+function useIdentify(src: Source | null): Identified | null | 'asking' {
+  const [v, setV] = useState<Identified | null | 'asking'>(null);
+  useEffect(() => {
+    setV(null);
+    if (!src) return;
+    setV('asking');
+    const ctl = new AbortController();
+    const q = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6) });
+    if (src.pmra || src.pmdec) {
+      q.set('pmra', String(src.pmra ?? 0));
+      q.set('pmdec', String(src.pmdec ?? 0));
+    }
+    fetch(`/api/v1/identify?${q}`, { signal: ctl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: Identified | null) => setV(d))
+      .catch(() => {});
+    return () => ctl.abort();
+  }, [src?.ra, src?.dec, src?.pmra, src?.pmdec]);
+  return v;
+}
+
 export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum: () => void }) {
+  const id = useIdentify(src);
   if (!src) return <div class="mono-s">Click a source in the picture</div>;
   const pm = src.pmra || src.pmdec ? Math.hypot(src.pmra ?? 0, src.pmdec ?? 0) : 0;
+  const sb = id && id !== 'asking' ? id.simbad : undefined;
+  const ga = id && id !== 'asking' ? id.gaia : undefined;
+  const plx = ga?.state === 'ok' && ga.parallax != null && ga.parallax >= 3 && (ga.ruwe ?? 9) <= 1.4 ? ga.parallax : null;
   return (
     <div class="okv">
       <div class="orow">
         <span class="faint">Name</span>
-        <span>{src.name ?? 'no catalogue name here'}</span>
+        <span>{src.name ?? (sb?.state === 'ok' ? sb.name : id === 'asking' ? 'asking SIMBAD…' : 'no catalogue name here')}</span>
       </div>
       <div class="orow">
         <span class="faint">Position</span>
         <span class="mono-s">
           {formatRA(src.ra)} {formatDec(src.dec)}
-          {src.name ? ' (J2000)' : ''}
+          {src.pmra || src.pmdec ? ' (J2000)' : ''}
         </span>
       </div>
       {pm > 0 && (
         <div class="orow">
           <span class="faint">Proper motion</span>
           <span>
-            {pm >= 1000 ? `${(pm / 1000).toFixed(2)} ″/yr` : `${pm.toFixed(0)} mas/yr`} (SIMBAD); measured at its place on each exposure's
-            date
+            {pm >= 1000 ? `${(pm / 1000).toFixed(2)} ″/yr` : `${pm.toFixed(0)} mas/yr`}; measured at its place on each exposure's date
+          </span>
+        </div>
+      )}
+      <div class="orow">
+        <span class="faint">SIMBAD</span>
+        <span>
+          {id === 'asking'
+            ? 'asking…'
+            : sb?.state === 'ok'
+              ? `${sb.name}${sb.type ? ` · ${sb.type}` : ''}${sb.sp ? ` · ${sb.sp}` : ''} (${sb.sep}″)`
+              : sb?.state === 'none'
+                ? 'nothing within 6″'
+                : 'not reachable'}
+        </span>
+      </div>
+      <div class="orow">
+        <span class="faint">Gaia DR3</span>
+        <span>
+          {id === 'asking'
+            ? 'asking…'
+            : ga?.state === 'ok'
+              ? `${ga.source_id}${ga.g != null ? ` · G ${ga.g}` : ''}${ga.bp_rp != null ? ` · BP−RP ${ga.bp_rp}` : ''}${ga.parallax != null ? ` · parallax ${ga.parallax} mas` : ''}${ga.ruwe != null ? ` · RUWE ${ga.ruwe}` : ''}`
+              : ga?.state === 'none'
+                ? 'nothing within 6″'
+                : 'not reachable'}
+        </span>
+      </div>
+      {plx !== null && (
+        <div class="orow">
+          <span class="faint">Distance</span>
+          <span>
+            {(1000 / plx).toFixed(1)} pc · {((1000 / plx) * 3.2616).toFixed(1)} light-years (Gaia parallax)
           </span>
         </div>
       )}

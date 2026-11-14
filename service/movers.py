@@ -148,6 +148,7 @@ class Movers:
             "sources_per_pass": res.sources_per_pass,
             "stationary": res.stationary,
             "weak": res.weak,
+            "chance": {"trials": res.chance_trials, "mean": round(res.chance_mean, 3), "any": round(res.chance_any, 3)},
             "still": 0,
             "tracks": tracks,
             "seconds": round(time.monotonic() - t0, 2),

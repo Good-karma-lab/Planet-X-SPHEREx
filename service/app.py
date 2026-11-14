@@ -58,6 +58,7 @@ class State:
         self.spectra: Spectra | None = None
         self.movers: Movers | None = None
         self.anomalies: Anomalies | None = None
+        self.identified: dict[tuple[float, float, int, int], dict[str, Any]] = {}
         self.coverage_lock = asyncio.Lock()
 
 
@@ -270,6 +271,27 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             media_type="application/json" if name.endswith(".json") else "application/octet-stream",
             headers={"Cache-Control": "public, max-age=31536000, immutable" if immutable else "no-store"},
         )
+
+    @app.get(f"{API_PREFIX}/identify")
+    async def identify(
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        pmra: float = Query(0.0, ge=-20000, le=20000),
+        pmdec: float = Query(0.0, ge=-20000, le=20000),
+    ) -> Any:
+        """What SIMBAD and Gaia DR3 call a place (each part: ok / none / unavailable)."""
+        if st.anomalies is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        key = (round(ra, 5), round(dec, 5), round(pmra), round(pmdec))
+        hit = st.identified.get(key)
+        if hit is not None:
+            return hit
+        out = await st.anomalies.identify(ra, dec, pmra, pmdec)
+        if all(v.get("state") != "unavailable" for v in out.values()):
+            st.identified[key] = out
+            if len(st.identified) > 5000:
+                st.identified.pop(next(iter(st.identified)))
+        return out
 
     @app.get(f"{API_PREFIX}/anomalies")
     async def anomalies_of(

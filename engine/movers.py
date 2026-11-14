@@ -34,6 +34,7 @@ V_MIN, V_MAX = 3.0, 120.0  # ″/yr
 FLUX_FACTOR = 2.5
 WEAK_SNR = 15.0
 MAX_SOURCES = 4000
+CHANCE_TRIALS = 20
 
 
 @dataclass
@@ -77,6 +78,9 @@ class Result:
     tracks: list[Track] = field(default_factory=list)
     weak: int = 0
     still_sources: list[Source] = field(default_factory=list)  # the stationary sources of the first pass (the anomaly search's input)
+    chance_trials: int = 0
+    chance_mean: float = 0.0  # tracks per field that chance alone makes
+    chance_any: float = 0.0  # share of trials with at least one track
 
 
 def _smooth(img: NDArray[np.floating], sigma: float) -> NDArray[np.float64]:
@@ -150,20 +154,9 @@ def _fit_line(t: NDArray[np.float64], p: NDArray[np.float64]) -> tuple[float, fl
     return float(coef[0]), float(coef[1]), rms
 
 
-def search(whites: list[NDArray[np.floating]], sats: list[NDArray[np.floating]], mjds: list[float], step_arcsec: float) -> Result:
-    npass = len(whites)
-    n = whites[0].shape[0]
-    covered = np.logical_and.reduce([np.isfinite(w) for w in whites])
-    edge = int(np.ceil(EDGE_ARCSEC / step_arcsec))
-    inner = np.zeros_like(covered)
-    inner[edge : n - edge, edge : n - edge] = True
-    usable = covered & inner
-    srcs: list[list[Source]] = []
-    for w, s in zip(whites, sats, strict=True):
-        found = find_sources(w, s, step_arcsec)
-        srcs.append([q for q in found if usable[min(n - 1, max(0, round(q.y))), min(n - 1, max(0, round(q.x)))]])
-    if npass < 3:
-        return Result([len(s) for s in srcs], 0)
+def _link(srcs: list[list[Source]], mjds: list[float], step_arcsec: float) -> tuple[list[Track], list[NDArray[np.bool_]]]:
+    """Stationary sources and the tracks through the others (merged); every track is returned, weak ones flagged."""
+    npass = len(srcs)
     years = (np.asarray(mjds, float) - mjds[0]) / 365.25
     match_px = MATCH_ARCSEC / step_arcsec
     xy = [np.array([[q.x, q.y] for q in s]) if s else np.zeros((0, 2)) for s in srcs]
@@ -244,6 +237,56 @@ def search(whites: list[NDArray[np.floating]], sats: list[NDArray[np.floating]],
             continue
         used |= ids
         kept.append(cand)
+    return kept, stationary
+
+
+def search(
+    whites: list[NDArray[np.floating]],
+    sats: list[NDArray[np.floating]],
+    mjds: list[float],
+    step_arcsec: float,
+    trials: int = CHANCE_TRIALS,
+    seed: int = 0,
+) -> Result:
+    npass = len(whites)
+    n = whites[0].shape[0]
+    covered = np.logical_and.reduce([np.isfinite(w) for w in whites])
+    edge = int(np.ceil(EDGE_ARCSEC / step_arcsec))
+    inner = np.zeros_like(covered)
+    inner[edge : n - edge, edge : n - edge] = True
+    usable = covered & inner
+    srcs: list[list[Source]] = []
+    for w, s in zip(whites, sats, strict=True):
+        found = find_sources(w, s, step_arcsec)
+        srcs.append([q for q in found if usable[min(n - 1, max(0, round(q.y))), min(n - 1, max(0, round(q.x)))]])
+    if npass < 3:
+        return Result([len(s) for s in srcs], 0)
+    kept, stationary = _link(srcs, mjds, step_arcsec)
     weak = sum(1 for t in kept if t.weak)
     still = [q for q, st in zip(srcs[0], stationary[0], strict=True) if st]
-    return Result([len(s) for s in srcs], len(still), [t for t in kept if not t.weak], weak, still)
+    res = Result([len(s) for s in srcs], len(still), [t for t in kept if not t.weak], weak, still)
+    # chance control: the moving (non-stationary) sources of every pass put at uniform random places of the field, the stationary
+    # ones kept, the linker run again; the mean number of tracks per field is what chance alone gives
+    ys, xs = np.nonzero(usable)
+    if trials and len(xs):
+        rng = np.random.default_rng(seed)
+        counts = []
+        for _ in range(trials):
+            shuffled = []
+            for k in range(npass):
+                moved = []
+                for q, st in zip(srcs[k], stationary[k], strict=True):
+                    if st:
+                        moved.append(q)
+                    else:
+                        c = int(rng.integers(len(xs)))
+                        moved.append(
+                            Source(float(xs[c]) + float(rng.random()), float(ys[c]) + float(rng.random()), q.flux, q.snr, q.saturated)
+                        )
+                shuffled.append(moved)
+            ktr, _ = _link(shuffled, mjds, step_arcsec)
+            counts.append(sum(1 for t in ktr if not t.weak))
+        res.chance_trials = trials
+        res.chance_mean = float(np.mean(counts))
+        res.chance_any = float(np.mean([c > 0 for c in counts]))
+    return res

@@ -369,3 +369,5 @@ input[type='range']::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .archsw input { accent-color: var(--accent); width: 13px; height: 13px; margin: 0; }
 .archsw .mono-s { margin-left: auto; }
 .vsq .vlabel { z-index: 3; }
+.film { position: absolute; inset: 0; }
+.film-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 4px; background: #02070a; image-rendering: auto; }

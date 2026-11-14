@@ -145,7 +145,15 @@ interface AnomalyView {
 interface MoversView {
   state: 'waiting' | 'running' | 'done' | 'failed';
   error: string;
-  result?: { passes: number; sources_per_pass: number[]; stationary: number; weak: number; still: number; tracks: Track[] };
+  result?: {
+    passes: number;
+    sources_per_pass: number[];
+    stationary: number;
+    weak: number;
+    still: number;
+    tracks: Track[];
+    chance?: { trials: number; mean: number; any: number };
+  };
 }
 
 const CHECK_WORD: Record<string, string> = {
@@ -167,7 +175,7 @@ function MoversRows({ mv, names, onPick }: { mv: MoversView | null; names: strin
           ? 'searching…'
           : r.passes < 3
             ? `${r.passes} passes: a track needs 3`
-            : `${r.tracks.length} track${r.tracks.length === 1 ? '' : 's'} · ${r.sources_per_pass.join(' / ')} sources per pass${r.still ? ` · ${r.still} centroid shift${r.still === 1 ? '' : 's'} rejected` : ''}${r.weak ? ` · ${r.weak} weak` : ''}`;
+            : `${r.tracks.length} track${r.tracks.length === 1 ? '' : 's'} · ${r.sources_per_pass.join(' / ')} sources per pass${r.still ? ` · ${r.still} centroid shift${r.still === 1 ? '' : 's'} rejected` : ''}${r.weak ? ` · ${r.weak} weak` : ''}${r.chance?.trials ? ` · chance ${r.chance.mean.toFixed(2)} tracks per field (${r.chance.trials} trials)` : ''}`;
   return (
     <>
       <div
@@ -317,6 +325,7 @@ export function Lab({ route }: { route: Route }) {
     frame,
     speed,
     stretch,
+    film,
     meta: null as FieldMeta | null,
   });
   state.current = {
@@ -329,6 +338,7 @@ export function Lab({ route }: { route: Route }) {
     frame,
     speed,
     stretch,
+    film,
     meta,
   };
 
@@ -580,6 +590,7 @@ export function Lab({ route }: { route: Route }) {
       const ctx = ov.getContext('2d')!;
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
       ctx.clearRect(0, 0, wcss, hcss);
+      if (st.film !== null) return; // the film draws its own picture and marks
       const m = st.meta;
       if (m && st.opts.marker && st.view === 'picture' && targets.current.length) {
         // the marker: a ring and the name of a test target at its place on the date of the season shown

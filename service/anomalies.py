@@ -146,7 +146,7 @@ class Anomalies:
             result = await asyncio.to_thread(self._score, sources, points)
             run.phase = "asking SIMBAD and Gaia about the anomalies"
             for a in result["anomalies"]:
-                a["identified"] = await self._identify(a["ra"], a["dec"], a.get("pmra", 0.0), a.get("pmdec", 0.0))
+                a["identified"] = await self.identify(a["ra"], a["dec"], a.get("pmra", 0.0), a.get("pmdec", 0.0))
             result["exposures"] = len(exps)
             result["seconds"] = round(time.monotonic() - run.started, 1)
             run.result = result
@@ -323,7 +323,7 @@ class Anomalies:
         names = [c["name"] for c in body["metadata"]]
         return [dict(zip(names, row, strict=True)) for row in body["data"]]
 
-    async def _identify(self, ra: float, dec: float, pmra: float, pmdec: float) -> dict[str, Any]:
+    async def identify(self, ra: float, dec: float, pmra: float, pmdec: float) -> dict[str, Any]:
         """What SIMBAD and Gaia DR3 call the place (at the survey's epoch for a moving source)."""
         r_ep, d_ep = place_at({"ra": ra, "dec": dec, "pmra": pmra, "pmdec": pmdec}, 61000.0)
         rad = (IDENTIFY_ARCSEC + 12.0 * (1 if (pmra or pmdec) else 0)) / 3600.0
