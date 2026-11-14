@@ -7,7 +7,8 @@ import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage }
 import { sky, type SkyLayer } from './globe/sky';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
-import { drawMovingPath, placeAt, type MovingObject } from './search/path';
+import { KnownList } from './search/known';
+import { drawBodyPath, drawMovingPath, placeAt, type BodyPath, type MovingObject } from './search/path';
 import './globe/globe.css';
 
 const KIND: Record<string, { cls: string; dot: string }> = {
@@ -174,8 +175,10 @@ export function Globe() {
   const [decIn, setDecIn] = useState(formatDec(a.dec));
   const [, setDatesTick] = useState(0);
   const cv = useRef<HTMLCanvasElement>(null);
-  const live = useRef({ survey, proj, covOn, a, sel, catalog });
-  live.current = { survey, proj, covOn, a, sel, catalog };
+  // a comet or asteroid chosen in the list: its path since April 2025 and where it is today
+  const [bodyPath, setBodyPath] = useState<BodyPath | null>(null);
+  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath });
+  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath };
   const dirty = useRef(true);
   const view = useRef(kept.view ?? { ra: a.ra, dec: a.dec, zoom: 1.6 });
   kept.view = view.current;
@@ -232,7 +235,7 @@ export function Globe() {
 
   useEffect(() => {
     dirty.current = true;
-  }, [survey, proj, covOn, sel, catalog]);
+  }, [survey, proj, covOn, sel, catalog, bodyPath]);
 
   // the sky canvas
   useEffect(() => {
@@ -395,6 +398,7 @@ export function Globe() {
       ctx.globalAlpha = 1;
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
       pins = [];
+      if (st.bodyPath) drawBodyPath(ctx, (ra, dec) => project(ra, dec, b), st.bodyPath, W / 2, font);
       // the selected object's path: from its earliest archive image to 2050, a dot at every image date, the SPHEREx stretch, and its
       // pin at its place on the date of the backdrop shown (the path is drawn larger than true when it would be under 60 px)
       let pathPin = false;
@@ -945,6 +949,28 @@ export function Globe() {
                 </div>
               </div>
             ))}
+          {filter === 'small' && (
+            <div class="known-head">
+              <span class="mono-s">Every comet and asteroid of the JPL Small-Body Database: Show on map draws its path since April 2025</span>
+            </div>
+          )}
+          {filter === 'small' && (
+            <KnownList
+              selected={bodyPath?.body.spkid ?? null}
+              today={bodyPath}
+              onShow={(p) => {
+                setBodyPath(p);
+                aim.set({ ra: p.today.ra, dec: p.today.dec, fov: 10 }, 'catalog');
+                flyRef.current(p.today.ra, p.today.dec, 30);
+              }}
+              onOpen={(_b, c) => {
+                location.hash = formatHash({
+                  screen: 'lab',
+                  params: { ra: c.ra.toFixed(5), dec: c.dec.toFixed(5), fov: '10', film: ((c.mjd0 + c.mjd1) / 2).toFixed(3) },
+                });
+              }}
+            />
+          )}
           {filter !== 'demo' &&
             filter !== 'small' &&
             slice.map((o) => {
