@@ -60,14 +60,27 @@ def main() -> int:
             "bg": 1,
         }
         plan = c.get(f"{a.base}/api/v1/deep", params={**params, "plan": 1}).json()
-        log(f["name"], "plan:", json.dumps({k: plan.get(k) for k in ("estimate_s", "orbits", "exposures") if k in plan}))
+        fields = list(plan.get("fields") or [])
+        # a pass with too few visits for the sum sits out (the deep sum needs two passes or more)
+        err = str((plan.get("plan") or {}).get("error", ""))
+        if plan.get("status") == "few-visits" and err.startswith("field "):
+            bad = int(err.split()[1].rstrip(":")) - 1
+            fields = [x for i, x in enumerate(fields) if i != bad]
+            log(f["name"], f"pass {bad + 1} sits out ({err})")
+        if len(fields) < 2:
+            log(f["name"], ": fewer than two usable passes, skipped")
+            continue
+        job = {k: v for k, v in params.items() if k not in ("centre", "passes")}
+        job["fields"] = ";".join(f"{x[0]},{x[1]},{x[2]}" for x in fields)
+        p2 = c.get(f"{a.base}/api/v1/deep", params={**job, "plan": 1}).json()
+        log(f["name"], "plan:", json.dumps({k: p2.get(k) for k in ("status", "estimate_s", "orbits") if k in p2}))
         while True:
-            r = c.get(f"{a.base}/api/v1/deep", params=params)
-            b = r.json() if r.status_code == 200 else {"state": f"http {r.status_code}"}
-            state = b.get("state") or b.get("status")
-            log(f["name"], state, (b.get("job") or {}).get("phase", ""))
-            if state not in ("running", "queued", "waiting", "paused", None) or b.get("result"):
-                log(f["name"], "result:", json.dumps(b.get("result") or b)[:2000])
+            r = c.get(f"{a.base}/api/v1/deep", params=job)
+            b2 = r.json() if r.status_code == 200 else {"state": f"http {r.status_code}"}
+            state = b2.get("state") or b2.get("status")
+            log(f["name"], state, (b2.get("job") or {}).get("phase", "") if isinstance(b2.get("job"), dict) else "")
+            if state not in ("running", "queued", "waiting", "paused", None) or b2.get("result"):
+                log(f["name"], "result:", json.dumps(b2.get("result") or b2)[:2000])
                 break
             time.sleep(60)
     return 0
