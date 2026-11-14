@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
 import { FieldClient, mjdToDate, type FieldMeta } from '../lib/field';
-import { formatHash, type Route } from '../lib/route';
+import { formatHash, parseHash, type Route } from '../lib/route';
 import { formatDec, formatRA, parseDec, parseRA } from '../lib/sky';
 import type { SxpPart } from '../lib/sxp';
 import { icon } from '../ui/icons';
@@ -10,11 +10,13 @@ import { ARCHIVE, ArchiveSet } from '../viewer/archive';
 import { FADE_MS, HOLD_MS, order } from '../viewer/pendulum';
 import { PER_PASS, Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
 import { atEpoch } from '../lib/sky';
-import { FilmView, type KnownBody } from './film';
+import { FRAME_MS, loadBodies, loadFilm, utc, type Film, type KnownBody } from './film';
 import { NeossatCard } from './neossat';
 import { LightCurves } from './lightcurve';
 import { ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
 import { halfToFloat } from '../lib/sxp';
+import { Portrait, type PortraitData } from './portrait';
+import { ContextRows, FilmTracks, drawTracks, useFilmTracks, type FilmTrack } from './search';
 
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
@@ -119,6 +121,7 @@ interface Opts {
   rings: boolean;
   morph: boolean;
   mono: boolean;
+  artifacts: boolean;
 }
 
 interface Track {
@@ -196,6 +199,29 @@ const CHECK_WORD: Record<string, string> = {
   none: 'no Gaia motion',
   pending: 'not checked yet',
 };
+const CHECK_SHORT: Record<string, string> = { same: 'Gaia ✓', none: 'no Gaia motion', pending: 'Gaia…', still: 'centroid shift' };
+
+/** The uncertainty of a track's speed (″/yr) from the scatter of its places about the fitted line: rms / √Σ(t − t̄)². */
+function speedErr(t: Track): number {
+  const yrs = t.mjd.map((m) => m / 365.25);
+  const mean = yrs.reduce((a, b) => a + b, 0) / Math.max(1, yrs.length);
+  const ss = yrs.reduce((a, y) => a + (y - mean) ** 2, 0);
+  return ss > 0 ? t.rms_arcsec / Math.sqrt(ss) : 0;
+}
+
+/** A track's speed as shown everywhere: the measured rate with its uncertainty. */
+function rateText(t: Track): string {
+  const e = speedErr(t);
+  return `${t.speed.toFixed(1)}${e >= 0.05 ? ` ± ${e.toFixed(1)}` : ''}″/yr`;
+}
+
+/** Ecliptic latitude (degrees) of a place: asteroids crowd within about 10° of the ecliptic. */
+function eclipticLat(ra: number, dec: number): number {
+  const e = (23.4393 * Math.PI) / 180;
+  const a = (ra * Math.PI) / 180;
+  const d = (dec * Math.PI) / 180;
+  return (Math.asin(Math.sin(d) * Math.cos(e) - Math.cos(d) * Math.sin(e) * Math.sin(a)) * 180) / Math.PI;
+}
 
 /** The Movers rows of the Searches list: the state of the search between passes and one row per track. */
 function MoversRows({ mv, names, onPick }: { mv: MoversView | null; names: string[]; onPick: (t: Track, name: string) => void }) {
@@ -229,7 +255,7 @@ function MoversRows({ mv, names, onPick }: { mv: MoversView | null; names: strin
         >
           <b>{names[i] || 'unnamed'}</b>
           <span>
-            {t.speed.toFixed(1)}″/yr toward {t.pa.toFixed(0)}° · {t.passes.length} passes
+            {rateText(t)} toward {t.pa.toFixed(0)}° · {t.passes.length} passes{t.saturated ? ' · saturated core' : ''}
           </span>
           <span class="faint">{CHECK_WORD[t.check] ?? t.check}</span>
         </button>
@@ -256,7 +282,7 @@ export function Lab({ route }: { route: Route }) {
         .filter((d) => d >= 1 && d <= 6)
     : [1, 2, 3, 4, 5, 6];
   const opts: Opts = {
-    reference: p['ref'] !== '0',
+    reference: p['ref'] === '1',
     archive: p['arch'] === '1',
     anomalies: p['ano'] !== '0',
     movers: p['movers'] !== '0',
@@ -269,10 +295,12 @@ export function Lab({ route }: { route: Route }) {
     morph: p['morph'] === '1',
     trajectory: p['traj'] !== '0',
     mono: p['blend'] === 'mono',
+    artifacts: p['art'] === '1',
   };
 
   const set = (params: Record<string, string | null>) => {
-    const next: Record<string, string> = { ...p };
+    // from the address as it is now (two quick clicks before a render must both count)
+    const next: Record<string, string> = { ...parseHash(location.hash).params };
     for (const [k, v] of Object.entries(params)) {
       if (v === null) delete next[k];
       else next[k] = v;
@@ -316,6 +344,9 @@ export function Lab({ route }: { route: Route }) {
   const [tab, setTab] = useState<Tab>('ctl');
   const [sel, setSel] = useState<Source | null>(null);
   const pictures = useRef(new Map<number, { n: number; rgb: Uint16Array }>());
+  const detsData = useRef(new Map<number, { n: number; dets: Uint16Array }>());
+  const satData = useRef(new Map<number, Uint8Array>());
+  const [portraitTick, setPortraitTick] = useState(0);
   const selRef = useRef<Source | null>(null);
   selRef.current = sel;
   const [mv, setMv] = useState<MoversView | null>(null);
@@ -355,7 +386,30 @@ export function Lab({ route }: { route: Route }) {
   const [frame, setFrame] = useState<number | null>(null);
   const speed = [0.25, 0.5, 1, 2, 4].includes(Number(p['spd'])) ? Number(p['spd']) : 1;
   const setSpeed = (v: number) => set({ spd: v === 1 ? null : String(v) });
-  const [filmStatus, setFilmStatus] = useState('');
+  const [filmNote, setFilmNote] = useState('');
+  const [filmData, setFilmData] = useState<Film | null>(null);
+  const filmRef = useRef<Film | null>(null);
+  filmRef.current = filmData;
+  const bodiesRef = useRef<{ state: string; bodies: KnownBody[]; vLimit: number } | null>(null);
+  bodiesRef.current = filmBodies;
+  const rendRef = useRef<Renderer | null>(null);
+  const layoutRef = useRef<{
+    rects: { x: number; y: number; w: number; h: number }[];
+    inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number } } | null;
+  }>({ rects: [], inset: null });
+  const [visit, setVisit] = useState(0);
+  const [insetBox, setInsetBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const artMap = useRef(new Map<number, HTMLCanvasElement>());
+  const artRef = useRef<HTMLCanvasElement | null>(null);
+  const [stage, setStage] = useState({ w: 400, h: 400 });
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState('');
+  const ft = useFilmTracks(filmData?.key ?? null);
+  const ftRef = useRef<FilmTrack[] | null>(null);
+  ftRef.current = ft.state === 'ok' ? ft.tracks : null;
+  const [trackSel, setTrackSel] = useState(-1);
+  const trackSelRef = useRef(-1);
+  trackSelRef.current = trackSel;
   const [raIn, setRaIn] = useState('');
   const [decIn, setDecIn] = useState('');
   const stretch = Number(p['lin']) > 0 && Number(p['lin']) < 5 ? Number(p['lin']) : 0.4;
@@ -398,17 +452,29 @@ export function Lab({ route }: { route: Route }) {
 
   // the picture is always square and as large as the free space allows
   useLayoutEffect(() => {
-    const el = wrap.current;
+    const el = stageRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => setSide(Math.max(160, Math.floor(Math.min(el.clientWidth, el.clientHeight) - 24))));
+    const ro = new ResizeObserver(() => {
+      const w = Math.max(160, Math.floor(el.clientWidth));
+      const h = Math.max(160, Math.floor(el.clientHeight));
+      setStage({ w, h });
+      setSide(Math.min(w, h));
+    });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [valid]);
 
   useEffect(() => {
     if (!valid || !canvas.current) return;
     const r = new Renderer(canvas.current);
+    setMeta(null);
+    setShown(null);
+    state.current.meta = null;
     pictures.current.clear();
+    detsData.current.clear();
+    satData.current.clear();
+    artMap.current.clear();
+    artRef.current = null;
     setSel(null);
     const pending: { name: string; part: SxpPart }[] = [];
     let diffPart: SxpPart | null = null;
@@ -416,6 +482,25 @@ export function Lab({ route }: { route: Route }) {
     const noised = new Set<number>();
     let trims: { p995: number; p999: number } | null = null;
     let shownPass = 0;
+    let shownVisit = 0;
+    rendRef.current = r;
+    // what the 2′ zoom looks at: the selected source, else the test target in the field (places at 2025.9)
+    const zoomTarget = (): [number, number] | null => {
+      const sl = selRef.current;
+      if (sl) return sl.pmra || sl.pmdec ? atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, 2025.9) : [sl.ra, sl.dec];
+      const m = state.current.meta;
+      if (!m) return null;
+      const half = (m.grid.n * m.grid.step_arcsec) / 2 / 3600;
+      for (const o of targets.current) {
+        const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2025.9);
+        if (
+          Math.abs(tdec - m.grid.dec0) < half &&
+          Math.abs(((tra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((tdec * Math.PI) / 180) < half
+        )
+          return [tra, tdec];
+      }
+      return null;
+    };
     const uploadDiff = () => {
       if (!diffPart || !r.size || !state.current.meta) return;
       const names = ['white', ...state.current.meta.bands.map((b) => b.key)];
@@ -436,7 +521,14 @@ export function Lab({ route }: { route: Route }) {
       const stack = name.split('_')[0] as StackName;
       const arr = part.arrays[stack === 'picture' ? 'rgb' : stack === 'quick' ? 'white' : stack]!;
       r.upload(stack, k, arr.data as Uint16Array);
-      if (part.arrays['sat']) r.uploadSat(k, part.arrays['sat'].data as Uint8Array);
+      if (part.arrays['sat']) {
+        r.uploadSat(k, part.arrays['sat'].data as Uint8Array);
+        satData.current.set(k, part.arrays['sat'].data as Uint8Array);
+      }
+      if (stack === 'dets') {
+        detsData.current.set(k, { n, dets: arr.data as Uint16Array });
+        setPortraitTick((t) => t + 1);
+      }
       if (stack === 'picture' || !noised.has(k)) {
         const lv = passLevels(arr.data as Uint16Array, n, PER_PASS[stack]);
         if (lv) {
@@ -469,6 +561,33 @@ export function Lab({ route }: { route: Route }) {
         uploadDiff();
       },
       onPart: (name, part) => {
+        if (name.startsWith('flags_')) {
+          // the artifact layer: red where the pipeline flagged the pixel in many exposures of the pass (any flag of the census)
+          const fl = part.arrays['flags'];
+          if (!fl) return;
+          const [layers, n] = [fl.shape[0]!, fl.shape[fl.shape.length - 1]!];
+          // artifacts only: not SOURCE (a real source) nor OVERFLOW (saturation, drawn white)
+          const names = (part.meta['names'] as string[] | undefined) ?? [];
+          const use = Array.from({ length: layers }, (_, k) => k).filter((k) => !['SOURCE', 'OVERFLOW'].includes(names[k] ?? ''));
+          const c = document.createElement('canvas');
+          c.width = c.height = n;
+          const g = c.getContext('2d')!;
+          const img = g.createImageData(n, n);
+          const d = fl.data as Uint8Array;
+          for (let i = 0; i < n * n; i++) {
+            let v = 0;
+            for (const k of use) v = Math.max(v, d[k * n * n + i]!);
+            const a = Math.max(0, Math.min(1, (v / 255 - 0.25) / 0.5));
+            img.data[4 * i] = 255;
+            img.data[4 * i + 1] = 40;
+            img.data[4 * i + 2] = 40;
+            img.data[4 * i + 3] = Math.round(200 * a);
+          }
+          g.putImageData(img, 0, 0);
+          artMap.current.set(Number(part.meta['pass']), c);
+          if (!artRef.current) artRef.current = c;
+          return;
+        }
         if (name === 'diff') {
           diffPart = part;
           uploadDiff();
@@ -499,130 +618,195 @@ export function Lab({ route }: { route: Route }) {
           : 400;
       r.soft = st.stretch;
       const { w, h } = r.begin();
-      const allOn = st.bands.length === BANDS.length;
-      let stack: StackName;
-      if (st.view === 'picture')
-        stack = allOn ? (r.loaded('picture').length >= 2 || r.loaded('quick').length === 0 ? 'picture' : 'quick') : 'bands';
-      else stack = st.view === 'bands' ? 'bands' : 'dets';
-      const loaded = r.loaded(stack);
       const out: typeof labels = [];
-      if (loaded.length) {
-        let a = loaded[0]!;
-        let b = a;
-        let t = 0;
-        if (st.time === 'sum') a = b = loaded[0]!;
-        else if (st.frame !== null && loaded.includes(st.frame)) a = b = st.frame;
-        else if (loaded.length > 1) {
-          const seq = order(loaded.length);
-          const slot = HOLD_MS + FADE_MS;
-          const k = Math.floor(clock / slot) % seq.length;
-          const within = clock % slot;
-          a = loaded[seq[k]!]!;
-          b = loaded[seq[(k + 1) % seq.length]!]!;
-          if (within >= HOLD_MS && st.opts.morph) {
-            const x = (within - HOLD_MS) / FADE_MS;
-            t = x * x * (3 - 2 * x);
-          } else if (within >= HOLD_MS) {
-            t = 0;
+      const rects: { x: number; y: number; w: number; h: number }[] = [];
+      let inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number } } | null = null;
+      const F = filmRef.current;
+      const days = st.film !== null;
+      // the 2′ zoom: on the selected source, else the test target in the field (its place at 2025.9)
+      const zoomOn = (): { cx: number; cy: number; s: number } | null => {
+        const m = st.meta;
+        if (!m || st.view !== 'picture' || st.opts.reference) return null;
+        const fovArc = m.grid.n * m.grid.step_arcsec;
+        if (fovArc <= 150) return null;
+        const o = zoomTarget();
+        if (!o) return null;
+        const cosd = Math.cos((m.grid.dec0 * Math.PI) / 180);
+        const cx = 0.5 - ((((o[0] - m.grid.ra0 + 540) % 360) - 180) * cosd * 3600) / fovArc;
+        const cy = 0.5 - ((o[1] - m.grid.dec0) * 3600) / fovArc;
+        if (cx < 0 || cy < 0 || cx > 1 || cy > 1) return null;
+        return { cx, cy, s: 120 / fovArc };
+      };
+      if (days) {
+        if (F && r.filmVisits) {
+          const nv = F.meta.frames.length;
+          let k = 0;
+          let k2 = 0;
+          let t = 0;
+          if (st.frame !== null) k = k2 = Math.min(st.frame, nv - 1);
+          else {
+            const pos = clock / FRAME_MS;
+            k = Math.floor(pos) % nv;
+            k2 = (k + 1) % nv;
+            const x = pos - Math.floor(pos);
+            if (st.opts.morph && x > 0.6) {
+              const y = (x - 0.6) / 0.4;
+              t = y * y * (3 - 2 * y);
+            }
           }
+          const det = F.meta.frames[t < 0.5 ? k : k2]!.det;
+          const tint = hslRgb(DETECTORS[det - 1]?.hue ?? 0);
+          const base: Panel = { x: 0, y: 0, w, h, stack: 'film', mode: 'layer', layer: 0, tint, noData: [0, 0, 0], time: 'pendulum' };
+          r.panel(base, k, k2, t);
+          rects.push({ x: 0, y: 0, w, h });
+          const z = zoomOn();
+          if (z) {
+            const S = Math.round(Math.min(220, w * 0.26));
+            inset = { x: 8, y: 8, w: S, h: S, zoom: z };
+            r.panel({ ...base, ...inset }, k, k2, t);
+          }
+          shownVisit = t < 0.5 ? k : k2;
+          setVisit((v) => (v === shownVisit ? v : shownVisit));
         }
-        const timeMode = st.time === 'diff' ? 'difference' : st.time === 'sum' ? 'coadd' : 'pendulum';
-        let panels: (Panel & { label?: string; sub?: string; hue?: number })[] = [];
-        if (st.view === 'picture') {
-          const mask = BANDS.reduce((m, bd, i) => (st.bands.includes(bd.key) ? m | (1 << i) : m), 0);
-          panels = [
-            stack === 'bands'
-              ? {
-                  x: 0,
-                  y: 0,
-                  w,
-                  h,
-                  stack,
-                  mode: 'blend',
-                  bandMask: mask,
-                  hues: BANDS.map((bd) => hslRgb(bd.hue)),
-                  mono: st.opts.mono,
-                  time: timeMode,
-                  diffLayer: 0,
-                }
-              : {
-                  x: 0,
-                  y: 0,
-                  w,
-                  h,
-                  stack,
-                  mode: stack === 'picture' && !st.opts.mono ? 'colour' : 'layer',
-                  time: timeMode,
-                  diffLayer: 0,
-                },
-          ];
-          if (stack === 'picture' && st.opts.mono) panels[0]!.stack = r.loaded('quick').length ? 'quick' : 'picture';
-        } else if (st.view === 'bands') {
-          const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
-          panels = wallLayout(shownBands.length, w, h).map((c, j) => {
-            const { bd, i } = shownBands[j]!;
-            return {
-              x: c.x,
-              y: c.y + 22,
-              w: c.size,
-              h: c.size - 22,
-              stack,
-              mode: 'layer',
-              layer: i,
-              tint: hslRgb(bd.hue),
-              noData: [0, 0, 0],
-              time: timeMode,
-              diffLayer: i + 1,
-              label: bd.name,
-              sub: bd.band,
-              hue: bd.hue,
-            };
-          });
-        } else {
-          const shownDets = st.dets.slice().sort();
-          panels = wallLayout(shownDets.length, w, h).map((c, j) => {
-            const d = shownDets[j]! - 1;
-            return {
-              x: c.x,
-              y: c.y + 22,
-              w: c.size,
-              h: c.size - 22,
-              stack,
-              mode: 'layer',
-              layer: d,
-              noData: [0, 0, 0],
-              time: timeMode,
-              diffLayer: 0,
-              label: `D${d + 1} ${DETECTORS[d]!.name}`,
-              sub: DETECTORS[d]!.range,
-              hue: DETECTORS[d]!.hue,
-            };
-          });
-        }
-        shownPass = t < 0.5 ? a : b;
-        for (const q of panels) {
-          r.panel(q, a, b, t);
-          if (q.label)
-            out.push({
-              x: q.x,
-              y: q.y - 20,
-              w: q.w,
-              text: q.label,
-              sub: q.sub ?? '',
-              hue: q.hue ?? 0,
+      } else {
+        const allOn = st.bands.length === BANDS.length;
+        let stack: StackName;
+        if (st.view === 'picture')
+          stack = allOn ? (r.loaded('picture').length >= 2 || r.loaded('quick').length === 0 ? 'picture' : 'quick') : 'bands';
+        else stack = st.view === 'bands' ? 'bands' : 'dets';
+        const loaded = r.loaded(stack);
+        if (loaded.length) {
+          let a = loaded[0]!;
+          let b = a;
+          let t = 0;
+          if (st.time === 'sum') a = b = loaded[0]!;
+          else if (st.frame !== null && loaded.includes(st.frame)) a = b = st.frame;
+          else if (loaded.length > 1) {
+            const seq = order(loaded.length);
+            const slot = HOLD_MS + FADE_MS;
+            const k = Math.floor(clock / slot) % seq.length;
+            const within = clock % slot;
+            a = loaded[seq[k]!]!;
+            b = loaded[seq[(k + 1) % seq.length]!]!;
+            if (within >= HOLD_MS && st.opts.morph) {
+              const x = (within - HOLD_MS) / FADE_MS;
+              t = x * x * (3 - 2 * x);
+            }
+          }
+          const timeMode = st.time === 'diff' ? 'difference' : st.time === 'sum' ? 'coadd' : 'pendulum';
+          let panels: (Panel & { label?: string; sub?: string; hue?: number })[] = [];
+          if (st.view === 'picture') {
+            const mask = BANDS.reduce((m, bd, i) => (st.bands.includes(bd.key) ? m | (1 << i) : m), 0);
+            panels = [
+              stack === 'bands'
+                ? {
+                    x: 0,
+                    y: 0,
+                    w,
+                    h,
+                    stack,
+                    mode: 'blend',
+                    bandMask: mask,
+                    hues: BANDS.map((bd) => hslRgb(bd.hue)),
+                    mono: st.opts.mono,
+                    time: timeMode,
+                    diffLayer: 0,
+                  }
+                : {
+                    x: 0,
+                    y: 0,
+                    w,
+                    h,
+                    stack,
+                    mode: stack === 'picture' && !st.opts.mono ? 'colour' : 'layer',
+                    time: timeMode,
+                    diffLayer: 0,
+                  },
+            ];
+            if (stack === 'picture' && st.opts.mono) panels[0]!.stack = r.loaded('quick').length ? 'quick' : 'picture';
+            const z = zoomOn();
+            if (z) {
+              const S = Math.round(Math.min(220, w * 0.26));
+              inset = { x: 8, y: 8, w: S, h: S, zoom: z };
+              panels.push({ ...panels[0]!, ...inset });
+            }
+          } else if (st.view === 'bands') {
+            const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
+            panels = wallLayout(shownBands.length, w, h).map((c, j) => {
+              const { bd, i } = shownBands[j]!;
+              return {
+                x: c.x,
+                y: c.y,
+                w: c.size,
+                h: c.size,
+                stack,
+                mode: 'layer',
+                layer: i,
+                tint: hslRgb(bd.hue),
+                noData: [0, 0, 0],
+                time: timeMode,
+                diffLayer: i + 1,
+                label: bd.name,
+                sub: bd.band,
+                hue: bd.hue,
+              };
             });
+          } else {
+            const shownDets = st.dets.slice().sort();
+            panels = wallLayout(shownDets.length, w, h).map((c, j) => {
+              const d = shownDets[j]! - 1;
+              return {
+                x: c.x,
+                y: c.y,
+                w: c.size,
+                h: c.size,
+                stack,
+                mode: 'layer',
+                layer: d,
+                noData: [0, 0, 0],
+                time: timeMode,
+                diffLayer: 0,
+                label: `D${d + 1} ${DETECTORS[d]!.name}`,
+                sub: DETECTORS[d]!.range,
+                hue: DETECTORS[d]!.hue,
+              };
+            });
+          }
+          shownPass = t < 0.5 ? a : b;
+          for (const q of panels) {
+            r.panel(q, a, b, t);
+            if (!q.zoom) rects.push({ x: q.x, y: q.y, w: q.w, h: q.h });
+            if (q.label) out.push({ x: q.x, y: q.y + q.h - 20, w: q.w, text: q.label, sub: q.sub ?? '', hue: q.hue ?? 0 });
+          }
+          setShown((s) => (s && s.pass === a && s.stack === stack ? s : { pass: a, stack }));
         }
-        setShown((s) => (s && s.pass === a && s.stack === stack ? s : { pass: a, stack }));
       }
+      layoutRef.current = { rects, inset };
       drawRings();
-      const key = JSON.stringify(out);
+      const key = JSON.stringify(out) + (inset ? `${inset.w}` : '');
       if (key !== lastLabels) {
         lastLabels = key;
         setLabels(out);
+        setInsetBox(inset ? { x: inset.x, y: inset.y, w: inset.w, h: inset.h } : null);
       }
       raf = requestAnimationFrame(tick);
     };
 
+    // ---- marks on the picture: one marker per object ----------------------------------------------------------------------
+    type Mark = {
+      ra: number;
+      dec: number;
+      kind: 'target' | 'track' | 'anomaly' | 'red' | 'body';
+      name: string;
+      lines: string[];
+      colour: string;
+      fill: string;
+      rr: number;
+      path?: [number, number][];
+      motion?: [number, number];
+      dashed?: boolean;
+      selected?: boolean;
+    };
     const drawRings = () => {
       const ov = overlay.current;
       const st = state.current;
@@ -636,27 +820,167 @@ export function Lab({ route }: { route: Route }) {
       const ctx = ov.getContext('2d')!;
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
       ctx.clearRect(0, 0, wcss, hcss);
-      if (st.film !== null) return; // the film draws its own picture and marks
       const m = st.meta;
-      if (m && st.opts.marker && st.view === 'picture' && targets.current.length) {
-        // the marker: a ring and the name of a test target at its place on the date of the season shown
-        const q = m.passes[shownPass] ?? m.passes[0]!;
-        const year = 2000 + (q.mjd_mid - 51544.5) / 365.25;
-        const scale = wcss / m.grid.n;
+      const F = filmRef.current;
+      const days = st.film !== null;
+      const grid = days && F ? F.meta.grid : m?.grid;
+      if (!grid) return;
+      const { rects, inset } = layoutRef.current;
+      // artifacts: where the pipeline flagged the pixel in many exposures of the season shown
+      const art = artMap.current.get(shownPass) ?? artRef.current;
+      if (st.opts.artifacts && art && (days || st.view === 'picture')) {
+        ctx.globalAlpha = 0.85;
+        ctx.imageSmoothingEnabled = true;
+        for (const box of rects) ctx.drawImage(art, box.x, box.y, box.w, box.h);
+        ctx.globalAlpha = 1;
+      }
+      const fovArc = grid.n * grid.step_arcsec;
+      const cosd = Math.cos((grid.dec0 * Math.PI) / 180);
+      const uvOf = (ra: number, dec: number): [number, number] => [
+        0.5 - ((((ra - grid.ra0 + 540) % 360) - 180) * cosd * 3600) / fovArc,
+        0.5 - ((dec - grid.dec0) * 3600) / fovArc,
+      ];
+      // the date of what is shown: the season's middle, or the visit's time in the Days scale
+      const shownMjd = days && F ? (F.meta.frames[shownVisit]?.mjd ?? F.meta.pass.mjd0) : (m?.passes[shownPass] ?? m?.passes[0])?.mjd_mid;
+      if (shownMjd === undefined) return;
+      const year = 2000 + (shownMjd - 51544.5) / 365.25;
+      const marks: Mark[] = [];
+      if (st.opts.marker && m) {
         for (const o of targets.current) {
           const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, year);
-          const dx = (-(((tra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec;
-          const dy = (-(tdec - m.grid.dec0) * 3600) / m.grid.step_arcsec;
-          const x = (m.grid.n / 2 + dx) * scale;
-          const y = (m.grid.n / 2 + dy) * scale;
-          if (x < 0 || y < 0 || x > wcss || y > hcss) continue;
-          const rr = 18;
-          ctx.save();
-          ctx.lineWidth = 3.5;
-          ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-          const ring = () => {
-            ctx.beginPath();
-            ctx.arc(x, y, rr, 0, 2 * Math.PI);
+          const [u, v] = uvOf(tra, tdec);
+          if (u < -0.05 || v < -0.05 || u > 1.05 || v > 1.05) continue;
+          marks.push({
+            ra: tra,
+            dec: tdec,
+            kind: 'target',
+            name: o.n,
+            lines: [],
+            colour: '#7ff0e4',
+            fill: '#d8fffa',
+            rr: 18,
+            path: m.passes.map((pp) => atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2000 + (pp.mjd_mid - 51544.5) / 365.25)),
+            motion: (o.pmra ?? 0) || (o.pmdec ?? 0) ? [o.pmra ?? 0, o.pmdec ?? 0] : undefined,
+          });
+        }
+      }
+      const mvv = mvRef.current;
+      if (st.opts.movers && mvv?.result && !days) {
+        for (const t of mvv.result.tracks) {
+          const yrs = year - 2025.9;
+          const decN = t.dec_2025_9 + (t.v_north * yrs) / 3600;
+          const raN = t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((decN * Math.PI) / 180);
+          const line = `${rateText(t)} · ${CHECK_SHORT[t.check] ?? t.check}${t.saturated ? ' · saturated core' : ''}`;
+          const same = marks.find(
+            (k) => k.kind === 'target' && Math.hypot((k.ra - raN) * Math.cos((decN * Math.PI) / 180), k.dec - decN) * 3600 < 12,
+          );
+          if (same) {
+            same.lines.push(line);
+            same.path = t.ra.map((x, i) => [x, t.dec[i]!]);
+            same.motion = [t.v_east * 1000, t.v_north * 1000];
+          } else
+            marks.push({
+              ra: raN,
+              dec: decN,
+              kind: 'track',
+              name: 'Mover',
+              lines: [line],
+              colour: '#ffb454',
+              fill: '#ffd08a',
+              rr: 18,
+              path: t.ra.map((x, i) => [x, t.dec[i]!]),
+              motion: [t.v_east * 1000, t.v_north * 1000],
+              dashed: t.check === 'pending',
+            });
+        }
+      }
+      const near = (ra: number, dec: number, arcsec: number) =>
+        marks.find((k) => Math.hypot((k.ra - ra) * Math.cos((dec * Math.PI) / 180), k.dec - dec) * 3600 < arcsec);
+      const anv = anRef.current;
+      if (st.opts.anomalies && anv?.result) {
+        for (const a of anv.result.anomalies) {
+          const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
+          const k = near(ara, adec, 10);
+          if (k) k.lines.push(`spectral anomaly ${a.n}`);
+          else
+            marks.push({
+              ra: ara,
+              dec: adec,
+              kind: 'anomaly',
+              name: `Anomaly ${a.n}`,
+              lines: [],
+              colour: '#ff7ac8',
+              fill: '#ffb0dc',
+              rr: 15,
+            });
+        }
+      }
+      const rv = redRef.current;
+      if (rv?.result) {
+        rv.result.red.forEach((x, i) => {
+          const [rra, rdec] =
+            x.moves && x.ra_j2000 != null && x.dec_j2000 != null
+              ? atEpoch(x.ra_j2000, x.dec_j2000, x.pmra ?? 0, x.pmdec ?? 0, year)
+              : [x.ra, x.dec];
+          const k = near(rra, rdec, 10);
+          if (k) k.lines.push(`red source ${i + 1}`);
+          else
+            marks.push({
+              ra: rra,
+              dec: rdec,
+              kind: 'red',
+              name: `Red source ${i + 1}`,
+              lines: [],
+              colour: '#ff6b6b',
+              fill: '#ffb3b3',
+              rr: 15,
+            });
+        });
+      }
+      // known bodies of the Days film: a ring where JPL predicts them, solid when the visit's motion map shows them there
+      const fb = bodiesRef.current;
+      if (days && F && fb && st.opts.marker) {
+        const n = F.meta.grid.n;
+        for (const b of fb.bodies) {
+          const fr = b.frames[shownVisit];
+          if (!fr || !fr.inside) continue;
+          const seen = b.seen.includes(shownVisit);
+          const ra = grid.ra0 - ((fr.x + 0.5 - n / 2) * grid.step_arcsec) / 3600 / cosd;
+          const dec = grid.dec0 - ((fr.y + 0.5 - n / 2) * grid.step_arcsec) / 3600;
+          const label = (b.v ?? 99) <= 19.5 || seen ? b.name.replace(/\s*\(.*\)\s*$/, '') : '';
+          marks.push({
+            ra,
+            dec,
+            kind: 'body',
+            name: label,
+            lines: label ? [`V ${b.v?.toFixed(1) ?? '—'}${seen ? ' · seen on this visit' : ''}`] : [],
+            colour: seen ? '#ffb454' : 'rgba(220,235,240,0.85)',
+            fill: seen ? '#ffd08a' : '#d6e7ed',
+            rr: 12,
+            dashed: !seen,
+          });
+        }
+      }
+      const fts = ftRef.current;
+      if (days && F && fts && st.opts.movers) {
+        drawTracks(ctx, fts, { scale: wcss / F.meta.grid.n, k: shownVisit, rings: true, trail: false, selected: trackSelRef.current }, 1);
+      }
+      const sl = selRef.current;
+      let selMark: Mark | null = null;
+      if (sl) {
+        const [sra, sdec] = sl.pmra || sl.pmdec ? atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, year) : [sl.ra, sl.dec];
+        const k = near(sra, sdec, 8);
+        if (k) k.selected = true;
+        else
+          selMark = { ra: sra, dec: sdec, kind: 'track', name: '', lines: [], colour: '#ffb454', fill: '#ffd08a', rr: 13, selected: true };
+      }
+      const all = selMark ? [...marks, selMark] : marks;
+      const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+      const ring = (x: number, y: number, mk: Mark, rr: number, ticks: boolean) => {
+        const shape = () => {
+          ctx.beginPath();
+          ctx.arc(x, y, rr, 0, 2 * Math.PI);
+          if (ticks)
             for (const [ax, ay] of [
               [1, 0],
               [-1, 0],
@@ -666,239 +990,179 @@ export function Lab({ route }: { route: Route }) {
               ctx.moveTo(x + ax * (rr - 4), y + ay * (rr - 4));
               ctx.lineTo(x + ax * (rr + 6), y + ay * (rr + 6));
             }
-            ctx.stroke();
-          };
-          ring();
-          ctx.lineWidth = 1.6;
-          ctx.strokeStyle = '#7ff0e4';
-          ring();
-          ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.stroke();
+        };
+        ctx.setLineDash(mk.dashed ? [4, 3] : []);
+        ctx.lineWidth = mk.selected ? 4.5 : 3.5;
+        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        shape();
+        ctx.lineWidth = mk.selected ? 2.4 : 1.6;
+        ctx.strokeStyle = mk.colour;
+        shape();
+        ctx.setLineDash([]);
+      };
+      const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
+        const lines = [mk.name, ...mk.lines].filter(Boolean);
+        if (!lines.length) return;
+        ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+        const tw = Math.max(...lines.map((l, i) => ctx.measureText(l).width * (i ? 0.92 : 1)));
+        const th = 13 * lines.length;
+        // right of the ring, else left; moved down past labels already placed
+        let lx = x + rr + 8;
+        if (lx + tw > box.x + box.w - 2) lx = x - rr - 8 - tw;
+        let ly = y - rr * 0.35 - 9;
+        for (let tries = 0; tries < 8; tries++) {
+          const hit = placed.find((p) => lx < p.x1 && lx + tw > p.x0 && ly < p.y1 && ly + th > p.y0);
+          if (!hit) break;
+          ly = hit.y1 + 2;
+        }
+        ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2, ly));
+        placed.push({ x0: lx, y0: ly, x1: lx + tw, y1: ly + th });
+        lines.forEach((l, i) => {
+          ctx.font = i ? '500 10.5px ui-monospace, Menlo, monospace' : '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
           ctx.lineWidth = 3;
           ctx.strokeStyle = '#000';
-          ctx.fillStyle = '#fff';
-          ctx.strokeText(o.n, x + rr + 8, y - rr * 0.35);
-          ctx.fillText(o.n, x + rr + 8, y - rr * 0.35);
-          if (st.opts.trajectory && m.passes.length > 1) {
-            // the trajectory: where the target is on the date of every season, joined
-            const pts = m.passes.map((pp) => {
-              const [pra, pdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2000 + (pp.mjd_mid - 51544.5) / 365.25);
-              return [
-                (m.grid.n / 2 -
-                  ((((pra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec) *
-                  scale,
-                (m.grid.n / 2 - ((pdec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale,
-              ] as const;
-            });
-            const [fx, fy] = pts[0]!;
-            const [lx, ly] = pts[pts.length - 1]!;
-            const len = Math.hypot(lx - fx, ly - fy);
-            if (len > 2.5 * rr) {
-              // a path long enough to leave the ring: the places on the seasons' dates, joined
-              ctx.setLineDash([3, 3]);
-              ctx.lineWidth = 1.4;
-              ctx.strokeStyle = 'rgba(127,240,228,0.9)';
-              ctx.beginPath();
-              pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
-              ctx.stroke();
-              ctx.setLineDash([]);
-              ctx.fillStyle = '#7ff0e4';
-              for (const [px, py] of pts) {
-                ctx.beginPath();
-                ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
-                ctx.fill();
-              }
-            } else if ((o.pmra ?? 0) || (o.pmdec ?? 0)) {
-              // too short to see beside the star (and never drawn inside a saturated core): an arrow from the ring along the motion
-              const ux = -(o.pmra ?? 0);
-              const uy = -(o.pmdec ?? 0);
-              const un = Math.hypot(ux, uy) || 1;
-              const dx = ux / un;
-              const dy = uy / un;
-              const x0 = x + dx * (rr + 4);
-              const y0 = y + dy * (rr + 4);
-              const x1 = x + dx * (rr + 26);
-              const y1 = y + dy * (rr + 26);
-              ctx.lineWidth = 3;
-              ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-              const arrow = () => {
-                ctx.beginPath();
-                ctx.moveTo(x0, y0);
-                ctx.lineTo(x1, y1);
-                ctx.moveTo(x1, y1);
-                ctx.lineTo(x1 - dx * 7 - dy * 4, y1 - dy * 7 + dx * 4);
-                ctx.moveTo(x1, y1);
-                ctx.lineTo(x1 - dx * 7 + dy * 4, y1 - dy * 7 - dx * 4);
-                ctx.stroke();
-              };
-              arrow();
-              ctx.lineWidth = 1.6;
-              ctx.strokeStyle = '#7ff0e4';
-              arrow();
-              const pm = Math.hypot(o.pmra ?? 0, o.pmdec ?? 0) / 1000;
-              const t = pm >= 1 ? `${pm.toFixed(1)}″/yr` : `${(pm * 1000).toFixed(0)} mas/yr`;
-              ctx.font = '600 10.5px ui-monospace, Menlo, monospace';
-              ctx.lineWidth = 3;
-              ctx.strokeStyle = '#000';
-              ctx.fillStyle = '#bff7f0';
-              ctx.strokeText(t, x1 + dx * 6 - 14, y1 + dy * 6 + (dy < 0 ? -4 : 12));
-              ctx.fillText(t, x1 + dx * 6 - 14, y1 + dy * 6 + (dy < 0 ? -4 : 12));
-            }
+          ctx.fillStyle = mk.fill;
+          ctx.strokeText(l, lx, ly + 10 + 13 * i);
+          ctx.fillText(l, lx, ly + 10 + 13 * i);
+        });
+      };
+      const pathOf = (mk: Mark, box: { x: number; y: number; w: number; h: number }, rr: number, x: number, y: number) => {
+        if (!st.opts.trajectory || (!mk.path && !mk.motion)) return;
+        const pts = (mk.path ?? []).map(([pra, pdec]) => {
+          const [u, v] = uvOf(pra, pdec);
+          return [box.x + u * box.w, box.y + v * box.h] as const;
+        });
+        const span = pts.length > 1 ? Math.hypot(pts[pts.length - 1]![0] - pts[0]![0], pts[pts.length - 1]![1] - pts[0]![1]) : 0;
+        if (span > 2.5 * rr) {
+          // a path long enough to leave the ring: the places on the seasons' dates, joined
+          ctx.setLineDash([3, 3]);
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+          ctx.beginPath();
+          pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+          ctx.stroke();
+          ctx.lineWidth = 1.4;
+          ctx.strokeStyle = mk.colour;
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.fillStyle = mk.colour;
+          for (const [px, py] of pts) {
+            ctx.beginPath();
+            ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
+            ctx.fill();
           }
-          ctx.restore();
+        } else if (mk.motion) {
+          // too short to see beside the star (and never drawn inside a saturated core): an arrow from the ring along the motion
+          const ux = -mk.motion[0];
+          const uy = -mk.motion[1];
+          const un = Math.hypot(ux, uy) || 1;
+          const dx = ux / un;
+          const dy = uy / un;
+          const x0 = x + dx * (rr + 4);
+          const y0 = y + dy * (rr + 4);
+          const x1 = x + dx * (rr + 24);
+          const y1 = y + dy * (rr + 24);
+          const arrow = () => {
+            ctx.beginPath();
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            ctx.lineTo(x1 - dx * 7 - dy * 4, y1 - dy * 7 + dx * 4);
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x1 - dx * 7 + dy * 4, y1 - dy * 7 - dx * 4);
+            ctx.stroke();
+          };
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+          arrow();
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = mk.colour;
+          arrow();
         }
-      }
-      const sl = selRef.current;
-      if (m && sl && !sl.name && st.view === 'picture') {
-        const scale = wcss / m.grid.n;
-        const x =
-          (m.grid.n / 2 -
-            ((((sl.ra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec) *
-          scale;
-        const y = (m.grid.n / 2 - ((sl.dec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale;
+      };
+      const wall = !days && st.view !== 'picture';
+      const underInset = (x: number, y: number) =>
+        !!inset && x > inset.x - 4 && y > inset.y - 4 && x < inset.x + inset.w + 4 && y < inset.y + inset.h + 4;
+      ctx.save();
+      for (const box of rects) {
+        if (wall) {
+          // a thin frame around every panel of a wall
+          ctx.strokeStyle = 'rgba(160,200,215,0.28)';
+          ctx.lineWidth = 1;
+          ctx.strokeRect(box.x + 0.5, box.y + 0.5, box.w - 1, box.h - 1);
+        }
         ctx.save();
-        ctx.lineWidth = 3.5;
-        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
         ctx.beginPath();
-        ctx.arc(x, y, 14, 0, 2 * Math.PI);
-        ctx.stroke();
-        ctx.lineWidth = 1.6;
-        ctx.strokeStyle = '#ffb454';
-        ctx.stroke();
+        ctx.rect(box.x, box.y, box.w, box.h);
+        ctx.clip();
+        for (const mk of all) {
+          const [u, v] = uvOf(mk.ra, mk.dec);
+          const x = box.x + u * box.w;
+          const y = box.y + v * box.h;
+          if (x < box.x - 30 || y < box.y - 30 || x > box.x + box.w + 30 || y > box.y + box.h + 30) continue;
+          if (wall) {
+            if (mk.kind !== 'target' && !mk.selected) continue;
+            ring(x, y, mk, Math.max(8, Math.min(14, box.w / 22)), mk.kind === 'target');
+            continue;
+          }
+          if (underInset(x, y)) continue;
+          ring(x, y, mk, mk.rr, mk.kind === 'target');
+          pathOf(mk, box, mk.rr, x, y);
+        }
+        if (!wall)
+          for (const mk of all) {
+            const [u, v] = uvOf(mk.ra, mk.dec);
+            const x = box.x + u * box.w;
+            const y = box.y + v * box.h;
+            if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y)) continue;
+            label(x, y, mk.rr, mk, box);
+          }
         ctx.restore();
       }
-      const mvv = mvRef.current;
-      if (m && st.opts.movers && st.view === 'picture' && mvv?.result) {
-        const scale = wcss / m.grid.n;
-        const toXY = (ra: number, dec: number): [number, number] => [
-          (m.grid.n / 2 - ((((ra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec) *
-            scale,
-          (m.grid.n / 2 - ((dec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale,
-        ];
-        const q = m.passes[shownPass] ?? m.passes[0]!;
-        for (const t of mvv.result.tracks) {
-          const pts = t.ra.map((r0, i) => toXY(r0, t.dec[i]!));
-          const yrs = (q.mjd_mid - 51544.5) / 365.25 + 2000 - 2025.9;
-          const decN = t.dec_2025_9 + (t.v_north * yrs) / 3600;
-          const [x, y] = toXY(t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((decN * Math.PI) / 180), decN);
+      if (inset) {
+        // the 2′ zoom: the selected object ringed, scaled with the zoom
+        const mk = all.find((k) => k.selected) ?? all.find((k) => k.kind === 'target');
+        if (mk) {
+          const [u, v] = uvOf(mk.ra, mk.dec);
+          const x = inset.x + ((u - inset.zoom.cx) / inset.zoom.s + 0.5) * inset.w;
+          const y = inset.y + ((v - inset.zoom.cy) / inset.zoom.s + 0.5) * inset.h;
           ctx.save();
-          ctx.setLineDash(t.check === 'pending' ? [4, 4] : []);
-          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-          ctx.lineWidth = 3.5;
-          // the track through the seasons only when it reaches outside the ring (never drawn inside a saturated core)
-          const span = Math.hypot(pts[pts.length - 1]![0] - pts[0]![0], pts[pts.length - 1]![1] - pts[0]![1]);
-          const showTrack = span > 2.5 * 22;
-          const path = () => {
-            if (showTrack) {
-              ctx.beginPath();
-              pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
-              ctx.stroke();
-            }
-            ctx.beginPath();
-            ctx.arc(x, y, 22, 0, 2 * Math.PI);
-            ctx.stroke();
-          };
-          path();
-          ctx.strokeStyle = '#ffb454';
-          ctx.lineWidth = 1.6;
-          path();
-          ctx.setLineDash([]);
-          ctx.fillStyle = '#ffb454';
-          if (showTrack)
-            for (const [px, py] of pts) {
-              ctx.beginPath();
-              ctx.arc(px, py, 2.2, 0, 2 * Math.PI);
-              ctx.fill();
-            }
-          ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = '#000';
-          ctx.fillStyle = '#ffd08a';
-          const label = `${t.speed.toFixed(1)}″/yr`;
-          ctx.strokeText(label, x + 26, y + 16);
-          ctx.fillText(label, x + 26, y + 16);
+          ctx.beginPath();
+          ctx.rect(inset.x, inset.y, inset.w, inset.h);
+          ctx.clip();
+          ring(x, y, { ...mk, selected: false }, Math.min(inset.w * 0.2, mk.rr / inset.zoom.s), false);
           ctx.restore();
         }
       }
-      const anv = anRef.current;
-      if (m && st.opts.anomalies && st.view === 'picture' && anv?.result) {
-        const scale = wcss / m.grid.n;
-        const q = m.passes[shownPass] ?? m.passes[0]!;
-        const year = 2000 + (q.mjd_mid - 51544.5) / 365.25;
-        for (const a of anv.result.anomalies) {
-          const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
-          const x =
-            (m.grid.n / 2 -
-              ((((ara - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec) *
-            scale;
-          const y = (m.grid.n / 2 - ((adec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale;
-          ctx.save();
-          ctx.lineWidth = 3.5;
-          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-          ctx.beginPath();
-          ctx.arc(x, y, 16, 0, 2 * Math.PI);
-          ctx.stroke();
-          ctx.lineWidth = 1.6;
-          ctx.strokeStyle = '#ff7ac8';
-          ctx.stroke();
-          ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = '#000';
-          ctx.fillStyle = '#ffb0dc';
-          ctx.strokeText(String(a.n), x + 15, y - 12);
-          ctx.fillText(String(a.n), x + 15, y - 12);
-          ctx.restore();
-        }
-      }
-      const rv = redRef.current;
-      if (m && st.view === 'picture' && rv?.result) {
-        const scale = wcss / m.grid.n;
-        const q = m.passes[shownPass] ?? m.passes[0]!;
-        const year = 2000 + (q.mjd_mid - 51544.5) / 365.25;
-        rv.result.red.forEach((x, k) => {
-          const [rra, rdec] =
-            x.moves && x.ra_j2000 != null && x.dec_j2000 != null
-              ? atEpoch(x.ra_j2000, x.dec_j2000, x.pmra ?? 0, x.pmdec ?? 0, year)
-              : [x.ra, x.dec];
-          const px =
-            (m.grid.n / 2 -
-              ((((rra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec) *
-            scale;
-          const py = (m.grid.n / 2 - ((rdec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale;
-          ctx.save();
-          ctx.lineWidth = 3.5;
-          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-          ctx.beginPath();
-          ctx.arc(px, py, 15, 0, 2 * Math.PI);
-          ctx.stroke();
-          ctx.lineWidth = 1.6;
-          ctx.strokeStyle = '#ff6b6b';
-          ctx.stroke();
-          ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = '#000';
-          ctx.fillStyle = '#ffb3b3';
-          ctx.strokeText(`R${k + 1}`, px - 30, py - 12);
-          ctx.fillText(`R${k + 1}`, px - 30, py - 12);
-          ctx.restore();
-        });
-      }
-      if (!st.opts.rings || !m || st.view !== 'picture' || m.passes.length < 2) return;
-      // speed rings: how far a body of that speed moves between the first and the last pass, centred on the field
-      const dt = (m.passes[m.passes.length - 1]!.mjd_mid - m.passes[0]!.mjd_mid) / 365.25;
-      const fovArcsec = m.grid.n * m.grid.step_arcsec;
+      ctx.restore();
+      if (!st.opts.rings || wall) return;
+      // speed rings, centred on the field: how far a body of that speed moves between the first and the last season
+      // (in the Days scale: between the first and the last visit, in ″ per hour)
+      let dt: number;
+      let speeds: number[];
+      let unit: string;
+      if (days && F) {
+        dt = (F.meta.frames[F.meta.frames.length - 1]!.mjd - F.meta.frames[0]!.mjd) * 24;
+        speeds = [0.3, 1, 3, 10, 30, 100];
+        unit = '″/h';
+      } else if (m && m.passes.length >= 2) {
+        dt = (m.passes[m.passes.length - 1]!.mjd_mid - m.passes[0]!.mjd_mid) / 365.25;
+        speeds = [1, 3, 10, 30, 100, 300];
+        unit = '″/yr';
+      } else return;
       ctx.strokeStyle = 'rgba(255,180,84,0.75)';
       ctx.fillStyle = 'rgba(255,200,130,0.95)';
       ctx.font = '600 10px ui-monospace, Menlo, monospace';
       ctx.lineWidth = 1;
-      for (const v of [1, 3, 10, 30, 100, 300]) {
-        const rpx = ((v * dt) / fovArcsec) * wcss;
+      for (const v of speeds) {
+        const rpx = ((v * dt) / fovArc) * wcss;
         if (rpx < 14 || rpx > wcss * 0.72) continue;
         ctx.beginPath();
         ctx.setLineDash([4, 4]);
         ctx.arc(wcss / 2, hcss / 2, rpx, 0, 2 * Math.PI);
         ctx.stroke();
         ctx.setLineDash([]);
-        ctx.fillText(`${v}″/yr`, wcss / 2 + rpx * 0.7071 + 3, hcss / 2 - rpx * 0.7071 - 3);
+        ctx.fillText(`${v}${unit}`, wcss / 2 + rpx * 0.7071 + 3, hcss / 2 - rpx * 0.7071 - 3);
       }
     };
 
@@ -916,7 +1180,47 @@ export function Lab({ route }: { route: Route }) {
     if (view === 'bands' || bands.length < BANDS.length || fov <= 10) c.want('bands_');
     if (view === 'det' || fov <= 10) c.want('dets_');
     if (time === 'diff') c.want('diff');
-  }, [view, time, fov, meta, bands.length]);
+    if (opts.artifacts) c.want('flags_');
+    if (tab === 'obj') c.want('dets_');
+  }, [view, time, fov, meta, bands.length, opts.artifacts, tab]);
+
+  // the Days scale: the visits of the pass shown (the film), drawn by the lab's renderer; no reload of the field
+  useEffect(() => {
+    setFilmData(null);
+    setFilmBodies(null);
+    setFilmNote('');
+    if (!valid || film === null) return;
+    let stop = false;
+    const stopped = () => stop;
+    void (async () => {
+      try {
+        const res = await loadFilm(ra, dec, fov, film || undefined, (t) => !stop && setFilmNote(t), stopped);
+        if (stop || !res) return;
+        if (res.state === 'none') {
+          setFilmNote(res.note);
+          return;
+        }
+        const f = res.film;
+        const r = rendRef.current;
+        if (r) {
+          r.setupFilm(f.meta.grid.n, f.meta.frames.length, 6.15 / f.meta.grid.step_arcsec);
+          f.sky.forEach((a, k) => r.uploadFilm(k, a));
+          r.setFilmNoise(f.background, f.sigma);
+        }
+        setFilmNote('');
+        setFrame((x) => (x !== null && x >= f.meta.frames.length ? null : x));
+        setFilmData(f);
+        setFilmBodies({ state: 'running', bodies: [], vLimit: 20.5 });
+        const b = await loadBodies(f, stopped);
+        if (!stop && b) setFilmBodies(b);
+      } catch (e) {
+        if (!stop) setFilmNote(`the visits could not be loaded: ${String(e)}`);
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [ra, dec, fov, valid, film]);
 
   // the search between passes: asked for once the field is finished; polled until its Gaia checks are done
   useEffect(() => {
@@ -1109,7 +1413,7 @@ export function Lab({ route }: { route: Route }) {
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
-      const n = meta?.passes.length ?? 0;
+      const n = state.current.film !== null ? (filmRef.current?.meta.frames.length ?? 0) : (meta?.passes.length ?? 0);
       if (e.code === 'Space') {
         e.preventDefault();
         setFrame(null);
@@ -1120,12 +1424,13 @@ export function Lab({ route }: { route: Route }) {
         setSpeed(steps[Math.max(0, Math.min(steps.length - 1, i + (e.key === ']' ? 1 : -1)))]!);
       } else if ((e.code === 'ArrowRight' || e.code === 'ArrowLeft') && n) {
         setPlaying(false);
-        setFrame((f) => ((f ?? shown?.pass ?? 0) + (e.code === 'ArrowRight' ? 1 : n - 1)) % n);
+        const cur = state.current.film !== null ? visit : (shown?.pass ?? 0);
+        setFrame((f) => ((f ?? cur) + (e.code === 'ArrowRight' ? 1 : n - 1)) % n);
       }
     };
     window.addEventListener('keydown', on);
     return () => window.removeEventListener('keydown', on);
-  }, [meta, shown, speed, p]);
+  }, [meta, shown, speed, p, visit]);
 
   if (!valid) {
     return (
@@ -1181,6 +1486,11 @@ export function Lab({ route }: { route: Route }) {
     const m = meta;
     if (!m || film !== null || view !== 'picture') return;
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    if (insetBox && !opts.reference) {
+      const lx = e.clientX - rect.left;
+      const ly = e.clientY - rect.top;
+      if (lx >= insetBox.x && ly >= insetBox.y && lx <= insetBox.x + insetBox.w && ly <= insetBox.y + insetBox.h) return; // the zoom itself
+    }
     let gx = ((e.clientX - rect.left) / rect.width) * m.grid.n;
     let gy = ((e.clientY - rect.top) / rect.height) * m.grid.n;
     const toSky = (x: number, y: number): [number, number] => [
@@ -1190,6 +1500,22 @@ export function Lab({ route }: { route: Route }) {
     const [cra, cdec] = toSky(gx, gy);
     const q = passes.find((x) => x.index === (shown?.pass ?? 0)) ?? passes[0];
     const year = q ? 2000 + (q.mjd_mid - 51544.5) / 365.25 : 2025.9;
+    const tol = Math.max(12, (14 / rect.width) * m.grid.n * m.grid.step_arcsec);
+    const sep = (ra1: number, de1: number) => Math.hypot((ra1 - cra) * Math.cos((cdec * Math.PI) / 180), de1 - cdec) * 3600;
+    // a click on an anomaly opens its passport; on a red source, its spectrum
+    for (const a of an?.result?.anomalies ?? []) {
+      const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
+      if (sep(ara, adec) < tol) return pickAnomaly(a.n);
+    }
+    const reds = redv?.result?.red ?? [];
+    for (let k = 0; k < reds.length; k++) {
+      const x = reds[k]!;
+      const [rra, rdec] =
+        x.moves && x.ra_j2000 != null && x.dec_j2000 != null
+          ? atEpoch(x.ra_j2000, x.dec_j2000, x.pmra ?? 0, x.pmdec ?? 0, year)
+          : [x.ra, x.dec];
+      if (sep(rra, rdec) < tol) return pickRed(k);
+    }
     for (const o of targets.current) {
       const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, year);
       if (Math.hypot((tra - cra) * Math.cos((cdec * Math.PI) / 180), tdec - cdec) * 3600 < 12) {
@@ -1277,20 +1603,72 @@ export function Lab({ route }: { route: Route }) {
       : archStep !== null && archStep < ARCHIVE.length
         ? `Archive · ${ARCHIVE[archStep]!.name} · ${ARCHIVE[archStep]!.years} · then the SPHEREx seasons`
         : shown && meta
-          ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd0) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}${phase ? ` · ${phase}` : ''}`
+          ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd0) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}${phase ? ` · ${phase}` : ''}${Math.abs(eclipticLat(ra, dec)) < 10 ? ' · near the ecliptic: asteroids likely here, switch to Days' : ''}`
           : phase;
   const frameIndex = frame ?? shown?.pass ?? 0;
-  const fName = 'Sky field';
-  const fCls = ` · ${formatRA(ra)} ${formatDec(dec)}`;
+  const wallView = view !== 'picture' && film === null;
+  /** The portrait of a source at (ra, dec) [J2000 with motion] from the detector stacks of the season shown. */
+  const portraitOf = (src: { ra: number; dec: number; pmra?: number; pmdec?: number }, label: string) => {
+    void portraitTick;
+    if (!meta) return null;
+    const k = shown?.pass ?? 0;
+    const d = detsData.current.get(k) ?? detsData.current.values().next().value;
+    if (!d) return <div class="mono-s">Portrait: loading the detector pictures…</div>;
+    const q = passes.find((x) => x.index === k) ?? passes[0];
+    const year = q ? 2000 + (q.mjd_mid - 51544.5) / 365.25 : 2025.9;
+    const [pra, pdec] = src.pmra || src.pmdec ? atEpoch(src.ra, src.dec, src.pmra ?? 0, src.pmdec ?? 0, year) : [src.ra, src.dec];
+    const g = meta.grid;
+    const gx = g.n / 2 - ((((pra - g.ra0 + 540) % 360) - 180) * Math.cos((g.dec0 * Math.PI) / 180) * 3600) / g.step_arcsec;
+    const gy = g.n / 2 - ((pdec - g.dec0) * 3600) / g.step_arcsec;
+    if (gx < 0 || gy < 0 || gx >= g.n || gy >= g.n) return null;
+    const data: PortraitData = { n: d.n, dets: d.dets, sat: satData.current.get(k), stepArcsec: g.step_arcsec };
+    return <Portrait data={data} x={gx} y={gy} label={label} />;
+  };
+  const half = fov / 120;
+  const inField = targets.current.find((o) => {
+    const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2025.9);
+    return Math.abs(tdec - dec) < half && Math.abs(((tra - ra + 540) % 360) - 180) * Math.cos((dec * Math.PI) / 180) < half;
+  });
+  const fieldName = inField ? inField.n : 'Sky field';
+  const beta = eclipticLat(ra, dec);
+  const nVisits = filmData?.meta.frames.length ?? 0;
+  const bodiesSeen = filmBodies?.bodies.filter((b) => b.seen.length).length ?? 0;
+  const daysStatus =
+    film === null
+      ? ''
+      : !filmData
+        ? filmNote || 'asking for the visits of the pass…'
+        : `Days · pass of ${season(filmData.meta.pass.mjd0)} · ${nVisits} visits · visit ${visit + 1} · ${utc(filmData.meta.frames[visit]?.mjd ?? 0)} · ` +
+          (filmBodies?.state === 'running'
+            ? 'asking JPL which known asteroids cross the field…'
+            : filmBodies
+              ? `${filmBodies.bodies.length} known asteroids predicted, ${bodiesSeen} seen in the visits`
+              : '') +
+          (Math.abs(beta) > 25 ? ' · far from the ecliptic: few asteroids expected here' : '');
+  const passMjd = (passes.find((q) => q.index === (shown?.pass ?? 0)) ?? passes[0])?.mjd_mid;
+  const toDays = () => {
+    setFrame(null);
+    set({ film: passMjd ? passMjd.toFixed(1) : '0', view: null });
+  };
+  const toMonths = () => {
+    setFrame(null);
+    set({ film: null });
+  };
 
-  const dchk = (id: string, ico: string, text: string, title: string, checked: boolean, onChange: ((v: boolean) => void) | null) => (
-    <label
-      class={`chk ${onChange ? '' : 'disabled'}`}
-      title={onChange ? title : `${title} (available once the searches of this field are built)`}
-    >
+  const dchk = (
+    id: string,
+    ico: string,
+    text: string,
+    title: string,
+    checked: boolean,
+    onChange: ((v: boolean) => void) | null,
+    why = 'not available in this view',
+  ) => (
+    <label class={`chk ${onChange ? '' : 'disabled'}`} title={onChange ? title : `${title} (${why})`}>
       <input
         type="checkbox"
         id={id}
+        aria-label={text}
         checked={checked}
         disabled={!onChange}
         onChange={(e) => onChange?.((e.target as HTMLInputElement).checked)}
@@ -1304,132 +1682,186 @@ export function Lab({ route }: { route: Route }) {
     <div class="screen">
       <div class="lab">
         <div class="vwrap" ref={wrap}>
-          <div
-            class="vsq"
-            style={{
-              width: `${side}px`,
-              height: `${side}px`,
-              cursor: view === 'picture' && film === null ? 'crosshair' : undefined,
-            }}
-            onClick={(e) => {
-              if (dragged.current) {
-                dragged.current = false;
-                return;
-              }
-              pick(e);
-            }}
-            onPointerDown={(e) => {
-              if (film !== null || view !== 'picture' || !meta) return;
-              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-              dragFrom.current = { x: e.clientX - r.left, y: e.clientY - r.top };
-            }}
-            onPointerMove={(e) => {
-              const f = dragFrom.current;
-              if (!f) return;
-              const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-              const x = e.clientX - r.left;
-              const y = e.clientY - r.top;
-              if (Math.hypot(x - f.x, y - f.y) > 12) setDragBox({ x0: f.x, y0: f.y, x1: x, y1: y });
-            }}
-            onPointerUp={() => {
-              const b = dragBox;
-              dragFrom.current = null;
-              setDragBox(null);
-              if (!b || !meta) return;
-              dragged.current = true;
-              // open the dragged box as a new field: its centre, the smallest field size that holds it
-              const n = meta.grid.n;
-              const sc = n / side;
-              const cx = ((b.x0 + b.x1) / 2) * sc;
-              const cy = ((b.y0 + b.y1) / 2) * sc;
-              const sizeArcmin = (Math.max(Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)) * sc * meta.grid.step_arcsec) / 60;
-              const nf = SIZES.find((z) => z >= sizeArcmin) ?? 60;
-              const nra =
-                (meta.grid.ra0 - ((cx - n / 2) * meta.grid.step_arcsec) / 3600 / Math.cos((meta.grid.dec0 * Math.PI) / 180) + 360) % 360;
-              const ndec = meta.grid.dec0 - ((cy - n / 2) * meta.grid.step_arcsec) / 3600;
-              set({ ra: nra.toFixed(5), dec: ndec.toFixed(5), fov: String(nf) });
-            }}
-          >
-            {dragBox && (
-              <div
-                class="dragbox"
-                style={{
-                  left: `${Math.min(dragBox.x0, dragBox.x1)}px`,
-                  top: `${Math.min(dragBox.y0, dragBox.y1)}px`,
-                  width: `${Math.abs(dragBox.x1 - dragBox.x0)}px`,
-                  height: `${Math.abs(dragBox.y1 - dragBox.y0)}px`,
-                }}
-              />
-            )}
-            <canvas
-              ref={canvas}
-              class="vid"
-              role="img"
-              aria-label="Video of the field built from real SPHEREx exposures"
-              data-testid="picture"
-              style={film !== null ? { visibility: 'hidden' } : undefined}
-            />
-            <canvas ref={overlay} class="ov" />
-            {film === null &&
-              labels.map((l) => (
+          <div class="vtop">
+            <div class="vtitle" data-testid="field-title">
+              <b>{fieldName}</b>
+              <span>
+                {formatRA(ra)} {formatDec(dec)}
+              </span>
+            </div>
+            <label class="fovsel" title="Field of view">
+              <span>Field</span>
+              <select
+                class="inp"
+                value={String(fov)}
+                onChange={(e) => set({ fov: (e.target as HTMLSelectElement).value })}
+                data-testid="fov"
+              >
+                {SIZES.map((s) => (
+                  <option key={s} value={String(s)}>
+                    {s}′
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div class="vstage" ref={stageRef}>
+            <div
+              class="vsq"
+              style={{
+                width: `${wallView ? stage.w : side}px`,
+                height: `${wallView ? stage.h : side}px`,
+                cursor: view === 'picture' ? 'crosshair' : undefined,
+              }}
+              onClick={(e) => {
+                if (dragged.current) {
+                  dragged.current = false;
+                  return;
+                }
+                pick(e);
+              }}
+              onPointerDown={(e) => {
+                if (film !== null || view !== 'picture' || !meta) return;
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                dragFrom.current = { x: e.clientX - r.left, y: e.clientY - r.top };
+              }}
+              onPointerMove={(e) => {
+                const f = dragFrom.current;
+                if (!f) return;
+                const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                const x = e.clientX - r.left;
+                const y = e.clientY - r.top;
+                if (Math.hypot(x - f.x, y - f.y) > 12) setDragBox({ x0: f.x, y0: f.y, x1: x, y1: y });
+              }}
+              onPointerUp={() => {
+                const b = dragBox;
+                dragFrom.current = null;
+                setDragBox(null);
+                if (!b || !meta) return;
+                dragged.current = true;
+                // open the dragged box as a new field: its centre, the smallest field size that holds it
+                const n = meta.grid.n;
+                const sc = n / side;
+                const cx = ((b.x0 + b.x1) / 2) * sc;
+                const cy = ((b.y0 + b.y1) / 2) * sc;
+                const sizeArcmin = (Math.max(Math.abs(b.x1 - b.x0), Math.abs(b.y1 - b.y0)) * sc * meta.grid.step_arcsec) / 60;
+                const nf = SIZES.find((z) => z >= sizeArcmin) ?? 60;
+                const nra =
+                  (meta.grid.ra0 - ((cx - n / 2) * meta.grid.step_arcsec) / 3600 / Math.cos((meta.grid.dec0 * Math.PI) / 180) + 360) % 360;
+                const ndec = meta.grid.dec0 - ((cy - n / 2) * meta.grid.step_arcsec) / 3600;
+                set({ ra: nra.toFixed(5), dec: ndec.toFixed(5), fov: String(nf) });
+              }}
+            >
+              {dragBox && (
                 <div
-                  class="panel-label"
+                  class="dragbox"
                   style={{
-                    left: `${l.x + 2}px`,
-                    top: `${l.y + 2}px`,
-                    maxWidth: `${l.w - 4}px`,
+                    left: `${Math.min(dragBox.x0, dragBox.x1)}px`,
+                    top: `${Math.min(dragBox.y0, dragBox.y1)}px`,
+                    width: `${Math.abs(dragBox.x1 - dragBox.x0)}px`,
+                    height: `${Math.abs(dragBox.y1 - dragBox.y0)}px`,
                   }}
-                >
-                  <span
-                    class="sw"
-                    style={{
-                      background: `hsl(${l.hue},80%,60%)`,
-                      boxShadow: `0 0 8px hsl(${l.hue},80%,60%)`,
-                    }}
-                  />
+                />
+              )}
+              <canvas
+                ref={canvas}
+                class={`vid ${wallView ? 'wall' : ''}`}
+                role="img"
+                aria-label="Video of the field built from real SPHEREx exposures"
+                data-testid="picture"
+              />
+              <canvas ref={overlay} class="ov" />
+              {labels.map((l) => (
+                <div class="panel-label" style={{ left: `${l.x + 6}px`, top: `${l.y + 2}px`, maxWidth: `${l.w - 10}px` }}>
+                  <span class="sw" style={{ background: `hsl(${l.hue},80%,60%)`, boxShadow: `0 0 8px hsl(${l.hue},80%,60%)` }} />
                   <b>{l.text}</b>
                   <em>{l.sub}</em>
                 </div>
               ))}
-            {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length && (
-              <canvas ref={archBig} class="archive-big" />
-            )}
-            {film === null && view === 'picture' && opts.reference && !(archStep !== null && archStep < ARCHIVE.length) && (
-              <div class="refbox" title="DSS2 red (POSS-II plates, 1985–1999) of the same field">
-                <canvas ref={refCanvas} width={150} height={150} />
-                <span>DSS2 red · 1985–1999</span>
-              </div>
-            )}
-            {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length ? (
-              <div class="vlabel">
-                {ARCHIVE[archStep]!.name} · {ARCHIVE[archStep]!.years}
-              </div>
-            ) : (
-              film === null &&
-              view === 'picture' &&
-              passMeta && <div class="vlabel">{time === 'sum' ? 'all seasons' : `SPHEREx · ${season(passMeta.mjd0)}`}</div>
-            )}
-            {film !== null && (
-              <div style={{ position: 'absolute', inset: 0 }}>
-                <FilmView
-                  ra={ra}
-                  dec={dec}
-                  fov={fov}
-                  mjd={film || undefined}
-                  playing={playing}
-                  onStatus={setFilmStatus}
-                  onBodies={setFilmBodies}
-                />
-              </div>
-            )}
+              {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length && (
+                <canvas ref={archBig} class="archive-big" />
+              )}
+              {insetBox && view === 'picture' && !opts.reference && (
+                <div
+                  class="zoombox"
+                  style={{ left: `${insetBox.x}px`, top: `${insetBox.y}px`, width: `${insetBox.w}px`, height: `${insetBox.h}px` }}
+                  title="2′ around the selected object (the test target until you click a source), from the same frames as the picture"
+                >
+                  <span>2′ zoom</span>
+                </div>
+              )}
+              {view === 'picture' && opts.reference && !(archStep !== null && archStep < ARCHIVE.length) && (
+                <div
+                  class="refbox"
+                  title="DSS2 red (POSS-II plates, 1985–1999) of the same field, the test target ringed where it was then"
+                >
+                  <canvas ref={refCanvas} width={150} height={150} />
+                  <span>Reference · DSS2 red · 1985–1999</span>
+                </div>
+              )}
+              {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length ? (
+                <div class="vlabel">
+                  {ARCHIVE[archStep]!.name} · {ARCHIVE[archStep]!.years}
+                </div>
+              ) : film !== null ? (
+                filmData && (
+                  <div class="vlabel">
+                    SPHEREx · visit {visit + 1} of {filmData.meta.frames.length} · {utc(filmData.meta.frames[visit]?.mjd ?? 0)} · D
+                    {filmData.meta.frames[visit]?.det}
+                  </div>
+                )
+              ) : (
+                view === 'picture' &&
+                passMeta && <div class="vlabel">{time === 'sum' ? 'all seasons' : `SPHEREx · ${season(passMeta.mjd0)}`}</div>
+              )}
+              {film !== null && !filmData && <div class="vwait">{filmNote || 'asking for the visits of the pass…'}</div>}
+            </div>
+          </div>
+          <div class="vbottom" role="group" aria-label={view === 'det' ? 'Detectors' : 'Spectral bands'}>
+            {view === 'det'
+              ? DETECTORS.map((d, i) => (
+                  <button
+                    key={i}
+                    class={`bchip ${dets.includes(i + 1) ? 'on' : ''}`}
+                    style={{ '--c': `hsl(${d.hue},80%,60%)` }}
+                    aria-pressed={dets.includes(i + 1)}
+                    onClick={() => toggleDet(i + 1)}
+                    title={`Detector D${i + 1}: ${d.name}, ${d.range}`}
+                  >
+                    <b>D{i + 1}</b>
+                    <em>{d.range}</em>
+                  </button>
+                ))
+              : BANDS.map((bd) => (
+                  <button
+                    key={bd.key}
+                    class={`bchip ${bands.includes(bd.key) ? 'on' : ''}`}
+                    style={{ '--c': `hsl(${bd.hue},80%,60%)` }}
+                    aria-pressed={bands.includes(bd.key)}
+                    onClick={() => toggleBand(bd.key)}
+                    data-testid={`band-${bd.key}`}
+                    title={`${bd.name}: ${bd.band}`}
+                  >
+                    <span class="ti" dangerouslySetInnerHTML={{ __html: icon(bd.icon, 14) }} />
+                    <b>{bd.name}</b>
+                  </button>
+                ))}
+            <span class="bchip-acts">
+              <button class="lnk" onClick={() => set(view === 'det' ? { dets: null } : { bands: null })} title="Switch every one on">
+                All
+              </button>
+              <button
+                class="lnk"
+                onClick={() => set(view === 'det' ? { dets: '1' } : { bands: BANDS[0]!.key })}
+                title={view === 'det' ? 'Only D1' : 'Only Starlight'}
+              >
+                None
+              </button>
+            </span>
           </div>
         </div>
         <aside class="panel">
           <div class="panel-head">
-            <div class="ptitle">
-              <b>{fName}</b>
-              <span>{fCls}</span>
-            </div>
             <div class="seg sm" role="group" aria-label="Panel">
               {(
                 [
@@ -1473,22 +1905,6 @@ export function Lab({ route }: { route: Route }) {
                     />
                   </div>
                 </div>
-                <div class="field">
-                  <label>FOV</label>
-                  <div class="seg fov">
-                    {SIZES.map((s) => (
-                      <button
-                        key={s}
-                        class={s === fov ? 'on' : ''}
-                        onClick={() => set({ fov: String(s) })}
-                        data-testid={`fov-${s}`}
-                        title={`${s}′ field`}
-                      >
-                        {s}′
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </section>
               <div class="vswitch">
                 {VIEWS.map((v) => (
@@ -1526,8 +1942,9 @@ export function Lab({ route }: { route: Route }) {
                 ).map(([k, ico, n, tip]) => (
                   <button
                     key={k}
-                    class={time === k ? 'on' : ''}
-                    title={tip}
+                    class={time === k && film === null ? 'on' : ''}
+                    title={film !== null ? `${tip} (Months scale only)` : tip}
+                    disabled={film !== null}
                     onClick={() => set({ time: k === 'loop' ? null : k })}
                     data-testid={`time-${k}`}
                   >
@@ -1548,91 +1965,6 @@ export function Lab({ route }: { route: Route }) {
                   </span>
                 </div>
               )}
-              {view === 'det' ? (
-                <>
-                  <div class="sechead">
-                    <span class="h2">Detectors</span>
-                    <span>
-                      <button class="lnk" onClick={() => set({ dets: null })}>
-                        All
-                      </button>
-                    </span>
-                  </div>
-                  <div class="bgrid">
-                    {DETECTORS.map((d, i) => (
-                      <button
-                        key={i}
-                        class={`btab ${dets.includes(i + 1) ? 'on' : ''}`}
-                        style={{ '--c': `hsl(${d.hue},80%,60%)` }}
-                        aria-pressed={dets.includes(i + 1)}
-                        onClick={() => toggleDet(i + 1)}
-                        title={`Detector D${i + 1}: ${d.name}, ${d.range}`}
-                      >
-                        <span class="tx">
-                          <b>
-                            D{i + 1} · {d.name}
-                          </b>
-                          <em>{d.range}</em>
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              ) : (
-                <>
-                  <div class="sechead">
-                    <span class="h2">Spectral bands</span>
-                    <span style={{ display: 'flex', gap: '12px' }}>
-                      <button class="lnk" onClick={() => set({ bands: null })} title="Switch every band on">
-                        All
-                      </button>
-                      <button class="lnk" onClick={() => set({ bands: BANDS[0]!.key })} title="Only Starlight">
-                        None
-                      </button>
-                    </span>
-                  </div>
-                  <div class="bgrid">
-                    {BANDS.map((bd) => (
-                      <button
-                        key={bd.key}
-                        class={`btab ${bands.includes(bd.key) ? 'on' : ''}`}
-                        style={{ '--c': `hsl(${bd.hue},80%,60%)` }}
-                        aria-pressed={bands.includes(bd.key)}
-                        onClick={() => toggleBand(bd.key)}
-                        data-testid={`band-${bd.key}`}
-                      >
-                        <span
-                          class="ti"
-                          dangerouslySetInnerHTML={{
-                            __html: icon(bd.icon, 20),
-                          }}
-                        />
-                        <span class="tx">
-                          <b>{bd.name}</b>
-                          <em>{bd.band}</em>
-                        </span>
-                      </button>
-                    ))}
-                    <button
-                      class="btab mask"
-                      style={{ '--c': 'hsl(0,0%,70%)' }}
-                      disabled
-                      title="Artifact mask: where the SPHEREx pipeline flagged the pixel in many exposures (available once the mask view is built)"
-                    >
-                      <span
-                        class="ti"
-                        dangerouslySetInnerHTML={{
-                          __html: icon('warning', 20),
-                        }}
-                      />
-                      <span class="tx">
-                        <b>Artifact mask</b>
-                        <em>flagged pixels</em>
-                      </span>
-                    </button>
-                  </div>
-                </>
-              )}
               <div class="dgroup">
                 <div class="sechead">
                   <span class="h2">Display</span>
@@ -1652,7 +1984,8 @@ export function Lab({ route }: { route: Route }) {
                     'White cores',
                     'Saturated cores white: pixels saturated in most exposures are drawn white, never as missing data',
                     opts.sat,
-                    (v) => set({ sat: v ? null : '0' }),
+                    film !== null ? null : (v) => set({ sat: v ? null : '0' }),
+                    'the visits of the Days scale carry no saturation layer: their brightest pixels are drawn at full white',
                   )}
                   {dchk(
                     'ringChk',
@@ -1691,16 +2024,18 @@ export function Lab({ route }: { route: Route }) {
                     'sparkle',
                     'Anomalies',
                     'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
-                    opts.anomalies,
+                    opts.anomalies && !!an?.result,
                     an?.result ? (v) => set({ ano: v ? null : '0' }) : null,
+                    'no anomaly search has been run for this field yet: “Find spectral anomalies here” runs it',
                   )}
                   {dchk(
                     'maskChk',
                     'warning',
                     'Artifacts',
-                    'Artifact mask: red where the pipeline flagged the pixel in many exposures',
-                    false,
-                    null,
+                    'Artifacts: red where the SPHEREx pipeline flagged the pixel in many exposures of the season shown',
+                    opts.artifacts,
+                    wallView ? null : (v) => set({ art: v ? '1' : null }),
+                    'shown on the Picture (and the Days scale), not on the walls',
                   )}
                   {dchk(
                     'morphChk',
@@ -1716,7 +2051,7 @@ export function Lab({ route }: { route: Route }) {
                     'Reference',
                     'Reference: the DSS2 red picture of the same place (1985–1999), with the test target where it was then',
                     opts.reference,
-                    (v) => set({ ref: v ? null : '0' }),
+                    (v) => set({ ref: v ? '1' : null }),
                   )}
                   {dchk(
                     'sharpChk',
@@ -1806,11 +2141,24 @@ export function Lab({ route }: { route: Route }) {
                   </select>
                   <button
                     class="lnk"
-                    onClick={() => void navigator.clipboard?.writeText(location.href)}
+                    onClick={() => {
+                      const done = (t: string) => {
+                        setCopied(t);
+                        setTimeout(() => setCopied(''), 2000);
+                      };
+                      try {
+                        navigator.clipboard.writeText(location.href).then(
+                          () => done('Copied'),
+                          () => done('Copy blocked: use the address bar'),
+                        );
+                      } catch {
+                        done('Copy blocked: use the address bar');
+                      }
+                    }}
                     title="Copy a link to this exact view"
                   >
                     <span dangerouslySetInnerHTML={{ __html: icon('link', 16) }} style={{ display: 'contents' }} />
-                    Copy link
+                    {copied || 'Copy link'}
                   </button>
                   <button
                     class="lnk"
@@ -1891,13 +2239,29 @@ export function Lab({ route }: { route: Route }) {
                     <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
                   </button>
                 ))}
-                <div class="srow">
-                  <b>Film</b>
-                  <span class="st">inside a pass: the visits, asteroids hop</span>
-                  <button class="btn sm" onClick={() => set({ film: film === null ? '0' : null })} data-testid="film">
-                    {film === null ? 'Film' : 'Close film'}
-                  </button>
-                </div>
+                {film !== null && filmData && ft.state === 'ok' && (
+                  <FilmTracks
+                    compact
+                    tracks={ft.tracks}
+                    control={ft.control}
+                    nVisits={filmData.meta.frames.length}
+                    fov={fov}
+                    sel={trackSel}
+                    onSel={setTrackSel}
+                    trail={false}
+                    onTrail={() => {}}
+                    blink={false}
+                    onBlink={() => {}}
+                    onAround={(t, f) => {
+                      const g = filmData.meta.grid;
+                      const pt = t.pts[(t.pts.length - 1) >> 1]!;
+                      const cosd = Math.cos((g.dec0 * Math.PI) / 180);
+                      const nra = (g.ra0 - ((pt.x + 0.5 - g.n / 2) * g.step_arcsec) / 3600 / cosd + 360) % 360;
+                      const ndec = g.dec0 - ((pt.y + 0.5 - g.n / 2) * g.step_arcsec) / 3600;
+                      set({ ra: nra.toFixed(5), dec: ndec.toFixed(5), fov: String(f) });
+                    }}
+                  />
+                )}
                 {film !== null && filmBodies && (
                   <>
                     <div
@@ -1918,9 +2282,10 @@ export function Lab({ route }: { route: Route }) {
                       .sort((a, b) => (b.stackZ ?? 0) - (a.stackZ ?? 0) || (a.v ?? 99) - (b.v ?? 99))
                       .slice(0, 10)
                       .map((b) => (
-                        <div key={b.name} class="mvrow" style={{ cursor: 'default' }}>
-                          <b>{b.name}</b>
-                          <span>V {b.v?.toFixed(1) ?? '—'}</span>
+                        <div key={b.name} class="mvrow body" style={{ cursor: 'default' }}>
+                          <b>
+                            {b.name} · V {b.v?.toFixed(1) ?? '—'}
+                          </b>
                           <span class="faint">
                             seen {b.seen.length} of {b.expected.length} film visits
                             {b.stackZ != null && b.stackN
@@ -1956,10 +2321,22 @@ export function Lab({ route }: { route: Route }) {
           {tab === 'obj' && (
             <div class="pbody">
               {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
-                <Passport a={an.result.anomalies.find((a) => a.n === selAn)!} f={an.result} />
+                <>
+                  {portraitOf(
+                    an.result.anomalies.find((a) => a.n === selAn)!,
+                    `Anomaly ${selAn}`,
+                  )}
+                  <Passport a={an.result.anomalies.find((a) => a.n === selAn)!} f={an.result} />
+                  <ContextRows
+                    ra={an.result.anomalies.find((a) => a.n === selAn)!.ra}
+                    dec={an.result.anomalies.find((a) => a.n === selAn)!.dec}
+                  />
+                </>
               ) : (
                 <>
+                  {sel && portraitOf(sel, sel.name ?? 'selected source')}
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
+                  {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={2000} />}
                   {sel && <LightCurves src={sel} />}
                   {sel && (
                     <div class="xlinks">
@@ -2042,41 +2419,107 @@ export function Lab({ route }: { route: Route }) {
                   __html: icon(playing && frame === null ? 'pause' : 'play', 18),
                 }}
               />
+              <div class="seg sm scale" role="group" aria-label="Time scale">
+                <button
+                  class={film === null ? 'on' : ''}
+                  aria-pressed={film === null}
+                  onClick={toMonths}
+                  title="Months: the passes (seasons) of the field, about six months apart: stars that move over the year"
+                  data-testid="scale-months"
+                >
+                  Months
+                </button>
+                <button
+                  class={film !== null ? 'on' : ''}
+                  aria-pressed={film !== null}
+                  onClick={toDays}
+                  disabled={!passes.length && film === null}
+                  title="Days: the visits inside the pass shown, a few hours to days apart: asteroids hop from visit to visit"
+                  data-testid="scale-days"
+                >
+                  Days
+                </button>
+              </div>
               <div class="tl-mid">
-                <div class="tl-labels">
-                  {passes.map((q, i) => (
-                    <span
-                      key={q.index}
-                      class={frameIndex === q.index ? 'on' : ''}
-                      style={{
-                        left: passes.length > 1 ? `${(i / (passes.length - 1)) * 100}%` : '0%',
-                        transform: `translateX(${i === 0 ? 0 : i === passes.length - 1 ? -100 : -50}%)`,
-                      }}
-                      onClick={() => {
+                {film === null ? (
+                  <>
+                    <div class="tl-labels">
+                      {passes.map((q, i) => (
+                        <span
+                          key={q.index}
+                          class={frameIndex === q.index ? 'on' : ''}
+                          style={{
+                            left: passes.length > 1 ? `${(i / (passes.length - 1)) * 100}%` : '0%',
+                            transform: `translateX(${i === 0 ? 0 : i === passes.length - 1 ? -100 : -50}%)`,
+                          }}
+                          onClick={() => {
+                            setPlaying(false);
+                            setFrame(q.index);
+                          }}
+                        >
+                          {season(q.mjd0)}
+                        </span>
+                      ))}
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(0, passes.length - 1)}
+                      step={1}
+                      value={frameIndex}
+                      aria-label="Season"
+                      onInput={(e) => {
                         setPlaying(false);
-                        setFrame(q.index);
+                        setFrame(Number((e.target as HTMLInputElement).value));
                       }}
-                    >
-                      {season(q.mjd0)}
-                    </span>
-                  ))}
-                </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(0, passes.length - 1)}
-                  step={1}
-                  value={frameIndex}
-                  aria-label="Season"
-                  onInput={(e) => {
-                    setPlaying(false);
-                    setFrame(Number((e.target as HTMLInputElement).value));
-                  }}
-                />
+                    />
+                  </>
+                ) : (
+                  <>
+                    <div class="tl-labels ticks">
+                      {(filmData?.meta.frames ?? []).map((fr, i, all) => {
+                        const mid = (all.length - 1) >> 1;
+                        const label = i === 0 || i === all.length - 1 || (i === mid && all.length > 4);
+                        return (
+                          <span
+                            key={i}
+                            class={`${visit === i ? 'on' : ''} ${label ? '' : 'tick'}`}
+                            style={{
+                              left: all.length > 1 ? `${(i / (all.length - 1)) * 100}%` : '0%',
+                              transform: `translateX(${i === 0 ? 0 : i === all.length - 1 ? -100 : -50}%)`,
+                            }}
+                            title={`visit ${i + 1}: ${utc(fr.mjd)} · D${fr.det} · ${fr.exposures} exposures`}
+                            onClick={() => {
+                              setPlaying(false);
+                              setFrame(i);
+                            }}
+                          >
+                            {label
+                              ? mjdToDate(fr.mjd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
+                              : '·'}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <input
+                      type="range"
+                      min={0}
+                      max={Math.max(0, nVisits - 1)}
+                      step={1}
+                      value={frame ?? visit}
+                      aria-label="Visit"
+                      disabled={!filmData}
+                      onInput={(e) => {
+                        setPlaying(false);
+                        setFrame(Number((e.target as HTMLInputElement).value));
+                      }}
+                    />
+                  </>
+                )}
               </div>
             </div>
-            <div class="status" data-testid="lab-status" title={film !== null ? filmStatus : status}>
-              {film !== null ? filmStatus : status}
+            <div class="status" data-testid="lab-status" title={film !== null ? daysStatus : status}>
+              {film !== null ? daysStatus : status}
             </div>
             <div class="readout" />
           </div>

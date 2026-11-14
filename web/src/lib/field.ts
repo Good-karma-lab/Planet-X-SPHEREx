@@ -64,7 +64,11 @@ export class FieldClient {
   async open(ra: number, dec: number, fov: number): Promise<void> {
     this.asked = [ra, dec, fov];
     this.ev.onPhase('asking the sky service…');
-    const r = await retrying(`/api/v1/fields?ra=${ra}&dec=${dec}&fov=${fov}`, (t) => this.ev.onPhase(t), () => this.stopped);
+    const r = await retrying(
+      `/api/v1/fields?ra=${ra}&dec=${dec}&fov=${fov}`,
+      (t) => this.ev.onPhase(t),
+      () => this.stopped,
+    );
     if (!r) return;
     if (!r.ok) return this.ev.onError(`the sky service answered ${r.status}`);
     const body = (await r.json()) as { key: string; state?: string; meta?: FieldMeta; job?: JobView };
@@ -80,7 +84,7 @@ export class FieldClient {
   }
 
   private partsFromMeta(meta: FieldMeta): string[] {
-    return [...meta.passes.flatMap((p) => ['picture', 'dets', 'bands'].map((k) => `${k}_p${p.index}`)), 'diff'];
+    return [...meta.passes.flatMap((p) => ['picture', 'dets', 'bands', 'flags'].map((k) => `${k}_p${p.index}`)), 'diff'];
   }
 
   /** Fetch the parts whose names start with `prefix` (e.g. "dets_") from now on, and those already ready. */
@@ -104,7 +108,11 @@ export class FieldClient {
       }
       if (view.state === 'error' || view.state === 'cancelled') return this.ev.onError(view.error ?? view.state);
       await new Promise((res) => setTimeout(res, POLL_MS));
-      const r = await retrying(`/api/v1/jobs/${view.id}`, (t) => this.ev.onPhase(t), () => this.stopped);
+      const r = await retrying(
+        `/api/v1/jobs/${view.id}`,
+        (t) => this.ev.onPhase(t),
+        () => this.stopped,
+      );
       if (!r) return;
       if (r.status === 404) return this.open(...this.asked); // the service restarted: ask for the field again
       if (!r.ok) continue;
@@ -130,7 +138,7 @@ export class FieldClient {
           this.ev.onPart(name, await p);
         } catch (e) {
           this.parts.delete(name);
-          this.ev.onError(String(e));
+          if (!name.startsWith('flags_')) this.ev.onError(String(e)); // a pass without flagged pixels has no flags part
         }
       }),
     );

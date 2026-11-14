@@ -7,15 +7,19 @@ import { HI, LO, SOFT } from './law';
 
 const VS = `#version 300 es
 in vec2 p;
-out vec2 uv;
-void main() { uv = vec2(0.5 * (p.x + 1.0), 0.5 * (1.0 - p.y)); gl_Position = vec4(p, 0.0, 1.0); }`;
+out vec2 vuv;
+void main() { vuv = vec2(0.5 * (p.x + 1.0), 0.5 * (1.0 - p.y)); gl_Position = vec4(p, 0.0, 1.0); }`;
 
 // uv: x to the right (west), y down (south) — the grid's own orientation (row 0 north, column 0 east).
 const FS = `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
-in vec2 uv;
+in vec2 vuv;
 out vec4 color;
+vec2 uv;                       // the place in the field: the panel's own uv, zoomed by uZoom (centre xy, share of the field z)
+uniform vec3 uZoom;
+uniform int uFilm;             // the Days film: one layer per visit, no saturation layer, its own background and noise
+uniform vec2 uSNF;
 uniform sampler2DArray uVal;   // layer = pass * uPerPass + channel
 uniform sampler2DArray uSat;   // layer = pass
 uniform int uPerPass;
@@ -42,6 +46,7 @@ uniform float uDP;             // one detector pixel in uv units
 
 float law(float x) { return clamp(asinh((x - uLo) / uSoft) / asinh((uHi - uLo) / uSoft), 0.0, 1.0); }
 
+int satK(int k) { return uFilm == 1 ? 0 : k; }
 float G = 1.0;                 // Sharpen gain of the place, the same for every layer and channel (so it never changes a colour)
 float raw(int pass, int ch, vec2 q) { return texture(uVal, vec3(q, float(pass * uPerPass + ch))).r; }
 float val(int pass, int ch) { return raw(pass, ch, uv) * G; }
@@ -58,14 +63,15 @@ float white(int k, vec2 q) {
 float sharpGain(int k) {
   if (uSharp <= 0.0) return 1.0;
   float L0 = white(k, uv);
-  float ws = smoothstep(3.0, 8.0, (L0 - uSN[k].x) / max(uSN[k].y, 1e-9));
+  vec2 sn = uFilm == 1 ? uSNF : uSN[k];
+  float ws = smoothstep(3.0, 8.0, (L0 - sn.x) / max(sn.y, 1e-9));
   if (ws <= 0.0 || L0 <= 0.0) return 1.0;
   float sb = 0.2 * L0, wt = 0.2, near = 0.0;
   for (int j = 0; j < 6; j++) {
     float an = float(j) * 1.0471976;
     vec2 d = vec2(cos(an), sin(an)) * uDP;
     vec2 q1 = uv + 0.5 * d, q2 = uv + d;
-    near = max(near, max(texture(uSat, vec3(q1, float(k))).r, texture(uSat, vec3(q2, float(k))).r));
+    near = max(near, max(texture(uSat, vec3(q1, float(satK(k)))).r, texture(uSat, vec3(q2, float(satK(k)))).r));
     float a1 = white(k, q1), a2 = white(k, q2);
     if (a1 > -1e8) { sb += 0.4 / 6.0 * a1; wt += 0.4 / 6.0; }
     if (a2 > -1e8) { sb += 0.4 / 6.0 * a2; wt += 0.4 / 6.0; }
@@ -77,7 +83,7 @@ float sharpGain(int k) {
 }
 
 vec3 passColour(int k) {
-  float sat = texture(uSat, vec3(uv, float(k))).r;
+  float sat = texture(uSat, vec3(uv, float(satK(k)))).r;
   if (sat > 0.5) return uWhiteCores == 1 ? vec3(1.0) : uNoData;  // a saturated core is white, never a hole
   G = sharpGain(k);
   if (uMode == 0) {
@@ -123,6 +129,8 @@ vec3 diffColour(int k) {
 }
 
 void main() {
+  uv = uZoom.xy + (vuv - 0.5) * uZoom.z;
+  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { color = vec4(uNoData, 1.0); return; }
   if (uTime == 2) {
     vec3 acc = vec3(0.0);
     for (int k = 0; k < 16; k++) { if (k >= uPasses) break; acc += passColour(k); }
@@ -140,9 +148,9 @@ void main() {
   color = vec4(mix(a, b, uT), 1.0);
 }`;
 
-export type StackName = 'quick' | 'picture' | 'dets' | 'bands';
+export type StackName = 'quick' | 'picture' | 'dets' | 'bands' | 'film';
 
-export const PER_PASS: Record<StackName, number> = { quick: 1, picture: 3, dets: 6, bands: 7 };
+export const PER_PASS: Record<StackName, number> = { quick: 1, picture: 3, dets: 6, bands: 7, film: 1 };
 
 interface Stack {
   tex: WebGLTexture;
@@ -168,6 +176,8 @@ export interface Panel {
   time?: 'pendulum' | 'difference' | 'coadd';
   /** layer of the Difference maps within a pass (0 white, 1.. the bands) */
   diffLayer?: number;
+  /** a zoom on part of the field: centre (uv, 0..1) and the share of the field shown */
+  zoom?: { cx: number; cy: number; s: number };
 }
 
 export class Renderer {
@@ -324,6 +334,54 @@ export class Renderer {
 
   private dpGrid = 4;
 
+  // ---- the Days film: its own size and texture, kept apart from the field's stacks so switching scales needs no reload ----
+  private film: { tex: WebGLTexture; n: number; count: number; loaded: Set<number> } | null = null;
+  private filmSat: WebGLTexture | null = null;
+  private filmSN: [number, number] = [0, 1];
+  private filmDP = 0.01;
+
+  /** A new film: `count` visits of n×n. */
+  setupFilm(n: number, count: number, detectorPixels: number): void {
+    const gl = this.gl;
+    if (this.film) gl.deleteTexture(this.film.tex);
+    const keep = this.n;
+    this.n = n;
+    const tex = this.newArray(gl.R16F, count);
+    if (!this.filmSat) {
+      this.filmSat = this.newArray(gl.R8, 1);
+      gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, 0, n, n, 1, gl.RED, gl.UNSIGNED_BYTE, new Uint8Array(n * n));
+    }
+    this.n = keep;
+    this.film = { tex, n, count, loaded: new Set() };
+    this.filmDP = detectorPixels / n;
+  }
+
+  /** One visit of the film: physical values (NaN = no data). */
+  uploadFilm(k: number, values: Float32Array): void {
+    const gl = this.gl;
+    const f = this.film;
+    if (!f) return;
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, f.tex);
+    gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, k, f.n, f.n, 1, gl.RED, gl.FLOAT, values);
+    f.loaded.add(k);
+  }
+
+  setFilmNoise(background: number, sigma: number): void {
+    this.filmSN = [background, sigma];
+  }
+
+  get filmVisits(): number {
+    return this.film?.loaded.size ?? 0;
+  }
+
+  clearFilm(): void {
+    if (this.film) this.gl.deleteTexture(this.film.tex);
+    if (this.filmSat) this.gl.deleteTexture(this.filmSat);
+    this.film = null;
+    this.filmSat = null;
+  }
+
   setWhiteBalance(pass: number, kr: number, kb: number): void {
     this.wb[2 * pass] = kr;
     this.wb[2 * pass + 1] = kb;
@@ -348,8 +406,10 @@ export class Renderer {
   /** Draw one panel (a pass or the crossfade of two) into its rectangle. */
   panel(p: Panel, a: number, b: number, t: number): void {
     const gl = this.gl;
-    const s = this.stacks.get(p.stack);
-    if (!s || !this.sat) return;
+    const isFilm = p.stack === 'film';
+    const s = isFilm ? this.film : this.stacks.get(p.stack);
+    const sat = isFilm ? this.filmSat : this.sat;
+    if (!s || !sat) return;
     const r = devicePixelRatio;
     const x = Math.round(p.x * r);
     const w = Math.round(p.w * r);
@@ -363,8 +423,12 @@ export class Renderer {
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, s.tex);
     gl.uniform1i(this.u('uVal'), 0);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.sat);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, sat);
     gl.uniform1i(this.u('uSat'), 1);
+    gl.uniform1i(this.u('uFilm'), isFilm ? 1 : 0);
+    gl.uniform2f(this.u('uSNF'), this.filmSN[0], this.filmSN[1]);
+    const z = p.zoom ?? { cx: 0.5, cy: 0.5, s: 1 };
+    gl.uniform3f(this.u('uZoom'), z.cx, z.cy, z.s);
     gl.uniform1i(this.u('uPerPass'), PER_PASS[p.stack]);
     gl.uniform1i(this.u('uMode'), p.mode === 'colour' ? 0 : p.mode === 'blend' ? 2 : 1);
     gl.uniform1i(this.u('uBandMask'), p.bandMask ?? 0);
@@ -375,7 +439,7 @@ export class Renderer {
     gl.uniform1i(this.u('uWhiteCores'), this.whiteCores ? 1 : 0);
     gl.uniform1f(this.u('uSharp'), this.sharp);
     gl.uniform2fv(this.u('uSN'), this.sn);
-    gl.uniform1f(this.u('uDP'), this.dp);
+    gl.uniform1f(this.u('uDP'), isFilm ? this.filmDP : this.dp);
     gl.uniform1i(this.u('uLayer'), p.layer ?? 0);
     gl.uniform3fv(this.u('uTint'), new Float32Array(p.tint ?? [1, 1, 1]));
     gl.uniform3fv(this.u('uNoData'), new Float32Array(p.noData ?? [0.36, 0.4, 0.44]));
@@ -390,31 +454,33 @@ export class Renderer {
     gl.uniform1i(this.u('uTime'), p.time === 'difference' ? 1 : p.time === 'coadd' ? 2 : 0);
     gl.uniform1i(this.u('uPasses'), s.loaded.size);
     gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, this.diff ?? this.sat);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, (isFilm ? null : this.diff) ?? sat);
     gl.uniform1i(this.u('uDiff'), 2);
-    gl.uniform1i(this.u('uHasDiff'), this.diff ? 1 : 0);
+    gl.uniform1i(this.u('uHasDiff'), this.diff && !isFilm ? 1 : 0);
     gl.uniform1i(this.u('uDiffPer'), this.diffPer);
     gl.uniform1i(this.u('uDiffLayer'), p.diffLayer ?? 0);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 }
 
-/** Square panels laid out to fill a w×h area: the column count that makes the panels largest. */
-export function wallLayout(count: number, w: number, h: number, gap = 6): { x: number; y: number; size: number }[] {
+/** Square panels laid out to fill a w×h area: the column count that makes the panels largest (on a tie, more columns: a wide
+ *  picture area takes the six detectors as 3 × 2); a short last row is centred. */
+export function wallLayout(count: number, w: number, h: number, gap = 8): { x: number; y: number; size: number }[] {
   let best = { cols: 1, size: 0 };
   for (let cols = 1; cols <= count; cols++) {
     const rows = Math.ceil(count / cols);
     const size = Math.floor(Math.min((w - gap * (cols - 1)) / cols, (h - gap * (rows - 1)) / rows));
-    if (size > best.size) best = { cols, size };
+    if (size >= best.size) best = { cols, size };
   }
   const rows = Math.ceil(count / best.cols);
   const totalW = best.cols * best.size + gap * (best.cols - 1);
   const totalH = rows * best.size + gap * (rows - 1);
   const x0 = (w - totalW) / 2;
   const y0 = (h - totalH) / 2;
-  return Array.from({ length: count }, (_, i) => ({
-    x: x0 + (i % best.cols) * (best.size + gap),
-    y: y0 + Math.floor(i / best.cols) * (best.size + gap),
-    size: best.size,
-  }));
+  return Array.from({ length: count }, (_, i) => {
+    const row = Math.floor(i / best.cols);
+    const inRow = row === rows - 1 ? count - row * best.cols : best.cols;
+    const shift = ((best.cols - inRow) * (best.size + gap)) / 2;
+    return { x: x0 + shift + (i % best.cols) * (best.size + gap), y: y0 + row * (best.size + gap), size: best.size };
+  });
 }
