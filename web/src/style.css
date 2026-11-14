@@ -2337,3 +2337,9 @@ input[type='range']::-moz-range-thumb {
 }
 .vsq.compact .ftitle { max-width: calc(100% - 140px); }
 .vsq.compact .ftitle span { display: none; }
+
+/* About: references and team */
+.about-h { margin: 22px 0 10px; font-size: 18px; letter-spacing: 0.01em; }
+.about-refs, .about-team { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; }
+.about-refs a, .about-team a { color: var(--accent-l); }
+.about-grid { align-items: start; }
