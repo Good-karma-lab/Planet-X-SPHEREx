@@ -223,8 +223,10 @@ class Scheduler:
     def _running(self, size: Size) -> list[Job]:
         return [j for j in self.jobs.values() if j.size == size and j.state in ("running", "paused")]
 
-    def _memory_used(self) -> int:
-        return sum(j.mem_mb for j in self.jobs.values() if j.state in ("running", "paused"))
+    def _memory_used(self, person_only: bool = False) -> int:
+        return sum(
+            j.mem_mb for j in self.jobs.values() if j.state in ("running", "paused") and (not person_only or j.priority <= Priority.P1)
+        )
 
     def _abandon_check(self) -> None:
         now = time.time()
@@ -255,7 +257,9 @@ class Scheduler:
                     if j.priority >= Priority.P2 and self.person_active():
                         j.phase = "paused: a person is working"
                         continue
-                    if self._memory_used() + j.mem_mb > self.memory_budget_mb and self._running(size):
+                    # a person's job counts only the memory of other people's jobs: the warm set's jobs give way to it at their checkpoints
+                    used = self._memory_used(person_only=j.priority <= Priority.P1)
+                    if used + j.mem_mb > self.memory_budget_mb and self._running(size):
                         j.phase = "waiting for memory"
                         continue
                     free -= 1

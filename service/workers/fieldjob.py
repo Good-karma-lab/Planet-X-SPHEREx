@@ -111,6 +111,11 @@ async def run_field(
     def progress(text: str) -> None:
         ctx.phase(text)
 
+    def reading(k: int, n: int, mb: float) -> None:
+        ctx.phase(f"reading the exposures: {k} of {n}, {mb:.0f} MB downloaded", k, n)
+
+    ctx.phase("finding the exposures")
+
     b = await build_field(
         index,
         fr,
@@ -123,6 +128,7 @@ async def run_field(
         on_pass=on_pass,
         on_quick=on_quick,
         wavelengths=wavelengths,
+        reading=reading,
     )
     ctx.phase("comparing passes")
     if len(built) >= 2:
