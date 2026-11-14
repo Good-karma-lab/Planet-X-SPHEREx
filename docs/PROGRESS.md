@@ -5,7 +5,9 @@
 - **Phase 1 (the plan): accepted** by the supervisor (04b3f54); decisions on the open questions recorded (03dc702,
   `docs/plan/06-build-plan.md` 6.2). Q1 (cloud account and domain) is the user's and still open: until then M0–M3 and the parts of M4
   that need no VM are built.
-- **M0 Foundations: done.** **M1 Level-2 access: done** (V2 passed; V1 partly: see below). Next: **M2 Exposure index**.
+- **M0, M1: done.** **M2 Exposure index: built, full bootstrap running** (validation after it ends). **M3 Field engine: built and run on
+  real exposures (first pass of Barnard's Star 5′ and 20′); full validation V4–V12 waits for the index.** **M4: the parts that need no VM
+  are built** (scheduler, product store, field job, API, warm runner, deployment kit); the cloud gate waits for Q1.
 
 ## M0 — Foundations (done)
 
@@ -66,15 +68,56 @@ Validation (report `docs/validation/2026-11-14-m1-level2.md`):
 - **V1 partial:** the spline reproduces the table nodes (≤ 3e-15 µm); spline − bilinear lookup: median 0.0002–0.0006 µm, max 0.0008–
   0.0059 µm. The comparison with IRSA's own tool is not run (it needs that tool); open.
 
+## M2 — Exposure index (built; bootstrap running)
+
+Decision (reported to the supervisor): the index is bootstrapped from IRSA's TAP service, one query per day of the survey
+(`spherex.artifact` ⨝ `spherex.plane`: S3 path, size, MD5, detector, time span, 4-corner footprint), instead of crawling ~1.6 M headers
+(~9 h, ~50 GB). Files IRSA does not list yet are found by the bucket reconciliation; exact offsets, MJD-AVG and the spacecraft position
+come from each file's header when it is first used (cached).
+- `indexer/irsa.py` (TAP by day, EWKB polygons, path → S3 key), `indexer/store.py` (SQLite with an R*Tree over bounding boxes, exact
+  spherical overlap in numpy, RA 0/360 and poles), `indexer/build.py` (resumable `bootstrap`, `reconcile` against the bucket, `query`).
+- Archive (2026-11-14): `spherex.artifact` = 1,628,318 files = DR1 (945,725 + deep 233,681) + QR3 (362,124 + deep 86,700); DR1 covers MJD
+  60789.75–61174.49 and QR3 61174.51–61318.0 (no overlap, no gap); deep files are separate files in the same period folders.
+- Footprint margin: the real SIP edge bows at most 35″ outside IRSA's 4-corner polygon (24 random files, all detectors); the index adds
+  60″ to every overlap test.
+- Bootstrap rate from this Mac: ~5 s per day with 3 parallel queries (~48 min for the survey).
+- Tests: 10 (WKB, CSV parsing, overlap inside/at the edge/outside, RA 0, poles, time order, resumable days, box cover).
+
+## M3 — Field engine (built; validation pending)
+
+- `engine/`: `passes` (visits, passes 60/90 days, CDET), `grid` (north-up tangent plane, one orientation), `clean` (clipped median,
+  40 wavelength bins from 10′, masks; transient-type flags masked only farther than 6 px from a bright core), `stack` (bilinear splat,
+  σ 0.35/0.50 by count, online leave-one-out test), `visit_test` (≤ 12′), `halo`, `register` (iterative Gaussian-weighted centroids),
+  `colour` (`lam_rgb`, 3×6 matrix, white balance), `diff` (z calibrated on empty sky, Stouffer), `centroid` (Moffat from the wings), `field`
+  (map-reduce over (pass, detector): detector and band stacks, saturated share over CDET, flag census; quick subset).
+- `service/workers/native.py` (one exposure inside a field), `fieldbuild.py` (index → passes → per-detector groups → register on pass 0).
+- First real runs (Barnard's Star, pass of Aug–Sep 2025, from this Mac): 5′: 134 exposures, D1–D6, cosmic-ray pixels 29 (D6 18),
+  per-visit pixels 454, FWHM 9.0″, 5.4 s compute warm. 20′: 149 exposures, 31 s cold (24 s reading 241 MB), 6.9 s compute, peak RSS 1.1 GB,
+  FWHM 8.8″ (105 stars). Fixed on the way: a blue-grey ring around the saturated core (transient-type flags were masked at the core).
+- Engine tests: splat sharper than interpolate-then-average (5.9 vs 6.4 grid px), flux kept, spike rejected and star cores kept, a hit
+  shielded by a neighbouring hit still rejected, three synthetic passes give the injected motion within 0.25 px, z width 1 on noise,
+  registration recovers a shift, halo rule, saturated zones, Moffat centre from the wings.
+
+## M4 — Service core (parts without the VM built)
+
+- `service/products/` (SXP1 format; store with versioned keys and lineage, atomic parts, SQLite catalogue, purge of stale versions),
+  `service/jobs/scheduler.py` (P0–P3, pause at checkpoints while a person is active, attach by key, abandon and re-attach, cap on
+  abandoned jobs, light/heavy slots, memory admission), `service/workers/fieldjob.py` (parts per pass: picture, dets, bands, flags; diff;
+  meta), `service/app.py` (`/api/v1/health`, `/fields`, `/jobs/{id}`, `/fields/{key}/parts/{name}`; polling free; 60 new jobs per 10 min per
+  client), `service/warm.py` (warm set from `data/warm.json`), `deploy/` (provisioning, units, Tunnel, R2 snapshot/restore).
+- Tests: scheduler 6, products 3, SXP1 2, warm 3, a contract test of the whole field life cycle on synthetic files through a fake bucket.
+- Decision: job state is in memory, results are durable in the product store (a restart re-attaches to complete products or recomputes).
+- Not yet: the quick part, the cloud gate (needs the VM: Q1), measurements on 2 cores.
+
 ## Milestones
 
 | Milestone | State | Report |
 |---|---|---|
 | M0 Foundations | done | this file, 2026-11-14 |
 | M1 Level-2 access | done (V1 partly) | this file, 2026-11-14 |
-| M2 Exposure index | next | |
-| M3 Field engine | not started | |
-| M4 Service core, cloud gate | not started (deployment waits for Q1) | |
+| M2 Exposure index | built; bootstrap running | this file |
+| M3 Field engine | built; validation pending | this file |
+| M4 Service core, cloud gate | parts without VM built; gate waits for Q1 | this file |
 | M5 Lab picture | not started | |
 | M6 Globe | not started | |
 | M7 Sources, Object card, archive images | not started | |
