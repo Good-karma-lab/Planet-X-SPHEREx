@@ -140,12 +140,13 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         fields: str | None = Query(None, description="ra,dec,mjd;ra,dec,mjd;...  the field centre and the middle date of each pass (2-6)"),
         centre: str | None = Query(None, description="ra,dec,mjd of one place in one pass (the other centres follow from `passes`)"),
         passes: str | None = Query(None, description="mjd;mjd;...  the middle dates of the passes, with `centre`"),
-        fov: float = Query(18.0, gt=2, le=20),
+        fov: float = Query(18.0, gt=2, le=60),
         dmin: float = Query(60.0, ge=5, le=5000),
         dmax: float = Query(110.0, ge=5, le=5000),
         det: str = Query("123"),
         keep: float = Query(6.0, ge=4, le=12),
         nmax: int = Query(15, ge=4, le=60),
+        prior: str | None = Query(None, description="imin,imax,fmin,fmax: only prograde orbits like the predicted Planet Nine"),
         plan: int = Query(0, ge=0, le=1),
         bg: int = Query(0, ge=0, le=1, description="1: a background run (overnight scans): it gives way to every person's job"),
     ) -> Any:
@@ -175,7 +176,16 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             raise HTTPException(400, "fields: ra,dec,mjd;ra,dec,mjd;...   centre: ra,dec,mjd   passes: mjd;mjd;...") from e
         if len(fl) < 2:
             raise HTTPException(400, "fields: at least two passes (ra,dec,mjd;ra,dec,mjd;...), or centre and passes")
-        params = deepjob.deep_params(fl, fov, dmin, dmax, dets, keep, nmax)
+        pri: tuple[float, float, float, float] | None = None
+        if prior:
+            try:
+                a_, b_, c_, d_ = (float(x) for x in prior.split(","))
+            except ValueError as e:
+                raise HTTPException(400, "prior: imin,imax,fmin,fmax") from e
+            if not (0 <= a_ < b_ <= 90 and 0 < c_ < d_ <= 1):
+                raise HTTPException(400, "prior: 0 <= imin < imax <= 90, 0 < fmin < fmax <= 1")
+            pri = (a_, b_, c_, d_)
+        params = deepjob.deep_params(fl, fov, dmin, dmax, dets, keep, nmax, pri)
         if plan or guessed:
             return await deepjob.plan_async(st.index, params)
         sels = deepjob.selections(st.index, params)
