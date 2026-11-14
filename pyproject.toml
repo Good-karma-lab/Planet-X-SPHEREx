@@ -8,7 +8,7 @@ license = { text = "MIT" }
 dependencies = [
     "numpy>=2.1",
     "scipy>=1.14",
-    "astropy>=6.1",
+    "astropy>=8.0,<9",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "httpx>=0.27",
@@ -31,7 +31,7 @@ build-backend = "hatchling.build"
 packages = ["engine", "service", "indexer"]
 
 [tool.ruff]
-line-length = 120
+line-length = 140
 target-version = "py312"
 extend-exclude = ["web"]
 
