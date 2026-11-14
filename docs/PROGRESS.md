@@ -68,6 +68,11 @@ Merged and live: Candidates tab and the Planet X tab in the lab, every planet na
 from outside again (survey gain/black, the all-sky dust map, no self-motion: identical canvas once the tiles have arrived; 20:5x
 layout; Coverage and Searched zones toggles with filled footprints and a legend; per-survey palettes held) — 48f23e5; the guided
 tour ends when the visitor leaves its screen — 0aefbce.
+QA round 7: Planet X link shows its real range, explains why one pass cannot tell 250–2000 au apart and plans the deep sum at once —
+91b8744; time left that moves and says finishing — 9a13c75; 60′ fields ring the strongest 5 anomalies / 5 red sources — e21c315; the
+pass Find Planet X will search is named — 8a9fdfc; lab-ui's globe fixes (catalogue dots back, colour surveys from the order-3 Allsky,
+preload after the page's load; first picture in 0.8 s headless) and the phone legend — e3ed109. Open: WISE red scan stripes (lab-ui:
+in the Allsky data itself; QA to compare), WISE 0855 movers 0 against the brown-dwarf scan's 7.9″/yr (H1).
 
 Open, with owner (the app pauses this session's messages to the other sessions, so these are the hand-over notes):
 - sky-service: WISE 0855 5′ movers find no track (blend); WISE 0855 5′ Find Planet X has fewer than four usable visits per pass
