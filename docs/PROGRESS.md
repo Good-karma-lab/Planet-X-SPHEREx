@@ -10,9 +10,13 @@
 - **M3: validated on real fields** (report `docs/validation/2026-11-14-m3-field.md`): ε Indi B 4.58″/yr toward 122° (catalogue 4.68, 122°;
   rms 0.05″); Barnard's Star 10.08″/yr toward 355° (catalogue 10.39, 356°: 0.3″/yr low, outside the ±0.2 tolerance, open); FWHM 8.8″;
   registration residuals 0.14–0.26″; weight lattice 4.6–10.9 % in thin stacks (open). V1 closed against CWAVE.
-- **M4:** service core without the VM done; the VM (Oracle A1, Madrid) is being created by the supervisor.
-- **M5 (in progress):** Lab with pendulum, colour, walls of bands and detectors, Difference, Co-add; entry screen with the five targets
-  and the demo fields.
+- **M4: deployed.** https://spherex.space on an Oracle Cloud VM in Madrid (E5.Flex x86-64, 4 vCPU, 16 GB; an A1 aarch64 VM later),
+  Caddy with automatic HTTPS in front, `deploy/provision.sh` + `deploy/push.sh`; a cold Barnard 5′ field builds on the VM from the
+  bucket within 90 s; the warm runner fills the 28 fields of the test targets.
+- **M5 (in progress):** Lab with one control panel (Controls / Object / Spectrum): pendulum, colour with a white balance on star peaks,
+  walls of bands and detectors, Difference, Co-add, Sharpen (on), target marker (on), stretch and trim, video download, film of a pass.
+- **M6 (in progress):** Globe over DSS2 / 2MASS / AllWISE / IRIS tiles (service tile cache), exposure coverage layer, exposure count under
+  the aim, catalogue of 4,100 SIMBAD objects with the five test targets; Findings, Index, Method and About pages.
 
 ## M0 — Foundations (done)
 
@@ -112,7 +116,8 @@ come from each file's header when it is first used (cached).
   client), `service/warm.py` (warm set from `data/warm.json`), `deploy/` (provisioning, units, Tunnel, R2 snapshot/restore).
 - Tests: scheduler 6, products 3, SXP1 2, warm 3, a contract test of the whole field life cycle on synthetic files through a fake bucket.
 - Decision: job state is in memory, results are durable in the product store (a restart re-attaches to complete products or recomputes).
-- Not yet: the quick part, the cloud gate (needs the VM: Q1), measurements on 2 cores.
+- Deployed 2026-11-14: Madrid VM, Caddy (HTTPS), code by `deploy/push.sh`, index copied as a consistent snapshot.
+- Not yet: the quick part, measurements of the cloud gate on the VM.
 
 ## Milestones
 
@@ -122,9 +127,9 @@ come from each file's header when it is first used (cached).
 | M1 Level-2 access | done (V1 partly) | this file, 2026-11-14 |
 | M2 Exposure index | done | this file, `docs/validation/2026-11-14-m2-index.md` |
 | M3 Field engine | done except Barnard's motion (−0.3″/yr) and the thin-stack lattice | `docs/validation/2026-11-14-m3-field.md` |
-| M4 Service core, cloud gate | parts without VM built; gate waits for Q1 | this file |
+| M4 Service core, cloud gate | deployed at https://spherex.space (Madrid VM, Caddy) | `deploy/README.md` |
 | M5 Lab picture | in progress | this file |
-| M6 Globe | not started | |
+| M6 Globe | in progress | this file |
 | M7 Sources, Object card, archive images | not started | |
 | M8 Spectra | not started | |
 | M9 Search between passes, pairs, chance | not started | |
