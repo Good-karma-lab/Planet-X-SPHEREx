@@ -215,7 +215,12 @@ interface DwarfRow {
 interface DwarfView {
   state: string;
   error?: string;
-  result?: { candidates: DwarfRow[]; known: DwarfRow[]; red_sources?: number };
+  result?: {
+    candidates: DwarfRow[];
+    known: DwarfRow[];
+    red_sources?: number;
+    counts?: { red_sources: number; moving_red: number; candidates: number; known_brown_dwarfs: number; known_other: number };
+  };
 }
 interface MoversView {
   state: 'waiting' | 'running' | 'done' | 'failed';
@@ -2788,11 +2793,12 @@ export function Lab({ route }: { route: Route }) {
                     : dwarfs.state !== 'done'
                       ? 'checking the red sources that move against Gaia and SIMBAD…'
                       : (() => {
-                          const cs = dwarfs.result?.candidates ?? [];
-                          const knownBd = cs.filter((c) => (c.status ?? '').startsWith('known')).length;
-                          const fresh = cs.length - knownBd;
-                          const gaiaKnown = dwarfs.result?.known.length ?? 0;
-                          return `${cs.length} red source${cs.length === 1 ? '' : 's'} moving with no Gaia counterpart${cs.length ? ` (${knownBd ? `${knownBd} a known brown dwarf in SIMBAD` : ''}${knownBd && fresh ? ', ' : ''}${fresh ? `${fresh} not in SIMBAD` : ''})` : ''} · ${gaiaKnown} red mover${gaiaKnown === 1 ? '' : 's'} with a Gaia star`;
+                          // the service's own counts, so every view says the same: candidates are what the catalogues do not explain
+                          const c = dwarfs.result?.counts;
+                          const cand = c?.candidates ?? dwarfs.result?.candidates.length ?? 0;
+                          const knownBd = c?.known_brown_dwarfs ?? 0;
+                          const moving = c?.moving_red;
+                          return `${cand} candidate${cand === 1 ? '' : 's'} the catalogues do not explain · ${knownBd} known brown dwarf${knownBd === 1 ? '' : 's'} recovered${moving != null ? ` · ${moving} red source${moving === 1 ? '' : 's'} moving` : ''}`;
                         })()}
                 </div>
                 {[
@@ -2821,7 +2827,7 @@ export function Lab({ route }: { route: Route }) {
                       {c.pm != null ? ` · ${(c.pm / 1000).toFixed(1)}″/yr` : ''}
                       {c.colour != null ? ` · colour ${c.colour.toFixed(2)}` : ''}
                     </span>
-                    <span class="faint">{c.status ?? ''}</span>
+                    <span class="faint">{c.status ?? (known ? 'known' : 'candidate')}</span>
                   </button>
                 ))}
               </section>
@@ -2979,7 +2985,14 @@ export function Lab({ route }: { route: Route }) {
                   ['Movers', mv?.state === 'done' ? String(mvr?.tracks.length ?? 0) : null],
                   ['Pairs', mv?.state === 'done' ? String(pairs.length) : null],
                   ['Red', redv?.state === 'done' ? String(redv.result?.red.length ?? 0) : null],
-                  ['Brown dwarfs', dwarfs?.state === 'done' ? String(dwarfs.result?.candidates.length ?? 0) : dwarfs ? null : '–'],
+                  [
+                    'Brown dwarfs',
+                    dwarfs?.state === 'done'
+                      ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0}${dwarfs.result?.counts?.known_brown_dwarfs ? ` (+${dwarfs.result.counts.known_brown_dwarfs} known)` : ''}`
+                      : dwarfs
+                        ? null
+                        : '–',
+                  ],
                   [
                     'Anomalies',
                     an?.state === 'done'
