@@ -17,7 +17,7 @@ VERSIONS: dict[str, str] = {
     "distant": "d1",  # Find Planet X, one pass: distance search, candidates, photometry, slider arrays
     "deep": "m1",  # Find Planet X, the sum of passes along one orbit
     "link": "l1",  # Find Planet X, the link of passes by one orbit
-    "filmsearch": "t2",  # the unknown movers of a film: candidates, straight-line tracks, chance control
+    "filmsearch": "t3",  # the unknown movers of a film; t3: on-off verification and orbit linking
 }
 
 DEPENDS: dict[str, tuple[str, ...]] = {
