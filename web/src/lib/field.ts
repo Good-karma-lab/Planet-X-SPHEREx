@@ -1,6 +1,7 @@
 // The field client: ask for a field, follow its job, fetch each part once (docs/plan/05-architecture.md 5.5, 5.8).
 
 import { parseSxp, type SxpPart } from './sxp';
+import { plainPhase } from './plain';
 
 export interface PassMeta {
   index: number;
@@ -97,7 +98,7 @@ export class FieldClient {
   private async follow(job: JobView): Promise<void> {
     let view = job;
     while (!this.stopped) {
-      this.ev.onPhase(view.state === 'error' ? `failed: ${view.error}` : view.phase);
+      this.ev.onPhase(view.state === 'error' ? `failed: ${view.error}` : plainPhase(view.phase));
       this.ready = view.parts;
       await this.fetchParts(this.ready);
       if (view.state === 'done') {

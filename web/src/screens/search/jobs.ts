@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { plainPhase } from '../../lib/plain';
 
 /** A long job of the service, as every search route answers it: state (or status), the phase, progress, and the result when done. */
 export interface JobView {
@@ -70,7 +71,7 @@ export function progressText(j: JobView | null, t0: number, head = ''): { text: 
       : el >= 5
         ? ` · ${Math.round(el)} s so far`
         : '';
-  return { text: `${head}${j?.phase || 'working'}${j?.total ? ` · ${j.done ?? 0} of ${j.total}` : ''}${sofar}${left}`, frac };
+  return { text: `${head}${plainPhase(j?.phase) || 'working'}${j?.total ? ` · ${j.done ?? 0} of ${j.total}` : ''}${sofar}${left}`, frac };
 }
 
 /** Is a product of the service there at all? (/api/v1/health lists the products it makes; nothing is asked of a search route just to find out.) null while unknown. */
