@@ -18,7 +18,11 @@ followed by the best-S/N map and the negated one (uint8: S/N × 255/12).
 from __future__ import annotations
 
 import asyncio
+import itertools
 import math
+import shutil
+import tempfile
+import time
 from typing import Any
 
 import numpy as np
@@ -267,17 +271,11 @@ async def run_distant(
     p["dmin"] = float(dmin_used)
     ctx.phase("scanning distance and own motion")
 
-    def on_scan(done: float, total: float, secs: float) -> None:
-        ctx.phase(f"scanning distance and own motion: block {int(done)} of {int(total)} ({secs:.0f} s)", int(done), int(total))
-
     try:
-        R = await px.tracked(ctx, edist.search, DV, T, N, p["dmin"], p["dmax"], mu_scale=p["mu_scale"], workers=4, on_progress=on_scan)
+        R = await scan_blocks(ctx, DV, T, N, p["dmin"], p["dmax"], p["mu_scale"])
     except edist.TooManyHypotheses as e:
         res["notes"].append(f"about {e.args[0]} hypotheses (the limit is {edist.HMAX}): raise the nearest distance")
         return finish("too-many-hypotheses")
-    except RuntimeError:
-        await ctx.checkpoint()  # a cancelled scan ends the job as cancelled
-        raise
     await ctx.checkpoint()
     t0, R0 = float(R["tv"][R["i0"]]), R["Rv"][R["i0"]]
     res.update(
@@ -359,6 +357,38 @@ async def run_distant(
     store.write_part(KIND, key, "bin", blob)
     res["bin_url"] = f"/api/v1/distant/{key}/bin"
     return finish("ok")
+
+
+async def scan_blocks(
+    ctx: Context, DV: list[dict[str, Any]], T: edist.Tangent, N: int, dmin: float, dmax: float, mu_scale: float
+) -> dict[str, Any]:
+    """The distance scan: the hypotheses are cut into blocks and every block is a call to a worker process, so the blocks run side by
+    side on all the workers; the arrays are written once and read in place by every block. The progress and the time left follow the
+    blocks done."""
+    work = tempfile.mkdtemp(prefix="distant_")
+    try:
+        prep = await ctx.compute(edist.search_prepare, DV, T, N, dmin, dmax, work, edist.STEP, mu_scale)
+        cuts = prep["cuts"]
+        blocks = [(int(a), int(b)) for a, b in itertools.pairwise(cuts) if b > a]
+        t0 = time.monotonic()
+        parts: list[Any] = []
+
+        async def one(a: int, b: int) -> None:
+            parts.append(await ctx.compute(edist.search_block, work, a, b, prep["wsum"]))
+            secs = time.monotonic() - t0
+            left = secs / len(parts) * (len(blocks) - len(parts))
+            ctx.phase(
+                f"scanning distance and own motion: block {len(parts)} of {len(blocks)} ({secs:.0f} s, about {left:.0f} s left)",
+                len(parts),
+                len(blocks),
+            )
+
+        await asyncio.gather(*(one(a, b) for a, b in blocks))
+        await ctx.checkpoint()
+        merged: dict[str, Any] = edist.search_merge(prep, parts, time.monotonic() - t0)
+        return merged
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
 
 
 def scan_candidates(
