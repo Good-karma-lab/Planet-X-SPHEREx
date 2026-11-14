@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import json
+import logging
 import math
 import os
 import shutil
@@ -163,6 +164,17 @@ def cap_exposures_by_visits(
     return [exps[i] for i in keep], pno[keep], note
 
 
+log = logging.getLogger("sky.planetx")
+READ_TRIES = 3
+READ_RETRY_S = 1.5
+
+
+def skipped_note(failed: int, total: int, label: str = "") -> str:
+    """The one line that says how many exposures could not be used (unreadable after retries, or without the telescope's place in the
+    header) and were left out."""
+    return f"{label}{failed} of {total} exposures could not be used and were left out"
+
+
 class _FileCancel:
     """The cancel flag of a job as seen from a worker process: a file the job creates."""
 
@@ -277,15 +289,24 @@ async def build_visits(
         async def one(i: int) -> None:
             nonlocal done, failed
             async with sem:
-                try:
-                    ne = await read_native(fr, exps[i].key, grid, vi, keep_outlier=True, wavelengths=wl)
-                    sc = await spacecraft_of(fr, exps[i].key)
-                except Exception:  # an unreadable exposure is counted, never hidden
-                    ne, sc = None, None
+                ne, sc = None, None
+                for attempt in range(READ_TRIES):  # a read that failed is tried again: the archive and the network hiccup
+                    try:
+                        ne = await read_native(fr, exps[i].key, grid, vi, keep_outlier=True, wavelengths=wl)
+                        sc = await spacecraft_of(fr, exps[i].key)
+                        break
+                    except Exception as e:  # an unreadable exposure is counted, never hidden
+                        ne, sc = None, None
+                        log.warning(
+                            "exposure %s not read (try %d of %d): %s: %s", exps[i].key, attempt + 1, READ_TRIES, type(e).__name__, e
+                        )
+                        await asyncio.sleep(READ_RETRY_S * (attempt + 1))
             done += 1
             ctx.phase(f"{label}: reading the exposures, {done} of {total}", done, total)
-            if ne is None or not ne.val.size or sc is None:
+            if ne is None or sc is None:
                 failed += 1
+                return
+            if not ne.val.size:  # the exposure read fine and has no pixel in this field (the index overlaps by a circle): not a failure
                 return
             natives.append(ne)
             scs.append(sc)

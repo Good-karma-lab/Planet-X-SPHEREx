@@ -24,6 +24,7 @@ from typing import Any
 JOB: ContextVar[Any] = ContextVar("sky_job", default=None)
 
 _pool: Executor | None = None
+_workers = 1
 _gate: _Gate | None = None
 
 
@@ -61,9 +62,15 @@ class _Gate:
 
 
 def configure(pool: Executor | None, workers: int) -> None:
-    global _pool, _gate
+    global _pool, _gate, _workers
     _pool = pool
+    _workers = max(1, workers)
     _gate = _Gate(workers + 2) if pool is not None else None
+
+
+def workers() -> int:
+    """How many worker processes the pool has (1 without a pool)."""
+    return _workers if _pool is not None else 1
 
 
 def priority() -> int:

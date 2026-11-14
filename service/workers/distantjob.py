@@ -246,7 +246,7 @@ async def run_distant(
     res["grid"] = {"ra0": p["ra"], "dec0": p["dec"], "n": N, "step": edist.S}
     pv = await px.build_visits(ctx, fr, wl, exps, pno, grid, "Find Planet X")
     if pv.failed:
-        res["notes"].append(f"{pv.failed} exposures were not read")
+        res["notes"].append(px.skipped_note(pv.failed, len(exps)))
     ctx.phase("static sky and differences")
     DV, notes = await ctx.compute(edist.static_and_differences, pv.vis, pk)
     res["notes"] += notes
@@ -367,11 +367,13 @@ async def scan_blocks(
     blocks done."""
     work = tempfile.mkdtemp(prefix="distant_")
     try:
-        prep = await ctx.compute(edist.search_prepare, DV, T, N, dmin, dmax, work, edist.STEP, mu_scale)
+        prep = await ctx.compute(edist.search_prepare, DV, T, N, dmin, dmax, work, edist.STEP, mu_scale, edist.HMAX, cpu.workers())
         cuts = prep["cuts"]
         blocks = [(int(a), int(b)) for a, b in itertools.pairwise(cuts) if b > a]
         t0 = time.monotonic()
         parts: list[Any] = []
+        left0 = prep["est_s"] / max(1, min(cpu.workers(), len(blocks)))
+        ctx.phase(f"scanning distance and own motion: {len(blocks)} blocks, about {left0:.0f} s", 0, len(blocks))
 
         async def one(a: int, b: int) -> None:
             parts.append(await ctx.compute(edist.search_block, work, a, b, prep["wsum"]))
