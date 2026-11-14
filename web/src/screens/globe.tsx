@@ -548,7 +548,7 @@ export function Globe() {
       const now = performance.now();
       if (anim) {
         const t = Math.min(1, (now - anim.t0) / anim.dur);
-        const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+        const e = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2; // cubic ease-in-out
         view.current.ra = (((anim.ra0 + anim.dra * e) % 360) + 360) % 360;
         view.current.dec = anim.de0 + anim.dde * e;
         // the scale follows a curve in log zoom through zm: out while the globe turns far, in at the end
@@ -630,7 +630,7 @@ export function Globe() {
       const lzm = zm < Math.min(z0, z1) ? 2 * Math.log(zm) - (lz0 + lz1) / 2 : (lz0 + lz1) / 2;
       anim = {
         t0: performance.now(),
-        dur: th > 0.3 || Math.abs(lz1 - lz0) > 3 ? 1400 : 900,
+        dur: 1600,
         ra0: view.current.ra,
         dra: ((ra - view.current.ra + 540) % 360) - 180,
         de0: view.current.dec,
