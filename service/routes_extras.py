@@ -11,6 +11,7 @@ import os
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -18,7 +19,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from engine.extras import ades, allwise, cadc_ref, spherex_orbit
+from engine.extras import ades, allwise, cadc_ref, gaia_readiness, spherex_orbit
 from engine.extras.cloudcat import Reader, separation_arcsec
 from engine.extras.cube import PIXEL_SR, CubeSource, RangeReader
 from service.reader.s3 import S3, ReadError
@@ -245,6 +246,12 @@ def build_router(extras: Extras) -> APIRouter:
     ) -> Any:
         """Catalogue sources at a place from cloud Parquet (AllWISE + 2MASS magnitudes, Gaia DR3): no TAP service in the path."""
         return await extras.xmatch(ra, dec, pmra, pmdec, radius, cats)
+
+    @router.get(f"{API_PREFIX}/gaia/readiness")
+    async def gaia_ready() -> Any:
+        """Is Gaia DR4 (planned 2026-12-02) in the ESA archive with the columns the service uses, and what to set to switch to it."""
+        today = datetime.now(UTC).date().isoformat()
+        return await gaia_readiness.probe(extras.cadc(), today)
 
     @router.get(f"{API_PREFIX}/reference/deep")
     async def reference_deep(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90)) -> Any:
