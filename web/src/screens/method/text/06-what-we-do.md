@@ -28,6 +28,10 @@ Things in the sky move at very different speeds, and one picture cannot show all
 - **Spectra** with their checks, brown dwarf candidates, red sources and the anomaly map.
 - **Context:** the globe with the coverage of the survey, archive images from 1985 to 2010 on the timeline, and the NEOWISE and ZTF light curves of a source.
 
+## Why our own stacking and fit
+
+We stack and fit with our own code (Astropy, NumPy and SciPy) because standard tools do not fit this data: our stacking keeps detail when a pixel is as large as the star, and our fit reads the detector's own PSF zones and keeps the OUTLIER pixels that mark asteroids.
+
 ## Leads, not discoveries
 
 A track or a candidate is drawn only when a search found it, and it carries its evidence: the frames, the numbers, the check against catalogues and the chance level. Where a search cannot reach a body, the page says how deep the search goes. The sections on validation and limits at the end of this page give the measured numbers and what we do not claim.

@@ -72,6 +72,8 @@ The portrait is the object's own image, coloured by its spectrum: a cutout 60″
 
 ## Spectrum of a moving body
 
+A spectrum at fixed coordinates of an object that moves by about a pixel per year simply disappears; along its track it stays, so we put the stamp where the object was in each exposure. A spectrum then separates three cases: a star (a smooth decline), a cold dwarf (methane and water bands and a rise toward 4 to 5 µm) and an asteroid (reflected sunlight, with a thermal rise beyond 3.5 µm).
+
 An asteroid or a distant body sits on a different star field in every exposure, so a plain PSF flux would carry the stars behind it. We measure it as on minus off.
 
 ```

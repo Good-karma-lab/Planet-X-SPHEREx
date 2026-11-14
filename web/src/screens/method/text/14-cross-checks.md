@@ -2,6 +2,10 @@
 
 We never trust a result of our own alone. Every track is compared with Gaia DR3, every asteroid with JPL's predictions, every spectrum with 2MASS and WISE, and a lead can be followed in other surveys' light curves, missions and archival images. This part describes each of those cross-checks and the files we give out, with the data source of each. The agreement we obtain is in Validation and dated measurements.
 
+## The globe
+
+The globe is the entrance to the survey. Its backgrounds are the dust map, DSS2, 2MASS, WISE and the SPHEREx cube; its coverage layer counts exposures in HEALPix cells of order 3 (768 cells, each about 7.3° across) and puts an exposure in the cell of its centre. A cell is teal where DR1 exposures exist and blue where only QR3 ones do, with opacity on a log scale of the count.
+
 ## Gaia DR3 and the release switch
 
 Gaia DR3 is the reference for every motion we measure: a track between passes is checked against Gaia stars moved to each pass date, an identification asks Gaia for the nearest star, and the cross-match returns its sources.

@@ -70,6 +70,8 @@ Surveys of other epochs are searched where the star was then. We ask Gaia first 
 
 ### Distance
 
+Gaia's parallax errors are of order 0.1 mas or smaller for the stars that matter here, so a parallax of 3 mas or more is a measurement better than 20σ; we apply no zero-point correction ([Gaia DR3](https://www.cosmos.esa.int/web/gaia/dr3)).
+
 The Object card shows a distance only from a clean Gaia DR3 parallax: RUWE ≤ 1.4 and parallax ≥ 3 mas. The distance is 1000/parallax parsecs, also given in light-years. Without a clean parallax no distance is shown.
 
 ## Brown dwarf candidates

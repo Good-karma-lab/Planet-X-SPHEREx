@@ -31,7 +31,7 @@ Source: Crill et al. 2020 ([arXiv:2404.11017](https://arxiv.org/abs/2404.11017))
 
 ## Passes and visits
 
-The telescope observes a patch for a few exposures in a row (a visit of up to four exposures, about ten minutes), then slews by about 60 degrees to another patch. A place on the sky is covered by many such visits spread over a few days, and a few days of coverage is a pass. A pass repeats about every six months because the Sun and the Earth move around the sky. Inside one pass a place is seen in all six bands; between two passes it is seen from the other side of the Earth's orbit.
+The telescope observes a patch for a few exposures in a row (a visit of up to four exposures, about ten minutes), then slews by about 60 degrees to another patch. A place on the sky is covered by many such visits spread over days to weeks, and the coverage of one stretch of weeks is a pass (a pass of one field lasts from about ten days to about two months). A pass repeats about every six months because the Sun and the Earth move around the sky. Inside one pass a place is seen in all six bands; between two passes it is seen from the other side of the Earth's orbit.
 
 This is the clock of everything we do. Stars with large proper motions shift between passes, which are months apart. Asteroids shift between visits, which are hours to days apart. Bodies in the outer solar system show a large parallax jump between passes.
 

@@ -29,7 +29,7 @@ Every file is a FITS file with several extensions. The files we read (DR1 and QR
 | EPSF | the PSF of the detector | binary table of zones, 3.9 MB |
 | WCS-WAVE | wavelength lookup table | small binary table at the end |
 
-Three float32 planes of 2040 × 2040 are 16.6 MB each. Together with FLAGS and the PSF a file is about 60 MB.
+Three float32 planes of 2040 × 2040 are 16.6 MB each. Together with FLAGS and the PSF a file is about 70 MB.
 
 Header keywords we use: `MJD-AVG` (time of the exposure), `DETECTOR`, the celestial WCS (tangent projection with SIP distortion; its alternate descriptions are dropped before parsing), the wavelength WCS, `X_SC`, `Y_SC`, `Z_SC` (spacecraft position, km, geocentric), the flag-bit table (`MSKN` and `MSKM` cards) and, for the PSF, the zone-centre columns `XCENTER` and `YCENTER`.
 
@@ -114,7 +114,7 @@ The PSF is needed to fit fluxes of point sources. In DR1 and QR3 files it is the
 
 - The PSF data of two files of one detector and release are byte-identical, even months apart and reduced by different pipeline versions. We therefore read a PSF once per detector, file layout and PSF data size, keep it in memory and on disk, and share it among all files of that family.
 - IRSA documents an error in the PSF cubes of the first two quick releases (planes stored in another order than the header says, up to ±5 % in photometry; see the [IRSA note](https://irsa.ipac.caltech.edu/data/SPHEREx/docs/psfhdrerr.html)). We avoid it by reading DR1 and QR3 only.
-- The tables end at about 2.5–3 pixels from the centre, where real stars are 3–4 times brighter than the table at 3–3.5 pixels. We therefore never fit a flux to the wings of a saturated star.
+- The tables are cut close to the star, so we never fit a flux to the wings of a saturated star.
 
 **Result:** the PSF data were byte-identical in 18 of 18 checks (D1–D6 in QR2, QR3 and DR1, first against last period of each), and QR3 and DR1 share the same EPSF for every detector (Source: docs/validation/2026-11-14-m1-level2.md).
 

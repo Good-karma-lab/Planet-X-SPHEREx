@@ -30,7 +30,6 @@ The idea carries over directly. A blink needs two things: a stable background an
 
 - **Years.** For each pass we make one clean picture of the sky and blink the passes in the order 1, 2, 3, 2. A star with proper motion swings back and forth while everything else stands still. Barnard's Star moves by about 10 arcseconds a year.
 - **Days.** Within a pass we make one picture per visit and blink the visits. An asteroid hops from visit to visit.
-- **Hours.** Within a visit each exposure is a frame, which catches the fastest movers.
 
 [figure: blink-pluto | The blink idea on our own plates: the same patch in 1950, 1991 and 2026, one star moving]
 

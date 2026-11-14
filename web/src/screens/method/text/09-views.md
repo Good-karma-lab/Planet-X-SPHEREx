@@ -18,6 +18,8 @@ lo = −0.05,  hi = 400,  soft = 0.4                          the defaults; samp
 
 ## Spectral colour
 
+Hot stars come out white-blue and cold dwarfs orange-red because they emit mostly at 4 to 5 µm. After a jump from one pass to the next the eye matches an object by its colour, so a cold object stands out before it has moved.
+
 Each SPHEREx exposure sees one wavelength, so a colour picture has to be built from the six detectors. We give every wavelength its rainbow colour (0.75 µm violet to 5 µm red) and mix the six detector stacks into red, green and blue with a fixed 3 × 6 matrix. A flat spectrum comes out grey, a red dwarf orange-red.
 
 ```
@@ -93,6 +95,8 @@ The wall of detectors has six panels, labelled in words and microns ("very near 
 
 ## Difference between passes
 
+The noise of the model, one over the square root of the summed weights, is wrong on real stacks: smoothing makes neighbouring pixels dependent, thin passes are noisier than their weights say, and the weights vary across the field. We therefore measure the width k of (D − S)/σ on source-free pixels and divide by it. For Gaussian noise about one pixel in 16,000 exceeds |z| = 4; real noise is not Gaussian, so an isolated coloured pixel is not a detection.
+
 Difference is the blink comparator done by arithmetic. For every pixel we ask how significant the change is between a pass b and the first pass a, and we draw only what is both significant and large against the light that is there.
 
 ```
@@ -117,6 +121,8 @@ A star with a different colour is not by itself a variable, because passes sampl
 The Artifacts switch paints red where the instrument pipeline flagged a pixel, so a streak or a persistence ghost is recognised before it is mistaken for motion. While a field is built we count, per pixel, the share of the exposures (inside their footprints) carrying each flag; flags that reach 2 % of the exposures somewhere in the field are kept. The red opacity is the largest share among the kept flags, zero up to a share of 25 % and full at 75 %. SOURCE (a real source) and OVERFLOW (saturation, drawn white) never redden. The mask is drawn on the picture and in Days, for the pass or visit shown.
 
 ### Speed rings
+
+A body at 500 au swings about 14′ over half a year, so a search for bodies beyond Neptune needs a field of at least 15′.
 
 Speed rings answer "which field size do I need": a small field shows what is slow, a large one catches what is fast. Rings of 1, 3, 10, 30, 100 and 300 ″/yr have the radius
 
@@ -165,6 +171,8 @@ mask:    static > 5 robust sigma above its median, grown by 1 grid point;
 The static background is what a blink comparator keeps still, so the film can drop it altogether. Motion only (Days scale) draws the motion map instead of the sky: dark, with amber only where the change connects, above 3σ, to a place a search found on that visit or where JPL predicts a known body that the visit shows; the amber is full from 8σ. Elsewhere the map stays dark, because the raw map's specks and a bright star's halo are not motion. Known bodies are ringed where JPL predicts them and solid when the motion map shows them there.
 
 ## Archive images
+
+A year of SPHEREx moves Barnard's Star by about 10 arcseconds, while the archives give decades: at 10.4 arcseconds a year it has moved about 13 arcminutes in 76 years. We check a candidate by extending its motion backward and looking at whether it sits where the old images show it.
 
 Archive images put decades between the looks. They show the same field in older all-sky surveys, on the same grid orientation (north up, east left), blinked before the SPHEREx passes and labelled with survey, band and years, never presented as SPHEREx.
 

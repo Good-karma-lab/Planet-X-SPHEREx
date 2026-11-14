@@ -1,6 +1,6 @@
 # Bodies beyond Neptune
 
-A body far beyond Neptune is too faint and too slow to show in any single SPHEREx exposure, so we add the exposures along the path such a body would take across the sky: at the right distance its light piles up in one point, at any other distance it smears out. We do this for every distance and every slow motion a bound body can have, in one pass of a field and in all passes together, and we link the finds of different passes into one orbit. Eris, at 95.5 au, comes out of three passes this way with no prior about its distance or motion, and no Planet Nine candidate has been confirmed.
+A body far beyond Neptune is too faint and too slow to show in any single SPHEREx exposure, so we add the exposures along the path such a body would take across the sky: at the right distance its light piles up in one point, at any other distance it smears out. We do this for every distance and every slow motion a bound body can have, in one pass of a field and in all passes together, and we link the finds of different passes into one orbit. We make no claim of a Planet Nine.
 
 ## The idea in plain words
 
@@ -11,6 +11,8 @@ That is the distance slider of the Find Planet X page: it shows the sum for the 
 One pass lasts a few weeks, so the parallax inside it is small and the distance comes out as a wide interval. Half a year later the telescope sees the same place from the other side of the Earth's orbit, and the body has jumped. Adding all the passes along one orbit makes the search deeper, and linking the tracks of the passes into one orbit fixes the distance.
 
 ## Products shared by every search
+
+A pixel is larger than a star image, so a bright star never subtracts cleanly: its residual is the same in every visit and would add up along a track, which is why we mask places where the static sky is bright. The static sky is a mean over the other passes because that is less noisy than one pass's median, and each visit difference is clipped at five sigma so that one visit cannot decide a detection.
 
 The one-pass search, the deep sum and the browser's distance slider all start from the same products, made once per field and pass. The detectors are D1 to D3 (0.75 to 2.4 µm, reflected light) by default; the Find Planet X page can also ask for D4 (2.4 to 3.8 µm) alone or for D1 to D4.
 
@@ -50,6 +52,8 @@ The grid is uniform in 1/d and in mu, so that two neighbouring hypotheses differ
 
 ### The sum and the noise ceiling
 
+We divide the sum by its own spread because the static-sky noise is shared between visits, so the formal error is too low. The threshold is 1.05 times the noise ceiling because the noise is not Gaussian. The reach of a blind search is set by that ceiling, the price of scanning thousands of tracks instead of one.
+
 ```
 sum(x) = Σ w · difference(x + offset) / sqrt(Σ w),     w = 1 / sigma²   (sigma of each visit's difference)
 ```
@@ -81,6 +85,8 @@ The browser receives the visit differences (one byte per pixel: 128 plus 25 time
 [figure: slider-eris | The sum of one pass of Eris's field at three distances: smeared, in focus at the body's distance, smeared again]
 
 ## The deep sum of all passes
+
+The highest peaks of the sum are leftovers of the static sky in one pass, lifted by the noise of the other passes: among millions of orbits the other passes always offer a positive fluctuation. Photometry on the exposures themselves tells them apart, which is why the deep sum has a second stage.
 
 One pass has a noise ceiling. A body below the ceiling of every pass can still rise above the ceiling of the sum of all passes, if the visits of every pass are added along ONE heliocentric orbit. This is the deepest search and the slowest job.
 
@@ -133,8 +139,9 @@ so each place on the sky has a fixed direction of own motion for each inclinatio
 
 ## What it can and cannot say
 
+- A run on a known body is called blind when the field was centred on it: the search knew the area but not the place inside it, the distance or the motion.
 - A blind search reaches a limited depth. A body fainter than that is not found, and a search that finds nothing does not show that nothing is there. The depth on a field is the measured noise limit of its deep sum: the noise ceiling and the bar of that run, printed with every result.
-- A candidate is a lead, not a discovery. Before it counts it needs the link of two or three passes, a check against the known bodies (JPL) and, for a body seen in D4, a check of the archive images of NEOWISE.
+- A candidate is a lead, not a discovery. Before it counts it needs the link of two or three passes, a check against the known bodies (JPL).
 - One pass cannot tell distances apart well: the result is an interval, and at several hundred au the parallax inside a pass is small. The jump between passes and the link are what turn the interval into a distance.
 - The deep sum takes the speed along the line of sight as zero; the link of passes fits it as a free number.
 - The fields searched are small patches of sky. What SPHEREx gives any candidate found elsewhere is its place in three or more passes, its distance from the jump and a 102-channel spectrum.
