@@ -244,6 +244,14 @@ function speedErr(t: Track): number {
   return ss > 0 ? t.rms_arcsec / Math.sqrt(ss) : 0;
 }
 
+/** The Gaia check said honestly: "Gaia ✓ 10.4" when the measured rate agrees within 2σ, else the tension in σ. */
+function gaiaWord(t: Track): string {
+  if (t.check !== 'same' || !t.gaia) return CHECK_SHORT[t.check] ?? t.check;
+  const e = Math.max(speedErr(t), 0.05);
+  const z = Math.abs(t.speed - t.gaia.pm) / e;
+  return z <= 2 ? `Gaia ✓ ${t.gaia.pm.toFixed(1)}` : `Gaia ${t.gaia.pm.toFixed(1)}″/yr: ${z.toFixed(1)}σ apart`;
+}
+
 /** A track's speed as shown everywhere: the measured rate with its uncertainty. */
 function rateText(t: Track): string {
   const e = speedErr(t);
@@ -307,7 +315,7 @@ function MoversRows({
           <span>
             {rateText(t)} toward {t.pa.toFixed(0)}° · {t.passes.length} passes{t.saturated ? ' · saturated core' : ''}
           </span>
-          <span class="faint">{CHECK_WORD[t.check] ?? t.check}</span>
+          <span class="faint">{t.check === 'same' && gaiaWord(t).includes('apart') ? gaiaWord(t) : (CHECK_WORD[t.check] ?? t.check)}</span>
         </button>
       ))}
     </>
@@ -324,13 +332,16 @@ export function Lab({ route }: { route: Route }) {
   const time: Time = (['loop', 'diff', 'sum'] as const).find((v) => v === p['time']) ?? 'loop';
   const film = p['film'] ? Number(p['film']) : null;
   const allBands = BANDS.map((b) => b.key);
-  const bands = p['bands'] ? p['bands'].split(',').filter((k) => allBands.includes(k)) : allBands;
-  const dets = p['dets']
-    ? p['dets']
-        .split(',')
-        .map(Number)
-        .filter((d) => d >= 1 && d <= 6)
-    : [1, 2, 3, 4, 5, 6];
+  const bands = p['bands'] === 'none' ? [] : p['bands'] ? p['bands'].split(',').filter((k) => allBands.includes(k)) : allBands;
+  const dets =
+    p['dets'] === 'none'
+      ? []
+      : p['dets']
+        ? p['dets']
+            .split(',')
+            .map(Number)
+            .filter((d) => d >= 1 && d <= 6)
+        : [1, 2, 3, 4, 5, 6];
   const opts: Opts = {
     reference: p['ref'] === '1',
     archive: p['arch'] === '1',
@@ -454,7 +465,7 @@ export function Lab({ route }: { route: Route }) {
   const artMap = useRef(new Map<number, HTMLCanvasElement>());
   const motionCache = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
   const artRef = useRef<HTMLCanvasElement | null>(null);
-  const [stage, setStage] = useState({ w: 400, h: 400 });
+  const [, setStage] = useState({ w: 400, h: 400 });
   const stageRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState('');
   const ft = useFilmTracks(filmData?.key ?? null);
@@ -999,7 +1010,7 @@ export function Lab({ route }: { route: Route }) {
           const yrs = year - 2025.9;
           const decN = t.dec_2025_9 + (t.v_north * yrs) / 3600;
           const raN = t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((decN * Math.PI) / 180);
-          const line = `${rateText(t)} · ${CHECK_SHORT[t.check] ?? t.check}${t.saturated ? ' · saturated core' : ''}`;
+          const line = `${rateText(t)} · ${gaiaWord(t)}${t.saturated ? ' · saturated core' : ''}`;
           const same = marks.find(
             (k) => k.kind === 'target' && Math.hypot((k.ra - raN) * Math.cos((decN * Math.PI) / 180), k.dec - decN) * 3600 < 12,
           );
@@ -1175,8 +1186,21 @@ export function Lab({ route }: { route: Route }) {
         ctx.setLineDash([]);
       };
       const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
-        const lines = [mk.name, ...mk.lines].filter(Boolean);
+        let lines = [mk.name, ...mk.lines].filter(Boolean);
         if (!lines.length) return;
+        // a narrow picture: at most two lines, each cut to fit
+        if (box.w < 520) {
+          lines = lines.slice(0, 2);
+          const maxW = box.w * 0.55;
+          lines = lines.map((l, i) => {
+            ctx.font = i
+              ? '500 10.5px ui-monospace, Menlo, monospace'
+              : '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+            let t = l;
+            while (t.length > 4 && ctx.measureText(t).width > maxW) t = t.slice(0, -2);
+            return t === l ? l : `${t.trimEnd()}…`;
+          });
+        }
         const tw = Math.max(
           ...lines.map((l, i) => {
             ctx.font = i
@@ -1861,13 +1885,13 @@ export function Lab({ route }: { route: Route }) {
   const toggleBand = (key: string) => {
     const next = bands.includes(key) ? bands.filter((k) => k !== key) : [...bands, key];
     set({
-      bands: next.length === BANDS.length ? null : next.length ? next.join(',') : BANDS[0]!.key,
+      bands: next.length === BANDS.length ? null : next.length ? next.join(',') : 'none',
     });
   };
   const toggleDet = (d: number) => {
     const next = dets.includes(d) ? dets.filter((x) => x !== d) : [...dets, d];
     set({
-      dets: next.length === 6 ? null : next.length ? next.sort().join(',') : '1',
+      dets: next.length === 6 ? null : next.length ? next.sort().join(',') : 'none',
     });
   };
   const passes = meta?.passes ?? [];
@@ -2028,8 +2052,8 @@ export function Lab({ route }: { route: Route }) {
             <div
               class="vsq"
               style={{
-                width: `${wallView ? stage.w : side}px`,
-                height: `${wallView ? stage.h : side}px`,
+                width: `${side}px`, // one square in every view: the frame never moves or grows
+                height: `${side}px`,
                 cursor: 'crosshair',
               }}
               onClick={(e) => {
@@ -2206,7 +2230,7 @@ export function Lab({ route }: { route: Route }) {
                 </button>
                 <button
                   class="mini"
-                  onClick={() => set(view === 'det' ? { dets: '1' } : { bands: BANDS[0]!.key })}
+                  onClick={() => set(view === 'det' ? { dets: 'none' } : { bands: 'none' })}
                   title={view === 'det' ? 'Only D1' : 'Only Starlight'}
                 >
                   NONE

@@ -2298,3 +2298,16 @@ input[type='range']::-moz-range-thumb {
     text-overflow: clip;
   }
 }
+
+/* the lab on a phone: nothing runs off the screen, the object's name stays */
+@media (max-width: 760px) {
+  .vsq .ftitle { max-width: calc(100% - 110px); }
+  .vsq .ftitle span { display: none; }
+  .vsq .fbands { flex-wrap: wrap; max-width: calc(100% - 12px); bottom: 6px; }
+  .vsq .fbands .bchip b { max-width: 48px; overflow: hidden; text-overflow: ellipsis; }
+  .vsq .fbands .bchip .dot { display: none; }
+  .vsq .fstatus { bottom: 70px; font-size: 10.5px; }
+  .tbar { height: auto; flex-wrap: wrap; row-gap: 6px; padding: 6px; }
+  .tbar .tl-mid { order: 9; flex-basis: 100%; }
+  .tbar .seg.scale button { padding: 3px 6px; font-size: 11px; }
+}
