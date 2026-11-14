@@ -35,6 +35,9 @@ export function render(md: string, prefix: string): Rendered {
   const out: string[] = [];
   const headings: Heading[] = [];
   let i = 0;
+  let figures = 0;
+  let sawLead = false;
+  let sawSection = false;
   const isTable = (l: string) => l.trim().startsWith('|');
   while (i < lines.length) {
     const l = lines[i]!;
@@ -54,6 +57,7 @@ export function render(md: string, prefix: string): Rendered {
     if (h) {
       const level = h[1]!.length;
       const id = `${prefix}-${slug(h[2]!)}`;
+      if (level >= 2) sawSection = true;
       headings.push({ id, title: h[2]!, level });
       out.push(`<h${level + 1} id="${id}">${inline(h[2]!)}</h${level + 1}>`);
       i++;
@@ -89,9 +93,25 @@ export function render(md: string, prefix: string): Rendered {
       out.push(`<${ordered ? 'ol' : 'ul'}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`);
       continue;
     }
+    const fig = /^\[figure:\s*([a-z0-9-]+)\s*(?:\|\s*(.*?))?\s*\]\s*$/.exec(l.trim());
+    if (fig) {
+      figures++;
+      out.push(
+        `<figure class="mf-fig" data-fig="${fig[1]}" id="${prefix}-fig-${figures}"><div class="mf-figslot" data-fig="${fig[1]}"></div>${fig[2] ? `<figcaption>${inline(fig[2])}</figcaption>` : ''}</figure>`,
+      );
+      i++;
+      continue;
+    }
     const buf: string[] = [];
-    while (i < lines.length && lines[i]!.trim() && !isTable(lines[i]!) && !/^(#{1,4} |```)/.test(lines[i]!) && !/^([-*]|\d+\.) /.test(lines[i]!)) buf.push(lines[i++]!.trim());
-    out.push(`<p>${inline(buf.join(' '))}</p>`);
+    while (i < lines.length && lines[i]!.trim() && !isTable(lines[i]!) && !/^(#{1,4} |```)/.test(lines[i]!) && !/^([-*]|\d+\.) /.test(lines[i]!) && !/^\[figure:/.test(lines[i]!.trim())) buf.push(lines[i++]!.trim());
+    const text = buf.join(' ');
+    const res = /^(?:\*\*Result:\*\*|Result:)\s*(.*)$/.exec(text);
+    if (res) out.push(`<p class="mf-result"><span class="mf-result-k">Result</span> ${inline(res[1]!)}</p>`);
+    else if (!sawSection && !sawLead) {
+      // the first paragraph after the part's title, before any section, is its lead
+      sawLead = true;
+      out.push(`<p class="mf-lead">${inline(text)}</p>`);
+    } else out.push(`<p>${inline(text)}</p>`);
   }
   return { html: out.join('\n'), headings };
 }

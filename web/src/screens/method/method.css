@@ -26,3 +26,10 @@
   .mf-cols { grid-template-columns: minmax(0, 1fr); }
   .mf-toc { position: static; max-height: none; }
 }
+
+.mf-prose .mf-lead { font-size: 15.5px; line-height: 1.6; color: var(--ink); margin: 0 0 18px; }
+.mf-prose .mf-result { margin: 4px 0 14px; padding: 9px 12px; border-left: 3px solid var(--accent-l); background: rgba(3, 9, 13, 0.45); border-radius: 0 6px 6px 0; color: var(--ink); }
+.mf-prose .mf-result-k { font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-l); margin-right: 8px; }
+.mf-prose .mf-fig { margin: 4px 0 16px; }
+.mf-prose .mf-figslot { min-height: 0; }
+.mf-prose .mf-fig figcaption { font: 500 11.5px var(--mono); color: var(--muted); margin-top: 4px; }

@@ -1,17 +1,6 @@
 import { useEffect, useMemo, useRef } from 'preact/hooks';
 import './method.css';
 import { render, type Heading } from './md';
-import overview from './text/overview.md?raw';
-import data from './text/data.md?raw';
-import stacks from './text/stacks.md?raw';
-import views from './text/views.md?raw';
-import spectra from './text/spectra.md?raw';
-import searches from './text/searches.md?raw';
-import checks from './text/checks.md?raw';
-import validation from './text/validation.md?raw';
-import repInjection from './text/report-injection.md?raw';
-import repMost from './text/report-most.md?raw';
-import repWavelength from './text/report-wavelength.md?raw';
 
 interface Part {
   id: string;
@@ -19,17 +8,12 @@ interface Part {
   text: string;
 }
 
-const PARTS: Part[] = [
-  { id: 'overview', group: 'Overview', text: overview },
-  { id: 'data', group: 'Data and reading', text: data },
-  { id: 'stacks', group: 'Cleaning and stacks', text: stacks },
-  { id: 'views', group: 'Views', text: views },
-  { id: 'spectra', group: 'Spectra', text: spectra },
-  { id: 'searches', group: 'Searches', text: searches },
-  { id: 'checks', group: 'Anomalies, checks and chance', text: checks },
-  { id: 'validation', group: 'Validation', text: validation },
-  { id: 'dated', group: 'Dated measurements', text: [repInjection, repMost, repWavelength].join('\n\n') },
-];
+// One part per file in ./text, in file-name order (01-…, 02-…): the id of a part is its file name without the extension
+const files = import.meta.glob('./text/*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+const PARTS: Part[] = Object.entries(files)
+  .map(([path, text]) => ({ id: path.replace(/^.*\//, '').replace(/\.md$/, ''), text }))
+  .sort((a, b) => a.id.localeCompare(b.id))
+  .map(({ id, text }) => ({ id, text, group: /^# (.*)$/m.exec(text)?.[1] ?? id }));
 
 /** The section of the address (#/method?sec=searches), if any. */
 const wanted = () => new URLSearchParams(location.hash.split('?')[1] ?? '').get('sec');
@@ -50,12 +34,12 @@ export function MethodFull() {
   useEffect(() => {
     const sec = wanted();
     if (sec) {
-      go(`part-${sec}`, false);
-      setTimeout(() => go(`part-${sec}`, false), 400);
+      go(`m-${sec}`, false);
+      setTimeout(() => go(`m-${sec}`, false), 400);
     }
     const onHash = () => {
       const w = wanted();
-      if (w) go(`part-${w}`, true);
+      if (w) go(`m-${w}`, true);
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -66,7 +50,7 @@ export function MethodFull() {
         <nav class="mf-toc card glass" aria-label="Contents of the Method">
           {rendered.map(({ part, r }) => (
             <div key={part.id}>
-              <a class="toc-sep" href={`#/method?sec=${part.id}`} onClick={(e) => { e.preventDefault(); go(`part-${part.id}`, true); }}>
+              <a class="toc-sep" href={`#/method?sec=${part.id}`} onClick={(e) => { e.preventDefault(); go(`m-${part.id}`, true); }}>
                 {part.group}
               </a>
               {r.headings
@@ -81,7 +65,7 @@ export function MethodFull() {
         </nav>
         <div class="mf-body">
           {rendered.map(({ part, r }) => (
-            <section key={part.id} id={`part-${part.id}`} class="card glass motion">
+            <section key={part.id} id={`m-${part.id}`} class="card glass motion">
               <div class="mf-prose" dangerouslySetInnerHTML={{ __html: r.html }} />
             </section>
           ))}
