@@ -17,7 +17,7 @@ def test_barnards_star_at_epoch_2025_9_is_where_the_lab_opens_it() -> None:
 def test_warm_set_has_the_five_targets_at_five_sizes_and_the_demo_fields() -> None:
     w = warm_set()
     assert len([f for f in w if f.label in ("Barnard's Star", "R Draconis")]) == 10
-    assert len(w) == 25 + 3
+    assert len(w) == 25 + 3 + 2  # five targets at five sizes, three demo fields, two films
 
 
 def test_runner_counts_and_retries_failures() -> None:
@@ -34,3 +34,20 @@ def test_runner_counts_and_retries_failures() -> None:
     asyncio.run(r.run(ensure))
     snap = r.snapshot()
     assert snap["done"] == 2 and snap["state"] == "incomplete" and list(snap["failed"].values()) == ["RuntimeError: S3 did not answer"]
+
+
+def test_a_restart_counts_the_fields_already_built_before_building() -> None:
+    w = warm_set()[:4]
+    built = {w[1], w[3]}
+    order: list[str] = []
+
+    async def complete(f):  # type: ignore[no-untyped-def]
+        return f in built
+
+    async def ensure(f):  # type: ignore[no-untyped-def]
+        order.append(f"{f.label} {f.fov}")
+        return True
+
+    r = WarmRunner(w)
+    asyncio.run(r.run(ensure, complete))
+    assert r.snapshot()["done"] == 4 and order == [f"{w[0].label} {w[0].fov}", f"{w[2].label} {w[2].fov}"]

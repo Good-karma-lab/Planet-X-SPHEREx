@@ -83,7 +83,8 @@ class Store:
             self._db.execute("UPDATE products SET complete = 1 WHERE key = ?", (key,))
 
     def is_complete(self, key: str) -> bool:
-        row = self._db.execute("SELECT complete FROM products WHERE key = ?", (key,)).fetchone()
+        with self._lock:
+            row = self._db.execute("SELECT complete FROM products WHERE key = ?", (key,)).fetchone()
         return bool(row and row[0])
 
     def read_part(self, kind: str, key: str, name: str) -> bytes | None:
@@ -105,7 +106,8 @@ class Store:
     def purge_stale(self) -> dict[str, int]:
         """Delete every product whose version is not current (whole version folders); returns {kind: products removed}."""
         removed: dict[str, int] = {}
-        rows = self._db.execute("SELECT kind, version, COUNT(*) FROM products GROUP BY kind, version").fetchall()
+        with self._lock:
+            rows = self._db.execute("SELECT kind, version, COUNT(*) FROM products GROUP BY kind, version").fetchall()
         for kind, version, n in rows:
             if VERSIONS.get(kind) == version:
                 continue
@@ -120,7 +122,8 @@ class Store:
         return removed
 
     def stats(self) -> dict[str, Any]:
-        rows = self._db.execute(
-            "SELECT kind, version, COUNT(*), SUM(bytes), SUM(complete), SUM(pinned) FROM products GROUP BY kind, version"
-        )
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT kind, version, COUNT(*), SUM(bytes), SUM(complete), SUM(pinned) FROM products GROUP BY kind, version"
+            ).fetchall()
         return {f"{k}/{v}": {"products": n, "bytes": b or 0, "complete": c or 0, "pinned": p or 0} for k, v, n, b, c, p in rows}

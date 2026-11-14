@@ -126,6 +126,32 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
         return key, st.scheduler.submit(fieldjob.KIND, key, params, fn, priority, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
 
+    def submit_film(key: str, params: dict[str, Any], priority: Priority) -> Any:
+        assert st.index is not None and st.store is not None and st.scheduler is not None and st.files is not None
+        index, files, store, wl = st.index, st.files, st.store, st.wavelengths
+
+        async def fn(ctx: Any) -> dict[str, Any]:
+            return await filmjob.run_film(ctx, index, files, store, params, wl)
+
+        return st.scheduler.submit(filmjob.KIND, key, params, fn, priority, "heavy", 1500)
+
+    def warm_key(f: WarmField) -> tuple[str, dict[str, Any]] | None:
+        """The product key of a warm field or film (None for a film with no exposures)."""
+        assert st.index is not None
+        if f.film_mjd is not None:
+            params = filmjob.film_params(f.ra, f.dec, f.fov, f.film_mjd)
+            exps, _ = filmjob.pass_exposures(st.index, params)
+            if not exps:
+                return None
+            return product_key(filmjob.KIND, params, extra=(filmjob.signature(exps),)), params
+        params = fieldjob.canonical(f.ra, f.dec, f.fov)
+        return product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),)), params
+
+    async def warm_complete(f: WarmField) -> bool:
+        assert st.store is not None
+        k = await asyncio.to_thread(warm_key, f)
+        return k is not None and st.store.is_complete(k[0])
+
     async def warm_searches(key: str, fov: float) -> None:
         """The searches of a warm field, so that a visitor sees their results at once: movers always, anomalies from 10′ up."""
         if st.movers is not None:
@@ -138,6 +164,25 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 await asyncio.sleep(5.0)
 
     async def ensure_warm(f: WarmField) -> bool:
+        if f.film_mjd is not None:
+            assert st.store is not None and st.scheduler is not None
+            k = await asyncio.to_thread(warm_key, f)
+            if k is None:
+                return True
+            fkey, fparams = k
+            if not st.store.is_complete(fkey):
+                fjob = st.scheduler.jobs.get(st.scheduler.by_key.get(fkey, "")) or submit_film(fkey, fparams, Priority.P2)
+                while fjob.state not in ("done", "error", "cancelled"):
+                    await asyncio.sleep(2.0)
+                if fjob.error:
+                    raise RuntimeError(fjob.error)
+            if st.store.is_complete(fkey):
+                st.store.pin(fkey)
+                meta = st.store.read_meta(filmjob.KIND, fkey)
+                if st.bodies is not None and meta is not None and st.bodies.cached(fkey) is None:
+                    st.bodies.start(fkey, meta)
+                return True
+            return False
         params = fieldjob.canonical(f.ra, f.dec, f.fov)
         key, job = submit_field(params, Priority.P2)
         while job is not None and job.state not in ("done", "error", "cancelled"):
@@ -154,7 +199,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     async def warm_loop() -> None:
         assert st.warm is not None
         while True:
-            await st.warm.run(ensure_warm)
+            await st.warm.run(ensure_warm, warm_complete)
             await asyncio.sleep(60.0 if st.warm.state != "done" else 600.0)
 
     app = FastAPI(
@@ -247,12 +292,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 return JSONResponse(
                     {"error": "too many new jobs from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
                 )
-        index, files, store, wl = st.index, st.files, st.store, st.wavelengths
-
-        async def fn(ctx: Any) -> dict[str, Any]:
-            return await filmjob.run_film(ctx, index, files, store, params, wl)
-
-        job = st.scheduler.submit(filmjob.KIND, key, params, fn, Priority.P0, "heavy", 1500)
+        job = submit_film(key, params, Priority.P0)
         return {"key": key, "params": params, "job": job.view()}
 
     @app.get(f"{API_PREFIX}/film/{{key}}/bodies")

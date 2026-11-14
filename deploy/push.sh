@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Release from a development machine to the VM: build the web app here (it is the same on every architecture), copy the code,
 # sync the Python environment there and restart the API. The store on the VM (index, products) stays.
-#   deploy/push.sh ubuntu@HOST [--index]      --index also copies a consistent snapshot of the local exposure index
+#   deploy/push.sh ubuntu@HOST [--index] [--now]   --index also copies a consistent snapshot of the local exposure index;
+#                                                  without --now the main instance restarts only when no job is running (up to 20 min)
 set -euo pipefail
 HOST="${1:?usage: deploy/push.sh user@host [--index]}"
 KEY="${SKY_SSH_KEY:-$HOME/.ssh/oci_spherex_ed25519}"
@@ -18,7 +19,9 @@ rsync -az --delete -e "$SSH" --rsync-path="sudo -u sky rsync" \
   --exclude '.ruff_cache' --exclude 'web/test-results' --exclude 'web/playwright-report' --exclude '.claude' \
   ./ "$HOST:/opt/sky/"
 
-if [ "${2:-}" = "--index" ]; then
+INDEX=0; NOW=0
+for a in "${@:2}"; do [ "$a" = "--index" ] && INDEX=1; [ "$a" = "--now" ] && NOW=1; done
+if [ "$INDEX" = 1 ]; then
   snap="$(mktemp -d)/exposures.sqlite"
   sqlite3 store/index/exposures.sqlite ".backup '$snap'"
   rsync -az --partial --progress -e "$SSH" --rsync-path="sudo -u sky rsync" "$snap" "$HOST:/var/lib/sky/index/exposures.sqlite"
@@ -33,6 +36,14 @@ sudo -u sky bash -lc "cd /opt/sky && ~/.local/bin/uv sync --frozen --no-dev -q"
 healthy() { for i in $(seq 1 90); do curl -sf -m 3 "http://127.0.0.1:$1/api/v1/health" >/dev/null && return 0; sleep 1; done; echo "port $1 did not come up" >&2; return 1; }
 sudo systemctl enable --now sky-api-standby.service
 sudo systemctl restart sky-api-standby.service && healthy 8781
+if [ "'"$NOW"'" != 1 ]; then
+  for i in $(seq 1 240); do
+    running=$(curl -sf -m 5 http://127.0.0.1:8780/api/v1/health | python3 -c "import json,sys; print(json.load(sys.stdin)[\"jobs\"][\"running\"])" 2>/dev/null || echo 0)
+    [ "$running" = "0" ] && break
+    [ "$i" = 1 ] && echo "waiting until no job is running (a half-built field would be lost)…"
+    sleep 5
+  done
+fi
 sudo systemctl restart sky-api.service && healthy 8780
 curl -s -m 10 http://127.0.0.1:8780/api/v1/health | head -c 160; echo'
 echo "released $rev to $HOST"

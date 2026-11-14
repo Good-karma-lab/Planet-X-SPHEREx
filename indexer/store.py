@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import math
 import sqlite3
+import threading
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,13 +87,32 @@ class Index:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         uri = f"file:{path}?mode=ro" if readonly else f"file:{path}"
-        self.db = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        self._uri = uri
+        self._readonly = readonly
+        # a reader has one connection per thread (the service asks from many threads at once; a shared sqlite3 connection mixes
+        # their cursors up); the writer keeps one
+        self._local = threading.local()
+        self._writer = None if readonly else sqlite3.connect(uri, uri=True, check_same_thread=False)
         if not readonly:
             self.db.execute("PRAGMA journal_mode=WAL")
             self.db.executescript(SCHEMA)
 
+    @property
+    def db(self) -> sqlite3.Connection:
+        if self._writer is not None:
+            return self._writer
+        c = getattr(self._local, "c", None)
+        if c is None:
+            c = sqlite3.connect(self._uri, uri=True, check_same_thread=False)
+            self._local.c = c
+        return c
+
     def close(self) -> None:
-        self.db.close()
+        if self._writer is not None:
+            self._writer.close()
+        c = getattr(self._local, "c", None)
+        if c is not None:
+            c.close()
 
     # ---- building ---------------------------------------------------------------------------------------------------------------
     def add(self, rows: Iterable[Row], source: str = "irsa") -> int:

@@ -20,6 +20,7 @@ class WarmField:
     ra: float
     dec: float
     fov: float
+    film_mjd: float | None = None  # a film of the pass at this date instead of a field
 
 
 def place_at_epoch(t: dict[str, Any], epoch: float) -> tuple[float, float]:
@@ -41,7 +42,9 @@ def warm_set(data: Path = DATA) -> list[WarmField]:
         out += [WarmField(d["label"], float(d["ra"]), float(d["dec"]), float(s)) for s in d["sizes"]]
     # the sizes a visitor opens first come first for every target; the slow 60′ fields last
     rank = {5.0: 0, 10.0: 1, 20.0: 2, 2.0: 3, 60.0: 4}
-    return sorted(out, key=lambda f: rank.get(f.fov, 5))
+    out = sorted(out, key=lambda f: rank.get(f.fov, 5))
+    out += [WarmField(f["label"], float(f["ra"]), float(f["dec"]), float(f["fov"]), float(f["mjd"])) for f in w.get("films", [])]
+    return out
 
 
 @dataclass
@@ -53,8 +56,18 @@ class WarmRunner:
     failed: dict[WarmField, str] = field(default_factory=dict)
     state: str = "idle"
 
-    async def run(self, ensure: Any) -> None:
+    async def run(self, ensure: Any, complete: Any = None) -> None:
+        """`complete(field)` (cheap, no computing) marks every field already built before anything is built, so a restart resumes at
+        the first field still missing instead of counting from zero behind it."""
         self.state = "running"
+        if complete is not None:
+            for f in self.fields:
+                if f not in self.done:
+                    try:
+                        if await complete(f):
+                            self.done.add(f)
+                    except Exception:  # the check is retried by ensure() below
+                        pass
         for f in self.fields:
             if f in self.done:
                 continue

@@ -1,0 +1,15 @@
+{
+ "frame": "NEOS_SCI_2025348081359_cord.fits",
+ "mission": "NEOSSat (Canadian Space Agency), via CADC",
+ "date_obs": "2025-12-14T08:13:59.269",
+ "exposure_s": 15.0039,
+ "wcs_offset_arcsec": 43.4,
+ "gaia_matches": 95,
+ "zero_point_g": 24.19,
+ "horizons_ra": 167.10477,
+ "horizons_dec": 5.18231,
+ "found": true,
+ "offset_from_prediction_arcsec": 5.6,
+ "g_mag": 12.37,
+ "snr": 154.0
+}

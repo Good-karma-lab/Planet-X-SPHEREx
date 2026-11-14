@@ -646,18 +646,59 @@ export function Lab({ route }: { route: Route }) {
                 (m.grid.n / 2 - ((pdec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale,
               ] as const;
             });
-            ctx.setLineDash([3, 3]);
-            ctx.lineWidth = 1.4;
-            ctx.strokeStyle = 'rgba(127,240,228,0.9)';
-            ctx.beginPath();
-            pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
-            ctx.stroke();
-            ctx.setLineDash([]);
-            ctx.fillStyle = '#7ff0e4';
-            for (const [px, py] of pts) {
+            const [fx, fy] = pts[0]!;
+            const [lx, ly] = pts[pts.length - 1]!;
+            const len = Math.hypot(lx - fx, ly - fy);
+            if (len > 2.5 * rr) {
+              // a path long enough to leave the ring: the places on the seasons' dates, joined
+              ctx.setLineDash([3, 3]);
+              ctx.lineWidth = 1.4;
+              ctx.strokeStyle = 'rgba(127,240,228,0.9)';
               ctx.beginPath();
-              ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
-              ctx.fill();
+              pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.fillStyle = '#7ff0e4';
+              for (const [px, py] of pts) {
+                ctx.beginPath();
+                ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
+                ctx.fill();
+              }
+            } else if ((o.pmra ?? 0) || (o.pmdec ?? 0)) {
+              // too short to see beside the star (and never drawn inside a saturated core): an arrow from the ring along the motion
+              const ux = -(o.pmra ?? 0);
+              const uy = -(o.pmdec ?? 0);
+              const un = Math.hypot(ux, uy) || 1;
+              const dx = ux / un;
+              const dy = uy / un;
+              const x0 = x + dx * (rr + 4);
+              const y0 = y + dy * (rr + 4);
+              const x1 = x + dx * (rr + 26);
+              const y1 = y + dy * (rr + 26);
+              ctx.lineWidth = 3;
+              ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+              const arrow = () => {
+                ctx.beginPath();
+                ctx.moveTo(x0, y0);
+                ctx.lineTo(x1, y1);
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x1 - dx * 7 - dy * 4, y1 - dy * 7 + dx * 4);
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x1 - dx * 7 + dy * 4, y1 - dy * 7 - dx * 4);
+                ctx.stroke();
+              };
+              arrow();
+              ctx.lineWidth = 1.6;
+              ctx.strokeStyle = '#7ff0e4';
+              arrow();
+              const pm = Math.hypot(o.pmra ?? 0, o.pmdec ?? 0) / 1000;
+              const t = pm >= 1 ? `${pm.toFixed(1)}″/yr` : `${(pm * 1000).toFixed(0)} mas/yr`;
+              ctx.font = '600 10.5px ui-monospace, Menlo, monospace';
+              ctx.lineWidth = 3;
+              ctx.strokeStyle = '#000';
+              ctx.fillStyle = '#bff7f0';
+              ctx.strokeText(t, x1 + dx * 6 - 14, y1 + dy * 6 + (dy < 0 ? -4 : 12));
+              ctx.fillText(t, x1 + dx * 6 - 14, y1 + dy * 6 + (dy < 0 ? -4 : 12));
             }
           }
           ctx.restore();
@@ -700,10 +741,15 @@ export function Lab({ route }: { route: Route }) {
           ctx.setLineDash(t.check === 'pending' ? [4, 4] : []);
           ctx.strokeStyle = 'rgba(0,0,0,0.6)';
           ctx.lineWidth = 3.5;
+          // the track through the seasons only when it reaches outside the ring (never drawn inside a saturated core)
+          const span = Math.hypot(pts[pts.length - 1]![0] - pts[0]![0], pts[pts.length - 1]![1] - pts[0]![1]);
+          const showTrack = span > 2.5 * 22;
           const path = () => {
-            ctx.beginPath();
-            pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
-            ctx.stroke();
+            if (showTrack) {
+              ctx.beginPath();
+              pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+              ctx.stroke();
+            }
             ctx.beginPath();
             ctx.arc(x, y, 22, 0, 2 * Math.PI);
             ctx.stroke();
@@ -714,11 +760,12 @@ export function Lab({ route }: { route: Route }) {
           path();
           ctx.setLineDash([]);
           ctx.fillStyle = '#ffb454';
-          for (const [px, py] of pts) {
-            ctx.beginPath();
-            ctx.arc(px, py, 2.2, 0, 2 * Math.PI);
-            ctx.fill();
-          }
+          if (showTrack)
+            for (const [px, py] of pts) {
+              ctx.beginPath();
+              ctx.arc(px, py, 2.2, 0, 2 * Math.PI);
+              ctx.fill();
+            }
           ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
           ctx.lineWidth = 3;
           ctx.strokeStyle = '#000';
