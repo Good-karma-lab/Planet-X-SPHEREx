@@ -1,9 +1,8 @@
-// Landing page: what SPHEREx Sky is, in plain words, over the real infrared sky.
-// The background is the 2MASS all-sky survey (IRSA HiPS Allsky image), toned for the night and drawn from inside the sphere with
-// a stereographic camera that turns as the page scrolls. Every star in it is a survey pixel; nothing is drawn or modelled.
+// Landing page: what SPHEREx Sky is, in plain words, over the real sky.
+// The background is NASA SVS's Deep Star Maps 2020 star map (Gaia DR2), the globe's default layer, as one equirectangular image
+// drawn from inside the sphere with a stereographic camera that turns as the page scrolls. Nothing is drawn or modelled on it.
 // Pictures on the page are real SPHEREx frames and DSS plates (web/public/landing/). Styles: ../landing.css (classes lp-).
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { faceXY } from '../lib/healpix';
 import '../landing.css';
 
 /** The app's main page (the globe). Links that do not open one object go here. */
@@ -18,8 +17,11 @@ const ERIS = '#/lab?ra=27.378&dec=-0.120&fov=20';
 const VIDEO = '/demo/spherex-sky-demo.mp4';
 const REPO = 'https://github.com/Good-karma-lab/Planet-X-SPHEREx';
 const IMG = '/landing/';
-/** The 2MASS colour Allsky image (order 3, 64-px tiles, 27 tiles a row), from IRSA (CORS open), else through the service. */
-const ALLSKY = ['https://irsa.ipac.caltech.edu/data/hips/CDS/2MASS/Color/Norder3/Allsky.jpg', '/api/v1/hips/2mass/3/allsky'];
+/** NASA SVS Deep Star Maps 2020 (SVS 4851; Gaia DR2), baked by the service: equatorial J2000, equirectangular, RA 0° at the centre and
+ *  increasing to the left, north up; the "lit" version (exposure ×3) shows the Milky Way. The 4k image comes first, the 8k one replaces it
+ *  where the graphics card takes 8192-pixel textures. */
+const SKY = '/tiles/svs-v1/equirect_4k_lit.webp';
+const SKY_HI = '/tiles/svs-v1/equirect_8k_lit.webp';
 
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 const D2R = Math.PI / 180;
@@ -33,53 +35,6 @@ function jump(id: string) {
 
 /* ------------------------------------------------------------------ the sky behind the page */
 
-const spread3 = (v: number) => (v & 1) | ((v & 2) << 1) | ((v & 4) << 2);
-
-/** The Allsky image resampled to a toned equirectangular texture (RA 0..360 across, Dec +90..-90 down), W × W/2. */
-function tonedSky(img: HTMLImageElement, W = 2048): ImageData {
-  const H = W / 2;
-  const c = document.createElement('canvas');
-  c.width = img.naturalWidth;
-  c.height = img.naturalHeight;
-  const x = c.getContext('2d', { willReadFrequently: true })!;
-  x.drawImage(img, 0, 0);
-  const src = x.getImageData(0, 0, c.width, c.height).data;
-  const lum = new Float32Array(W * H);
-  for (let py = 0; py < H; py++) {
-    const dec = 90 - ((py + 0.5) * 180) / H;
-    for (let px = 0; px < W; px++) {
-      const ra = ((px + 0.5) * 360) / W;
-      const { face, ix, iy } = faceXY(9, ra, dec);
-      const tile = face * 64 + spread3(ix >> 6) + 2 * spread3(iy >> 6);
-      const sx = (tile % 27) * 64 + (iy & 63);
-      const sy = Math.floor(tile / 27) * 64 + (ix & 63);
-      const i = (sy * c.width + sx) * 4;
-      lum[py * W + px] = 0.3 * src[i]! + 0.55 * src[i + 1]! + 0.15 * src[i + 2]!;
-    }
-  }
-  // black and white points from a sample of the sky; asinh law; the night ramp (blue-grey, warmer where bright)
-  const sample = Array.from({ length: 20000 }, (_, k) => lum[Math.floor((k * 7919) % lum.length)]!).sort((a, b) => a - b);
-  const lo = sample[Math.floor(0.35 * sample.length)]!;
-  const hi = sample[Math.floor(0.9995 * sample.length)]!;
-  const out = new ImageData(W, H);
-  const d = out.data;
-  const norm = Math.asinh(1 / 0.08);
-  for (let i = 0; i < lum.length; i++) {
-    const t = Math.max(0, Math.min(1, (lum[i]! - lo) / (hi - lo)));
-    const v = Math.min(1, Math.asinh(t / 0.08) / norm);
-    const w = Math.min(1, 1.25 * v);
-    const r = (92 + 86 * w) * v;
-    const g = (128 + 58 * w) * v;
-    const b = (186 + 14 * w) * v;
-    // screen over the navy ground
-    d[i * 4] = 255 - ((255 - 5) * (255 - r)) / 255;
-    d[i * 4 + 1] = 255 - ((255 - 12) * (255 - g)) / 255;
-    d[i * 4 + 2] = 255 - ((255 - 22) * (255 - b)) / 255;
-    d[i * 4 + 3] = 255;
-  }
-  return out;
-}
-
 const VS = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
 const FS = `precision highp float;
 uniform sampler2D sky;uniform vec2 res;uniform float ra0,dec0,k;
@@ -90,7 +45,7 @@ void main(){
   float sd=sin(dec0),cd=cos(dec0),sc=sin(c),cc=cos(c);
   float dec=asin(clamp(cc*sd+(rho>0.?q.y*sc*cd/rho:0.),-1.,1.));
   float ra=ra0+atan(-q.x*sc,rho*cd*cc-q.y*sd*sc);
-  vec3 col=texture2D(sky,vec2(fract(ra/(2.*PI)),(PI*.5-dec)/PI)).rgb;
+  vec3 col=texture2D(sky,vec2(fract(.5-ra/(2.*PI)),(PI*.5-dec)/PI)).rgb;
   vec2 e=gl_FragCoord.xy/res-.5;float vig=smoothstep(.95,.35,length(e*vec2(1.,.8)));
   float side=smoothstep(.0,.62,gl_FragCoord.x/res.x);
   gl_FragColor=vec4(col*(.55+.45*vig)*(.62+.38*side),1.);
@@ -156,32 +111,26 @@ function SkyBackdrop({ scroller }: { scroller: () => HTMLElement | null }) {
       if (!raf) raf = requestAnimationFrame(draw);
     };
 
-    const load = (i: number) => {
-      if (i >= ALLSKY.length) return;
+    const tex = gl.createTexture();
+    const load = (src: string, next?: string) => {
       const img = new Image();
       img.crossOrigin = 'anonymous';
       img.onload = () => {
-        const build = () => {
-          if (stop) return;
-          const tex = gl.createTexture();
-          gl.bindTexture(gl.TEXTURE_2D, tex);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, tonedSky(img));
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-          ready = true;
-          cv.classList.add('on');
-          kick();
-        };
-        const ric = (window as unknown as { requestIdleCallback?: (f: () => void) => void }).requestIdleCallback;
-        if (ric) ric(build);
-        else setTimeout(build, 50);
+        if (stop) return;
+        gl.bindTexture(gl.TEXTURE_2D, tex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        ready = true;
+        cv.classList.add('on');
+        kick();
+        if (next && (gl.getParameter(gl.MAX_TEXTURE_SIZE) as number) >= 8192) load(next);
       };
-      img.onerror = () => load(i + 1);
-      img.src = ALLSKY[i]!;
+      img.src = src;
     };
-    load(0);
+    load(SKY, SKY_HI);
     const el = scroller();
     el?.addEventListener('scroll', kick, { passive: true });
     window.addEventListener('resize', kick);
@@ -451,8 +400,8 @@ export function Landing() {
             </div>
             <div class="lp-steps">
               <article class="lp-card">
-                <div class="lp-pic" style={{ backgroundImage: `url(${IMG}sky_2mass_toned.jpg)` }} role="img" aria-label="The Milky Way in the 2MASS infrared survey, the sky behind this page">
-                  <span class="lp-badge">the sky behind this page · 2MASS</span>
+                <div class="lp-pic" style={{ backgroundImage: `url(${IMG}sky_svs_milky_way.jpg)` }} role="img" aria-label="The Milky Way towards Sagittarius on NASA's Deep Star Maps, the sky behind this page">
+                  <span class="lp-badge">the sky behind this page · NASA SVS star map</span>
                 </div>
                 <div class="lp-body">
                   <span class="lp-n">01</span>
@@ -723,7 +672,8 @@ export function Landing() {
                 <li>Star motions: ESA Gaia DR3 (ESA/Gaia/DPAC)</li>
                 <li>Object names: SIMBAD, CDS Strasbourg</li>
                 <li>Known asteroids: JPL Small-Body Identification, JPL Horizons</li>
-                <li>Sky behind this page and globe layers: 2MASS, DSS2, AllWISE, IRIS (HiPS, CDS / IRSA)</li>
+                <li>Sky behind this page: NASA/Goddard Space Flight Center Scientific Visualization Studio. Gaia DR2: ESA/Gaia/DPAC.</li>
+                <li>Globe layers: 2MASS, DSS2, AllWISE, IRIS (HiPS, CDS / IRSA)</li>
               </ul>
             </div>
             <div>
