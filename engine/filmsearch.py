@@ -39,7 +39,7 @@ SN_MIN = 5.0
 STAR_K = 0.74
 LINK_MAX = 1000
 VMIN, VMAX, TOL, DT_MAX = 3.0, 200.0, 4.0, 5.0
-RMS_MAX = 1.5
+RMS_MAX = 2.0
 NMIN_FOUND = 4
 REC_Z, REC_R, REC_PAD = 3.5, 1.5, 0.5
 CHANCE_MAX = 0.15
@@ -92,7 +92,17 @@ def frame_peaks(
     ref = np.maximum(rs - float(np.median(rs[good])), 0.0)
     pk = (z == maximum_filter(z, 5)) & (z >= sn_min) & (sm >= star_k * ref)
     ys, xs = np.where(pk)
-    return np.array([[x, y, z[y, x], sm[y, x]] for x, y in zip(xs, ys, strict=True)], float).reshape(-1, 4)
+    rows = []
+    for x, y in zip(xs, ys, strict=True):
+        # the place to a fraction of a grid point: the centroid of the positive part of the 3 x 3 motion map around the peak
+        win = np.clip(
+            np.where(good[max(y - 1, 0) : y + 2, max(x - 1, 0) : x + 2], z[max(y - 1, 0) : y + 2, max(x - 1, 0) : x + 2], 0.0), 0.0, None
+        )
+        yy, xx = np.mgrid[max(y - 1, 0) : y + 2, max(x - 1, 0) : x + 2]
+        w = float(win.sum())
+        cx, cy = (float((win * xx).sum() / w), float((win * yy).sum() / w)) if w > 0 else (float(x), float(y))
+        rows.append([cx, cy, z[y, x], sm[y, x]])
+    return np.array(rows, float).reshape(-1, 4)
 
 
 def find_candidates(frames: Sequence[Frame], step_arcsec: float, n: int) -> list[Candidate]:
@@ -232,41 +242,156 @@ def chance_by_visits(
     return c / max(ntrial, 1)
 
 
-def search(frames: Sequence[Frame], step_arcsec: float, n: int, trials: int = CONTROL_TRIALS) -> dict[str, Any]:
-    """The whole search of a film: candidates, tracks drawn, the control. Track points are in the film's grid (x column, y row, row 0
-    north)."""
-    cands = find_candidates(frames, step_arcsec, n)
+ORBIT_TRIALS = 12
+VERIFY_MAX = 600
+
+
+def orbit_tracks(
+    cands: Sequence[Candidate],
+    verified: dict[int, dict[str, Any]],
+    obs: dict[int, tuple[float, F64]],
+    frame_t: F64,
+    zmaps: NDArray[np.float32],
+    ra0: float,
+    dec0: float,
+    step: float,
+    trials: int = ORBIT_TRIALS,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Link the candidates that on − off photometry found positive in every exposure of their visit (at least PRE_NSIG sigma) with the orbit
+    model (the observer is the Earth plus the spacecraft at the frame), follow each track into the visits where the orbit predicts it,
+    and keep the tracks that chance does not make: the same linking on the same candidates at chance places, `trials` times. -> (tracks, control)."""
+    from engine import onoff
+    from engine import orbit as _orbit
+
+    eorbit: Any = _orbit  # the orbit model is numeric code without annotations
+
+    ok = [c for c, v in verified.items() if v["allpos"] and v["sig"] >= onoff.PRE_NSIG and cands[c].frame in obs]
+    ctl: dict[str, Any] = {"trials": trials, "min_visits_drawn": None, "chance": {}, "verified_candidates": len(ok)}
+    if len(ok) < 3:
+        return [], ctl
+    sel = [cands[c] for c in ok]
+    vis = np.array([q.frame for q in sel])
+    t = np.array([obs[q.frame][0] for q in sel])
+    rr = np.array([obs[q.frame][1] for q in sel])
+    u = -np.array([q.east for q in sel])  # the orbit module counts u to the west
+    v = np.array([q.north for q in sel])
+    plane = eorbit.Plane(ra0, dec0)
+    tr = eorbit.link(u, v, vis, t, rr, plane)
+    ch = np.zeros(11)
+    for k in range(trials):
+        for r in eorbit.control_trial(u, v, vis, t, rr, ra0, dec0, 1000 + k):
+            ch[: min(r["nvis"], 10) + 1] += 1
+    ch = ch / max(trials, 1)
+    okn = [k for k in range(3, len(ch)) if ch[k] < CHANCE_MAX]
+    nv_min = max(okn[0] if okn else len(ch), NMIN_FOUND)
+    ctl.update(min_visits_drawn=nv_min, chance={str(k): round(float(ch[k]), 3) for k in range(3, len(ch)) if ch[k] > 0 or k == nv_min})
+    n = zmaps.shape[1]
+    cc = (n - 1) / 2.0
+    out: list[dict[str, Any]] = []
+    for r in tr:
+        m = [ok[q] for q in r["idx"]]
+        zs = [verified[c]["sig"] for c in m]
+        zt = float(np.sum(zs) / np.sqrt(len(zs)))
+        if zt < onoff.TRACK_NSIG:
+            continue
+        have = sorted({cands[c].frame for c in m})
+        lo, hi = min(cands[c].t for c in m) - REC_PAD, max(cands[c].t for c in m) + REC_PAD
+        rec: list[tuple[int, float, float, float]] = []
+        rad = round(np.ceil(REC_R))
+        for k in range(zmaps.shape[0]):
+            if k in have or k not in obs or not (lo <= frame_t[k] <= hi):
+                continue
+            uu, vv = eorbit.sky(r["state"], np.array([obs[k][0]]), obs[k][1][None], plane)
+            x, y = cc + float(uu[0]) / step, cc - float(vv[0]) / step
+            ix, iy = round(x), round(y)
+            if not (rad <= ix < n - rad and rad <= iy < n - rad):
+                continue
+            win = zmaps[k, iy - rad : iy + rad + 1, ix - rad : ix + rad + 1]
+            if np.isfinite(win).any() and np.nanmax(win) >= REC_Z:
+                rec.append((k, float(x), float(y), float(np.nanmax(win))))
+        if len(have) + len(rec) < nv_min or len(have) < NMIN_FOUND:
+            continue
+        pts = [
+            {"f": cands[c].frame, "x": round(cands[c].x, 2), "y": round(cands[c].y, 2), "z": round(cands[c].sn, 1), "how": "found"}
+            for c in m
+        ]
+        pts += [{"f": k, "x": round(x, 2), "y": round(y, 2), "z": round(z, 1), "how": "recovered"} for k, x, y, z in rec]
+        pts.sort(key=lambda p: frame_t[p["f"]])
+        out.append(
+            {
+                "n": len(have) + len(rec),
+                "n_found": len(have),
+                "n_recovered": len(rec),
+                "hours": round(r["hours"], 2),
+                "rate": round(r["rate"], 2),
+                "pa": round(r["pa"], 1),
+                "rms": round(r["rms"], 2),
+                "method": "orbit",
+                "verified": True,
+                "z_together": round(zt, 1),
+                "dist_au": round(r["dist"], 2),
+                "dist_range_au": [round(r["dist_lo"], 2), round(r["dist_hi"], 2)],
+                "pts": pts,
+            }
+        )
+    return out, ctl
+
+
+def search(
+    frames: Sequence[Frame],
+    cands: Sequence[Candidate],
+    step_arcsec: float,
+    n: int,
+    verified: dict[int, dict[str, Any]] | None = None,
+    obs: dict[int, tuple[float, F64]] | None = None,
+    ra0: float = 0.0,
+    dec0: float = 0.0,
+    trials: int = CONTROL_TRIALS,
+) -> dict[str, Any]:
+    """The whole search of a film: orbit tracks through the verified candidates when the verification and the observers are given, and the
+    straight-line tracks through the strongest candidates that no orbit track took over (not verified). Track points are in the film's grid
+    (x column, y row, row 0 north)."""
     out: dict[str, Any] = {"candidates": len(cands), "tracks": [], "control": {"trials": trials, "min_visits_drawn": None, "chance": {}}}
     if len(cands) < 3:
         return out
-    top = cands[:LINK_MAX]
+    frame_t = np.array([f.mjd for f in frames])
+    zmaps = np.stack([f.motion if f.motion is not None else np.full((n, n), np.nan, np.float32) for f in frames])
+    tracks: list[dict[str, Any]] = []
+    if verified is not None and obs is not None:
+        tracks, ctl = orbit_tracks(cands, verified, obs, frame_t, zmaps, ra0, dec0, step_arcsec)
+        out["control"] = ctl
+        out["verification"] = {
+            "measured": len(verified),
+            "verified_alone": sum(1 for v in verified.values() if v["ok"]),
+            "linked": ctl["verified_candidates"],
+        }
+    top = list(cands[:LINK_MAX])
     t = np.array([q.t for q in top])
     u = np.array([q.east for q in top])
     v = np.array([q.north for q in top])
     vis = np.array([q.frame for q in top], float)
-    frame_t = np.array([f.mjd for f in frames])
-    zmaps = np.stack([f.motion if f.motion is not None else np.full((n, n), np.nan, np.float32) for f in frames])
-    tracks = tracks_with_recovery(t, u, v, vis, frame_t, zmaps, step_arcsec)
+    lines = tracks_with_recovery(t, u, v, vis, frame_t, zmaps, step_arcsec)
     ch = chance_by_visits(t, u, v, vis, n * step_arcsec / 2.0, frame_t, zmaps, step_arcsec, trials)
     okn = [k for k in range(NMIN_FOUND, len(ch)) if ch[k] < CHANCE_MAX]
-    nv_min = okn[0] if okn else len(ch)
-    out["control"] = {
-        "trials": trials,
-        "min_visits_drawn": nv_min,
-        "chance": {str(k): round(float(ch[k]), 3) for k in range(NMIN_FOUND, len(ch)) if ch[k] > 0 or k == nv_min},
-    }
-    drawn = []
-    for tr in tracks:
-        if tr["nvis"] < NMIN_FOUND or tr["score"] < nv_min or tr["rms"] > RMS_MAX:
+    nv_line = okn[0] if okn else len(ch)
+    line_chance = {str(k): round(float(ch[k]), 3) for k in range(NMIN_FOUND, len(ch)) if ch[k] > 0 or k == nv_line}
+    out["control"]["line_chance"] = line_chance
+    if out["control"]["min_visits_drawn"] is None:  # no orbit search (no verification): the straight-line control is the control
+        out["control"].update(min_visits_drawn=nv_line, chance=line_chance)
+    taken = {(p["f"], round(p["x"], 1), round(p["y"], 1)) for tr in tracks for p in tr["pts"] if p["how"] == "found"}
+    for tr in lines:
+        if tr["nvis"] < NMIN_FOUND or tr["score"] < nv_line or tr["rms"] > RMS_MAX:
             continue
         pts = [
-            {"f": int(top[q].frame), "x": round(top[q].x, 2), "y": round(top[q].y, 2), "z": round(top[q].sn, 1), "how": "found"}
+            {"f": top[q].frame, "x": round(top[q].x, 2), "y": round(top[q].y, 2), "z": round(top[q].sn, 1), "how": "found"}
             for q in tr["idx"]
         ]
+        if {(p["f"], round(p["x"], 1), round(p["y"], 1)) for p in pts} & taken:
+            continue
         pts += [{"f": int(k), "x": round(x, 2), "y": round(y, 2), "z": round(z, 1), "how": "recovered"} for k, x, y, z in tr["rec"]]
         pts.sort(key=lambda p: frame_t[p["f"]])
-        z_found = [p["z"] for p in pts if p["how"] == "found"]
-        drawn.append(
+        zf = [p["z"] for p in pts if p["how"] == "found"]
+        tracks.append(
             {
                 "n": int(tr["score"]),
                 "n_found": int(tr["nvis"]),
@@ -277,11 +402,11 @@ def search(frames: Sequence[Frame], step_arcsec: float, n: int, trials: int = CO
                 "rms": round(tr["rms"], 2),
                 "method": "line",
                 "verified": False,
-                "z_together": round(float(np.sum(z_found) / np.sqrt(len(z_found))), 1),
+                "z_together": round(float(np.sum(zf) / np.sqrt(len(zf))), 1),
                 "pts": pts,
             }
         )
-    out["tracks"] = drawn
+    out["tracks"] = tracks
     return out
 
 
