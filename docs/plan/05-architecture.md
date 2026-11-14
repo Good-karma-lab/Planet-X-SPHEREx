@@ -13,11 +13,11 @@
         └───────────────┬─────────────────────┘
                         │ Cloudflare Tunnel (outbound only, no open port)
                         ▼
-   ┌──────────────────── one VM (Oracle A1 Ashburn, 2 OCPU / 12 GB / 200 GB) ───────────────────────┐
+   ┌──────────────────── one VM (Oracle A1 Madrid, 2 OCPU / 12 GB / 200 GB) ────────────────────────┐
    │  api (uvicorn, async)  ── jobs table ──  scheduler ──►  worker processes (compute, N = cores)   │
    │     │   ▲  polls / parts                       │             │  engine (numpy, scipy, numba)   │
    │     │   └──────── product store (files + SQLite catalogue, versioned, atomic) ◄───┘           │
-   │     ├── reader pool (async HTTP range reads) ──► S3 nasa-irsa-spherex (us-east-1, same region) │
+   │     ├── reader pool (async HTTP range reads) ──► S3 nasa-irsa-spherex (us-east-1, ~90 ms away)  │
    │     ├── upstream clients (breakers, budgets) ──► IRSA, Gaia, SIMBAD, SkyBoT, JPL, STScI, …     │
    │  indexer (timer, hourly) ──► index shards      warm runner (lowest priority)   snapshotter     │
    └───────────────────────────────────────────────────────────────────────────────────────────────┘
@@ -188,8 +188,8 @@ The API contract is documented in `docs/api.md` (generated from the typed models
 
 ## 5.10 Deployment
 
-- **Target:** Oracle Cloud Always Free Ampere A1 in US East (Ashburn) — 2 OCPU, 12 GB, 200 GB block volume — next to the bucket's
-  region; Ubuntu 24.04 aarch64; the account upgraded to pay-as-you-go (no charge within the allowance) to avoid idle reclamation.
+- **Target:** Oracle Cloud Always Free Ampere A1 in EU Madrid (`eu-madrid-1`, the account's home region; Oracle refused US East) —
+  2 OCPU, 12 GB, 200 GB block volume; the bucket is ~90 ms away, so reads go many in flight and whole row bands are cached; Ubuntu 24.04 aarch64; the account upgraded to pay-as-you-go (no charge within the allowance) to avoid idle reclamation.
 - **Provisioning:** `deploy/provision.sh` (idempotent): users, firewall (no inbound except SSH from the admin address), unattended
   security upgrades, `uv`, the app, systemd units `sky-api`, `sky-workers`, `sky-indexer.timer`, `sky-snapshot.timer`, `cloudflared`.
 - **Front:** Cloudflare DNS + Tunnel (no open HTTP port on the VM), cache rules: static assets and `/api/v1/fields/*/parts/*` with

@@ -158,7 +158,7 @@ to the supervisor. Small commits throughout. The walking skeleton is deployed ea
 
 | Risk | Effect | Mitigation |
 |---|---|---|
-| 2 OCPU too slow for cold 20′–60′ fields; no A1 capacity | cold fields take many minutes; deployment blocked | measured at the M4 gate; warm set covers the demo; budget fallback VM (15–40 USD/month); compute hot loops in Numba |
+| 2 OCPU too slow for cold 20′–60′ fields; no A1 capacity; Madrid ~90 ms from the bucket | cold fields take many minutes; deployment blocked | measured at the M4 gate; warm set covers the demo; budget fallback VM (15–40 USD/month); compute hot loops in Numba |
 | Oracle reclaims or loses the VM | outage | pay-as-you-go account; R2 snapshot; scripted provisioning; restore drill |
 | External services down (IRSA, VizieR, NED were down 2026-11-13/14) | catalogue parts and archive images missing | every part says "did not answer"; long caches; mirrors; the pictures and spectra need only S3 |
 | IRSA catalogue lag | exposure lists incomplete via IRSA | own index from the bucket; IRSA only for reconciliation and fallback |
@@ -172,7 +172,8 @@ to the supervisor. Small commits throughout. The walking skeleton is deployed ea
 
 ## 6.2 Open questions and decisions
 
-1. **Q1 — cloud account. Open (the user's).** The Oracle Cloud (and Cloudflare, R2) sign-up with the card check is the user's; a
+1. **Q1 — cloud account. Answered (2026-11-14):** the user's Oracle Cloud account exists; Oracle allowed only the home region
+   eu-madrid-1, so the A1 VM (2 OCPU / 12 GB, Ubuntu 24.04 aarch64) is in Madrid; the supervisor creates it. Earlier text: The Oracle Cloud (and Cloudflare, R2) sign-up with the card check is the user's; a
    domain or a Cloudflare-provided hostname is also their choice. Until it is answered, M0–M3 and the parts of M4 that need no VM are
    built; the deployment part of M4 waits.
 2. **Q2 — frontend framework. Decided (2026-11-14):** Preact + TypeScript.

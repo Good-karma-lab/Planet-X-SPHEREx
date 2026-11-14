@@ -25,6 +25,9 @@ timeouts, retries, concurrency limits and a circuit breaker, and a generic User-
 | 14 | IRSA Finder Chart API | 2MASS J/H/Ks, AllWISE W1/W2 images | HTTPS XML → FITS | permanent per field | same |
 | 15 | STScI Pan-STARRS (`ps1filenames`, `fitscut`) | g, i images (stack 2010–2014) | HTTPS FITS | permanent per field | same |
 | 16 | NEOWISE single exposures (IRSA IBE / cutouts) | WISE archive check of a D4 candidate | HTTPS FITS cutouts | per candidate, permanent | job reports progress and failures; on request only |
+| 16b | SPHEREx calibration files in the bucket (`dr1/spectral_wcs/`, `dr1/epsf/`, `dr1/l3_flux_corrections/`) | per-pixel wavelength (CWAVE/CBAND), EPSF per detector, cross-release flux scaling | HTTPS range GET | permanent per calibration version | spline through WCS-WAVE (wavelength); per-file EPSF |
+| 16c | IRSA MOST (Moving Object Search Tool) and the IRSA SPHEREx Spectrophotometry Tool | independent checks: was a known body inside the exposures at that time; forced-photometry spectra of point sources to compare ours with | web tools (no stable API found yet): used by the validation suite, not by the running service | — | — |
+| 16d | Gaia DR3 HATS copy, `s3://stpubdata/gaia/gaia_dr3/public/hats` (us-east-1, anonymous) | bulk star lists without a TAP service | S3 | 30 days | Gaia TAP mirrors |
 | 17 | SVO Filter Profile Service | J, H, Ks, W1, W2 curves | fetched once, **stored in the repository** | — | — |
 | 18 | ERFA ephemerides (bundled with astropy) | Earth position for orbits and parallax | local library | — | — |
 | 19 | Cloudflare (DNS, CDN, Tunnel, R2) | front, cache, origin access, warm-set snapshot | — | — | origin down: cached static and immutable products still served; R2 snapshot restores a VM |
@@ -33,8 +36,9 @@ timeouts, retries, concurrency limits and a circuit breaker, and a generic User-
 ## 3.2 SPHEREx Level-2 in the public bucket
 
 - **Where:** `https://nasa-irsa-spherex.s3.us-east-1.amazonaws.com/<release>/<period>/…` (QR2, QR3, deep collections, and DR1 since 2026-11-11 — preferred for the periods it covers), part of the AWS
-  Open Data program: no account, no charge to read. The nearer to us-east-1 the compute, the faster cold reads (the reason
-  for choosing Ashburn).
+  Open Data program: no account, no charge to read. The nearer to us-east-1 the compute, the faster cold reads. The VM is in Madrid (the Oracle account's home region; Ashburn was refused):
+  each request adds ~90 ms of round trip, so many reads in flight, whole row bands per request and the row-band cache matter more; the
+  M4 cloud gate measures it.
 - **How:** HTTPS GET with `Range: bytes=a-b`; one request per contiguous row band per plane; header chain walked once per file and
   stored in the index (offsets of IMAGE, FLAGS, VARIANCE, ZODI, PSF, WCS-WAVE). Compressed FLAGS (QR3): only the needed tiles.
   Connection pool with keep-alive; concurrency by budget (section 5.4 of the architecture): up to 96 in flight for a person's field on
@@ -69,6 +73,8 @@ truth for reading).
 
 ## 3.5 Catalogues
 
+- **Gaia DR4** is planned for 2026-12-02 (reference epoch J2017.5, new source ids, epoch astrometry). DR3 stays the default until DR4 is
+  validated; the Gaia client takes the table and the reference epoch as configuration so the switch is one setting.
 - **Gaia DR3.** GAVO `dr3lite` TAP (G < 17.5, positions and proper motions) for cell-based star lists (cells of ~0.5° cached 30 days;
   the field's stars are cut from the cells); ESA Gaia archive TAP for RUWE, parallax error and the variability flag in the context card
   (one source per request). Positions moved from epoch 2016.0 with proper motion to the date needed.
@@ -103,7 +109,7 @@ survey did not answer.
 
 | Resource | Plan | Limit that matters |
 |---|---|---|
-| Oracle Cloud Always Free, Ampere A1, US East (Ashburn) | the server: service + workers + indexer | 2 OCPU + 12 GB RAM (allowance since 2026-06-15; was 4 + 24), 200 GB block storage, 10 TB egress/month; account upgraded to pay-as-you-go (still free within the allowance) to avoid idle reclamation and to get A1 capacity |
+| Oracle Cloud Always Free, Ampere A1, **EU Madrid (`eu-madrid-1`)** — the account's home region; Oracle refused other regions | the server: service + workers + indexer | 2 OCPU + 12 GB RAM (allowance since 2026-06-15; was 4 + 24), 200 GB block storage, 10 TB egress/month; account upgraded to pay-as-you-go (still free within the allowance) to avoid idle reclamation and to get A1 capacity |
 | Cloudflare (free plan) | DNS, TLS, CDN for static files and immutable products, Tunnel (`cloudflared`) to the origin (no open inbound port), basic rate-limiting rules, Access for admin endpoints | proxied response size limits (large parts are split into chunks ≤ 64 MB each), 100 s origin timeout (every API answer is short; long work is a job) |
 | Cloudflare R2 (free tier) | snapshot of the index and of the warm-set products (~7–10 GB) | 10 GB storage free, no egress fee; beyond 10 GB a few cents per GB-month |
 | Domain | optional, ~10 USD/yr; else a Cloudflare-provided hostname | — |
