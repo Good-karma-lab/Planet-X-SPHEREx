@@ -1893,19 +1893,22 @@ export function Lab({ route }: { route: Route }) {
                           ? 'asking JPL which bodies cross the field…'
                           : filmBodies.state === 'unavailable'
                             ? 'JPL not reachable; asked again next time'
-                            : `${filmBodies.bodies.length} predicted (V ≤ ${filmBodies.vLimit}) · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen on at least one of their visits`}
+                            : `${filmBodies.bodies.length} predicted (V ≤ ${filmBodies.vLimit}) · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen on at least one visit · ${filmBodies.bodies.filter((b) => (b.stackZ ?? 0) >= 5).length} stand out when their visits are stacked along JPL's track (z ≥ 5)`}
                       </span>
                     </div>
                     {filmBodies.bodies.some((b) => b.name.includes('3I/ATLAS')) && <NeossatCard />}
                     {[...filmBodies.bodies]
-                      .sort((a, b) => b.seen.length - a.seen.length || (a.v ?? 99) - (b.v ?? 99))
-                      .slice(0, 8)
+                      .sort((a, b) => (b.stackZ ?? 0) - (a.stackZ ?? 0) || (a.v ?? 99) - (b.v ?? 99))
+                      .slice(0, 10)
                       .map((b) => (
                         <div key={b.name} class="mvrow" style={{ cursor: 'default' }}>
                           <b>{b.name}</b>
                           <span>V {b.v?.toFixed(1) ?? '—'}</span>
                           <span class="faint">
                             seen {b.seen.length} of {b.expected.length} film visits
+                            {b.stackZ != null && b.stackN
+                              ? ` · along its track z ${b.stackZ.toFixed(1)} (chance ${b.controlZ?.toFixed(1)})`
+                              : ''}
                             {b.planes != null ? ` · in ${b.planes} detector images` : ''}
                           </span>
                         </div>

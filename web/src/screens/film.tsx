@@ -29,6 +29,11 @@ export interface KnownBody {
   planes?: number;
   /** the expected frames on which the film's motion map shows something at the predicted place (z ≥ 4 within 2 grid pixels) */
   seen: number[];
+  /** the motion significance stacked along JPL's track over the expected visits: Σ z / √N at the predicted pixel, and the same
+   *  at four places 20 grid pixels aside (what chance gives) */
+  stackZ?: number;
+  stackN?: number;
+  controlZ?: number;
 }
 
 const SEEN_Z = 4.0;
@@ -115,7 +120,31 @@ export function FilmView({
                 }
               return best > 0 && zOf(best) >= SEEN_Z;
             });
-            return { ...kb, seen };
+            // the track stacked: z at the predicted pixel of every expected visit, summed over √N (a body too faint for one visit can
+            // stand out when its visits are added); the same stack 20 pixels aside on four sides is the chance level
+            const zAt = (k: number, x: number, y: number) => {
+              const xi = Math.round(x);
+              const yi = Math.round(y);
+              if (xi < 0 || yi < 0 || xi >= n || yi >= n) return null;
+              const v = mot[k * n * n + yi * n + xi]!;
+              return v ? zOf(v) : null;
+            };
+            const stack = (dx: number, dy: number) => {
+              let sum = 0;
+              let cnt = 0;
+              for (const k of kb.expected) {
+                const z = zAt(k, kb.frames[k]!.x + dx, kb.frames[k]!.y + dy);
+                if (z !== null) {
+                  sum += z;
+                  cnt++;
+                }
+              }
+              return { z: cnt ? sum / Math.sqrt(cnt) : 0, n: cnt };
+            };
+            const on = stack(0, 0);
+            const off = [stack(20, 0), stack(-20, 0), stack(0, 20), stack(0, -20)];
+            const controlZ = Math.sqrt(off.reduce((a, o) => a + o.z * o.z, 0) / off.length);
+            return { ...kb, seen, stackZ: on.z, stackN: on.n, controlZ };
           });
           bodiesRef.current = list;
           onBodies?.({ state: b.state, bodies: list, vLimit: b.v_limit ?? 20.5 });
