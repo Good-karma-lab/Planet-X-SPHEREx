@@ -16,8 +16,8 @@ Every search on this site has a depth and a set of conditions under which it wor
 - The motion of a saturated star in a 5′ field is pulled by its saturated core: Barnard's Star gives 11.37 ± 0.47 ″/yr at 5′ against Gaia's 10.393, and 10.7 ± 0.8 at 20′ (live, 2026-11-14, and docs/PROGRESS.md).
 - Saturated stars have no SPHEREx spectrum, and RW Aurigae and R Draconis give no tracks for the same reason; the spectrum tab says so and shows the catalogue photometry instead.
 - A spectrum checked against 2MASS and WISE is checked on the stars we measured (a field star and ε Indi B); we have no statistic over many stars.
-- One pass of the search for bodies beyond Neptune finds a place but does not tell the distance: for Eris the distance is flat over 70 to 165 au from a single pass, and it takes the link of three passes to fix it.
-- The search for bodies beyond Neptune found nothing in the Planet Nine field we searched (1°, D4, with the orbital prior); the depths of the searches are printed with their results on the Planet X page.
+- One pass of the search for bodies beyond Neptune finds a place but does not fix the distance; the link of several passes does.
+- The searches for bodies beyond Neptune found nothing above their bar in the Planet Nine fields we searched; the depth of each search is printed with its result on the Planet X page.
 - The quick look from the all-sky cube is a placeholder for a few seconds, from a 12.9 arcsecond pixel, and is never a measurement of a source.
 - The survey's own time sampling limits what the film shows: visits come a few times a day with gaps of days, so a body that crosses a field between visits is seen in few frames.
 
