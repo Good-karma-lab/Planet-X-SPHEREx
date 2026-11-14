@@ -121,6 +121,19 @@ class Store:
                     shutil.rmtree(vdir, ignore_errors=True)
         return removed
 
+    def listing(self, kinds: tuple[str, ...]) -> list[dict[str, Any]]:
+        """The current-version products of these kinds: key, kind, params, created (epoch s), complete."""
+        marks = ",".join("?" for _ in kinds)
+        with self._lock:
+            rows = self._db.execute(
+                f"SELECT key, kind, params, created, complete, version FROM products WHERE kind IN ({marks}) ORDER BY created", kinds
+            ).fetchall()
+        return [
+            {"key": k, "kind": kind, "params": json.loads(p), "created": c, "complete": bool(done)}
+            for k, kind, p, c, done, v in rows
+            if VERSIONS.get(kind) == v
+        ]
+
     def stats(self) -> dict[str, Any]:
         with self._lock:
             rows = self._db.execute(
