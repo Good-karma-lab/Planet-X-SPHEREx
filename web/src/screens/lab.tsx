@@ -29,6 +29,7 @@ import {
   useDistant,
   useFilmTracks,
   type FilmTrack,
+  type ChancePairs,
   type Pair,
 } from './search';
 import { useDistantPlan } from './search/distant';
@@ -2919,6 +2920,7 @@ export function Lab({ route }: { route: Route }) {
                 <PairCard
                   pair={pairs[pairSel]!}
                   mjds={pairMjds}
+                  chance={(mv as unknown as { chance_pairs?: ChancePairs } | null)?.chance_pairs ?? null}
                   onSpectrum={(pra, pdec) => {
                     setSelAn(null);
                     setSel({ ra: pra, dec: pdec });
