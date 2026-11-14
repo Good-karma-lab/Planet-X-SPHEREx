@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "preact/hooks";
-import { formatDec, formatRA } from "../lib/sky";
+import { useEffect, useRef, useState } from 'preact/hooks';
+import { formatDec, formatRA } from '../lib/sky';
 
 export interface Source {
   ra: number;
@@ -23,7 +23,7 @@ export interface SpecPoint {
 
 interface SpecView {
   key: string;
-  state: "running" | "done" | "failed";
+  state: 'running' | 'done' | 'failed';
   error: string;
   total: number;
   measured: number;
@@ -43,11 +43,11 @@ export function useSpectrum(src: Source | null): {
 } {
   const [view, setView] = useState<SpecView | null>(null);
   const [points, setPoints] = useState<SpecPoint[]>([]);
-  const [error, setError] = useState("");
+  const [error, setError] = useState('');
   useEffect(() => {
     setView(null);
     setPoints([]);
-    setError("");
+    setError('');
     if (!src) return;
     let stop = false;
     let held: SpecPoint[] = [];
@@ -56,19 +56,17 @@ export function useSpectrum(src: Source | null): {
       dec: src.dec.toFixed(6),
     });
     if (src.pmra || src.pmdec) {
-      q.set("pmra", String(src.pmra ?? 0));
-      q.set("pmdec", String(src.pmdec ?? 0));
+      q.set('pmra', String(src.pmra ?? 0));
+      q.set('pmdec', String(src.pmdec ?? 0));
     }
     const poll = async () => {
       while (!stop) {
         try {
           const r = await fetch(`/api/v1/spectrum?${q}&since=${held.length}`, {
-            cache: "no-store",
+            cache: 'no-store',
           });
           if (r.status === 429) {
-            setError(
-              "Too many new measurements from this address; trying again shortly",
-            );
+            setError('Too many new measurements from this address; trying again shortly');
             await new Promise((res) => setTimeout(res, 5000));
             continue;
           }
@@ -78,11 +76,11 @@ export function useSpectrum(src: Source | null): {
           held = [...held, ...v.points];
           setView(v);
           setPoints(held);
-          setError(v.state === "failed" ? v.error : "");
-          if (v.state !== "running") {
+          setError(v.state === 'failed' ? v.error : '');
+          if (v.state !== 'running') {
             // the finished spectrum once more in full: points that deviate from their neighbours are flagged only at the end
             const all = (await fetch(`/api/v1/spectrum?${q}&since=0`, {
-              cache: "no-store",
+              cache: 'no-store',
             }).then((x) => x.json())) as SpecView;
             if (!stop) setPoints(all.points);
             return;
@@ -111,7 +109,7 @@ function SpectrumChart({ points }: { points: SpecPoint[] }) {
     const H = cv.clientHeight;
     cv.width = W * dpr;
     cv.height = H * dpr;
-    const c = cv.getContext("2d")!;
+    const c = cv.getContext('2d')!;
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
     c.clearRect(0, 0, W, H);
     const ok = points.filter((p) => p.ok && p.flux != null);
@@ -129,9 +127,9 @@ function SpectrumChart({ points }: { points: SpecPoint[] }) {
       if (hi <= lo) hi = lo + 1;
     }
     const y = (v: number) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-    c.strokeStyle = "rgba(140,225,240,0.18)";
-    c.fillStyle = "rgba(160,185,194,0.9)";
-    c.font = "500 10.5px ui-monospace, Menlo, monospace";
+    c.strokeStyle = 'rgba(140,225,240,0.18)';
+    c.fillStyle = 'rgba(160,185,194,0.9)';
+    c.font = '500 10.5px ui-monospace, Menlo, monospace';
     c.lineWidth = 1;
     for (let lam = 1; lam <= 5; lam++) {
       c.beginPath();
@@ -140,7 +138,7 @@ function SpectrumChart({ points }: { points: SpecPoint[] }) {
       c.stroke();
       c.fillText(`${lam}`, x(lam) - 3, H - B + 13);
     }
-    c.fillText("µm", W - R - 14, H - 4);
+    c.fillText('µm', W - R - 14, H - 4);
     const step = niceStep((hi - lo) / 4);
     for (let v = Math.ceil(lo / step) * step; v <= hi; v += step) {
       c.beginPath();
@@ -149,9 +147,9 @@ function SpectrumChart({ points }: { points: SpecPoint[] }) {
       c.stroke();
       c.fillText(fmt(v), 2, y(v) + 3);
     }
-    c.fillText("mJy", 2, T + 8);
+    c.fillText('mJy', 2, T + 8);
     if (lo < 0) {
-      c.strokeStyle = "rgba(214,231,237,0.35)";
+      c.strokeStyle = 'rgba(214,231,237,0.35)';
       c.beginPath();
       c.moveTo(L, y(0));
       c.lineTo(W - R, y(0));
@@ -173,20 +171,14 @@ function SpectrumChart({ points }: { points: SpecPoint[] }) {
     }
     const last = ok[ok.length - 1];
     if (last) {
-      c.strokeStyle = "#ffffff";
+      c.strokeStyle = '#ffffff';
       c.lineWidth = 1.4;
       c.beginPath();
       c.arc(x(last.lam), y(last.flux!), 5.5, 0, 7);
       c.stroke();
     }
   }, [points]);
-  return (
-    <canvas
-      ref={ref}
-      class="spec-chart"
-      aria-label="Spectrum: flux against wavelength"
-    />
-  );
+  return <canvas ref={ref} class="spec-chart" aria-label="Spectrum: flux against wavelength" />;
 }
 
 function niceStep(x: number): number {
@@ -196,35 +188,12 @@ function niceStep(x: number): number {
 }
 function fmt(v: number): string {
   const a = Math.abs(v);
-  return a >= 100
-    ? v.toFixed(0)
-    : a >= 10
-      ? v.toFixed(0)
-      : a >= 1
-        ? v.toFixed(1)
-        : v.toFixed(2);
+  return a >= 100 ? v.toFixed(0) : a >= 10 ? v.toFixed(0) : a >= 1 ? v.toFixed(1) : v.toFixed(2);
 }
 
 function csv(src: Source, points: SpecPoint[]): string {
-  const head = `# SPHEREx Level-2 PSF photometry at RA ${src.ra.toFixed(6)} Dec ${src.dec.toFixed(6)}${src.pmra || src.pmdec ? ` (proper motion ${src.pmra} ${src.pmdec} mas/yr)` : ""}\n# i,mjd,detector,wavelength_um,flux_mJy,error_mJy,used,reason\n`;
-  return (
-    head +
-    points
-      .map((p) =>
-        [
-          p.i,
-          p.mjd,
-          p.det,
-          p.lam,
-          p.flux ?? "",
-          p.err ?? "",
-          p.ok ? 1 : 0,
-          p.why,
-        ].join(","),
-      )
-      .join("\n") +
-    "\n"
-  );
+  const head = `# SPHEREx Level-2 PSF photometry at RA ${src.ra.toFixed(6)} Dec ${src.dec.toFixed(6)}${src.pmra || src.pmdec ? ` (proper motion ${src.pmra} ${src.pmdec} mas/yr)` : ''}\n# i,mjd,detector,wavelength_um,flux_mJy,error_mJy,used,reason\n`;
+  return head + points.map((p) => [p.i, p.mjd, p.det, p.lam, p.flux ?? '', p.err ?? '', p.ok ? 1 : 0, p.why].join(',')).join('\n') + '\n';
 }
 
 export function SpectrumTab({ src }: { src: Source | null }) {
@@ -232,56 +201,41 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   if (!src) return <div class="mono-s">Click a source in the picture</div>;
   const why = new Map<string, number>();
   for (const p of points) if (!p.ok) why.set(p.why, (why.get(p.why) ?? 0) + 1);
-  const perDet = [1, 2, 3, 4, 5, 6].map(
-    (d) => points.filter((p) => p.ok && p.det === d).length,
-  );
+  const perDet = [1, 2, 3, 4, 5, 6].map((d) => points.filter((p) => p.ok && p.det === d).length);
   const usable = points.filter((p) => p.ok).length;
   return (
     <div class="spec">
       <div class="spec-head">
-        <b>{src.name ?? "Source"}</b>
+        <b>{src.name ?? 'Source'}</b>
         <span class="mono-s">
           {formatRA(src.ra)} {formatDec(src.dec)}
         </span>
       </div>
       <div class="spec-state">
         {view
-          ? view.state === "running"
+          ? view.state === 'running'
             ? `Measuring: ${view.measured} of ${view.total} exposures · ${usable} used`
-            : view.state === "done"
+            : view.state === 'done'
               ? `${usable} points from ${view.total} exposures`
               : `Failed: ${view.error}`
-          : "Finding the exposures of this place…"}
+          : 'Finding the exposures of this place…'}
       </div>
-      {view?.no_spectrum && (
-        <div class="partial">
-          Saturated in most exposures: no SPHEREx spectrum
-        </div>
-      )}
+      {view?.no_spectrum && <div class="partial">Saturated in most exposures: no SPHEREx spectrum</div>}
       <SpectrumChart points={points} />
       <div class="spec-dets">
         {perDet.map((n, i) => (
           <span key={i}>
-            <span
-              class="sw"
-              style={{ background: `hsl(${DET_HUE[i]},80%,62%)` }}
-            />
-            D{i + 1} {n}
+            <span class="sw" style={{ background: `hsl(${DET_HUE[i]},80%,62%)` }} />D{i + 1} {n}
           </span>
         ))}
       </div>
-      {why.size > 0 && (
-        <div class="mono-s">
-          Not used:{" "}
-          {[...why.entries()].map(([k, n]) => `${n} ${k}`).join(" · ")}
-        </div>
-      )}
+      {why.size > 0 && <div class="mono-s">Not used: {[...why.entries()].map(([k, n]) => `${n} ${k}`).join(' · ')}</div>}
       {error && (
-        <div class="mono-s" style={{ color: "var(--amber)" }}>
+        <div class="mono-s" style={{ color: 'var(--amber)' }}>
           {error}
         </div>
       )}
-      {view?.state === "done" && points.length > 0 && (
+      {view?.state === 'done' && points.length > 0 && (
         <a
           class="lnk"
           download={`spectrum-${formatRA(src.ra, true)}${formatDec(src.dec, true)}.csv`}
@@ -294,37 +248,28 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   );
 }
 
-export function ObjectTab({
-  src,
-  onSpectrum,
-}: {
-  src: Source | null;
-  onSpectrum: () => void;
-}) {
+export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum: () => void }) {
   if (!src) return <div class="mono-s">Click a source in the picture</div>;
-  const pm =
-    src.pmra || src.pmdec ? Math.hypot(src.pmra ?? 0, src.pmdec ?? 0) : 0;
+  const pm = src.pmra || src.pmdec ? Math.hypot(src.pmra ?? 0, src.pmdec ?? 0) : 0;
   return (
     <div class="okv">
       <div class="orow">
         <span class="faint">Name</span>
-        <span>{src.name ?? "no catalogue name here"}</span>
+        <span>{src.name ?? 'no catalogue name here'}</span>
       </div>
       <div class="orow">
         <span class="faint">Position</span>
         <span class="mono-s">
           {formatRA(src.ra)} {formatDec(src.dec)}
-          {src.name ? " (J2000)" : ""}
+          {src.name ? ' (J2000)' : ''}
         </span>
       </div>
       {pm > 0 && (
         <div class="orow">
           <span class="faint">Proper motion</span>
           <span>
-            {pm >= 1000
-              ? `${(pm / 1000).toFixed(2)} ″/yr`
-              : `${pm.toFixed(0)} mas/yr`}{" "}
-            (SIMBAD); measured at its place on each exposure's date
+            {pm >= 1000 ? `${(pm / 1000).toFixed(2)} ″/yr` : `${pm.toFixed(0)} mas/yr`} (SIMBAD); measured at its place on each exposure's
+            date
           </span>
         </div>
       )}

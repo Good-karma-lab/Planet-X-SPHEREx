@@ -347,3 +347,7 @@ input[type='range']::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .okv { margin: 0; display: grid; gap: 0; }
 .orow { display: grid; grid-template-columns: 118px 1fr; gap: 10px; padding: 7px 0; border-top: 1px solid var(--edge-soft); font-size: 12.5px; line-height: 1.35; }
 .partial { font-size: 12px; color: var(--amber); background: rgba(255, 180, 84, 0.08); border: 1px solid rgba(255, 180, 84, 0.25); border-radius: 8px; padding: 6px 9px; }
+.mvrow { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 6px 9px; color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; }
+.mvrow:hover, .mvrow:focus-visible { background: rgba(255, 180, 84, 0.09); border-color: rgba(255, 180, 84, 0.45); outline: none; }
+.mvrow b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
+.mvrow .faint { margin-left: auto; font: 500 11px var(--mono); white-space: nowrap; }

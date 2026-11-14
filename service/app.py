@@ -21,6 +21,7 @@ from service import __version__
 from service.config import Config, load
 from service.coverage import coverage_map
 from service.jobs.scheduler import Priority, Scheduler
+from service.movers import Movers
 from service.products.store import Store, product_key
 from service.products.versions import VERSIONS
 from service.ratelimit import Buckets, client_id
@@ -54,6 +55,7 @@ class State:
         self.hips: HipsTiles | None = None
         self.coverage: dict[str, Any] | None = None
         self.spectra: Spectra | None = None
+        self.movers: Movers | None = None
         self.coverage_lock = asyncio.Lock()
 
 
@@ -72,6 +74,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.s3 = s3 or S3()
         st.files = FileReader(st.s3, cfg.store_dir)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
+        st.movers = Movers(st.store, cfg.store_dir)
         if st.index is not None:
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
         if scheduler is None:
@@ -252,6 +255,19 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             media_type="application/json" if name.endswith(".json") else "application/octet-stream",
             headers={"Cache-Control": "public, max-age=31536000, immutable" if immutable else "no-store"},
         )
+
+    @app.get(f"{API_PREFIX}/movers")
+    async def movers_of(
+        ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90), fov: float = Query(5, gt=0, le=60)
+    ) -> Any:
+        """The search between passes of a field (once the field is finished) and the Gaia check of its tracks."""
+        if st.index is None or st.store is None or st.movers is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        params = fieldjob.canonical(ra, dec, fov)
+        key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
+        if not st.store.is_complete(key):
+            return {"state": "waiting", "error": "", "field": key}
+        return st.movers.view(st.movers.get_or_start(key))
 
     @app.get(f"{API_PREFIX}/spectrum")
     async def spectrum(
