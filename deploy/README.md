@@ -22,6 +22,8 @@ ssh -i ~/.ssh/oci_spherex_ed25519 ubuntu@HOST 'sudo SKY_DOMAIN=spherex.space bas
 deploy/push.sh ubuntu@HOST --index
 ```
 
+The globe's baked tiles live in `/var/www/spherex-tiles` and are served by Caddy at `/tiles/*` (immutable cache, any origin); the route is part of the Caddyfile that `provision.sh` writes, and `push.sh` / `release.sh` never touch the Caddyfile.
+
 `provision.sh` is idempotent: packages, Caddy and its Caddyfile, ports 80/443 in iptables (Oracle's images keep their rules there; ufw
 is not used), the `sky` user, `uv`, the store in `/var/lib/sky` and the systemd units. `push.sh --index` also copies a consistent
 snapshot of the local exposure index (about 0.9 GB), so the VM does not rebuild it from IRSA.
