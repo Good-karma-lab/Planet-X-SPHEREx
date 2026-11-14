@@ -9,6 +9,10 @@ import './findings/findings.css';
 import { FIELD, useLive } from './findings/live';
 import { AboutBody } from './about/About';
 import { LeadReport, LeadsList, rankLeads, useLeadParam } from './findings/leads';
+import { mountTour } from '../ui/Tour';
+
+
+mountTour();
 
 const fmtN = (n: number | undefined | null) => (n ?? 0).toLocaleString('en-US');
 const kv = (k: string, v: string) => (

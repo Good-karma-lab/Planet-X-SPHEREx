@@ -1,3 +1,4 @@
+import { startTour } from '../../ui/Tour';
 import { Validation } from './Validation';
 
 const lab = (q: string) => `#/lab?${q}`;
@@ -11,6 +12,11 @@ export function AboutBody() {
         <p class="hint">
           SPHEREx Sky shows what NASA's SPHEREx telescope really saw: pick any patch of the sky and watch it change over the seasons, in colour, and find the things that
           move. Nothing here is simulated. Not affiliated with or endorsed by NASA.
+        </p>
+        <p>
+          <button class="btn sm primary" onClick={startTour}>
+            Take a 5-step tour
+          </button>
         </p>
       </div>
       <div class="pg-grid">
