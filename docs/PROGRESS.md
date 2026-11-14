@@ -72,7 +72,9 @@ QA round 7: Planet X link shows its real range, explains why one pass cannot tel
 91b8744; time left that moves and says finishing — 9a13c75; 60′ fields ring the strongest 5 anomalies / 5 red sources — e21c315; the
 pass Find Planet X will search is named — 8a9fdfc; lab-ui's globe fixes (catalogue dots back, colour surveys from the order-3 Allsky,
 preload after the page's load; first picture in 0.8 s headless) and the phone legend — e3ed109. Open: WISE red scan stripes (lab-ui:
-in the Allsky data itself; QA to compare), WISE 0855 movers 0 against the brown-dwarf scan's 7.9″/yr (H1).
+in the Allsky data itself; QA to compare). Then: lab-ui's survey switch without a half-old picture, with the Allsky blur switched off
+(over the whole mosaic it drew tile seams) — a7c91e8, 48400f3; H1's moving red sources as tracks: WISE 0855 5′ now lists one
+mover, 7.9 ± 0.6″/yr toward 281°, "found in the red bands, 3.8–5 µm" — f98705a, 5e6912d.
 
 Open, with owner (the app pauses this session's messages to the other sessions, so these are the hand-over notes):
 - sky-service: WISE 0855 5′ movers find no track (blend); WISE 0855 5′ Find Planet X has fewer than four usable visits per pass
