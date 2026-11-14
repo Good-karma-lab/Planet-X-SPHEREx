@@ -14,3 +14,15 @@
 .pair-crop canvas { width: 96px; height: 96px; image-rendering: pixelated; border: 1px solid var(--edge-soft); border-radius: 4px; display: block; }
 .pair-crop figcaption { font: 500 10.5px var(--mono); color: var(--muted); margin-top: 3px; }
 .leadbtn { white-space: normal; text-align: left; }
+.dsbox { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.dsbox .sechead { display: flex; justify-content: space-between; align-items: baseline; }
+.dsbox .srrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.dsbox .srt { font-weight: 650; font-size: 13px; }
+.ds-lab { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.ds-chk { font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.ds-canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+.stl { margin: 0; }
+.ds-prog { height: 3px; border-radius: 2px; background: rgba(95, 227, 214, 0.15); overflow: hidden; }
+.ds-prog i { display: block; height: 100%; background: var(--accent); transition: width 0.4s; }
+.ds-prog.indet i { width: 35%; animation: ds-indet 1.4s ease-in-out infinite; }
+@keyframes ds-indet { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }

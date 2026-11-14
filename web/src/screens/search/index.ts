@@ -4,3 +4,5 @@ export { drawBodyPath, fetchBodyPath, todayText, type BodyPath, type PathPoint, 
 export { FilmTracks, useFilmTracks, chanceText, trackLine } from './film-tracks';
 export { drawBlink, drawTracks, trackName, type FilmControl, type FilmTrack, type TrackPoint } from './tracks';
 export { PairButton, PairCard, type Pair } from './pair';
+export { DistantCanvas, DistantLines, DistantPanel, peakRows, useDistant, type Distant, type DistantCandidate, type DistantResult, type DistantSliders } from './distant';
+export { about, progressText, runJob, useProduct } from './jobs';
