@@ -1,7 +1,5 @@
 /** A small Markdown renderer for the Method text: headings, paragraphs, lists, tables, code blocks, bold, italics-free inline code and links. HTML in the text is escaped. */
 
-import { FIGURES } from './figures';
-
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 /** Inline: `code`, **bold**, [text](url). */
@@ -32,13 +30,13 @@ export interface Rendered {
 }
 
 /** Renders one Markdown text; `prefix` keeps the ids of several texts apart. */
-export function render(md: string, prefix: string): Rendered {
+export function render(md: string, prefix: string, leadOn = true): Rendered {
   const lines = md.split('\n');
   const out: string[] = [];
   const headings: Heading[] = [];
   let i = 0;
   let figures = 0;
-  let sawLead = false;
+  let sawLead = !leadOn;
   let sawSection = false;
   const isTable = (l: string) => l.trim().startsWith('|');
   while (i < lines.length) {
@@ -98,15 +96,8 @@ export function render(md: string, prefix: string): Rendered {
     const fig = /^\[figure:\s*([a-z0-9-]+)\s*(?:\|\s*(.*?))?\s*\]\s*$/.exec(l.trim());
     if (fig) {
       figures++;
-      const f = FIGURES[fig[1]!];
-      const media = !f
-        ? ''
-        : f.kind === 'video'
-          ? `<video class="mf-media" src="${f.src}"${f.poster ? ` poster="${f.poster}"` : ''} muted loop playsinline controls preload="none" aria-label="${esc(f.alt).replace(/"/g, '&quot;')}"></video>`
-          : `<img class="mf-media" src="${f.src}" alt="${esc(f.alt).replace(/"/g, '&quot;')}" loading="lazy" />`;
-      const credit = f?.credit ? `<span class="mf-credit">${inline(f.credit)}</span>` : '';
       out.push(
-        `<figure class="mf-fig" data-fig="${fig[1]}" id="${prefix}-fig-${figures}"><div class="mf-figslot" data-fig="${fig[1]}">${media}</div>${fig[2] || credit ? `<figcaption>${fig[2] ? inline(fig[2]) : ''}${credit ? ` ${credit}` : ''}</figcaption>` : ''}</figure>`,
+        `<figure class="mf-fig" data-fig="${fig[1]}" id="${prefix}-fig-${figures}"><div class="mf-figslot" data-fig="${fig[1]}"></div>${fig[2] ? `<figcaption>${inline(fig[2])}</figcaption>` : ''}</figure>`,
       );
       i++;
       continue;
@@ -123,4 +114,103 @@ export function render(md: string, prefix: string): Rendered {
     } else out.push(`<p>${inline(text)}</p>`);
   }
   return { html: out.join('\n'), headings };
+}
+
+
+/** A figure placed in the text: `[figure: name | caption]` on a line of its own. */
+export interface FigureBlock {
+  kind: 'figure';
+  name: string;
+  caption: string;
+}
+/** A callout for the margin: a paragraph that starts `**Result:**` (or `Result:`), with its source taken from the end of it. */
+export interface ResultBlock {
+  kind: 'result';
+  text: string;
+  source: string;
+}
+export interface HtmlBlock {
+  kind: 'html';
+  html: string;
+}
+export type Block = HtmlBlock | FigureBlock | ResultBlock;
+
+/** One part: its title (the `# ` line), its lead (the first paragraph after it), and the rest as blocks. */
+export interface PartText {
+  title: string;
+  lead: string;
+  blocks: Block[];
+  headings: Heading[];
+}
+
+const FIG = /^\[figure:\s*([a-z0-9-]+)\s*(?:\|\s*(.*?))?\s*\]\s*$/i;
+const RES = /^(?:\*\*Result:\*\*|Result:)\s*(.*)$/;
+/** the source at the end of a Result: "(Source: x)", "Source: x." or "; source: x" */
+const SRC = /(?:\(\s*|;\s+|\.\s+|\s+)[Ss]ource:?\s*([^)]*?)\s*\)?\.?\s*$/;
+
+/** Splits a Result paragraph into its sentence and its source. */
+function result(raw: string): ResultBlock {
+  let text = raw.trim();
+  let source = '';
+  const m = SRC.exec(text);
+  if (m) {
+    source = m[1]!.trim();
+    text = text.slice(0, m.index).replace(/[\s;(]+$/, '').trim();
+    if (text && !/[.!?]$/.test(text)) text += '.';
+  }
+  return { kind: 'result', text, source };
+}
+
+/** Renders a part: a run of Markdown as HTML, figures and Result paragraphs as their own blocks; the title and the lead are taken out. */
+export function renderPart(md: string, prefix: string): PartText {
+  const lines = md.split('\n');
+  let title = '';
+  let lead = '';
+  let i = 0;
+  while (i < lines.length && !lines[i]!.trim()) i++;
+  if (i < lines.length && /^# /.test(lines[i]!)) title = lines[i++]!.slice(2).trim();
+  while (i < lines.length && !lines[i]!.trim()) i++;
+  const lb: string[] = [];
+  while (i < lines.length && lines[i]!.trim() && !/^(#{1,4} |```|\||\[figure:|[-*] |\d+\. )/.test(lines[i]!) && !RES.test(lines[i]!.trim())) lb.push(lines[i++]!.trim());
+  lead = lb.join(' ');
+  const blocks: Block[] = [];
+  // a Result written at the end of the lead is a callout of its own
+  const inLead = /\s+Result:\s+(.*)$/.exec(lead);
+  if (inLead) {
+    lead = lead.slice(0, inLead.index).trim();
+    blocks.push(result(inLead[1]!));
+  }
+  const headings: Heading[] = [];
+  let buf: string[] = [];
+  const flush = () => {
+    if (buf.some((l) => l.trim())) {
+      const r = render(buf.join('\n'), prefix, false);
+      headings.push(...r.headings);
+      blocks.push({ kind: 'html', html: r.html });
+    }
+    buf = [];
+  };
+  let inCode = false;
+  for (; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.startsWith('```')) inCode = !inCode;
+    if (!inCode) {
+      const f = FIG.exec(line.trim());
+      if (f) {
+        flush();
+        blocks.push({ kind: 'figure', name: f[1]!.toLowerCase(), caption: (f[2] ?? '').trim() });
+        continue;
+      }
+      if (RES.test(line.trim())) {
+        flush();
+        const para = [line.trim()];
+        while (i + 1 < lines.length && lines[i + 1]!.trim() && !FIG.test(lines[i + 1]!.trim()) && !/^(#{1,4} |```|\|)/.test(lines[i + 1]!)) para.push(lines[++i]!.trim());
+        blocks.push(result(RES.exec(para.join(' '))![1]!));
+        continue;
+      }
+    }
+    buf.push(line);
+  }
+  flush();
+  return { title, lead, blocks, headings };
 }

@@ -34,12 +34,13 @@ const lab = async (q) => {
 await check('globe: catalogue and test targets', async () => {
   await page.goto(`${BASE}/#/globe`);
   // the catalogue is a drawer, closed by default
-  if (!(await page.getByTestId('chip-bench').isVisible())) await page.getByRole('button', { name: 'Catalogue', exact: true }).click();
+  if (!(await page.getByTestId('chip-bench').isVisible())) await page.locator('.cat-handle').click();
   await page.getByTestId('chip-bench').waitFor({ timeout: 30000 });
   return await page.getByTestId('chip-bench').innerText();
 });
 await check('globe: SPHEREx background', async () => {
-  await page.getByRole('button', { name: 'SPHEREx — DR1', exact: true }).click();
+  await page.locator('.cat-handle').click(); // the drawer slides away
+  await page.getByRole('group', { name: 'Sky background' }).getByRole('button', { name: /SPHEREx/ }).click();
   await page.waitForTimeout(3000);
 });
 await check('lab: Barnard 5′ opens (warm)', async () => {
@@ -55,6 +56,8 @@ await check('lab: movers find Barnard with Gaia', async () => {
 await check('lab: spectrum of a clicked star', async () => {
   const v = await page.locator('.vsq').boundingBox();
   await page.mouse.click(v.x + v.width * 0.514, v.y + v.height * 0.165);
+  // a click opens the object's passport; its spectrum is the Spectrum tab
+  await page.getByTestId('tab-spec').click();
   await page.waitForFunction(() => /points from|Measuring/.test(document.querySelector('.spec-state')?.textContent ?? ''), null, {
     timeout: 90000,
   });
@@ -95,13 +98,14 @@ await check('lab: Days scale of the ecliptic field with known asteroids', async 
   );
   return (await page.getByTestId('lab-status').innerText()).slice(0, 140);
 });
-await check('findings: live cards', async () => {
+await check('findings: ranked leads from the service', async () => {
   await page.goto(`${BASE}/#/findings`);
-  await page.getByText('Gaia: same motion').first().waitFor({ timeout: 60000 });
+  await page.locator('.leadrow').first().waitFor({ timeout: 60000 });
+  return `${await page.locator('.leadrow').count()} leads`;
 });
 await check('method and about', async () => {
   await page.goto(`${BASE}/#/method`);
-  await page.getByText('Known bodies', { exact: true }).waitFor({ timeout: 20000 });
+  await page.locator('main h2').nth(10).waitFor({ timeout: 20000 }); // the Method in its parts
   await page.goto(`${BASE}/#/about`);
   await page.locator('main h1').waitFor({ timeout: 20000 });
 });

@@ -29,18 +29,23 @@ import {
   useDistant,
   useFilmTracks,
   type FilmTrack,
+  type ChancePairs,
   type Pair,
 } from './search';
+import { useDistantPlan } from './search/distant';
+import { FPX_AUTO } from '../lib/flags';
 import { useAsteroidSearch } from './asteroids';
 
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
 type Time = 'loop' | 'diff' | 'sum';
-type Tab = 'ctl' | 'cand' | 'obj' | 'spec' | 'find';
+type Tab = 'ctl' | 'cand' | 'obj' | 'spec';
 
 const ICON_DET =
   '<svg viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="8" aria-hidden="true"><rect x="28" y="64" width="62" height="56" rx="8"/><rect x="97" y="64" width="62" height="56" rx="8"/><rect x="166" y="64" width="62" height="56" rx="8"/><rect x="28" y="136" width="62" height="56" rx="8"/><rect x="97" y="136" width="62" height="56" rx="8"/><rect x="166" y="136" width="62" height="56" rx="8"/></svg>';
 
+/** one line on a view button; the full name is its tooltip */
+const VIEW_WORD: Record<string, string> = { picture: 'Picture', bands: 'Bands', det: 'Detectors' };
 const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
   {
     id: 'picture',
@@ -62,6 +67,10 @@ const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
   },
 ];
 
+/** the detectors whose range holds a band (D1 0.75–1.11, D2 1.11–1.64, D3 1.64–2.42, D4 2.42–3.82, D5 3.82–4.42, D6 4.42–5.00 µm) */
+const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2, 4], ice: [4], pah: [4], co2: [5], co: [6] };
+/** a band's name on a tile too small for the full one */
+const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
 const BANDS = [
   { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
   {
@@ -131,6 +140,7 @@ interface Opts {
   archive: boolean;
   anomalies: boolean;
   movers: boolean;
+  red: boolean;
   marker: boolean;
   sharp: boolean;
   trim: 'fixed' | 'p999' | 'p995' | 'adaptive';
@@ -360,6 +370,7 @@ export function Lab({ route }: { route: Route }) {
     archive: p['arch'] === '1',
     anomalies: p['ano'] !== '0',
     movers: p['movers'] !== '0',
+    red: p['red'] !== '0',
     marker: p['marker'] !== '0',
     sharp: p['sharp'] !== '0',
     trim: p['trim'] === 'p999' || p['trim'] === 'p995' || p['trim'] === 'adaptive' ? p['trim'] : 'fixed',
@@ -455,7 +466,11 @@ export function Lab({ route }: { route: Route }) {
       w: number;
       text: string;
       sub: string;
+      /** the label of a tile too small for the full one */
+      short?: string;
       hue: number;
+      /** the tile's own box and what it says when its detector or band has no exposure in the season shown */
+      empty?: { x: number; y: number; w: number; h: number; text: string };
     }[]
   >([]);
   const [playing, setPlaying] = useState(true);
@@ -478,7 +493,7 @@ export function Lab({ route }: { route: Route }) {
   const artMap = useRef(new Map<number, HTMLCanvasElement>());
   const motionCache = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
   const artRef = useRef<HTMLCanvasElement | null>(null);
-  const [, setStage] = useState({ w: 400, h: 400 });
+  const [stage, setStage] = useState({ w: 400, h: 400 });
   const stageRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState('');
   const ft = useFilmTracks(filmData?.key ?? null);
@@ -487,7 +502,7 @@ export function Lab({ route }: { route: Route }) {
   const [trackSel, setTrackSel] = useState(-1);
   const [note, setNote] = useState('');
   const [wallWait, setWallWait] = useState(false);
-  const [trayOpen, setTrayOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(() => typeof innerWidth === "number" && innerWidth > 860 && innerHeight > 640);
   const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
   const dwarfsRef = useRef<DwarfView | null>(null);
   dwarfsRef.current = dwarfs;
@@ -513,12 +528,19 @@ export function Lab({ route }: { route: Route }) {
     mjd: (meta?.passes.find((q) => q.index === (shown?.pass ?? 0)) ?? meta?.passes[0])?.mjd_mid,
     ...fpxRange,
   });
+  // Find Planet X on its own (FPX_AUTO): the other distance range and the other light choice run after the first, one after another
+  const autoMjd = (meta?.passes.find((q) => q.index === (shown?.pass ?? 0)) ?? meta?.passes[0])?.mjd_mid;
+  const distB = useDistant({ ra, dec, fov, pass: null, mjd: autoMjd, dmin: 30, dmax: 300, det: '4' });
+  const distC = useDistant({ ra, dec, fov, pass: null, mjd: autoMjd, dmin: 250, dmax: 2000, det: '123' });
+  const distD = useDistant({ ra, dec, fov, pass: null, mjd: autoMjd, dmin: 250, dmax: 2000, det: '4' });
+  const [deepSt, setDeepSt] = useState<[string, string]>(['idle', 'idle']);
+  const [deepFr, setDeepFr] = useState<[number | null, number | null]>([null, null]);
   const fpxStarted = useRef('');
   useEffect(() => {
     const key = `${ra},${dec},${fov}`;
     if (!fpx || !meta || distRef.available !== true || distRef.ds.state !== 'idle' || fpxStarted.current === key) return;
     fpxStarted.current = key;
-    setTab('find');
+    setTab('cand');
     void distRef.start(null);
   }, [fpx, meta, distRef.available, distRef.ds.state, ra, dec, fov]);
   const trackSelRef = useRef(-1);
@@ -835,7 +857,9 @@ export function Lab({ route }: { route: Route }) {
             }
           }
           const timeMode = st.time === 'diff' ? 'difference' : st.time === 'sum' ? 'coadd' : 'pendulum';
-          let panels: (Panel & { label?: string; sub?: string; hue?: number })[] = [];
+          let panels: (Panel & { label?: string; short?: string; sub?: string; hue?: number; empty?: string })[] = [];
+          const passMeta0 = st.meta?.passes.find((q) => q.index === a);
+          const lacks = (dets: number[]) => (passMeta0 && dets.length > 0 && dets.every((d) => !((passMeta0.detectors?.[`D${d}`] ?? 0) > 0)) ? dets : null);
           if (st.view === 'picture') {
             const mask = BANDS.reduce((m, bd, i) => (st.bands.includes(bd.key) ? m | (1 << i) : m), 0);
             panels = [
@@ -873,8 +897,10 @@ export function Lab({ route }: { route: Route }) {
               panels.push({ ...panels[0]!, ...inset });
             }
           } else if (st.view === 'bands') {
+            // on a phone the status line sits over the bottom of the picture: the tiles leave room for it
+            const wallRes = w < 560 ? 156 : 96;
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
-            panels = wallLayout(shownBands.length, w, h - 96).map((c0, j) => {
+            panels = wallLayout(shownBands.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the band buttons below
               const { bd, i } = shownBands[j]!;
               return {
@@ -890,13 +916,16 @@ export function Lab({ route }: { route: Route }) {
                 time: timeMode,
                 diffLayer: i + 1,
                 label: bd.name,
+                short: BAND_SHORT[bd.key],
                 sub: bd.band,
                 hue: bd.hue,
+                empty: lacks(BAND_DETS[bd.key] ?? []) ? `no exposure in ${(BAND_DETS[bd.key] ?? []).map((d) => `D${d}`).join(', ')} in this season` : undefined,
               };
             });
           } else {
+            const wallRes = w < 560 ? 156 : 96;
             const shownDets = st.dets.slice().sort();
-            panels = wallLayout(shownDets.length, w, h - 96).map((c0, j) => {
+            panels = wallLayout(shownDets.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the detector buttons below
               const d = shownDets[j]! - 1;
               return {
@@ -911,8 +940,10 @@ export function Lab({ route }: { route: Route }) {
                 time: timeMode,
                 diffLayer: 0,
                 label: `D${d + 1} ${DETECTORS[d]!.name}`,
+                short: `D${d + 1}`,
                 sub: DETECTORS[d]!.range,
                 hue: DETECTORS[d]!.hue,
+                empty: lacks([d + 1]) ? `no exposure in D${d + 1} in this season` : undefined,
               };
             });
           }
@@ -920,7 +951,8 @@ export function Lab({ route }: { route: Route }) {
           for (const q of panels) {
             r.panel(q, a, b, t);
             if (!q.zoom) rects.push({ x: q.x, y: q.y, w: q.w, h: q.h });
-            if (q.label) out.push({ x: q.x, y: q.y + q.h - 20, w: q.w, text: q.label, sub: q.sub ?? '', hue: q.hue ?? 0 });
+            if (q.label)
+              out.push({ x: q.x, y: q.y + q.h - 20, w: q.w, text: q.label, short: q.short, sub: q.sub ?? '', hue: q.hue ?? 0, empty: q.empty ? { x: q.x, y: q.y, w: q.w, h: q.h, text: q.empty } : undefined });
           }
           setShown((s) => (s && s.pass === a && s.stack === stack ? s : { pass: a, stack }));
         }
@@ -1078,7 +1110,7 @@ export function Lab({ route }: { route: Route }) {
       }
       const mvv = mvRef.current;
       if (st.opts.movers && mvv?.result && !days) {
-        for (const t of mvv.result.tracks) {
+        mvv.result.tracks.forEach((t, ti) => {
           const yrs = year - 2025.9;
           const decN = t.dec_2025_9 + (t.v_north * yrs) / 3600;
           const raN = t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((decN * Math.PI) / 180);
@@ -1095,7 +1127,7 @@ export function Lab({ route }: { route: Route }) {
               ra: raN,
               dec: decN,
               kind: 'track',
-              name: 'Mover',
+              name: `Mover ${ti + 1}`,
               lines: [line],
               colour: '#ffb454',
               fill: '#ffd08a',
@@ -1104,7 +1136,7 @@ export function Lab({ route }: { route: Route }) {
               motion: [t.v_east * 1000, t.v_north * 1000],
               dashed: t.check === 'pending',
             });
-        }
+        });
       }
       const near = (ra: number, dec: number, arcsec: number) =>
         marks.find((k) => Math.hypot((k.ra - ra) * Math.cos((dec * Math.PI) / 180), k.dec - dec) * 3600 < arcsec);
@@ -1131,7 +1163,7 @@ export function Lab({ route }: { route: Route }) {
         }
       }
       const rv = redRef.current;
-      if (rv?.result && !days) {
+      if (rv?.result && !days && st.opts.red) {
         rv.result.red.forEach((x, i) => {
           if (i >= ringMax) return;
           const [rra, rdec] =
@@ -1154,7 +1186,7 @@ export function Lab({ route }: { route: Route }) {
         });
       }
       const dw = dwarfsRef.current?.result;
-      if (dw && !days) {
+      if (dw && !days && st.opts.red) {
         dw.candidates.forEach((c, i) => {
           const [cra, cdec] =
             c.ra_j2000 != null && c.dec_j2000 != null
@@ -1261,7 +1293,8 @@ export function Lab({ route }: { route: Route }) {
         ctx.setLineDash([]);
       };
       const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
-        let lines = [mk.name, ...mk.lines].filter(Boolean);
+        // only the name or number at the ring; the rate, the checks and the rest are on the selected mark and in the Candidates list (the test target keeps its line)
+        let lines = [mk.name, ...(mk.kind === 'target' || mk.selected ? mk.lines : [])].filter(Boolean);
         if (!lines.length) return;
         // a narrow picture: at most two lines, each cut to fit
         if (box.w < 520) {
@@ -1291,12 +1324,24 @@ export function Lab({ route }: { route: Route }) {
         // a label never leaves the picture, on either side (a phone's picture is narrower than a long name)
         lx = Math.max(box.x + 4, Math.min(lx, box.x + box.w - 4 - tw));
         let ly = y - rr * 0.35 - 9;
+        const ly0 = ly;
         for (let tries = 0; tries < 8; tries++) {
           const hit = placed.find((p) => lx < p.x1 && lx + tw > p.x0 && ly < p.y1 && ly + th > p.y0);
           if (!hit) break;
           ly = hit.y1 + 2;
         }
+        // a narrow picture: a name pushed away from its own ring would point at the wrong thing, so it is left out (the ring and the list keep it)
+        if (box.w < 520 && !mk.selected && mk.kind !== 'target' && Math.abs(ly - ly0) > 6) return;
         ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2, ly));
+        // pushed back inside the picture (at its bottom edge) the label can land on another one again: it then goes above that one, and
+        // when no room is left only the selected mark and the test target keep their name (the ring and the list carry the rest)
+        const clash = () => placed.find((p) => lx < p.x1 && lx + tw > p.x0 && ly < p.y1 && ly + th > p.y0);
+        for (let tries = 0; tries < 8; tries++) {
+          const hit = clash();
+          if (!hit) break;
+          ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2, hit.y0 - th - 2));
+        }
+        if (clash() && !mk.selected && mk.kind !== 'target') return;
         placed.push({ x0: lx, y0: ly, x1: lx + tw, y1: ly + th });
         lines.forEach((l, i) => {
           ctx.font = i ? '500 10.5px ui-monospace, Menlo, monospace' : '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -1415,6 +1460,8 @@ export function Lab({ route }: { route: Route }) {
             if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y) || mk.ghost) continue;
             // a crowded field: names for the first dozen marks (targets, movers, known bodies first), rings only for the rest
             if (++labelled > 14 && (mk.kind === 'anomaly' || mk.kind === 'red') && !mk.selected) continue;
+            // a phone: names for the first six marks only (the selected one and the test target always)
+            if (box.w < 520 && labelled > 6 && !mk.selected && mk.kind !== 'target') continue;
             label(x, y, mk.rr, mk, box);
           }
         ctx.restore();
@@ -1606,7 +1653,7 @@ export function Lab({ route }: { route: Route }) {
     const dec0 = t.dec_2025_9 - (t.v_north * years) / 3600;
     const ra0 = t.ra_2025_9 - (t.v_east * years) / 3600 / Math.cos((t.dec_2025_9 * Math.PI) / 180);
     setSel({ ra: (ra0 + 360) % 360, dec: dec0, name: name || undefined, pmra: t.v_east * 1000, pmdec: t.v_north * 1000 });
-    setTab('spec');
+    setTab('obj');
   };
 
   // the spectral anomaly map: its state when the field opens (a finished map is shown at once); started by the button
@@ -1660,13 +1707,31 @@ export function Lab({ route }: { route: Route }) {
         ? { ra: x.ra_j2000, dec: x.dec_j2000, pmra: x.pmra, pmdec: x.pmdec, name: `Red source ${k + 1}` }
         : { ra: x.ra, dec: x.dec, name: `Red source ${k + 1}` },
     );
-    setTab('spec');
+    setTab('obj');
   };
   const pickAnomaly = (n: number) => {
     const a = an?.result?.anomalies.find((x) => x.n === n);
     if (!a) return;
     setSel({ ra: a.ra, dec: a.dec, name: `Anomaly ${n}`, pmra: a.pmra || undefined, pmdec: a.pmdec || undefined });
     setSelAn(n);
+    setTab('obj');
+  };
+
+  /** a track found inside a pass: selected as an object (at its middle place in the film's grid) and its passport opened */
+  const selectTrack = (i: number) => {
+    setTrackSel(i);
+    const t = ft.state === 'ok' ? ft.tracks[i] : undefined;
+    const g = filmData?.meta.grid;
+    if (t && g && t.pts.length) {
+      const p = t.pts[Math.floor(t.pts.length / 2)]!;
+      const cd = Math.cos((g.dec0 * Math.PI) / 180);
+      setSelAn(null);
+      setSel({
+        ra: g.ra0 - ((p.x + 0.5 - g.n / 2) * g.step_arcsec) / 3600 / cd,
+        dec: g.dec0 - ((p.y + 0.5 - g.n / 2) * g.step_arcsec) / 3600,
+        name: t.known?.name ?? `Track ${i + 1}`,
+      });
+    }
     setTab('obj');
   };
 
@@ -1913,7 +1978,7 @@ export function Lab({ route }: { route: Route }) {
           pmra: o.pmra ?? 0,
           pmdec: o.pmdec ?? 0,
         });
-        setTab('spec');
+        setTab('obj');
         return;
       }
     }
@@ -1950,7 +2015,7 @@ export function Lab({ route }: { route: Route }) {
     const [ra2, dec2] = toSky(gx, gy);
     setSelAn(null);
     setSel({ ra: ra2, dec: dec2 });
-    setTab('spec');
+    setTab('obj');
   };
   const goAim = () => {
     const a = parseRA(raIn);
@@ -2113,6 +2178,91 @@ export function Lab({ route }: { route: Route }) {
   const pairMjds = (mv as unknown as { mjd?: number[] } | null)?.mjd ?? passes.map((q) => q.mjd_mid);
   const anFrac = an?.state === 'done' ? 1 : an?.state === 'running' ? (an.total ? an.done / an.total : null) : 0;
   const dist = distRef;
+  const pxPlan = useDistantPlan(
+    { ra, dec, fov, pass: null, mjd: (meta?.passes.find((q) => q.index === (shown?.pass ?? 0)) ?? meta?.passes[0])?.mjd_mid },
+    dist.available === true && valid,
+  );
+
+  // Find Planet X on its own: after the field's other scans and behind a person's picture, one search at a time
+  const fpxRuns = [distRef, distB, distC, distD];
+  const scanOver = (v?: string) => v === 'done' || v === 'failed' || v === 'none';
+  const othersOver =
+    !!mv && scanOver(mv.state) && !!redv && scanOver(redv.state) && !!dwarfs && scanOver(dwarfs.state) && (!an || an.state === 'done' || an.state === 'failed' || an.state === 'idle') && scanOver(ast.state);
+  const pictureBusy = !meta || wallWait || (film !== null && !filmData);
+  const fpxHold = !FPX_AUTO || !valid || pictureBusy || !othersOver;
+  const fpxOff = fpxRuns.some((r) => r.available !== true);
+  useEffect(() => {
+    if (fpxHold || fpxOff || fpx) return;
+    if (fpxRuns.some((r) => r.ds.state === 'loading')) return;
+    const next = fpxRuns.find((r) => r.ds.state === 'idle');
+    if (next) void next.start(null, true);
+  });
+  const fpxAllOver = FPX_AUTO && fpxRuns.every((r) => r.ds.state !== 'idle' && r.ds.state !== 'loading');
+  const deepOn = FPX_AUTO && passes.length >= 3;
+  const pxState = (() => {
+    if (FPX_AUTO && !fpx) {
+      if (fpxOff) return { frac: 0, text: 'not offered' };
+      const parts = [...fpxRuns.map((r) => (r.ds.state === 'ok' ? 1 : r.ds.state === 'loading' ? (r.ds.frac ?? 0) : r.ds.state === 'idle' ? 0 : 1)), ...(deepOn ? deepFr.map((f) => f ?? (0 as number)) : [])];
+      const frac = parts.reduce((a, b) => a + b, 0) / parts.length;
+      const active = fpxRuns.some((r) => r.ds.state === 'loading') || deepSt.some((x) => x === 'planning' || x === 'plan' || x === 'running');
+      const finished = fpxAllOver && (!deepOn || deepSt.every((x) => x === 'done' || x === 'none' || x === 'error'));
+      if (finished) {
+        const n = fpxRuns.reduce((a, r) => a + (r.ds.state === 'ok' ? (r.ds.r.candidates?.length ?? 0) : 0), 0);
+        return { frac: 1, text: `${n} found` };
+      }
+      if (!active && fpxHold) return { frac: 0, text: 'waiting for the other scans' };
+      return { frac, text: `${Math.round(frac * 100)} %` };
+    }
+    const ds = dist.ds;
+    if (dist.available !== true) return { frac: 0, text: 'not offered' };
+    if (ds.state === 'idle') return { frac: 0, text: pxPlan ? (pxPlan.estimate_s < 90 ? '~1 min' : pxPlan.estimate_s < 5400 ? `~${Math.round(pxPlan.estimate_s / 60)} min` : `~${(pxPlan.estimate_s / 3600).toFixed(1)} h`) : 'ready' };
+    if (ds.state === 'loading') return { frac: ds.frac, text: ds.frac != null ? `${Math.round(ds.frac * 100)} %` : 'running' };
+    if (ds.state === 'ok') return { frac: 1, text: `${ds.r.candidates?.length ?? 0} found` };
+    if (ds.state === 'none') return { frac: 0, text: 'no data' };
+    return { frac: 0, text: 'failed' };
+  })();
+  const goPx = (e: Event, deep: boolean) => {
+    e.stopPropagation();
+    setTab('cand');
+    if (!deep && dist.ds.state === 'idle') void dist.start(null);
+    setTimeout(() => document.getElementById('px-section')?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 80);
+  };
+  const scanItems: (readonly [string, string | null])[] = [
+    ...(
+  [
+                  ['Movers', mv?.state === 'done' ? String(mvr?.tracks.length ?? 0) : null],
+                  ['Pairs', mv?.state === 'done' ? String(pairs.length) : null],
+                  ['Red', redv?.state === 'done' ? String(redv.result?.red.length ?? 0) : null],
+                  [
+                    'Brown dwarfs',
+                    dwarfs?.state === 'done'
+                      ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0}${dwarfs.result?.counts?.known_brown_dwarfs ? ` (+${dwarfs.result.counts.known_brown_dwarfs} known)` : ''}`
+                      : dwarfs
+                        ? null
+                        : '–',
+                  ],
+                  [
+                    'Anomalies',
+                    an?.state === 'done'
+                      ? String(an.result?.anomalies.length ?? 0)
+                      : an?.state === 'running'
+                        ? `${pct(anFrac) ?? 0}%`
+                        : null,
+                  ],
+                  [
+                    'Asteroids',
+                    ast.state === 'done'
+                      ? String(ast.tracks?.length ?? 0)
+                      : ast.state === 'none'
+                        ? '–'
+                        : ast.frac !== null && ast.state !== 'idle'
+                          ? `${pct(ast.frac)}%`
+                          : null,
+                  ],
+                ] as readonly (readonly [string, string | null])[]
+    ),
+    ['Planet X', FPX_AUTO && !fpx ? ((pxState.frac ?? 0) >= 1 ? pxState.text.replace(' found', '') : pxState.text.endsWith('%') ? pxState.text : null) : dist.ds.state === 'ok' ? String(dist.ds.r.candidates?.length ?? 0) : dist.ds.state === 'loading' ? `${Math.round((dist.ds.frac ?? 0) * 100)}%` : null],
+  ];
   const foundCount =
     (mvr?.tracks.length ?? 0) +
     pairs.length +
@@ -2130,6 +2280,9 @@ export function Lab({ route }: { route: Route }) {
               style={{
                 width: `${side}px`, // one square in every view: the frame never moves or grows
                 height: `${side}px`,
+                // whole pixels, so that the 1 px frame is crisp and never one pixel thick in one state and two in another
+                marginLeft: `${Math.max(0, Math.floor((stage.w - side) / 2))}px`,
+                marginTop: `${Math.max(0, Math.floor((stage.h - side) / 2))}px`,
                 cursor: 'crosshair',
               }}
               onClick={(e) => {
@@ -2150,8 +2303,7 @@ export function Lab({ route }: { route: Route }) {
                     filmData.meta.frames.map((f) => f.mjd),
                   );
                   if (hit >= 0) {
-                    setTrackSel(hit);
-                    setTab('cand');
+                    selectTrack(hit);
                     return;
                   }
                 }
@@ -2208,13 +2360,24 @@ export function Lab({ route }: { route: Route }) {
                 data-testid="picture"
               />
               <canvas ref={overlay} class="ov" />
-              {labels.map((l) => (
-                <div class="panel-label" style={{ left: `${l.x + 6}px`, top: `${l.y + 2}px`, maxWidth: `${l.w - 10}px` }}>
-                  <span class="sw" style={{ background: `hsl(${l.hue},80%,60%)`, boxShadow: `0 0 8px hsl(${l.hue},80%,60%)` }} />
-                  <b>{l.text}</b>
-                  <em>{l.sub}</em>
-                </div>
-              ))}
+              {labels.map((l) =>
+                l.empty ? (
+                  <div class={`panel-empty${l.w < 200 ? ' small' : ''}`} style={{ left: `${l.empty.x}px`, top: `${l.empty.y}px`, width: `${l.empty.w}px`, height: `${l.empty.h}px` }}>
+                    <span>{l.empty.text}</span>
+                  </div>
+                ) : null,
+              )}
+              {labels.map((l) => {
+                // a tile under 200 px has room for the short name only (D1, CO₂), not for the wavelength range
+                const small = l.w < 200;
+                return (
+                  <div class="panel-label" style={{ left: `${l.x + 6}px`, top: `${l.y + 2}px`, maxWidth: `${l.w - 10}px` }}>
+                    <span class="sw" style={{ background: `hsl(${l.hue},80%,60%)`, boxShadow: `0 0 8px hsl(${l.hue},80%,60%)` }} />
+                    <b>{small && l.short ? l.short : l.text}</b>
+                    {!small && <em>{l.sub}</em>}
+                  </div>
+                );
+              })}
               {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length && (
                 <canvas ref={archBig} class="archive-big" />
               )}
@@ -2536,7 +2699,6 @@ export function Lab({ route }: { route: Route }) {
                   ['cand', 'Candidates'],
                   ['obj', 'Object'],
                   ['spec', 'Spectrum'],
-                  ['find', 'Planet X'],
                 ] as const
               ).map(([k, n]) => (
                 <button key={k} class={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
@@ -2555,7 +2717,7 @@ export function Lab({ route }: { route: Route }) {
                     <label for="raIn">RA</label>
                     <input
                       id="raIn"
-                      class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`}
+                      class={`inp coord ${raIn !== '' && parseRA(raIn) === null ? 'bad' : ''}`}
                       spellcheck={false}
                       value={raIn}
                       onInput={(e) => setRaIn((e.target as HTMLInputElement).value)}
@@ -2567,7 +2729,7 @@ export function Lab({ route }: { route: Route }) {
                     <label for="decIn">Dec</label>
                     <input
                       id="decIn"
-                      class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`}
+                      class={`inp coord ${decIn !== '' && parseDec(decIn) === null ? 'bad' : ''}`}
                       spellcheck={false}
                       value={decIn}
                       onInput={(e) => setDecIn((e.target as HTMLInputElement).value)}
@@ -2589,22 +2751,61 @@ export function Lab({ route }: { route: Route }) {
                       data-testid={`view-${v.id}`}
                     >
                       <span class="vi" dangerouslySetInnerHTML={{ __html: v.icon }} />
-                      <span>{v.name}</span>
+                      <span>{VIEW_WORD[v.id] ?? v.name}</span>
                     </button>
                   ))}
                 </div>
               </section>
               <section class="psec">
                 <div class="psh">Display</div>
-                <div class="psub">On the picture</div>
+                <div class="psub">Objects</div>
                 <div class="swgrid">
                   {sw(
                     'ringChk',
-                    'Marker',
+                    'Target marker',
                     'Marker: a ring and the name of the test target, of the selected source and of the known asteroids, at their place on the date shown',
                     opts.marker,
                     (v) => set({ marker: v ? null : '0' }),
                   )}
+                  {sw(
+                    'movChk',
+                    'Movers',
+                    'Mover rings: a ring and a path for every track a search found (between passes in Months, inside the pass in Days)',
+                    opts.movers && (film === null || (ft.state === 'ok' && ft.tracks.length > 0)),
+                    film === null || (ft.state === 'ok' && ft.tracks.length > 0) ? (v) => set({ movers: v ? null : '0' }) : null,
+                    ft.state === 'ok'
+                      ? 'the asteroid search found no track in this pass'
+                      : 'the asteroid search of this pass has not finished yet',
+                  )}
+                  {sw(
+                    'redChk',
+                    'Red sources',
+                    'Red sources: a ring and the name on every source that is bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (the brown dwarf candidates are among them)',
+                    opts.red && !!redv?.result?.red.length,
+                    redv?.result?.red.length ? (v) => set({ red: v ? null : '0' }) : null,
+                    redv?.result ? 'the red-source search found none in this field' : 'the red-source search of this field has not finished yet',
+                  )}
+                  {sw(
+                    'anoChk',
+                    'Anomalies',
+                    'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
+                    opts.anomalies && !!an?.result?.anomalies.length,
+                    an?.result?.anomalies.length ? (v) => set({ ano: v ? null : '0' }) : null,
+                    an?.result
+                      ? 'the anomaly search found no anomaly in this field'
+                      : 'the anomaly search of this field has not finished yet',
+                  )}
+                  {sw(
+                    'maskChk',
+                    'Artifacts',
+                    'Artifacts: red where the SPHEREx pipeline flagged the pixel in many exposures of the season shown',
+                    opts.artifacts,
+                    wallView ? null : (v) => set({ art: v ? '1' : null }),
+                    'shown on the Picture and in Days, not on the walls',
+                  )}
+                </div>
+                <div class="psub">Paths</div>
+                <div class="swgrid">
                   {sw(
                     'trailChk',
                     'Trajectory',
@@ -2619,45 +2820,8 @@ export function Lab({ route }: { route: Route }) {
                     opts.rings,
                     (v) => set({ rings: v ? '1' : null }),
                   )}
-                  {sw(
-                    'movChk',
-                    'Mover rings',
-                    'Mover rings: a ring and a path for every track a search found (between passes in Months, inside the pass in Days)',
-                    opts.movers && (film === null || (ft.state === 'ok' && ft.tracks.length > 0)),
-                    film === null || (ft.state === 'ok' && ft.tracks.length > 0) ? (v) => set({ movers: v ? null : '0' }) : null,
-                    ft.state === 'ok'
-                      ? 'the asteroid search found no track in this pass'
-                      : 'the asteroid search of this pass has not finished yet',
-                    ft.state === 'ok' ? 'none here' : '↓ search',
-                  )}
-                  {sw(
-                    'anoChk',
-                    'Anomalies',
-                    'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
-                    opts.anomalies && !!an?.result?.anomalies.length,
-                    an?.result?.anomalies.length ? (v) => set({ ano: v ? null : '0' }) : null,
-                    an?.result
-                      ? 'the anomaly search found no anomaly in this field'
-                      : 'the anomaly search of this field has not finished yet',
-                    an?.result ? 'none here' : '↓ search',
-                  )}
-                  {sw(
-                    'maskChk',
-                    'Artifacts',
-                    'Artifacts: red where the SPHEREx pipeline flagged the pixel in many exposures of the season shown',
-                    opts.artifacts,
-                    wallView ? null : (v) => set({ art: v ? '1' : null }),
-                    'shown on the Picture and in Days, not on the walls',
-                  )}
-                  {sw(
-                    'refChk',
-                    'Reference',
-                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
-                    opts.reference,
-                    (v) => set({ ref: v ? '1' : null }),
-                  )}
                 </div>
-                <div class="psub">Image</div>
+                <div class="psub">Picture</div>
                 <div class="swgrid">
                   {sw(
                     'boostChk',
@@ -2665,6 +2829,13 @@ export function Lab({ route }: { route: Route }) {
                     'Brighten: a lower white point, so faint sources stand out (bright stars saturate)',
                     opts.boost,
                     (v) => set({ boost: v ? '1' : null }),
+                  )}
+                  {sw(
+                    'sharpChk',
+                    'Sharpen',
+                    'Sharpen: faint stars crisper on screen; boost only, the same gain in every channel (colours never change), never near saturated cores',
+                    opts.sharp,
+                    (v) => set({ sharp: v ? null : '0' }),
                   )}
                   {sw(
                     'satChk',
@@ -2675,12 +2846,15 @@ export function Lab({ route }: { route: Route }) {
                     'the visits of the Days scale carry no saturation layer: their cores are always drawn white',
                   )}
                   {sw(
-                    'sharpChk',
-                    'Sharpen',
-                    'Sharpen: faint stars crisper on screen; boost only, the same gain in every channel (colours never change), never near saturated cores',
-                    opts.sharp,
-                    (v) => set({ sharp: v ? null : '0' }),
+                    'refChk',
+                    'Reference',
+                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
+                    opts.reference,
+                    (v) => set({ ref: v ? '1' : null }),
                   )}
+                </div>
+                <div class="psub">Playback</div>
+                <div class="swgrid">
                   {sw(
                     'morphChk',
                     'Interpolate',
@@ -2784,13 +2958,15 @@ export function Lab({ route }: { route: Route }) {
                   <ContextRows
                     ra={an.result.anomalies.find((a) => a.n === selAn)!.ra}
                     dec={an.result.anomalies.find((a) => a.n === selAn)!.dec}
+                    pmra={an.result.anomalies.find((a) => a.n === selAn)!.pmra}
+                    pmdec={an.result.anomalies.find((a) => a.n === selAn)!.pmdec}
                   />
                 </>
               ) : (
                 <>
                   {sel && portraitOf(sel, sel.name ?? 'selected source')}
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
-                  {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={2000} />}
+                  {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={2000} pmra={sel.pmra ?? 0} pmdec={sel.pmdec ?? 0} />}
                   {sel && <LightCurves src={sel} />}
                   {sel && (
                     <div class="xlinks">
@@ -2834,12 +3010,14 @@ export function Lab({ route }: { route: Route }) {
               <SpectrumTab src={sel} />
             </div>
           )}
-          {tab === 'cand' && (
-            <div class="pbody">
+          {(tab === 'cand' || (FPX_AUTO && !fpx)) && (
+            // with Find Planet X on its own the body stays mounted (hidden) so its deep sums keep running when another tab is shown
+            <div class="pbody" style={tab === 'cand' ? undefined : { display: 'none' }}>
               {pairSel !== null && pairs[pairSel] && (
                 <PairCard
                   pair={pairs[pairSel]!}
                   mjds={pairMjds}
+                  chance={(mv as unknown as { chance_pairs?: ChancePairs } | null)?.chance_pairs ?? null}
                   onSpectrum={(pra, pdec) => {
                     setSelAn(null);
                     setSel({ ra: pra, dec: pdec });
@@ -2970,7 +3148,7 @@ export function Lab({ route }: { route: Route }) {
                       key={i}
                       class="mvrow"
                       onClick={() => {
-                        setTrackSel(i);
+                        selectTrack(i);
                         if (film === null) toDays();
                         setFrame(t.pts[0]?.f ?? 0);
                         setPlaying(false);
@@ -3032,75 +3210,72 @@ export function Lab({ route }: { route: Route }) {
                   </>
                 )}
               </section>
-            </div>
-          )}
-          {tab === 'find' && (
-            <div class="pbody">
-              <section class="psec fsec">
+              <section class="psec fsec" id="px-section">
                 <div class="fsh">Planet X · bodies beyond Neptune</div>
-                <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
-                {passes.length >= 3 && (
-                  <DeepSumPanel
-                    ra={ra}
-                    dec={dec}
-                    fov={fov}
-                    passes={passes.map((q) => q.mjd_mid)}
-                    autoPlan={fpx && (fpxRange.dmin ?? 0) >= 200 ? [fpxRange.dmin!, fpxRange.dmax ?? 2000] : undefined}
-                  />
+                {FPX_AUTO && !fpx ? (
+                  [
+                    [distRef, '30–300 au · D1–D3'],
+                    [distB, '30–300 au · D4'],
+                    [distC, '250–2000 au · D1–D3'],
+                    [distD, '250–2000 au · D4'],
+                  ].map(([d, label]) =>
+                    (d as typeof distRef).ds.state === 'idle' ? null : (
+                      <div key={label as string}>
+                        <div class="mono-s">{label as string}</div>
+                        <DistantPanel d={d as typeof distRef} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
+                      </div>
+                    ),
+                  )
+                ) : (
+                  <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
                 )}
+                {passes.length >= 3 &&
+                  (FPX_AUTO && !fpx ? (
+                    <>
+                      <DeepSumPanel
+                        ra={ra}
+                        dec={dec}
+                        fov={fov}
+                        passes={passes.map((q) => q.mjd_mid)}
+                        autoRun={[60, 110]}
+                        autoHold={fpxHold || !fpxAllOver}
+                        onState={(x) => {
+                          setDeepSt((o) => (o[0] === x.state ? o : [x.state, o[1]]));
+                          setDeepFr((o) => (o[0] === x.frac ? o : [x.frac, o[1]]));
+                        }}
+                      />
+                      <DeepSumPanel
+                        ra={ra}
+                        dec={dec}
+                        fov={fov}
+                        passes={passes.map((q) => q.mjd_mid)}
+                        autoRun={[250, 800]}
+                        autoHold={fpxHold || !fpxAllOver || !['done', 'none', 'error'].includes(deepSt[0])}
+                        onState={(x) => {
+                          setDeepSt((o) => (o[1] === x.state ? o : [o[0], x.state]));
+                          setDeepFr((o) => (o[1] === x.frac ? o : [o[0], x.frac]));
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <DeepSumPanel
+                      ra={ra}
+                      dec={dec}
+                      fov={fov}
+                      passes={passes.map((q) => q.mjd_mid)}
+                      autoPlan={fpx && (fpxRange.dmin ?? 0) >= 200 ? [fpxRange.dmin!, fpxRange.dmax ?? 2000] : undefined}
+                    />
+                  ))}
                 {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
               </section>
             </div>
           )}
-          <div class={`sbar ${trayOpen ? '' : 'tray'}`}>
-            <div
-              class="tray-line"
-              onClick={() => setTrayOpen((o) => !o)}
-              title={trayOpen ? 'Fold the scans' : 'Show every scan'}
-              data-testid="scans"
-            >
+          <div class={`sbar ${trayOpen ? '' : 'tray'}`} data-testid="scans">
+            <button class="tray-head" onClick={() => setTrayOpen((o) => !o)} aria-expanded={trayOpen} title={trayOpen ? 'Fold the scans' : 'Show every scan'}>
               <b>Scans</b>
-              {(
-                [
-                  ['Movers', mv?.state === 'done' ? String(mvr?.tracks.length ?? 0) : null],
-                  ['Pairs', mv?.state === 'done' ? String(pairs.length) : null],
-                  ['Red', redv?.state === 'done' ? String(redv.result?.red.length ?? 0) : null],
-                  [
-                    'Brown dwarfs',
-                    dwarfs?.state === 'done'
-                      ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0}${dwarfs.result?.counts?.known_brown_dwarfs ? ` (+${dwarfs.result.counts.known_brown_dwarfs} known)` : ''}`
-                      : dwarfs
-                        ? null
-                        : '–',
-                  ],
-                  [
-                    'Anomalies',
-                    an?.state === 'done'
-                      ? String(an.result?.anomalies.length ?? 0)
-                      : an?.state === 'running'
-                        ? `${pct(anFrac) ?? 0}%`
-                        : null,
-                  ],
-                  [
-                    'Asteroids',
-                    ast.state === 'done'
-                      ? String(ast.tracks?.length ?? 0)
-                      : ast.state === 'none'
-                        ? '–'
-                        : ast.frac !== null && ast.state !== 'idle'
-                          ? `${pct(ast.frac)}%`
-                          : null,
-                  ],
-                ] as const
-              ).map(([n, v]) => (
-                <span class="it" key={n}>
-                  <i class={v === null || v.endsWith('%') ? 'busy' : ''} />
-                  {n} {v ?? '…'}
-                </span>
-              ))}
-              <span class="tg">{trayOpen ? '▾' : '▴'}</span>
-            </div>
-            {trayOpen && (
+              <span class="chev">{trayOpen ? '▾' : '▴'}</span>
+            </button>
+            {trayOpen ? (
               <div onClick={() => setTab('cand')} title="Open the candidates of this field">
                 {srow(
                   'Movers',
@@ -3173,6 +3348,47 @@ export function Lab({ route }: { route: Route }) {
                     'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
                   'search-asteroids',
                 )}
+                {srow(
+                  'Brown dwarfs',
+                  !dwarfs ? 0 : dwarfs.state === 'done' ? 1 : dwarfs.state === 'failed' ? 0 : null,
+                  !dwarfs
+                    ? 'waiting'
+                    : dwarfs.state === 'done'
+                      ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0} found${dwarfs.result?.counts?.known_brown_dwarfs ? ` · +${dwarfs.result.counts.known_brown_dwarfs} known` : ''}`
+                      : dwarfs.state === 'failed'
+                        ? 'failed'
+                        : 'checking',
+                  'Red sources that move between the passes and that the catalogues do not explain',
+                  'search-browndwarfs',
+                )}
+                <div class="sline sline-px" data-testid="search-px" title="Find Planet X: the visits of a pass added along trial distances and own motions (30–300 au)">
+                  <b>Find Planet X</b>
+                  <span class={`sprog ${pxState.frac === null ? 'busy' : ''}`}>
+                    <i style={{ width: `${pxState.frac === null ? 30 : Math.max(2, pxState.frac * 100)}%` }} />
+                  </span>
+                  <span class="sval">{pxState.text}</span>
+                  <span class="sacts">
+                    {!FPX_AUTO && dist.ds.state === 'idle' && dist.available === true && (
+                      <button class="btn sm mini" onClick={(e) => goPx(e, false)}>
+                        Start
+                      </button>
+                    )}
+                    {!FPX_AUTO && passes.length >= 3 && pxPlan && (
+                      <button class="btn sm mini" onClick={(e) => goPx(e, true)} title="The deep sum of all passes: its plan and time are shown before it starts">
+                        Deep sum
+                      </button>
+                    )}
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <div class="tray-sum" onClick={() => setTrayOpen(true)}>
+                {scanItems.map(([n, v]) => (
+                  <span class="it" key={n}>
+                    <i class={v === null || v.endsWith('%') ? 'busy' : ''} />
+                    {n} {v ?? '…'}
+                  </span>
+                ))}
               </div>
             )}
           </div>

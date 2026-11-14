@@ -44,6 +44,7 @@ from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
 from service.routes_dwarfs import make_dwarfs_router
+from service.routes_export import make_export_router
 from service.routes_extras import register as register_extras
 from service.routes_known import make_known_router
 from service.routes_pairs import make_pairs_router
@@ -121,6 +122,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if st.index is not None:
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
             st.anomalies = Anomalies(st.index, st.files, st.wavelengths, st.store, cfg.store_dir)
+            st.anomalies.catalogue = st.catalogue
         if scheduler is None:
             workers = max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2)))
             # fresh worker processes (forkserver), not copies of the API process: small, and the memory cap counts only their own work
@@ -394,6 +396,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_pairs_router(st))
     app.include_router(make_dwarfs_router(st))
     app.include_router(make_searched_router(st))
+    app.include_router(make_export_router(st))
     app.include_router(make_planetx_router(st))
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
     register_extras(app)
@@ -465,7 +468,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         params = fieldjob.canonical(ra, dec, fov)
         key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
         if st.store.is_complete(key):
-            return {"key": key, "state": "done", "params": params, "meta": st.store.read_meta(fieldjob.KIND, key)}
+            return {"key": key, "state": "done", "params": params, "meta": fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))}
         if key not in st.scheduler.by_key or st.scheduler.jobs[st.scheduler.by_key[key]].state in ("error", "cancelled"):
             wait = st.new_work.take(client_id(request, st.salt))
             if wait > 0:
@@ -474,7 +477,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 )
         _, job = submit_field(params, Priority.P0)
         if job is None:
-            return {"key": key, "state": "done", "params": params, "meta": st.store.read_meta(fieldjob.KIND, key)}
+            return {"key": key, "state": "done", "params": params, "meta": fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))}
         return {"key": key, "params": params, "job": job.view()}
 
     @app.get(f"{API_PREFIX}/film")
@@ -593,7 +596,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         hit = st.identified.get(key)
         if hit is not None:
             return hit
-        out = await st.anomalies.identify(ra, dec, pmra, pmdec)
+        # the place is where the source stands at the passes' epoch: the catalogues' places are carried to it with their own motions
+        # (the old query looked at the clicked place in the catalogues' epochs, 2000 and 2016, and lost every star that moves)
+        out = await (st.catalogue.identify(ra, dec) if st.catalogue is not None else st.anomalies.identify(ra, dec, pmra, pmdec))
         if all(v.get("state") != "unavailable" for v in out.values()):
             st.identified[key] = out
             if len(st.identified) > 5000:
@@ -706,8 +711,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             raise HTTPException(404, str(e)) from e
         except Exception as e:  # the bucket did not answer: said, never cached
             raise HTTPException(502, f"the all-sky cube could not be read: {type(e).__name__}") from e
-        if all(v is None for v in out["flux"]):
-            out["note"] = "no value in the all-sky cube at this pixel (a saturated core or a gap of the map)"
+        filled = sum(1 for v in out["flux"] if v is not None)
+        if filled < 0.5 * len(out["flux"]):
+            out["note"] = "most planes of the all-sky cube are empty at this pixel (a saturated core or a gap of the map)"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(out, separators=(",", ":")))
         return out

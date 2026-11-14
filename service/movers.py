@@ -22,6 +22,7 @@ from typing import Any
 
 import httpx
 import numpy as np
+from scipy.ndimage import center_of_mass, label
 
 from engine import movers
 from engine.grid import Grid
@@ -36,10 +37,38 @@ KIND = "movers"
 GAIA_TAP = (gaia.TAP,)
 GAIA_EPOCH = gaia.EPOCH
 SAME_ARCSEC = 3.0
+GAIA_EPOCH_YEAR = 2016.0
+SAT_THRESHOLD = 0.3
 NEAR_ARCSEC = 6.0
 PM_MIN = 2.0  # mas/yr
 STILL_FRACTION = 0.3  # a star moving less than this share of the track's rate explains nothing
 CHECK_AGAIN_S = 60.0
+
+
+MOVER_SIGMA = 5.0  # a "mover" is a motion measured to at least this many sigma ...
+MOVER_SHIFT_ARCSEC = 6.15  # ... that also shifts the source over the baseline by at least one SPHEREx pixel (what the eye can see)
+RMS_FLOOR_ARCSEC = 0.3  # the scatter of a short track says little: the error of the speed never counts less than this
+
+
+def motion_grade(speed: float, rms_arcsec: float, mjds: list[float]) -> dict[str, Any]:
+    """How much a measured motion is worth: the speed's error (scatter about the straight line over √Σ(t − t̄)², years), its significance,
+    the shift over the baseline of the passes, and the grade: "mover" when it is at least MOVER_SIGMA sigma and at least one pixel
+    (MOVER_SHIFT_ARCSEC) over the baseline, else "slow" (a possible slow motion below what a picture can show)."""
+    yrs = [m / 365.25 for m in mjds]
+    mean = sum(yrs) / max(1, len(yrs))
+    ss = sum((y - mean) ** 2 for y in yrs)
+    err = max(rms_arcsec, RMS_FLOOR_ARCSEC) / math.sqrt(ss) if ss > 0 else float("inf")
+    sigma = speed / err if err > 0 else 0.0
+    baseline = (max(yrs) - min(yrs)) if yrs else 0.0
+    shift = speed * baseline
+    ok = sigma >= MOVER_SIGMA and shift >= MOVER_SHIFT_ARCSEC
+    return {
+        "speed_err": round(err, 2) if math.isfinite(err) else None,
+        "sigma": round(sigma, 1),
+        "shift_arcsec": round(shift, 1),
+        "baseline_years": round(baseline, 2),
+        "grade": "mover" if ok else "slow",
+    }
 
 
 def year_of(mjd: float) -> float:
@@ -96,6 +125,13 @@ class Movers:
                 raise ValueError("the field is not finished")
             raws = await asyncio.to_thread(self._quick_parts, run.field_key, meta)
             result = await cpu.run(search_parts, run.field_key, meta, raws)
+            try:  # bright fast stars saturate: the catalogue names them and the saturated zones give their motion
+                stars = await self._fast_stars(meta)
+                extra = await cpu.run(saturated_movers, meta, raws, stars, result["tracks"]) if stars else []
+            except (BreakerOpenError, httpx.HTTPError, ValueError, KeyError, OSError):
+                extra = []  # the catalogue did not answer: the search's own tracks stand, and this part is tried on the next search
+            result["tracks"] = list(result["tracks"]) + extra
+            result["saturated_movers"] = len(extra)
             run.result = result
             run.checked_at = time.monotonic()
             await self._check_all(run)
@@ -126,6 +162,32 @@ class Movers:
             tmp = self.dir / f"{run.key}.part"
             tmp.write_text(json.dumps(run.result, separators=(",", ":")))
             tmp.replace(self.dir / f"{run.key}.json")
+
+    async def _fast_stars(self, meta: dict[str, Any]) -> list[dict[str, Any]]:
+        """The bright fast stars of the field in Gaia DR3 (G < SAT_STAR_G, proper motion above SAT_PM_MAS), from the archive or, when it
+        does not answer, from the Parquet copy on AWS. The cone covers the field and the way a star can have come (11″/yr to the passes)."""
+        g = meta["grid"]
+        radius = g["n"] * g["step_arcsec"] / 2.0 * math.sqrt(2.0) + 11.0 * 12.0
+        q = (
+            f"SELECT source_id, ra, dec, pmra, pmdec, parallax, phot_g_mean_mag FROM {gaia.TABLE} "
+            f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {g['ra0']:.7f}, {g['dec0']:.7f}, {radius / 3600.0:.7f})) "
+            f"AND phot_g_mean_mag < {SAT_STAR_G} AND (pmra*pmra + pmdec*pmdec) > {SAT_PM_MAS**2:.0f}"
+        )
+        try:
+            self.gaia.before()
+            try:
+                r = await self.client.post(GAIA_TAP[0], data={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "json", "QUERY": q})
+                r.raise_for_status()
+                body = r.json()
+            except Exception:
+                self.gaia.failure()
+                raise
+            self.gaia.success()
+            names = [c["name"] for c in body["metadata"]]
+            return [dict(zip(names, row, strict=True)) for row in body["data"]]
+        except (BreakerOpenError, httpx.HTTPError, ValueError, KeyError):
+            rows = await cpu.run(gaia_fast_rows, g["ra0"], g["dec0"], radius / 3600.0)
+            return rows
 
     async def _gaia_near(self, ra: float, dec: float, radius_arcsec: float) -> list[dict[str, Any]]:
         q = (
@@ -209,7 +271,15 @@ class Movers:
         out: dict[str, Any] = {"key": run.key, "state": run.state, "error": run.error}
         if run.result:
             r = dict(run.result)
-            r["tracks"] = [t for t in r["tracks"] if t["check"] != "still"]
+            shown: list[dict[str, Any]] = []
+            slow: list[dict[str, Any]] = []
+            for t in r["tracks"]:
+                if t["check"] == "still":
+                    continue
+                # a motion the catalogue confirms (Gaia "same") is a mover whatever its size; an unexplained one must be measured to
+                # MOVER_SIGMA sigma and shift by a pixel over the baseline, else it is only a possible slow motion
+                (slow if t.get("grade") == "slow" and t["check"] != "same" else shown).append(t)
+            r["tracks"], r["slow_tracks"], r["slow"] = shown, slow, len(slow)
             out["result"] = r
         return out
 
@@ -255,6 +325,7 @@ def search_parts(field_key: str, meta: dict[str, Any], raws: list[bytes]) -> dic
                 "snr": [None if not math.isfinite(s) else round(s, 1) for s in t.snr],
                 "check": "pending",
                 "gaia": None,
+                **motion_grade(t.speed, t.rms_arcsec, [float(m) for m in t.mjd]),
             }
         )
     return {
@@ -269,6 +340,141 @@ def search_parts(field_key: str, meta: dict[str, Any], raws: list[bytes]) -> dic
         "tracks": tracks,
         "seconds": round(time.monotonic() - t0, 2),
     }
+
+
+SAT_STAR_G = 10.0  # a Gaia star brighter than this saturates SPHEREx
+SAT_PM_MAS = 500.0  # and moves at least this fast: the search between passes may lose it (its core is a saturated zone, not a point)
+SAT_BLOB_ARCSEC = 12.0  # the saturated zone of a star is looked for this close to where the catalogue puts the star
+SAT_MATCH_ARCSEC = 8.0  # its centre may differ from the catalogue place by this much (the zone is a few detector pixels wide)
+SAT_MIN_PASSES = 2
+
+
+def gaia_fast_rows(ra: float, dec: float, radius_deg: float) -> list[dict[str, Any]]:
+    """The bright fast Gaia stars around a place from the Parquet copy on AWS (a worker process)."""
+    rows = gaia_hats.cone(ra, dec, radius_deg)
+    return [
+        r
+        for r in rows
+        if r.get("phot_g_mean_mag") is not None
+        and r["phot_g_mean_mag"] < SAT_STAR_G
+        and math.hypot(r.get("pmra") or 0.0, r.get("pmdec") or 0.0) > SAT_PM_MAS
+    ]
+
+
+def _carried(st: dict[str, Any], mjd: float) -> tuple[float, float]:
+    """A Gaia star (2016 place, proper motion in mas/yr) at the date of a pass."""
+    k = year_of(mjd) - GAIA_EPOCH_YEAR
+    d = st["dec"] + (st["pmdec"] or 0.0) * k / 3.6e6
+    return st["ra"] + (st["pmra"] or 0.0) * k / 3.6e6 / math.cos(math.radians(d)), d
+
+
+def saturated_movers(
+    meta: dict[str, Any], raws: list[bytes], stars: list[dict[str, Any]], tracks: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Fast bright stars that saturate: Gaia's stars of the field (2016 place and motion, `stars`) carried to every pass and looked for as a
+    saturated zone of the stacks there. The zone's centre in every pass is measured (the speed is then the zone's own, with its
+    scatter); the catalogue says which star it is. A star that a track of the search between passes already stands for is left out.
+    -> tracks in the shape of the search's (source "saturated": the places are the measured centres of the saturated zones, the verdict is
+    Gaia's)."""
+    whites, sats = [], []
+    for raw in raws:
+        _, arr = decode(raw)
+        whites.append(arr["white"].astype(np.float32))
+        sats.append(arr["sat"].astype(np.float32) / 255.0)
+    keep = covering_passes(whites)
+    passes = [meta["passes"][i] for i in keep]
+    sats = [sats[i] for i in keep]
+    g = meta["grid"]
+    grid = Grid(g["ra0"], g["dec0"], g["step_arcsec"], g["n"])
+    n, step = g["n"], g["step_arcsec"]
+    out: list[dict[str, Any]] = []
+    for st in stars:
+        exp_xy, exp_ra, exp_dec = [], [], []
+        for p in passes:
+            k = year_of(p["mjd_mid"]) - GAIA_EPOCH_YEAR
+            d = st["dec"] + (st["pmdec"] or 0.0) * k / 3.6e6
+            a = st["ra"] + (st["pmra"] or 0.0) * k / 3.6e6 / math.cos(math.radians(d))
+            gx, gy = grid.sky_to_grid([a], [d])
+            exp_xy.append((float(gx[0]), float(gy[0])))
+            exp_ra.append(a)
+            exp_dec.append(d)
+        if any(not (0 <= x < n and 0 <= y < n) for x, y in exp_xy):
+            continue
+        if any(
+            all(
+                math.hypot(
+                    (tr["ra"][j] - _carried(st, m)[0]) * math.cos(math.radians(tr["dec"][j])),
+                    tr["dec"][j] - _carried(st, m)[1],
+                )
+                * 3600.0
+                < 6.0
+                for j, m in enumerate(tr["mjd"])
+            )
+            for tr in tracks
+        ):
+            continue
+        found: list[tuple[int, float, float]] = []
+        rad = max(2, math.ceil(SAT_BLOB_ARCSEC / step))
+        for i, (x, y) in enumerate(exp_xy):
+            y0, y1, x0, x1 = max(0, int(y) - rad), min(n, int(y) + rad + 1), max(0, int(x) - rad), min(n, int(x) + rad + 1)
+            win = sats[i][y0:y1, x0:x1] > SAT_THRESHOLD
+            if not win.any():
+                continue
+            lab, nlab = label(win)
+            best: tuple[float, float, float] | None = None
+            for blob in range(1, nlab + 1):
+                cy, cx = center_of_mass(lab == blob)
+                dist = math.hypot(cx + x0 - x, cy + y0 - y) * step
+                if best is None or dist < best[0]:
+                    best = (dist, float(cx + x0), float(cy + y0))
+            if best is not None and best[0] <= SAT_MATCH_ARCSEC:
+                found.append((i, best[1], best[2]))
+        if len(found) < SAT_MIN_PASSES:
+            continue
+        idx = [i for i, _, _ in found]
+        ra_m, dec_m = grid.grid_to_sky([x for _, x, _ in found], [y for _, _, y in found])
+        t_yr = np.array([year_of(passes[i]["mjd_mid"]) for i in idx])
+        cosd = math.cos(math.radians(float(np.mean(dec_m))))
+        ye, yn = (np.asarray(ra_m) - ra_m[0]) * cosd * 3600.0, (np.asarray(dec_m) - dec_m[0]) * 3600.0
+        fe, fn = np.polyfit(t_yr, ye, 1), np.polyfit(t_yr, yn, 1)
+        rms = float(np.sqrt(np.mean((ye - np.polyval(fe, t_yr)) ** 2 + (yn - np.polyval(fn, t_yr)) ** 2)))
+        ve, vn = float(fe[0]), float(fn[0])
+        cat_ve, cat_vn = (st["pmra"] or 0.0) / 1000.0, (st["pmdec"] or 0.0) / 1000.0
+        offs = [
+            math.hypot((ra_m[j] - exp_ra[i]) * math.cos(math.radians(exp_dec[i])), dec_m[j] - exp_dec[i]) * 3600.0
+            for j, i in enumerate(idx)
+        ]
+        gmag = st.get("g", st.get("phot_g_mean_mag"))
+        yrs25 = 2025.9 - year_of(passes[idx[0]]["mjd_mid"])
+        out.append(
+            {
+                "passes": [passes[i]["index"] for i in idx],
+                "mjd": [round(passes[i]["mjd_mid"], 4) for i in idx],
+                "ra": [round(float(a), 6) for a in ra_m],
+                "dec": [round(float(d), 6) for d in dec_m],
+                "ra_2025_9": round((float(ra_m[0]) + ve * yrs25 / 3600.0 / cosd) % 360.0, 6),
+                "dec_2025_9": round(float(dec_m[0]) + vn * yrs25 / 3600.0, 6),
+                "speed": round(math.hypot(ve, vn), 2),
+                "pa": round(math.degrees(math.atan2(ve, vn)) % 360.0, 1),
+                "v_east": round(ve, 3),
+                "v_north": round(vn, 3),
+                "rms_arcsec": round(rms, 2),
+                "saturated": True,
+                "snr": [None] * len(idx),
+                "check": "same",
+                "gaia": {
+                    "source_id": str(st["source_id"]),
+                    "pm": round(math.hypot(cat_ve, cat_vn), 3),
+                    "pa": round(math.degrees(math.atan2(cat_ve, cat_vn)) % 360.0, 1),
+                    "g": None if gmag is None else round(float(gmag), 2),
+                    "offset_arcsec": round(max(offs), 2),
+                },
+                "source": "saturated",
+                **motion_grade(math.hypot(ve, vn), rms, [passes[i]["mjd_mid"] for i in idx]),
+                "note": "a bright star: its core is saturated; the places are the centres of the saturated zone, the name is Gaia's",
+            }
+        )
+    return out
 
 
 def covering_passes(whites: list[np.ndarray], share: float = 0.5) -> list[int]:

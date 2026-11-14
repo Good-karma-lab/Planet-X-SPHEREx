@@ -164,6 +164,7 @@ def test_cap_keeps_whole_visits_and_the_searched_pass() -> None:
 
 def test_honest_words_carry_the_limits() -> None:
     h = px.honest_words("deep", (1, 2, 3))
-    assert "0.034" in h["limit"] and "lead" in h
+    # the depth is the field's own measured bar, never a figure from elsewhere
+    assert "bar of the sum of the passes" in h["limit"] and "mJy" not in h["limit"] and "lead" in h
     assert "did not use D4" in h["planet_nine"]
     assert "did not use D4" not in px.honest_words("distant", (1, 2, 3, 4))["planet_nine"]

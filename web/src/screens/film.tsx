@@ -4,6 +4,7 @@
 import { mjdToDate } from '../lib/field';
 import { parseSxp } from '../lib/sxp';
 import { HI, LO, SOFT } from '../viewer/law';
+import { plainPhase } from '../lib/plain';
 
 export interface FrameMeta {
   visit: number;
@@ -99,7 +100,7 @@ export async function loadFilm(
     }
     const j = (await jr.json()) as { state: string; phase: string; error: string | null; done: number; total: number };
     if (j.state === 'error' || j.state === 'cancelled') throw new Error(j.error ?? j.state);
-    onPhase(`building the visits: ${j.phase}${j.total ? ` (${j.done} of ${j.total})` : ''}`);
+    onPhase(`building the visits: ${plainPhase(j.phase)}${j.total ? ` (${j.done} of ${j.total})` : ''}`);
     state = j.state;
     if (state !== 'done') await sleep(1000);
   }

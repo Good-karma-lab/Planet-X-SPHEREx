@@ -44,10 +44,13 @@ chmod 440 /etc/sudoers.d/sky
 
 # Caddyfile: the domain with automatic HTTPS, and the bare address over HTTP
 # the main instance takes the traffic; while it restarts the standby (8781) answers, and a request waits up to 30 s for either
+# the globe's baked tiles are files: served by Caddy itself from /var/www/spherex-tiles (immutable, any origin), never by the API
+TILES='\thandle_path /tiles/* {\n\t\troot * /var/www/spherex-tiles\n\t\theader Cache-Control "public, max-age=31536000, immutable"\n\t\theader Access-Control-Allow-Origin "*"\n\t\tfile_server\n\t}\n'
+mkdir -p /var/www/spherex-tiles
 UPSTREAM='\treverse_proxy 127.0.0.1:8780 127.0.0.1:8781 {\n\t\tlb_policy first\n\t\tlb_try_duration 30s\n\t\tlb_try_interval 250ms\n\t\thealth_uri /api/v1/health\n\t\thealth_interval 2s\n\t\thealth_timeout 2s\n\t\tfail_duration 5s\n\t}\n'
 {
   if [ -n "$DOMAIN" ]; then
-    printf '%s, www.%s {\n\tencode {\n\t\tzstd\n\t\tgzip\n\t\tmatch {\n\t\t\theader Content-Type text/*\n\t\t\theader Content-Type application/json*\n\t\t\theader Content-Type application/javascript*\n\t\t\theader Content-Type application/octet-stream*\n\t\t\theader Content-Type image/svg+xml*\n\t\t}\n\t}\n'"$UPSTREAM"'}\n\n' "$DOMAIN" "$DOMAIN"
+    printf '%s, www.%s {\n'"$TILES"'\tencode {\n\t\tzstd\n\t\tgzip\n\t\tmatch {\n\t\t\theader Content-Type text/*\n\t\t\theader Content-Type application/json*\n\t\t\theader Content-Type application/javascript*\n\t\t\theader Content-Type application/octet-stream*\n\t\t\theader Content-Type image/svg+xml*\n\t\t}\n\t}\n'"$UPSTREAM"'}\n\n' "$DOMAIN" "$DOMAIN"
   fi
   printf ':80 {\n\tencode zstd gzip\n'"$UPSTREAM"'}\n'
 } > /etc/caddy/Caddyfile.new

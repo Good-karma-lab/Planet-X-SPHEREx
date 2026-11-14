@@ -11,9 +11,9 @@ VERSIONS: dict[str, str] = {
     "field": "f2",  # the stacks of a field (all parts). f2: band hues in the meta
     "film": "v2",  # the frames of the visits of one pass. v2: no motion at coverage edges
     "spectrum": "s1",  # PSF photometry of a place in every exposure that covers it
-    "movers": "m3",  # the search between passes of a field and its Gaia check; m2 chance control, m3 corner passes sit out
+    "movers": "m5",  # the search between passes and its Gaia check; m4 saturated fast stars, m5 motion grade (5 sigma and a pixel)
     "anomalies": "a2",  # the spectral anomaly map of a field and the identification of its anomalies; a2: the same passes as the movers
-    "red": "r2",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm. r2: the scatter and the passes of a moving source
+    "red": "r3",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm. r2: scatter and passes of a moving source; r3: peaks from 4 sigma
     "distant": "d1",  # Find Planet X, one pass: distance search, candidates, photometry, slider arrays
     "deep": "m1",  # Find Planet X, the sum of passes along one orbit
     "link": "l1",  # Find Planet X, the link of passes by one orbit

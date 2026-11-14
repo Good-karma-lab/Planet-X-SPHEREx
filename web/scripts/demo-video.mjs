@@ -38,52 +38,47 @@ async function waitPicture() {
   await page.waitForFunction(() => /Season \d of \d/.test(document.querySelector('[data-testid=lab-status]')?.textContent ?? ''), null, { timeout: 120000 });
 }
 
-// one idea per shot, played slowly (half speed, no cross-fade), the caption saying what to look at
+// one idea per shot, played slowly (half speed, no cross-fade), the caption saying what to look at; it leads with what moves between
+// the passes (a nearby star, a brown dwarf) and with Find Planet X
 
-// 1. Barnard's Star, 5′: the seasons as a pendulum, the star ringed with its measured rate
-await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=5&spd=0.5`);
-await page.getByRole('button', { name: 'Controls', exact: true }).click();
+// 1. Barnard's Star, 20′: the passes as a pendulum, the star ringed with its measured rate and the Gaia check
+await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=20&spd=0.5`);
 await waitPicture();
-await page.waitForTimeout(3000);
-await subtitle("Barnard's Star, season by season: watch the ringed star step north.");
-mark('pendulum');
+await page.getByTestId('tab-cand').click();
+await page.waitForTimeout(4000);
+await subtitle("Barnard's Star, pass by pass: the search finds it moving, 10.7″ a year. Gaia agrees.");
+mark('barnard');
 await page.waitForTimeout(8000);
-mark('pendulum-end');
+mark('barnard-end');
 
-// 2. Days: the visits inside one pass, an asteroid hopping between visits hours apart
-await page.goto(`${BASE}/#/lab?ra=169.71871&dec=4.68556&fov=20&film=61023.3&spd=0.5`);
-await page.waitForFunction(() => /Days · pass/.test(document.querySelector('[data-testid=lab-status]')?.textContent ?? ''), null, { timeout: 240000 });
-await page.waitForFunction(() => !/asking JPL/.test(document.querySelector('[data-testid=lab-status]')?.textContent ?? ''), null, { timeout: 120000 });
-await page.waitForTimeout(1500);
-await subtitle('Days inside one pass: the ringed asteroid hops from visit to visit.');
-mark('days');
-await page.waitForTimeout(8000);
-mark('days-end');
-
-// 3. a click on a star: its spectrum, measured live in every exposure
-await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=5`);
+// 2. ε Indi B, 20′: the brown dwarf drifting among white stars; Candidates says it is a known brown dwarf, recovered
+await page.goto(`${BASE}/#/lab?ra=331.09645&dec=-56.80059&fov=20&spd=0.5`);
 await waitPicture();
-await page.waitForTimeout(1500);
-const vsq = await page.locator('.vsq').boundingBox();
-await page.mouse.click(vsq.x + vsq.width * 0.514, vsq.y + vsq.height * 0.165);
-await subtitle('Click a star: its spectrum is measured in every exposure, point by point.');
-mark('spectrum');
+await page.getByTestId('tab-cand').click();
+await page.getByText(/known brown dwarf/).first().waitFor({ timeout: 120000 });
+await page.waitForTimeout(2000);
+await subtitle('A cold brown dwarf, ε Indi B: found moving, and red in the 3–5 µm bands.');
+mark('epsindi');
 await page.waitForTimeout(7000);
-mark('spectrum-end');
+mark('epsindi-end');
 
-// 4. ε Indi B, 20′: the anomaly search ranks the brown dwarf first; its passport
-await page.goto(`${BASE}/#/lab?ra=331.09645&dec=-56.80059&fov=20`);
-await page.getByRole('button', { name: 'Controls', exact: true }).click();
-await waitPicture();
-await page.getByText('Anomaly 1', { exact: true }).first().waitFor({ timeout: 120000 });
+// 3. the Planet X page: the Solar System with the predicted orbit and the searched directions
+await page.goto(`${BASE}/#/planetx`);
+await page.waitForTimeout(5000);
+await subtitle('Find Planet X: every orbit from 30 to 2000 au, the passes added along each one.');
+mark('planetx');
+await page.waitForTimeout(8500);
+mark('planetx-end');
+
+// 4. what it found: known worlds found blind, and the best Planet Nine peak ruled out
+await page.getByText(/known worlds found blind/i).last().scrollIntoViewIfNeeded();
 await page.waitForTimeout(1500);
-await page.getByText('Anomaly 1', { exact: true }).first().click();
-await subtitle("Anomaly 1 is ε Indi B: a cold brown dwarf, unlike the field's stars.");
-mark('anomaly');
+await subtitle('It finds Sedna and Eris blind. Our best Planet Nine peak: ruled out by NEOWISE.');
+mark('results');
 await page.waitForTimeout(7000);
-mark('anomaly-end');
+mark('results-end');
 
-// 6. title card
+// 5. title card
 await page.evaluate(() => {
   document.getElementById('demo-sub')?.remove();
   const el = document.createElement('div');
@@ -92,7 +87,7 @@ await page.evaluate(() => {
     'background:radial-gradient(1200px 700px at 50% 40%,#0d2430,#04080c);color:#eafcff;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';
   el.innerHTML =
     '<div style="font-size:96px;font-weight:700;letter-spacing:.02em">SPHEREx Sky</div>' +
-    '<div style="font-size:46px;font-weight:500;color:#9ff3ea">see the sky change</div>' +
+    '<div style="font-size:46px;font-weight:500;color:#9ff3ea">see the sky move</div>' +
     '<div style="font:600 56px ui-monospace,Menlo,monospace;color:#ffffff;margin-top:24px">spherex.space</div>' +
     '<div style="font-size:28px;font-weight:500;color:#a0b9c2;margin-top:20px">Real NASA SPHEREx data · Good Karma Lab · NASA Space Apps 2026</div>';
   document.body.appendChild(el);

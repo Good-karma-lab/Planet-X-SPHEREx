@@ -9,10 +9,10 @@ const MP4 = process.argv[3] ?? '../docs/submission/demo/spherex-sky-demo.mp4';
 const marks = Object.fromEntries(JSON.parse(readFileSync(join(OUT, 'marks.json'), 'utf8')).map((m) => [m.name, m.t]));
 // scene: [mark, offset after the mark, length]
 const scenes = [
-  ['pendulum', 0.3, 7.0],
-  ['days', 0.3, 7.0],
-  ['spectrum', 0.6, 6.4],
-  ['anomaly', 0.4, 6.4],
+  ['barnard', 0.3, 7.0],
+  ['epsindi', 0.3, 6.0],
+  ['planetx', 0.3, 8.0],
+  ['results', 0.3, 6.0],
   ['title', 0.2, 3.0],
 ];
 const parts = scenes.map(([m, off, len], i) => `[0:v]trim=${(marks[m] + off).toFixed(2)}:${(marks[m] + off + len).toFixed(2)},setpts=PTS-STARTPTS[s${i}]`);

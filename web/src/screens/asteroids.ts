@@ -3,6 +3,7 @@
 
 import { useEffect, useState } from 'preact/hooks';
 import type { FilmControl, FilmTrack } from './search';
+import { plainPhase } from '../lib/plain';
 
 export interface AsteroidSearch {
   state: 'idle' | 'building' | 'searching' | 'done' | 'none' | 'failed';
@@ -58,7 +59,7 @@ export function useAsteroidSearch(ra: number, dec: number, fov: number, mjd: num
           if (v)
             setS({
               state: 'building',
-              text: `building the visits: ${v.phase ?? ''}`,
+              text: `building the visits: ${plainPhase(v.phase)}`,
               frac: v.total ? (v.done ?? 0) / v.total : null,
             });
         }

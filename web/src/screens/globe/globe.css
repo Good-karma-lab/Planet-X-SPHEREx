@@ -92,3 +92,41 @@
 @media (max-width: 860px), (max-aspect-ratio: 1/1) {
   .screen .globe-wrap::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 330px; z-index: 4; pointer-events: none; background: linear-gradient(rgba(3, 8, 15, 0.97) 0, rgba(3, 8, 15, 0.97) 62%, transparent); }
 }
+
+/* ===== one row of controls, a lighter frame, the catalogue as a drawer ===== */
+.screen .globe-wrap { flex: 1; background: radial-gradient(120% 110% at 50% 38%, #314a62 0%, #22374b 52%, #162636 100%); }
+.map-ui.map-bar { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; right: 56px; max-width: none; }
+.map-ui.map-bar .aimrow { display: flex; align-items: center; gap: 10px; padding: 5px 10px; border-radius: 12px; }
+.map-ui.map-bar .fld { display: flex; align-items: center; gap: 5px; margin: 0; }
+.map-ui.map-bar .fld > span { color: var(--faint); font: 600 9.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.map-ui.map-bar .fld .inp.coord { width: 112px; min-width: 0; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; padding: 5px 6px; }
+.map-ui.map-bar .fld .fovsel { width: 62px; padding: 5px 4px; font: 500 12px var(--mono); }
+.map-ui.map-bar > .seg { align-self: center; }
+
+.screen { overflow: hidden; }
+.cat-drawer { position: absolute; top: 64px; right: 0; bottom: 0; width: min(400px, 92%); z-index: 20; display: flex; transform: translateX(100%); transition: transform 0.28s cubic-bezier(0.3, 0.7, 0.2, 1); pointer-events: none; }
+.cat-drawer.open { transform: translateX(0); }
+.cat-drawer > * { pointer-events: auto; }
+.cat-drawer .catalog { flex: 1; min-width: 0; max-width: none; height: 100%; }
+.cat-handle { position: absolute; left: -38px; top: 50%; transform: translateY(-50%); width: 38px; height: 132px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 0; border: 1px solid var(--edge); border-right: 0; border-radius: 12px 0 0 12px; background: rgba(8, 18, 24, 0.82); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--accent-l); cursor: pointer; box-shadow: -6px 0 18px rgba(0, 0, 0, 0.35); }
+.cat-handle:hover { background: rgba(20, 44, 54, 0.9); }
+.cat-handle .cat-arrow { font: 600 22px/1 var(--font); }
+.cat-handle .cat-word { writing-mode: vertical-rl; transform: rotate(180deg); font: 600 12px var(--font); letter-spacing: 0.1em; text-transform: uppercase; }
+.cat-drawer:not(.open) .cat-handle { box-shadow: -4px 0 14px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(95, 227, 214, 0.15); }
+
+@media (max-width: 860px), (max-aspect-ratio: 1/1) {
+  .map-ui.map-bar { left: 10px; right: 46px; top: 10px; }
+  .map-ui.map-bar .aimrow { flex-wrap: wrap; gap: 6px 10px; }
+  .map-ui.map-bar .seg.sm { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  .screen .globe-wrap::before { height: 250px; }
+  .cat-handle { left: -34px; width: 34px; height: 110px; }
+  .cat-drawer { top: 150px; }
+}
+/* tighter, so that the whole row fits at 1280 px */
+.map-ui.map-bar { right: 50px; gap: 6px; }
+.map-ui.map-bar .aimrow { gap: 8px; padding: 4px 9px; }
+.map-ui.map-bar .fld .inp.coord { width: 116px; }
+.map-ui.map-bar .seg button { padding: 6px 9px; }
+.map-ui.map-bar .seg.sm button { padding: 5px 7px; font-size: 11px; }
+
+.map-credit { font-size: 11px; line-height: 1.35; color: rgba(255, 255, 255, 0.62); padding: 0 4px; max-width: 520px; text-shadow: 0 1px 3px #000; pointer-events: none; }

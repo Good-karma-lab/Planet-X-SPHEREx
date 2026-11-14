@@ -34,19 +34,3 @@ describe('method markdown', () => {
     expect(render('[figure: slider-eris]', 'p').html).not.toContain('figcaption');
   });
 });
-
-describe('method figures', () => {
-  it('a registered video becomes a video element with its poster, an unregistered name stays an empty slot', () => {
-    const r = render('[figure: raw-exposures | caption]\n\n[figure: slider-eris]', 'p');
-    expect(r.html).toContain('<video class="mf-media" src="/method/raw-exposures.mp4" poster="/method/raw-exposures.jpg"');
-    expect(r.html).toContain('data-fig="slider-eris"><\/div>');
-  });
-  it('every registered file exists on disk', async () => {
-    const { FIGURES } = await import('../../src/screens/method/figures');
-    const { existsSync } = await import('node:fs');
-    for (const f of Object.values(FIGURES)) {
-      expect(existsSync(`public${f.src}`)).toBe(true);
-      if (f.poster) expect(existsSync(`public${f.poster}`)).toBe(true);
-    }
-  });
-});

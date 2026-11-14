@@ -48,8 +48,8 @@ def run_field(c: httpx.Client, f: dict[str, Any], poll_s: float, max_hours: floa
         **f,
         "prior": f["prior"],
         "det": f["det"],
-        "dmin": DMIN,
-        "dmax": DMAX,
+        "dmin": f.get("dmin", DMIN),
+        "dmax": f.get("dmax", DMAX),
         "started": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     mids = passes_of(c, f["ra"], f["dec"])
@@ -59,9 +59,9 @@ def run_field(c: httpx.Client, f: dict[str, Any], poll_s: float, max_hours: floa
         return out
     q: dict[str, Any] = {
         "fields": ";".join(f"{f['ra']},{f['dec']},{m:.3f}" for m in mids[:6]),
-        "fov": 60,
-        "dmin": DMIN,
-        "dmax": DMAX,
+        "fov": f.get("fov", 60),
+        "dmin": f.get("dmin", DMIN),
+        "dmax": f.get("dmax", DMAX),
         "det": f["det"],
     }
     if f["prior"]:

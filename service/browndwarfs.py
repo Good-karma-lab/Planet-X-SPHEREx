@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from service.context import CatalogueContext
-from service.movers import Movers, year_of
+from service.movers import Movers, motion_grade, year_of
 from service.products.store import Store, product_key
 from service.products.versions import VERSIONS
 from service.red import find_red_async
@@ -78,7 +78,7 @@ def pseudo_track(c: dict[str, Any], mjds: list[float]) -> dict[str, Any]:
     }
 
 
-def red_movers(red: dict[str, Any], mjds: list[float]) -> list[dict[str, Any]]:
+def red_movers(red: dict[str, Any], mjds: list[float], pass_index: list[int] | None = None) -> list[dict[str, Any]]:
     """The red sources of the field that move (peaks of the passes shift along a line faster than centroid scatter does)."""
     out = []
     for r in red.get("red", []):
@@ -101,6 +101,8 @@ def red_movers(red: dict[str, Any], mjds: list[float]) -> list[dict[str, Any]]:
             "path_rms_arcsec": r.get("path_rms_arcsec"),
             "path_passes": r.get("path_passes"),
         }
+        used = [m for k, m in enumerate(mjds) if pass_index is None or r.get("path_passes") is None or pass_index[k] in r["path_passes"]]
+        c.update(motion_grade(pm / 1000.0, r.get("path_rms_arcsec") or 0.0, used or mjds))
         k = EPOCH - 2000.0
         c["dec"] = round(c["dec_j2000"] + c["pmdec"] * k / 3.6e6, 6)
         c["ra"] = round((c["ra_j2000"] + c["pmra"] * k / 3.6e6 / max(math.cos(math.radians(c["dec_j2000"])), 1e-6)) % 360.0, 6)
@@ -149,8 +151,12 @@ def status_of(c: dict[str, Any]) -> str:
 
 
 def group_of(c: dict[str, Any]) -> str:
-    """`known`: the catalogues explain it (SIMBAD names it, or a Gaia star moves with it); `candidate`: they do not."""
-    return "candidate" if c["status"] in ("unidentified", "catalogue did not answer") else "known"
+    """`known`: the catalogues explain it (SIMBAD names it, or a Gaia star moves with it); `candidate`: they do not and the motion is a
+    mover's (at least 5 sigma and a pixel over the baseline); `slow`: they do not and the motion is below that (a possible slow motion: no
+    candidate, no lead)."""
+    if c["status"] not in ("unidentified", "catalogue did not answer"):
+        return "known"
+    return "slow" if c.get("grade") == "slow" else "candidate"
 
 
 def movers_track(c: dict[str, Any], pass_index: list[int], mjds: list[float]) -> dict[str, Any]:
@@ -179,6 +185,7 @@ def movers_track(c: dict[str, Any], pass_index: list[int], mjds: list[float]) ->
         "source": "red",
         "colour": c["colour"],
         "snr_long": c["snr_long"],
+        **{k: c[k] for k in ("speed_err", "sigma", "shift_arcsec", "baseline_years", "grade") if k in c},
     }
 
 
@@ -236,7 +243,7 @@ class BrownDwarfs:
                 waited += 1.0
             tracks = list(mrun.result.get("tracks", [])) if mrun.state == "done" else []
             mjds = [float(p["mjd_mid"]) for p in meta["passes"]]
-            cands = red_movers(red, mjds)[:MAX_CHECKED]
+            cands = red_movers(red, mjds, [int(p["index"]) for p in meta["passes"]])[:MAX_CHECKED]
             for c in cands:
                 c["mover"] = mover_match(c, tracks)
                 c["gaia_check"] = pseudo_track(c, mjds)
@@ -284,13 +291,15 @@ class BrownDwarfs:
             return
         known = [c for c in items if group_of(c) == "known"]
         cands = [c for c in items if group_of(c) == "candidate"]
+        slow = [c for c in items if group_of(c) == "slow"]
         for c in items:
             c.pop("gaia_check", None)
-        run.result["candidates"], run.result["known"] = cands, known
+        run.result["candidates"], run.result["known"], run.result["slow"] = cands, known, slow
         run.result["counts"] = {
             "red_sources": run.result.get("red_sources"),
             "moving_red": len(items),
             "candidates": len(cands),
+            "slow": len(slow),
             "known_brown_dwarfs": sum(1 for c in known if c["status"] == "known brown dwarf"),
             "known_other": sum(1 for c in known if c["status"] != "known brown dwarf"),
         }
@@ -315,13 +324,17 @@ class BrownDwarfs:
         out = []
         for c in (run.result.get("candidates") or []) + (run.result.get("known") or []):
             if c.get("mover") is None and c.get("track") and c["track"]["check"] != "still":
-                out.append(c["track"])
+                out.append(c["track"])  # candidates are movers by construction; a known one is shown whatever its motion
         return out
 
     def view(self, run: DwarfRun) -> dict[str, Any]:
         out: dict[str, Any] = {"key": run.key, "state": run.state, "error": run.error}
         if run.result:
             r = dict(run.result)
-            r["candidates"] = [{k: v for k, v in c.items() if k != "gaia_check"} for c in r["candidates"]]
+            rows = [{k: v for k, v in c.items() if k != "gaia_check"} for c in r["candidates"]]
+            if r.get("pending"):  # not sorted yet: a motion below a mover's is already only a possible slow motion
+                r["slow"] = [c for c in rows if c.get("grade") == "slow"]
+                rows = [c for c in rows if c.get("grade") != "slow"]
+            r["candidates"] = rows
             out["result"] = r
         return out
