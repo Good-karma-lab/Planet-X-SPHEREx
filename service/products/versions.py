@@ -11,7 +11,7 @@ VERSIONS: dict[str, str] = {
     "field": "f2",  # the stacks of a field (all parts). f2: band hues in the meta
     "film": "v2",  # the frames of the visits of one pass. v2: no motion at coverage edges
     "spectrum": "s1",  # PSF photometry of a place in every exposure that covers it
-    "movers": "m3",  # the search between passes of a field and the Gaia check of its tracks. m2: chance control; m3: passes covering only a corner sit out
+    "movers": "m3",  # the search between passes of a field and its Gaia check; m2 chance control, m3 corner passes sit out
     "anomalies": "a2",  # the spectral anomaly map of a field and the identification of its anomalies; a2: the same passes as the movers
     "red": "r1",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm
 }
