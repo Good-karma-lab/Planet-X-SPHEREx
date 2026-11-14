@@ -24,6 +24,10 @@ export interface FilmTrack {
   z_together?: number;
   dist_au?: number;
   rms?: number;
+  /** position angle of the motion on the sky, degrees (north through east) */
+  pa?: number;
+  /** the signal of the track, S/N */
+  snr?: number;
   /** a known body the places match */
   known?: { name: string; V?: number | null } | null;
 }
@@ -45,60 +49,140 @@ export interface TrackDraw {
   /** the frame on screen */
   k: number;
   rings: boolean;
-  trail: boolean;
+  /** kept for the callers that pass it: earlier places are always drawn now, as small dots */
+  trail?: boolean;
+  /** the selected track (-1 or out of range: none) */
   selected: number;
+  /** the time of every frame (MJD): the place between two measured visits is interpolated in time; without it, in frame number */
+  mjd?: number[];
 }
 
-/** The found bodies on a frame: the dashed path of every track, a ring where it was seen in this frame, and (Trail) its last three places fading behind it. */
+/** One colour per track (amber first), repeated when there are more tracks. */
+export const TRACK_COLOURS = ['#ffb454', '#5fe3d6', '#ff8fc7', '#b8a2ff', '#9be564', '#6fb3ff'];
+const colourOf = (i: number) => TRACK_COLOURS[i % TRACK_COLOURS.length]!;
+
+/** Where a track is on frame k: its measured place there, or a place interpolated between the two visits around it; null outside the time span of the track. */
+export function trackPlace(tr: FilmTrack, k: number, mjd?: number[]): { x: number; y: number; measured: boolean } | null {
+  const pts = tr.pts;
+  if (!pts.length) return null;
+  const hit = pts.find((q) => q.f === k);
+  if (hit) return { x: hit.x, y: hit.y, measured: true };
+  if (k < pts[0]!.f || k > pts[pts.length - 1]!.f) return null;
+  let i = 0;
+  while (i < pts.length - 1 && pts[i + 1]!.f < k) i++;
+  const a = pts[i]!;
+  const b = pts[i + 1]!;
+  if (!b) return null;
+  const t0 = mjd?.[a.f];
+  const t1 = mjd?.[b.f];
+  const tk = mjd?.[k];
+  const u = t0 != null && t1 != null && tk != null && t1 > t0 ? (tk - t0) / (t1 - t0) : (k - a.f) / (b.f - a.f);
+  return { x: a.x + (b.x - a.x) * u, y: a.y + (b.y - a.y) * u, measured: false };
+}
+
+const RING = 12;
+const BADGE = 17;
+/** The badge sits up and to the right of the ring. */
+const badgeAt = (x: number, y: number): [number, number] => [x + RING * 0.75 + BADGE / 2, y - RING * 0.75 - BADGE / 2];
+
+/** The details of the selected track in one line. */
+export function trackLabel(tr: FilmTrack, i: number): string {
+  return `Track ${i + 1} · ${tr.known ? tr.known.name : 'asteroid candidate'} · ${tr.rate.toFixed(1)}″/h${tr.pa != null ? ` → PA ${tr.pa.toFixed(0)}°` : ''} · ${tr.n} visits${tr.snr != null ? ` · S/N ${tr.snr.toFixed(0)}` : ''}`;
+}
+
+/**
+ * The found bodies on a frame. Each track is a small numbered badge at its ring (17 px, the track's colour, a dark number); only the selected track has its details
+ * written out. The ring is solid on a measured visit and dashed at the time-interpolated place between visits (none outside the track's time span); earlier places are
+ * small dots on a thin dashed path; while one track is selected the others dim to 35 %. `x`, `y` and the scale are in the canvas' own units (`dpr` scales line widths only).
+ */
 export function drawTracks(c: CanvasRenderingContext2D, tracks: FilmTrack[], d: TrackDraw, dpr = 1): void {
+  if (!d.rings) return;
   const X = (x: number) => (x + 0.5) * d.scale;
   const Y = (y: number) => (y + 0.5) * d.scale;
+  const sel = d.selected >= 0 && d.selected < tracks.length ? d.selected : -1;
   c.save();
-  if (d.rings) {
-    for (const tr of tracks) {
-      if (!tr.pts.length) continue;
-      c.strokeStyle = 'rgba(255,180,84,.85)';
-      c.lineWidth = 1.5 * dpr;
-      c.setLineDash([4 * dpr, 4 * dpr]);
+  c.textBaseline = 'middle';
+  c.textAlign = 'center';
+  tracks.forEach((tr, i) => {
+    if (!tr.pts.length) return;
+    const col = colourOf(i);
+    const here = trackPlace(tr, d.k, d.mjd);
+    if (!here) return; // outside the time span: nothing of this track is drawn
+    c.globalAlpha = sel >= 0 && sel !== i ? 0.35 : 1;
+    // earlier places: small dots on a thin dashed path that ends at the ring
+    const past = tr.pts.filter((q) => q.f < d.k);
+    c.strokeStyle = col;
+    c.lineWidth = 1 * dpr;
+    c.globalAlpha *= 0.7;
+    c.setLineDash([3 * dpr, 3 * dpr]);
+    c.beginPath();
+    past.forEach((q, j) => (j ? c.lineTo(X(q.x), Y(q.y)) : c.moveTo(X(q.x), Y(q.y))));
+    c.lineTo(X(here.x), Y(here.y));
+    c.stroke();
+    c.setLineDash([]);
+    c.fillStyle = col;
+    for (const q of past) {
       c.beginPath();
-      tr.pts.forEach((q, i) => (i ? c.lineTo(X(q.x), Y(q.y)) : c.moveTo(X(q.x), Y(q.y))));
-      c.stroke();
-      c.setLineDash([]);
-      const here = tr.pts.find((q) => q.f === d.k);
-      if (here) {
-        c.strokeStyle = '#ffb454';
-        c.lineWidth = 1.8 * dpr;
-        c.beginPath();
-        c.arc(X(here.x), Y(here.y), 12 * dpr, 0, 7);
-        c.stroke();
-      }
+      c.arc(X(q.x), Y(q.y), 2.2 * dpr, 0, 7);
+      c.fill();
     }
-  }
-  if (d.trail) {
-    for (const tr of tracks) {
-      const pts = tr.pts;
-      if (!pts.length) continue;
-      const last = pts[pts.length - 1]!.f;
-      if (d.k > last || d.k <= pts[0]!.f) continue;
-      const past = pts.filter((q) => q.f < d.k).slice(-3);
-      if (!past.length) continue;
-      const cur = pts.find((q) => q.f === d.k);
-      const seq = cur ? past.concat([cur]) : past;
-      c.strokeStyle = 'rgba(255,180,84,.35)';
-      c.lineWidth = 1 * dpr;
-      c.beginPath();
-      seq.forEach((q, i) => (i ? c.lineTo(X(q.x), Y(q.y)) : c.moveTo(X(q.x), Y(q.y))));
-      c.stroke();
-      past.forEach((q, i) => {
-        const a = [0.2, 0.38, 0.6][3 - past.length + i]!;
-        c.fillStyle = `rgba(255,180,84,${a})`;
-        c.beginPath();
-        c.arc(X(q.x), Y(q.y), 3 * dpr, 0, 7);
-        c.fill();
-      });
+    c.globalAlpha = sel >= 0 && sel !== i ? 0.35 : 1;
+    // the ring: solid on a measured visit, dashed between visits
+    const x = X(here.x);
+    const y = Y(here.y);
+    c.strokeStyle = 'rgba(0,0,0,.55)';
+    c.lineWidth = 3.4 * dpr;
+    c.beginPath();
+    c.arc(x, y, RING, 0, 7);
+    c.stroke();
+    c.strokeStyle = col;
+    c.lineWidth = (sel === i ? 2.2 : 1.6) * dpr;
+    if (!here.measured) c.setLineDash([3 * dpr, 3 * dpr]);
+    c.beginPath();
+    c.arc(x, y, RING, 0, 7);
+    c.stroke();
+    c.setLineDash([]);
+    // the numbered badge
+    const [bx, by] = badgeAt(x, y);
+    c.fillStyle = col;
+    c.beginPath();
+    c.arc(bx, by, BADGE / 2, 0, 7);
+    c.fill();
+    c.fillStyle = '#071218';
+    c.font = `700 ${11 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+    c.fillText(String(i + 1), bx, by + 0.5);
+    // the details of the selected track only
+    if (sel === i) {
+      const text = trackLabel(tr, i);
+      c.font = `600 ${11.5 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      c.textAlign = 'left';
+      c.lineWidth = 3 * dpr;
+      c.lineJoin = 'round';
+      c.strokeStyle = 'rgba(3,8,15,.8)';
+      c.strokeText(text, bx + BADGE / 2 + 5, by);
+      c.fillStyle = '#ffffff';
+      c.fillText(text, bx + BADGE / 2 + 5, by);
+      c.textAlign = 'center';
     }
-  }
+  });
   c.restore();
+}
+
+/** The track whose badge is under a point (canvas units, the same as drawTracks), or -1. `mjd` as in TrackDraw. */
+export function hitTrack(tracks: FilmTrack[], k: number, scale: number, x: number, y: number, mjd?: number[]): number {
+  let best = -1;
+  let bd = BADGE / 2 + 3;
+  tracks.forEach((tr, i) => {
+    const here = trackPlace(tr, k, mjd);
+    if (!here) return;
+    const [bx, by] = badgeAt((here.x + 0.5) * scale, (here.y + 0.5) * scale);
+    const dd = Math.hypot(x - bx, y - by);
+    if (dd < bd) {
+      bd = dd;
+      best = i;
+    }
+  });
+  return best;
 }
 
 /**
