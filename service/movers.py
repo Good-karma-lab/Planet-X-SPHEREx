@@ -45,6 +45,32 @@ STILL_FRACTION = 0.3  # a star moving less than this share of the track's rate e
 CHECK_AGAIN_S = 60.0
 
 
+MOVER_SIGMA = 5.0  # a "mover" is a motion measured to at least this many sigma ...
+MOVER_SHIFT_ARCSEC = 6.15  # ... that also shifts the source over the baseline by at least one SPHEREx pixel (what the eye can see)
+RMS_FLOOR_ARCSEC = 0.3  # the scatter of a short track says little: the error of the speed never counts less than this
+
+
+def motion_grade(speed: float, rms_arcsec: float, mjds: list[float]) -> dict[str, Any]:
+    """How much a measured motion is worth: the speed's error (scatter about the straight line over √Σ(t − t̄)², years), its significance,
+    the shift over the baseline of the passes, and the grade: "mover" when it is at least MOVER_SIGMA sigma and at least one pixel
+    (MOVER_SHIFT_ARCSEC) over the baseline, else "slow" (a possible slow motion below what a picture can show)."""
+    yrs = [m / 365.25 for m in mjds]
+    mean = sum(yrs) / max(1, len(yrs))
+    ss = sum((y - mean) ** 2 for y in yrs)
+    err = max(rms_arcsec, RMS_FLOOR_ARCSEC) / math.sqrt(ss) if ss > 0 else float("inf")
+    sigma = speed / err if err > 0 else 0.0
+    baseline = (max(yrs) - min(yrs)) if yrs else 0.0
+    shift = speed * baseline
+    ok = sigma >= MOVER_SIGMA and shift >= MOVER_SHIFT_ARCSEC
+    return {
+        "speed_err": round(err, 2) if math.isfinite(err) else None,
+        "sigma": round(sigma, 1),
+        "shift_arcsec": round(shift, 1),
+        "baseline_years": round(baseline, 2),
+        "grade": "mover" if ok else "slow",
+    }
+
+
 def year_of(mjd: float) -> float:
     return 2000.0 + (mjd - 51544.5) / 365.25
 
@@ -245,7 +271,15 @@ class Movers:
         out: dict[str, Any] = {"key": run.key, "state": run.state, "error": run.error}
         if run.result:
             r = dict(run.result)
-            r["tracks"] = [t for t in r["tracks"] if t["check"] != "still"]
+            shown: list[dict[str, Any]] = []
+            slow: list[dict[str, Any]] = []
+            for t in r["tracks"]:
+                if t["check"] == "still":
+                    continue
+                # a motion the catalogue confirms (Gaia "same") is a mover whatever its size; an unexplained one must be measured to
+                # MOVER_SIGMA sigma and shift by a pixel over the baseline, else it is only a possible slow motion
+                (slow if t.get("grade") == "slow" and t["check"] != "same" else shown).append(t)
+            r["tracks"], r["slow_tracks"], r["slow"] = shown, slow, len(slow)
             out["result"] = r
         return out
 
@@ -291,6 +325,7 @@ def search_parts(field_key: str, meta: dict[str, Any], raws: list[bytes]) -> dic
                 "snr": [None if not math.isfinite(s) else round(s, 1) for s in t.snr],
                 "check": "pending",
                 "gaia": None,
+                **motion_grade(t.speed, t.rms_arcsec, [float(m) for m in t.mjd]),
             }
         )
     return {
@@ -435,6 +470,7 @@ def saturated_movers(
                     "offset_arcsec": round(max(offs), 2),
                 },
                 "source": "saturated",
+                **motion_grade(math.hypot(ve, vn), rms, [passes[i]["mjd_mid"] for i in idx]),
                 "note": "a bright star: its core is saturated; the places are the centres of the saturated zone, the name is Gaia's",
             }
         )

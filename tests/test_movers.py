@@ -72,3 +72,25 @@ def test_a_saturated_fast_star_is_a_mover_named_by_gaia() -> None:
     assert saturated_movers(meta, raws, [star], [dict(t, mjd=t["mjd"])]) == []  # a track of the search stands there: not added twice
     still = dict(star, ra=star["ra"] + 0.05)  # a star whose catalogue place has no saturated zone in the stacks is not claimed
     assert saturated_movers(meta, raws, [still], []) == []
+
+
+def test_a_motion_is_a_mover_only_at_5_sigma_and_a_pixel_over_the_baseline() -> None:
+    from service.movers import Movers, Run, motion_grade
+
+    one_year = [60900.0, 61100.0, 61265.0]
+    slow = motion_grade(4.2, 1.0, one_year)  # R Dra 20′: 4.2″/yr, one-year baseline: under a pixel, ~3σ
+    assert slow["grade"] == "slow" and slow["shift_arcsec"] < 6.15 and slow["sigma"] < 5
+    fast = motion_grade(11.2, 0.35, [60926.7, 61139.4, 61287.1])  # Barnard's Star
+    assert fast["grade"] == "mover" and fast["sigma"] > 5 and fast["shift_arcsec"] > 6.15
+    # a track the catalogue confirms is shown whatever its size; an unexplained slow one goes to `slow_tracks`
+    base = {"mjd": one_year, "check": "same", "gaia": None}
+    tracks = [
+        dict(base, speed=4.3, **slow, check="same"),
+        dict(base, speed=4.2, **slow, check="none"),
+        dict(base, speed=11.2, **fast, check="none"),
+    ]
+    mv = object.__new__(Movers)
+    view = mv.view(Run(key="k", field_key="f", state="done", result={"tracks": tracks}))
+    r = view["result"]
+    assert [t["check"] for t in r["tracks"]] == ["same", "none"] and r["tracks"][1]["grade"] == "mover"
+    assert len(r["slow_tracks"]) == 1 and r["slow"] == 1
