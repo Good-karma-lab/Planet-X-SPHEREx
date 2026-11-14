@@ -1,0 +1,27 @@
+/* Dark glass panels, teal edges, amber for motion, white for saturation (docs/plan/04-ui.md). */
+:root {
+  --bg: #05070b;
+  --panel: rgba(16, 24, 32, 0.78);
+  --edge: #2fb7b0;
+  --text: #dfe8ee;
+  --dim: #8a9aa6;
+  --motion: #ffb13b;
+  --nodata: #5b6670;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+#app { height: 100%; }
+.shell { display: grid; grid-template-rows: auto 1fr auto; height: 100%; }
+.top { display: flex; align-items: center; gap: 24px; padding: 8px 16px; background: var(--panel); border-bottom: 1px solid var(--edge); }
+.brand { color: var(--text); font-weight: 600; text-decoration: none; letter-spacing: 0.02em; }
+nav { display: flex; gap: 4px; }
+nav a { color: var(--dim); text-decoration: none; padding: 4px 10px; border-radius: 6px; }
+nav a.on { color: var(--text); background: rgba(47, 183, 176, 0.18); }
+.view { padding: 16px; overflow: hidden; }
+.view h1 { margin: 0; font-size: 16px; font-weight: 500; color: var(--dim); }
+.status { padding: 4px 16px; color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-top: 1px solid rgba(47, 183, 176, 0.25); }
+@media (max-width: 600px) {
+  .top { gap: 12px; padding: 8px; }
+  nav a { padding: 4px 6px; }
+}
