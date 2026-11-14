@@ -236,12 +236,22 @@ class SkyPainter {
         if (dust) {
           const dd = DUST.data;
           if (!dd) continue;
-          const tx = Math.min(DUST.w - 1, Math.max(0, ((((ra % 360) + 360) % 360) / 360) * DUST.w) | 0);
-          const ty = Math.min(DUST.h - 1, Math.max(0, ((90 - Math.asin(zc) / D2R) / 180) * DUST.h) | 0);
-          const t = (ty * DUST.w + tx) * 4;
-          o[q] = dd[t]!;
-          o[q + 1] = dd[t + 1]!;
-          o[q + 2] = dd[t + 2]!;
+          // bilinear between the picture's pixels (RA wraps round): zoomed in, the dust is smooth, not a grid of blocks
+          const fx = ((((ra % 360) + 360) % 360) / 360) * DUST.w - 0.5;
+          const fy = Math.min(DUST.h - 1, Math.max(0, ((90 - Math.asin(zc) / D2R) / 180) * DUST.h - 0.5));
+          const x0 = Math.floor(fx);
+          const y0 = Math.floor(fy);
+          const ax = fx - x0;
+          const ay = fy - y0;
+          const xa = (x0 + DUST.w) % DUST.w;
+          const xb = (x0 + 1 + DUST.w) % DUST.w;
+          const yb = Math.min(DUST.h - 1, y0 + 1);
+          const t00 = (y0 * DUST.w + xa) * 4;
+          const t01 = (y0 * DUST.w + xb) * 4;
+          const t10 = (yb * DUST.w + xa) * 4;
+          const t11 = (yb * DUST.w + xb) * 4;
+          for (let c = 0; c < 3; c++)
+            o[q + c] = (dd[t00 + c]! * (1 - ax) + dd[t01 + c]! * ax) * (1 - ay) + (dd[t10 + c]! * (1 - ax) + dd[t11 + c]! * ax) * ay;
         } else if (one) {
           if (samplers[0]!.at(f, rgb, 0) === FROM_NOTHING) continue;
           // a baked tile has its tone already; a live one (deeper than the baked orders, or while the baked ones are not read) gets the layer's
