@@ -207,8 +207,8 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
 
             if background and (request.client is None or request.client.host not in ("127.0.0.1", "::1")):
                 raise HTTPException(403, "background searches are started from the machine itself")
-            pri = Priority.P3 if background else Priority.P2 if bg else Priority.P0
-            job = st.scheduler.submit(deepjob.KIND, key, params, fn, pri, "heavy", 4000)
+            job_priority = Priority.P3 if background else Priority.P2 if bg else Priority.P0
+            job = st.scheduler.submit(deepjob.KIND, key, params, fn, job_priority, "heavy", 4000)
         return job_reply(key, job, estimates.get(key))
 
     @r.get(f"{prefix}/distant/{{key}}/bin")
