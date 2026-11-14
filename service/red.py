@@ -86,11 +86,21 @@ def red_result(field_key: str, meta: dict[str, Any], raws: list[tuple[bytes, byt
             t = np.array([(meta["passes"][k]["mjd_mid"] - 51544.5) / 365.25 for k, _, _ in r.path])
             pra, pdec = grid.grid_to_sky([x for _, x, _ in r.path], [y for _, _, y in r.path])
             cosd = math.cos(math.radians(float(np.mean(pdec))))
-            ve = float(np.polyfit(t, (np.asarray(pra) - pra[0]) * cosd * 3.6e6, 1)[0])
-            vn = float(np.polyfit(t, (np.asarray(pdec) - pdec[0]) * 3.6e6, 1)[0])
+            ye, yn = (np.asarray(pra) - pra[0]) * cosd * 3.6e6, (np.asarray(pdec) - pdec[0]) * 3.6e6
+            fe, fn = np.polyfit(t, ye, 1), np.polyfit(t, yn, 1)
+            ve, vn = float(fe[0]), float(fn[0])
+            # the scatter of the peaks of the passes about that line (arcsec): what the motion is worth
+            rms = float(np.sqrt(np.mean(((ye - np.polyval(fe, t)) ** 2 + (yn - np.polyval(fn, t)) ** 2) / 1e6)))
             ra0 = float(pra[0]) - ve * float(t[0]) / 3.6e6 / cosd
             dec0 = float(pdec[0]) - vn * float(t[0]) / 3.6e6
-            row.update(pmra=round(ve, 1), pmdec=round(vn, 1), ra_j2000=round(ra0 % 360.0, 6), dec_j2000=round(dec0, 6))
+            row.update(
+                pmra=round(ve, 1),
+                pmdec=round(vn, 1),
+                ra_j2000=round(ra0 % 360.0, 6),
+                dec_j2000=round(dec0, 6),
+                path_rms_arcsec=round(rms, 2),
+                path_passes=[int(meta["passes"][k]["index"]) for k, _, _ in r.path],
+            )
         rows.append(row)
     seen = [x["colour"] for x in rows if not x["lower_limit"] and x["snr_short"] >= 5]
     result = {

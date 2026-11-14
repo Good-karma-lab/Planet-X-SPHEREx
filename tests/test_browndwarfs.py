@@ -70,3 +70,18 @@ def test_the_catalogues_sort_moving_red_sources_into_candidates_and_known_ones()
         c["status"] = bd.status_of(c)
     assert [bd.group_of(c) for c in (wise, star, gaia_only, new, waiting)] == ["known", "known", "known", "candidate", "candidate"]
     assert wise["status"] == "known brown dwarf" and gaia_only["status"] == "star with Gaia motion" and new["status"] == "unidentified"
+
+
+def test_a_moving_red_source_is_a_track_of_the_movers_view_unless_the_white_stacks_found_it() -> None:
+    c = bd.red_movers({"red": [dict(red_row(-8000.0, 700.0), path_rms_arcsec=0.8, path_passes=[0, 2])]}, MJDS)[0]
+    c["gaia_check"] = bd.pseudo_track(c, MJDS)
+    c["gaia_check"]["check"] = "none"
+    c["status"] = "known brown dwarf"
+    tr = bd.movers_track(c, [0, 1, 2], MJDS)
+    assert tr["passes"] == [0, 2] and len(tr["ra"]) == 2 and len(tr["mjd"]) == 2 == len(tr["snr"])
+    assert math.isclose(tr["speed"], math.hypot(8.0, 0.7), abs_tol=0.01) and 270 < tr["pa"] < 290
+    assert tr["rms_arcsec"] == 0.8 and tr["source"] == "red" and tr["check"] == "none"
+    again = dict(c, track=tr, mover={"passes": [0, 1, 2]})  # the white stacks found it too: not added a second time
+    run = bd.DwarfRun("k", "f", state="done", result={"candidates": [dict(c, track=tr, mover=None), again], "known": []})
+    got = object.__new__(bd.BrownDwarfs).red_tracks(run)
+    assert len(got) == 1 and got[0] is tr

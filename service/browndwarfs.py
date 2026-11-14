@@ -98,6 +98,8 @@ def red_movers(red: dict[str, Any], mjds: list[float]) -> list[dict[str, Any]]:
             "lower_limit": bool(r["lower_limit"]),
             "snr_long": r["snr_long"],
             "snr_short": r["snr_short"],
+            "path_rms_arcsec": r.get("path_rms_arcsec"),
+            "path_passes": r.get("path_passes"),
         }
         k = EPOCH - 2000.0
         c["dec"] = round(c["dec_j2000"] + c["pmdec"] * k / 3.6e6, 6)
@@ -149,6 +151,35 @@ def status_of(c: dict[str, Any]) -> str:
 def group_of(c: dict[str, Any]) -> str:
     """`known`: the catalogues explain it (SIMBAD names it, or a Gaia star moves with it); `candidate`: they do not."""
     return "candidate" if c["status"] in ("unidentified", "catalogue did not answer") else "known"
+
+
+def movers_track(c: dict[str, Any], pass_index: list[int], mjds: list[float]) -> dict[str, Any]:
+    """The motion of a moving red source in the shape of a track of the search between passes (the lab draws and lists both alike): its
+    places at the dates of the passes it was measured in, along the straight line the peaks of the passes define. The signal is the red
+    bands' (3.8-5 um), where the white stack does not see it, so there is no per-pass S/N."""
+    t = c["gaia_check"]
+    use = [k for k, pi in enumerate(pass_index) if c.get("path_passes") is None or pi in c["path_passes"]] or list(range(len(pass_index)))
+    ve, vn = c["pmra"] / 1000.0, c["pmdec"] / 1000.0
+    return {
+        "passes": [pass_index[k] for k in use],
+        "mjd": [round(mjds[k], 4) for k in use],
+        "ra": [round(t["ra"][k], 6) for k in use],
+        "dec": [round(t["dec"][k], 6) for k in use],
+        "ra_2025_9": c["ra"],
+        "dec_2025_9": c["dec"],
+        "speed": round(math.hypot(ve, vn), 2),
+        "pa": c["pa"],
+        "v_east": round(ve, 3),
+        "v_north": round(vn, 3),
+        "rms_arcsec": c.get("path_rms_arcsec") if c.get("path_rms_arcsec") is not None else 0.0,
+        "saturated": False,
+        "snr": [None] * len(use),
+        "check": t["check"],
+        "gaia": t["gaia"],
+        "source": "red",
+        "colour": c["colour"],
+        "snr_long": c["snr_long"],
+    }
 
 
 def verdict_text(check: str) -> str:
@@ -215,6 +246,8 @@ class BrownDwarfs:
                 "version": VERSIONS[KIND],
                 "red_sources": red.get("sources"),
                 "movers_checked": mrun.state == "done",
+                "pass_index": [int(p["index"]) for p in meta["passes"]],
+                "mjd": mjds,
                 "candidates": cands,
                 "known": [],
                 "pending": True,
@@ -243,6 +276,9 @@ class BrownDwarfs:
                 if c["simbad"].get("state") == "unavailable":
                     pending = True
             c["status"] = status_of(c)
+            c["track"] = movers_track(c, run.result.get("pass_index", []), run.result.get("mjd", []))
+            c["track"]["status"] = c["status"]
+            c["track"]["name"] = (c.get("simbad") or {}).get("name")
         run.result["pending"] = pending
         if pending:  # the pseudo tracks stay so that the catalogues are asked again; every source counts as a candidate for now
             return
@@ -272,6 +308,15 @@ class BrownDwarfs:
         except Exception:  # the catalogue did not answer: asked again with the next request
             return {"state": "unavailable"}
         return {k: r[k] for k in ("state", "name", "otype", "sptype", "sep", "link") if k in r}
+
+    def red_tracks(self, run: DwarfRun) -> list[dict[str, Any]]:
+        """The tracks of the moving red sources the search between passes did not find itself (no track of the white stacks stands where
+        the source stands), for the movers view. A source whose Gaia verdict is "still" (a static star's centroid shift) is left out."""
+        out = []
+        for c in (run.result.get("candidates") or []) + (run.result.get("known") or []):
+            if c.get("mover") is None and c.get("track") and c["track"]["check"] != "still":
+                out.append(c["track"])
+        return out
 
     def view(self, run: DwarfRun) -> dict[str, Any]:
         out: dict[str, Any] = {"key": run.key, "state": run.state, "error": run.error}

@@ -13,7 +13,7 @@ VERSIONS: dict[str, str] = {
     "spectrum": "s1",  # PSF photometry of a place in every exposure that covers it
     "movers": "m3",  # the search between passes of a field and its Gaia check; m2 chance control, m3 corner passes sit out
     "anomalies": "a2",  # the spectral anomaly map of a field and the identification of its anomalies; a2: the same passes as the movers
-    "red": "r1",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm
+    "red": "r2",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm. r2: the scatter and the passes of a moving source
     "distant": "d1",  # Find Planet X, one pass: distance search, candidates, photometry, slider arrays
     "deep": "m1",  # Find Planet X, the sum of passes along one orbit
     "link": "l1",  # Find Planet X, the link of passes by one orbit
