@@ -5,7 +5,7 @@ import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVE
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, type SkyLayer } from './globe/sky';
-import { fovOfGlobe, glowOf, paintGround, toneOf } from './globe/glow';
+import { fovOfGlobe, haloOf, paintGround, toneBounds, toneOf } from './globe/glow';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
 import { KnownList } from './search/known';
@@ -335,43 +335,31 @@ export function Globe() {
     // where each test target's pin and the selected object's pin were drawn: the click finds them there
     let pins: { o: Obj; x: number; y: number }[] = [];
     let drag: { x: number; y: number; ra: number; dec: number; moved: boolean } | null = null;
-    let glowMix = 1;
     let lastBreath = 0;
     let lastLoop = performance.now();
     let lastTouch = 0;
     let driftGain = 0;
     let driftClock = 0;
     const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
-    let glowT = performance.now();
     const font = getComputedStyle(document.body).fontFamily;
     const draw = () => {
       const st = live.current;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
       paintGround(ctx, W, H);
-      // wide view: the survey as a soft glow (toned, real); below 12° across: the raw survey, crossfaded over 400 ms
-      const wideNow = st.proj !== 'globe' || fovOfGlobe(W, R()) > 12;
       const tNow = performance.now();
-      glowMix = Math.max(0, Math.min(1, glowMix + ((tNow - glowT) / 400) * (wideNow ? 1 : -1)));
-      glowT = tNow;
-      if (glowMix > 0 && glowMix < 1) dirty.current = true;
+      // the survey's own pixels in the night palette at every zoom (one black and white point per survey, taken from the whole-sky view), with the light halo of the band
       if (sky.shown) {
+        const wide = st.proj !== 'globe' || fovOfGlobe(W, R()) > 60;
+        const tb = toneBounds(sky.canvas, sky.gen, st.survey, wide);
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
-        {
-          // the survey's own detail in the night palette at every zoom (stronger the closer the view), over the glow of the wide view
-          ctx.globalAlpha = 1 - 0.45 * glowMix;
-          ctx.globalCompositeOperation = 'screen';
-          ctx.drawImage(toneOf(sky.canvas, sky.gen, st.survey === 'dss2' ? 0.45 : 0.3), 0, 0, W, H);
-          ctx.globalCompositeOperation = 'source-over';
-        }
-        if (glowMix > 0) {
-          ctx.globalAlpha = glowMix;
-          ctx.globalCompositeOperation = 'screen';
-          ctx.drawImage(glowOf(sky.canvas, sky.gen, st.survey === 'dss2' ? 0.45 : 0.3), 0, 0, W, H);
-          ctx.globalCompositeOperation = 'source-over';
-        }
+        ctx.globalCompositeOperation = 'screen';
+        ctx.drawImage(toneOf(sky.canvas, sky.gen, tb), 0, 0, W, H);
+        ctx.globalAlpha = 0.35;
+        ctx.drawImage(haloOf(sky.canvas, sky.gen, tb), 0, 0, W, H);
         ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
       }
       const b = basis();
       if (st.proj !== 'globe') {
