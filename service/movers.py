@@ -430,7 +430,9 @@ def saturated_movers(
                     "source_id": str(st["source_id"]),
                     "pm": round(math.hypot(cat_ve, cat_vn), 3),
                     "pa": round(math.degrees(math.atan2(cat_ve, cat_vn)) % 360.0, 1),
-                    "g": None if st.get("g") is None else round(float(st["g"]), 2),
+                    "g": None
+                    if st.get("g", st.get("phot_g_mean_mag")) is None
+                    else round(float(st.get("g", st.get("phot_g_mean_mag"))), 2),
                     "offset_arcsec": round(max(offs), 2),
                 },
                 "source": "saturated",
