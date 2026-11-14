@@ -50,9 +50,9 @@ function useHonest(): string[] {
 }
 
 const LIGHT: { id: string; name: string; hint: string }[] = [
-  { id: 'D4', name: 'D4', hint: '2.4–3.8 µm: the band where SPHEREx goes deeper than WISE' },
-  { id: 'D1-D3', name: 'D1–D3', hint: '0.75–2.4 µm: reflected light' },
-  { id: 'D1-D4', name: 'D1–D4', hint: 'all four short bands' },
+  { id: '4', name: 'D4', hint: '2.4–3.8 µm: the band where SPHEREx goes deeper than WISE' },
+  { id: '123', name: 'D1–D3', hint: '0.75–2.4 µm: reflected light' },
+  { id: '1234', name: 'D1–D4', hint: 'all four short bands' },
 ];
 
 export function PlanetXPage() {
@@ -65,8 +65,7 @@ export function PlanetXPage() {
   const [dec, setDec] = useState(String(f0.dec));
   const [size, setSize] = useState(String(f0.size));
   const [far, setFar] = useState(true);
-  const [light, setLight] = useState('D4');
-  const [prior, setPrior] = useState(true);
+  const [light, setLight] = useState('4');
   const pick = (f: Field) => {
     setFid(f.id);
     setRa(String(f.ra));
@@ -80,9 +79,8 @@ export function PlanetXPage() {
   const plan = usePlan(raN, decN, sizeN, dmin, dmax, valid);
   const href = useMemo(() => {
     const q = new URLSearchParams({ ra: raN.toFixed(4), dec: decN.toFixed(4), fov: String(sizeN > 20 ? 60 : sizeN > 10 ? 20 : sizeN > 5 ? 10 : sizeN > 2 ? 5 : 2), fpx: '1', dmin: String(dmin), dmax: String(dmax), det: light });
-    if (prior) q.set('prior', '1');
     return `#/lab?${q}`;
-  }, [raN, decN, sizeN, dmin, dmax, light, prior]);
+  }, [raN, decN, sizeN, dmin, dmax, light]);
 
   const mine = (searched ?? []).filter(isFpx);
   const area = mine.reduce((s, f) => s + (f.fov / 60) ** 2, 0);
@@ -109,7 +107,7 @@ export function PlanetXPage() {
             <span>mJy blind limit in D4 (WISE: 0.065)</span>
           </div>
           <div>
-            <b>{PROOF.length}</b>
+            <b>{new Set(PROOF.map((x) => x.who)).size}</b>
             <span>known worlds found blind</span>
           </div>
           <div>
@@ -121,7 +119,7 @@ export function PlanetXPage() {
           <section class="card glass px-left">
             <h3>THE SOLAR SYSTEM</h3>
             <Model onHover={setHover} />
-            <div class="px-status" data-testid="px-status">{hover ?? 'Drag to turn, scroll to zoom. Orbits are JPL elements; positions are for today.'}</div>
+            <div class="px-status" data-testid="px-status">{hover ?? 'Drag to turn, scroll to zoom, hover a point for its name. Orbits are JPL elements; positions are for today.'}</div>
             <div class="px-p9">
               <b>Planet Nine, predicted</b>
               <span>semi-major axis {P9.a} au ({P9.aRange[0]}–{P9.aRange[1]}) · perihelion {P9.peri} au · inclination {P9.i}° · {P9.mass}</span>
@@ -157,10 +155,6 @@ export function PlanetXPage() {
                 ))}
               </span>
             </div>
-            <label class="px-row px-check">
-              <input type="checkbox" checked={prior} onChange={(e) => setPrior((e.target as HTMLInputElement).checked)} />
-              <span>Planet Nine orbits only (the prediction as a prior)</span>
-            </label>
             <div class="px-plan" data-testid="px-plan">
               {!valid ? 'Enter RA 0–360°, Dec −90…+90° and a size of 1–120′.' : plan ? `reads ${plan.exposures} exposures in ${plan.visits} visits · ${mins(plan.estimate_s)}` : 'planning…'}
             </div>
