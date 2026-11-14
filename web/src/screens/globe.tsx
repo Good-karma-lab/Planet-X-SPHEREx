@@ -5,6 +5,7 @@ import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVE
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, type SkyLayer } from './globe/sky';
+import { drawStars, fovOfGlobe, loadStars } from './globe/stars';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
 import { KnownList } from './search/known';
@@ -197,6 +198,7 @@ export function Globe() {
   useEffect(() => {
     void loadCatalog().then((c) => setCatalog((old) => (old === c ? old : c)));
     void loadCoverage().then(() => (dirty.current = true));
+    void loadStars().then(() => (dirty.current = true));
     const offDates = onImageDates(() => {
       dirty.current = true;
       setDatesTick((t) => t + 1);
@@ -320,6 +322,7 @@ export function Globe() {
 
     // where each test target's pin and the selected object's pin were drawn: the click finds them there
     let pins: { o: Obj; x: number; y: number }[] = [];
+    let starTier = 0;
     const font = getComputedStyle(document.body).fontFamily;
     const draw = () => {
       const st = live.current;
@@ -330,44 +333,17 @@ export function Globe() {
         ctx.drawImage(sky.canvas, 0, 0, W, H);
       }
       const b = basis();
-      // grid
-      ctx.save();
-      ctx.strokeStyle = 'rgba(255,255,255,.10)';
-      ctx.lineWidth = 1;
-      ctx.fillStyle = 'rgba(255,255,255,.45)';
-      ctx.font = `11px ${font}`;
-      const line = (pts: [number, number][]) => {
-        ctx.beginPath();
-        let pen = false;
-        let lx = 0;
-        for (const [ra, de] of pts) {
-          const p = project(ra, de, b);
-          if (!p[2] || (st.proj === 'moll' && pen && Math.abs(p[0] - lx) > W / 2)) {
-            pen = false;
-            if (!p[2]) continue;
-          }
-          if (pen) ctx.lineTo(p[0], p[1]);
-          else ctx.moveTo(p[0], p[1]);
-          pen = true;
-          lx = p[0];
-        }
-        ctx.stroke();
-      };
-      for (let ra = 0; ra < 360; ra += 30) {
-        const pts: [number, number][] = [];
-        for (let de = -90; de <= 90; de += 3) pts.push([ra, de]);
-        line(pts);
-        const lp = project(ra, 2, b);
-        if (lp[2]) ctx.fillText(`${ra / 15}h`, lp[0] + 3, lp[1] - 3);
-      }
-      for (let de = -60; de <= 60; de += 30) {
-        const pts: [number, number][] = [];
-        for (let ra = 0; ra <= 360; ra += 3) pts.push([ra, de]);
-        line(pts);
-        const lp = project(st.proj === 'moll' ? 170 : view.current.ra, de, b);
-        if (lp[2]) ctx.fillText(`${de > 0 ? '+' : ''}${de}°`, lp[0] + 3, lp[1] - 3);
-      }
-      ctx.restore();
+      // the stars: the real Hipparcos catalogue as points of light (no grid, no catalogue dots); a slow frame drops to a lower tier
+      const t0 = performance.now();
+      drawStars(ctx, (ra, dec) => project(ra, dec, b), {
+        W,
+        H,
+        fov: st.proj === 'globe' ? fovOfGlobe(W, R()) : 150,
+        tier: starTier,
+      });
+      const dt = performance.now() - t0;
+      if (dt > 20) starTier = 1;
+      else if (dt < 8) starTier = 0;
       ctx.strokeStyle = 'rgba(255,255,255,.22)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
