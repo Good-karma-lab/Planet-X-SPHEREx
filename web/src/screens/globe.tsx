@@ -78,6 +78,43 @@ const DEMOS: { n: string; what: string; ra: number; dec: number; fov: number; fi
   { n: 'Eris field', what: 'the dwarf planet beyond Neptune', ra: 27.378, dec: -0.12, fov: 20 },
 ];
 
+/** Small bodies the tool shows in a film: each opens the film of the pass in which SPHEREx saw it, with the body ringed. */
+const SMALL: { n: string; what: string; ra: number; dec: number; fov: number; film: number }[] = [
+  { n: '3I/ATLAS', what: 'interstellar comet · 55 SPHEREx images on 14 Dec 2025', ra: 166.8274, dec: 5.2787, fov: 60, film: 61023.6 },
+  {
+    n: '(9952) 1991 AK',
+    what: 'main-belt asteroid · V 18.1 · 119 images, 14–20 Dec 2025',
+    ra: 169.8917,
+    dec: 4.3514,
+    fov: 60,
+    film: 61027,
+  },
+  {
+    n: '(9078) 1994 PB2',
+    what: 'main-belt asteroid · V 18.9 · 118 images, 14–20 Dec 2025',
+    ra: 169.8917,
+    dec: 4.3514,
+    fov: 60,
+    film: 61027,
+  },
+  {
+    n: '(11020) Orwell',
+    what: 'main-belt asteroid · V 18.8 · 121 images, 14–20 Dec 2025',
+    ra: 169.8917,
+    dec: 4.3514,
+    fov: 60,
+    film: 61027,
+  },
+  {
+    n: '(43959) 1997 CB26',
+    what: 'main-belt asteroid · V 18.4 · 107 images, 14–20 Dec 2025',
+    ra: 169.8917,
+    dec: 4.3514,
+    fov: 60,
+    film: 61027,
+  },
+];
+
 function mollweideTheta(phi: number): number {
   let th = phi;
   for (let i = 0; i < 12; i++) {
@@ -643,7 +680,7 @@ export function Globe() {
     else if (filter === 'bd') L = L.filter((o) => o.k === 'bd');
     else if (filter === 'fast') L = L.filter((o) => o.k === 'fast');
     else if (filter === 'var') L = L.filter((o) => o.k === 'mira' || o.k === 'young' || o.k === 'var');
-    else if (filter === 'demo') L = [];
+    else if (filter === 'demo' || filter === 'small') L = [];
     const q = query.trim().toLowerCase();
     if (q) {
       const m = q.match(/^(.+?)[,;]\s*(.+)$/);
@@ -807,6 +844,7 @@ export function Globe() {
                 ['fast', 'Fast stars'],
                 ['var', 'Variables'],
                 ['demo', `Demo fields (${DEMOS.length})`],
+                ['small', 'Comets / Asteroids'],
               ] as const
             ).map(([k, l]) => (
               <button
@@ -824,11 +862,11 @@ export function Globe() {
           </div>
         </div>
         <div class="cat-list">
-          {filter !== 'demo' && !slice.length && catalog.length > 0 && (
+          {filter !== 'demo' && filter !== 'small' && !slice.length && catalog.length > 0 && (
             <div class="empty">Not in the local SIMBAD snapshot. Coordinates work too, e.g. “17h57m48s, +04d41m”.</div>
           )}
-          {filter === 'demo' &&
-            DEMOS.map((d) => (
+          {(filter === 'demo' || filter === 'small') &&
+            (filter === 'demo' ? DEMOS : SMALL).map((d) => (
               <div key={d.n} class="row" onClick={() => aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog')}>
                 <div class="nm">
                   <span class="t">{d.n}</span>
@@ -874,6 +912,7 @@ export function Globe() {
               </div>
             ))}
           {filter !== 'demo' &&
+            filter !== 'small' &&
             slice.map((o) => {
               const { ra, dec } = o;
               return (
