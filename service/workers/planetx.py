@@ -90,7 +90,7 @@ def honest_words(kind: str, det: tuple[int, ...] = (1, 2, 3)) -> dict[str, Any]:
         "(0.039-0.047 mJy against 0.065 mJy, measured on artificial bodies in 1 degree fields at 250-2000 au): the margin is small."
         + ("" if d4 else " This job did not use D4."),
         "lead": "A candidate is a lead, not a discovery: it needs the link of two or three passes, the check against the known bodies "
-        "(SkyBoT, JPL) and, for a body seen in D4, the archive check.",
+        "(JPL) and, for a body seen in D4, the archive check.",
         "numbers": numbers,
     }
 

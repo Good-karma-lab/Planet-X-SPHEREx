@@ -722,7 +722,7 @@ export function Landing() {
                 <li>SPHEREx Level-2 images: NASA / JPL-Caltech, via NASA/IPAC IRSA</li>
                 <li>Star motions: ESA Gaia DR3 (ESA/Gaia/DPAC)</li>
                 <li>Object names: SIMBAD, CDS Strasbourg</li>
-                <li>Known asteroids: IMCCE SkyBoT, JPL Horizons</li>
+                <li>Known asteroids: JPL Small-Body Identification, JPL Horizons</li>
                 <li>Sky behind this page and globe layers: 2MASS, DSS2, AllWISE, IRIS (HiPS, CDS / IRSA)</li>
               </ul>
             </div>
