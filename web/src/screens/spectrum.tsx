@@ -1,25 +1,10 @@
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { formatDec, formatRA } from '../lib/sky';
+import { binNote, binSpectrum, type Bin } from './spectrum/bins';
+import type { Source, SpecPoint } from './spectrum/types';
+import './spectrum/extra.css';
 
-export interface Source {
-  ra: number;
-  dec: number;
-  /** a catalogue object: its name and proper motion (mas/yr, J2000 place) */
-  name?: string;
-  pmra?: number;
-  pmdec?: number;
-}
-
-export interface SpecPoint {
-  i: number;
-  mjd: number;
-  det: number;
-  lam: number;
-  ok: boolean;
-  why: string;
-  flux?: number;
-  err?: number;
-}
+export type { Source, SpecPoint };
 
 interface SpecView {
   key: string;
@@ -99,7 +84,7 @@ export function useSpectrum(src: Source | null): {
   return { view, points, error };
 }
 
-function SpectrumChart({ points }: { points: SpecPoint[] }) {
+function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]; cur: SpecPoint | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
@@ -169,15 +154,52 @@ function SpectrumChart({ points }: { points: SpecPoint[] }) {
       c.arc(x(p.lam), y(p.flux!), 2.2, 0, 7);
       c.fill();
     }
-    const last = ok[ok.length - 1];
-    if (last) {
+    // the binned spectrum over the points: filled = at least 3σ above zero, an arrow down = 3σ upper limit
+    for (const b of bins) {
+      const col = `hsl(${DET_HUE[b.det - 1]},85%,72%)`;
+      const bx = x(b.lam);
+      c.strokeStyle = '#e8f6fa';
+      c.fillStyle = '#071218';
+      c.lineWidth = 1.5;
+      if (b.detected) {
+        c.beginPath();
+        c.moveTo(bx, y(b.flux - b.err));
+        c.lineTo(bx, y(b.flux + b.err));
+        c.stroke();
+        c.beginPath();
+        c.arc(bx, y(b.flux), 4.2, 0, 7);
+        c.fillStyle = col;
+        c.fill();
+        c.stroke();
+      } else {
+        const top = y(3 * b.err);
+        c.beginPath();
+        c.moveTo(bx, top);
+        c.lineTo(bx, top + 12);
+        c.moveTo(bx - 3.5, top + 8);
+        c.lineTo(bx, top + 12.5);
+        c.lineTo(bx + 3.5, top + 8);
+        c.stroke();
+      }
+    }
+    // the exposure being looked at: a ring on its point, or a tick at its wavelength when it gave no point
+    if (cur && cur.lam > 0) {
       c.strokeStyle = '#ffffff';
       c.lineWidth = 1.4;
-      c.beginPath();
-      c.arc(x(last.lam), y(last.flux!), 5.5, 0, 7);
-      c.stroke();
+      if (cur.ok && cur.flux != null) {
+        c.beginPath();
+        c.arc(x(cur.lam), y(cur.flux), 6, 0, 7);
+        c.stroke();
+      } else {
+        c.setLineDash([3, 3]);
+        c.beginPath();
+        c.moveTo(x(cur.lam), T);
+        c.lineTo(x(cur.lam), H - B);
+        c.stroke();
+        c.setLineDash([]);
+      }
     }
-  }, [points]);
+  }, [points, bins, cur]);
   return <canvas ref={ref} class="spec-chart" aria-label="Spectrum: flux against wavelength" />;
 }
 
@@ -196,20 +218,107 @@ function csv(src: Source, points: SpecPoint[]): string {
   return head + points.map((p) => [p.i, p.mjd, p.det, p.lam, p.flux ?? '', p.err ?? '', p.ok ? 1 : 0, p.why].join(',')).join('\n') + '\n';
 }
 
+const PLAY_MS = 90;
+
+function dateOf(mjd: number): string {
+  return new Date((mjd - 40587) * 86400000).toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+}
+
+/** The slider over the exposures of a spectrum, in the order they were taken: one at a time, or played through. */
+function ExposurePlayer({
+  rows,
+  k,
+  onK,
+  playing,
+  onPlay,
+}: {
+  rows: SpecPoint[];
+  k: number;
+  onK: (k: number) => void;
+  playing: boolean;
+  onPlay: (on: boolean) => void;
+}) {
+  const cur = rows[k];
+  const line = !cur
+    ? ''
+    : cur.ok && cur.flux != null
+      ? `exposure ${k + 1} of ${rows.length} · ${dateOf(cur.mjd)} · D${cur.det} · ${cur.lam.toFixed(2)} µm · ${cur.flux.toFixed(Math.abs(cur.flux) < 10 ? 2 : 1)} mJy`
+      : `exposure ${k + 1} of ${rows.length} · ${dateOf(cur.mjd)} · D${cur.det} · no point: ${cur.why || 'no usable measurement'}`;
+  return (
+    <div class="spec-play">
+      <button
+        class="pp"
+        aria-label={playing ? 'Pause' : 'Play through the exposures'}
+        onClick={() => onPlay(!playing)}
+      >
+        {playing ? (
+          <svg viewBox="0 0 16 16"><rect x="3" y="2" width="3.5" height="12" rx="1" /><rect x="9.5" y="2" width="3.5" height="12" rx="1" /></svg>
+        ) : (
+          <svg viewBox="0 0 16 16"><path d="M4 2.2v11.6a.8.8 0 0 0 1.2.7l9-5.8a.8.8 0 0 0 0-1.4l-9-5.8A.8.8 0 0 0 4 2.2z" /></svg>
+        )}
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={Math.max(0, rows.length - 1)}
+        step={1}
+        value={k}
+        aria-label="Exposure"
+        onInput={(e) => {
+          onPlay(false);
+          onK(Number((e.currentTarget as HTMLInputElement).value));
+        }}
+      />
+      <div class="spec-line">{line}</div>
+    </div>
+  );
+}
+
 export function SpectrumTab({ src }: { src: Source | null }) {
-  const { view, points, error } = useSpectrum(src);
-  if (!src) return <div class="mono-s">Click a source in the picture</div>;
+  // Clear drops the spectrum until another source is picked (a new pick is a new object, even at the same place)
+  const [cleared, setCleared] = useState<Source | null>(null);
+  const shown = src && src !== cleared ? src : null;
+  const { view, points, error } = useSpectrum(shown);
+  const [at, setAt] = useState<number | null>(null); // null: the newest exposure
+  const [playing, setPlaying] = useState(false);
+  const rows = useMemo(() => [...points].sort((a, b) => a.i - b.i), [points]);
+  const bins = useMemo(() => binSpectrum(points), [points]);
+  const k = at == null ? Math.max(0, rows.length - 1) : Math.min(at, Math.max(0, rows.length - 1));
+  useEffect(() => {
+    setAt(null);
+    setPlaying(false);
+  }, [shown]);
+  useEffect(() => {
+    if (!playing || rows.length < 2) return;
+    // a play starts from the first exposure unless the slider is in the middle
+    const t = setInterval(() => {
+      setAt((v) => {
+        const nx = (v ?? 0) + 1;
+        if (nx >= rows.length - 1) {
+          setPlaying(false);
+          return rows.length - 1;
+        }
+        return nx;
+      });
+    }, PLAY_MS);
+    return () => clearInterval(t);
+  }, [playing, rows.length]);
+  if (!shown) return <div class="mono-s">Click a source in the picture</div>;
   const why = new Map<string, number>();
   for (const p of points) if (!p.ok) why.set(p.why, (why.get(p.why) ?? 0) + 1);
   const perDet = [1, 2, 3, 4, 5, 6].map((d) => points.filter((p) => p.ok && p.det === d).length);
   const usable = points.filter((p) => p.ok).length;
+  const cur = rows[k] ?? null;
   return (
     <div class="spec">
       <div class="spec-head">
-        <b>{src.name ?? 'Source'}</b>
+        <b>{shown.name ?? 'Source'}</b>
         <span class="mono-s">
-          {formatRA(src.ra)} {formatDec(src.dec)}
+          {formatRA(shown.ra)} {formatDec(shown.dec)}
         </span>
+        <button class="lnk spec-clear" onClick={() => setCleared(shown)}>
+          Clear
+        </button>
       </div>
       <div class="spec-state">
         {!view || (view.state === 'running' && view.total === 0)
@@ -223,7 +332,8 @@ export function SpectrumTab({ src }: { src: Source | null }) {
       {(view?.no_spectrum || (view && view.measured >= 20 && view.saturated > 0.5 * view.measured)) && (
         <div class="partial">Saturated in most exposures: no SPHEREx spectrum (the core of this star overflows the detector)</div>
       )}
-      <SpectrumChart points={points} />
+      <SpectrumChart points={points} bins={bins} cur={cur} />
+      {bins.length > 0 && <div class="spec-bin-note">{binNote(bins)}</div>}
       <div class="spec-dets">
         {perDet.map((n, i) => (
           <span key={i}>
@@ -231,7 +341,19 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           </span>
         ))}
       </div>
-      {why.size > 0 && <div class="mono-s">Not used: {[...why.entries()].map(([k, n]) => `${n} ${k}`).join(' · ')}</div>}
+      {rows.length > 1 && (
+        <ExposurePlayer
+          rows={rows}
+          k={k}
+          onK={(v) => setAt(v)}
+          playing={playing}
+          onPlay={(on) => {
+            if (on && (at == null || at >= rows.length - 1)) setAt(0);
+            setPlaying(on);
+          }}
+        />
+      )}
+      {why.size > 0 && <div class="mono-s">Not used: {[...why.entries()].map(([k2, n]) => `${n} ${k2}`).join(' · ')}</div>}
       {error && (
         <div class="mono-s" style={{ color: 'var(--amber)' }}>
           {error}
@@ -240,8 +362,8 @@ export function SpectrumTab({ src }: { src: Source | null }) {
       {view?.state === 'done' && points.length > 0 && (
         <a
           class="lnk"
-          download={`spectrum-${formatRA(src.ra, true)}${formatDec(src.dec, true)}.csv`}
-          href={`data:text/csv;charset=utf-8,${encodeURIComponent(csv(src, points))}`}
+          download={`spectrum-${formatRA(shown.ra, true)}${formatDec(shown.dec, true)}.csv`}
+          href={`data:text/csv;charset=utf-8,${encodeURIComponent(csv(shown, points))}`}
         >
           Download the points (CSV)
         </a>

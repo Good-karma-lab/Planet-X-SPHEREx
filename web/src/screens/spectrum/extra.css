@@ -1,0 +1,11 @@
+.spec-head .spec-clear { margin-left: auto; }
+.spec-bin-note { font: 500 11px var(--mono); color: var(--muted); }
+.spec-play { display: grid; grid-template-columns: 34px 1fr; gap: 4px 10px; align-items: center; }
+.spec-play button.pp {
+  width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--edge-soft); background: rgba(8, 20, 26, 0.7);
+  color: var(--accent); display: grid; place-items: center; padding: 0; cursor: pointer;
+}
+.spec-play button.pp:hover { border-color: var(--accent); }
+.spec-play button.pp svg { width: 14px; height: 14px; fill: currentColor; }
+.spec-play input[type='range'] { width: 100%; accent-color: var(--accent); margin: 0; }
+.spec-play .spec-line { grid-column: 1 / -1; font: 500 11px var(--mono); color: var(--muted); }
