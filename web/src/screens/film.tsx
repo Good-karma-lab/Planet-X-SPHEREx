@@ -121,6 +121,7 @@ export async function loadFilm(
     const a = new Float32Array(n * n);
     const off = k * n * n;
     for (let i = 0; i < n * n; i++) a[i] = lut[raw[off + i]!]!;
+    fillCores(a, n, HI);
     sky.push(a);
     for (let i = 0; i < n * n; i += 97) if (raw[off + i]) sample.push(a[i]!);
   }
@@ -186,4 +187,46 @@ export async function loadBodies(film: Film, stop: () => boolean): Promise<{ sta
     pause = Math.min(10000, pause * 1.4);
   }
   return null;
+}
+
+/** A hole enclosed by data within a few pixels on all four sides: a saturated core (bright all around) is drawn white, never
+ *  as a hole; any other masked spot (a cosmic ray, a flagged pixel of this visit) is filled from its neighbours. Edges of the
+ *  visit's coverage stay without data. */
+function fillCores(a: Float32Array, n: number, white: number, reach = 10): void {
+  const N = n * n;
+  const dist = [new Int16Array(N), new Int16Array(N), new Int16Array(N), new Int16Array(N)];
+  const val = [new Float32Array(N), new Float32Array(N), new Float32Array(N), new Float32Array(N)];
+  const far = 32767;
+  const scan = (k: number, idx: (o: number, t: number) => number, rev: boolean) => {
+    for (let o = 0; o < n; o++) {
+      let d = far;
+      let v = NaN;
+      for (let s = 0; s < n; s++) {
+        const i = idx(o, rev ? n - 1 - s : s);
+        const x = a[i]!;
+        if (Number.isNaN(x)) d = Math.min(far, d + 1);
+        else {
+          d = 0;
+          v = x;
+        }
+        dist[k]![i] = d;
+        val[k]![i] = v;
+      }
+    }
+  };
+  scan(0, (y, x) => y * n + x, false);
+  scan(1, (y, x) => y * n + x, true);
+  scan(2, (x, y) => y * n + x, false);
+  scan(3, (x, y) => y * n + x, true);
+  const sample: number[] = [];
+  for (let i = 0; i < N; i += 13) if (!Number.isNaN(a[i]!)) sample.push(a[i]!);
+  sample.sort((x, y) => x - y);
+  const bright = sample.length ? sample[Math.floor(sample.length * 0.995)]! : white;
+  for (let i = 0; i < N; i++) {
+    if (!Number.isNaN(a[i]!)) continue;
+    if (dist.some((d) => d[i]! > reach)) continue;
+    const m = (val[0]![i]! + val[1]![i]! + val[2]![i]! + val[3]![i]!) / 4;
+    const lo = Math.min(val[0]![i]!, val[1]![i]!, val[2]![i]!, val[3]![i]!);
+    a[i] = lo >= bright ? white : m;
+  }
 }
