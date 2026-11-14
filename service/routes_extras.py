@@ -19,7 +19,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from engine.extras import ades, allwise, cadc_ref, gaia_readiness, spherex_orbit
+from engine.extras import ades, allwise, cadc_ref, gaia_readiness, spherex_orbit, ssois
 from engine.extras.cloudcat import Reader, separation_arcsec
 from engine.extras.cube import PIXEL_SR, CubeSource, RangeReader
 from service.reader.s3 import S3, ReadError
@@ -252,6 +252,47 @@ def build_router(extras: Extras) -> APIRouter:
         """Is Gaia DR4 (planned 2026-12-02) in the ESA archive with the columns the service uses, and what to set to switch to it."""
         today = datetime.now(UTC).date().isoformat()
         return await gaia_readiness.probe(extras.cadc(), today)
+
+    async def _ssois(query: dict[str, str], radio: bool) -> dict[str, Any]:
+        try:
+            rows = await ssois.search(extras.cadc(), query, radio)
+        except (ssois.SsoisError, httpx.HTTPError) as e:  # said, not hidden
+            return {"state": "unavailable", "error": f"{type(e).__name__}: {str(e)[:120]}", "rows": [], "link": ssois.human_link(query)}
+        return {"state": "ok" if rows else "none", "n": len(rows), "rows": rows[:200], "link": ssois.human_link(query)}
+
+    @router.get(f"{API_PREFIX}/ssois")
+    async def ssois_by_name(
+        name: str = Query(..., pattern=ssois.NAME.pattern),
+        start: str = Query(..., pattern=ssois.DATE.pattern),
+        end: str = Query(..., pattern=ssois.DATE.pattern),
+        radio: bool = False,
+    ) -> Any:
+        """Archival images (CFHT, Subaru, Pan-STARRS, DECam, HST ...) of a named small body in a date range, from CADC SSOIS."""
+        try:
+            q = ssois.name_query(name, start, end)
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+        return await _ssois(q, radio)
+
+    @router.get(f"{API_PREFIX}/ssois/orbit")
+    async def ssois_by_orbit(
+        epoch: str = Query(..., pattern=ssois.DATE.pattern),
+        a: float = Query(..., gt=0, lt=1000),
+        e: float = Query(..., ge=0, lt=1),
+        i: float = Query(..., ge=0, le=180),
+        node: float = Query(..., ge=0, le=360),
+        peri: float = Query(..., ge=0, le=360),
+        anom: float = Query(..., ge=0, le=360),
+        start: str = Query(..., pattern=ssois.DATE.pattern),
+        end: str = Query(..., pattern=ssois.DATE.pattern),
+        radio: bool = False,
+    ) -> Any:
+        """The same for an orbit given by elements (for a lead that has one): precovery and confirmation of the orbit."""
+        try:
+            q = ssois.orbit_query(ssois.Elements(epoch, a, e, i, node, peri, anom), start, end)
+        except ValueError as err:
+            raise HTTPException(422, str(err)) from err
+        return await _ssois(q, radio)
 
     @router.get(f"{API_PREFIX}/reference/deep")
     async def reference_deep(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90)) -> Any:
