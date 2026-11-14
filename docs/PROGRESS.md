@@ -55,14 +55,17 @@ rate agrees between landing and lab (20′: 10.7 ± 0.8″/yr, Gaia 10.4) — 10
 a Find Planet X link from the Planet X page (`fpx=1&dmin&dmax&det`) applies its range and detectors and starts the search (checked
 live: 250–2000 au, D4) and a trajectory year never sits under the object's label — 88e91a2; the phone rail's words keep a gap down
 to 320 px — e821bd2.
+Merged and live at ed31aa2: lab-ui's Planet X page fixes (detector digits in the Lab link, Eris once, labels that no longer pile up,
+"Sedna (known body)") and sky-service's Find Planet X reads (tried 3 times; one line "N of M exposures could not be used and were
+left out") with scan blocks sized by the work. The `distant` version was kept at d1 so the searched list keeps every search done so
+far: cached results still show the old "10 exposures were not read" note, new searches the new line. Warm set: every field a page
+links to (Planet X page fields at 20′/60′, the landing's brown dwarf link) — 8f99e29.
 
 Open, with owner (the app pauses this session's messages to the other sessions, so these are the hand-over notes):
-- sky-service: on WISE 0855, Find Planet X reports "10 exposures were not read" per field (3 visits); the overnight deep sums show
-  the same (9–15 per field) — worth a look at which files fail. ε Indi B Find Planet X runs 48 blocks with an ETA that does not move.
-  WISE 0855 5′ movers find no track (blend).
-- lab-ui (Planet X page): "4 known worlds" counts Eris twice; Eris is quoted as 95.89 ± 0.54 au in one place and 95.9 ± 0.6 in
-  another; the Solar System model piles labels up near the Sun, shows a "Sedna (test)" marker and a True-scale blob; the phone
-  stats read "—".
+- sky-service: WISE 0855 5′ movers find no track (blend); WISE 0855 5′ Find Planet X has fewer than four usable visits per pass
+  (a limit of the data, reported as such).
+- lab-ui (Planet X page): Eris is quoted as 95.89 ± 0.54 au in one place and 95.9 ± 0.6 in another; the phone stats read "—"
+  (check after ed31aa2).
 - lab-ui / design-review: the landing hero card is cut on the right; the film slot waits for the new video.
 - prod-build: Sunday video, slides and texts; Download video not clicked by QA (it writes a file).
 - Overnight on the VM, both fields done, nothing detected (250–800 au, deep sum, every person's job first):
