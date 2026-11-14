@@ -409,6 +409,7 @@ def saturated_movers(
             math.hypot((ra_m[j] - exp_ra[i]) * math.cos(math.radians(exp_dec[i])), dec_m[j] - exp_dec[i]) * 3600.0
             for j, i in enumerate(idx)
         ]
+        gmag = st.get("g", st.get("phot_g_mean_mag"))
         yrs25 = 2025.9 - year_of(passes[idx[0]]["mjd_mid"])
         out.append(
             {
@@ -430,9 +431,7 @@ def saturated_movers(
                     "source_id": str(st["source_id"]),
                     "pm": round(math.hypot(cat_ve, cat_vn), 3),
                     "pa": round(math.degrees(math.atan2(cat_ve, cat_vn)) % 360.0, 1),
-                    "g": None
-                    if st.get("g", st.get("phot_g_mean_mag")) is None
-                    else round(float(st.get("g", st.get("phot_g_mean_mag"))), 2),
+                    "g": None if gmag is None else round(float(gmag), 2),
                     "offset_arcsec": round(max(offs), 2),
                 },
                 "source": "saturated",
