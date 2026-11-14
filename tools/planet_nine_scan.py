@@ -104,13 +104,14 @@ def main() -> int:
     ap.add_argument("--out", default="planet_nine.json")
     ap.add_argument("--max-hours", type=float, default=6.0, help="per field")
     ap.add_argument("--poll-seconds", type=float, default=60.0)
+    ap.add_argument("--only", type=int, default=None, help="search only this field (0 or 1)")
     a = ap.parse_args()
     out = Path(a.out)
     state: dict[str, Any] = json.loads(out.read_text()) if out.is_file() else {"fields": []}
     done = {d["name"] for d in state["fields"] if d.get("state") in ("done", "not-enough-passes", "too-many-hypotheses")}
     with httpx.Client(base_url=a.base, headers={"User-Agent": "planet-nine-scan/1"}) as c:
-        for f in FIELDS:
-            if f["name"] in done:
+        for i, f in enumerate(FIELDS):
+            if f["name"] in done or (a.only is not None and i != a.only):
                 continue
             state["fields"] = [d for d in state["fields"] if d["name"] != f["name"]]
             state["fields"].append(run_field(c, f, a.poll_seconds, a.max_hours))
