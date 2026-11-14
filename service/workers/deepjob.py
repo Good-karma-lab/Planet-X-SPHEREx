@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import math
 import multiprocessing as mp
 import os
@@ -172,13 +173,23 @@ def plan_geometry(index: Index, p: dict[str, Any]) -> tuple[Any, dict[str, Any]]
     }
 
 
+_PLANS: dict[str, dict[str, Any]] = {}
+
+
 def plan(index: Index, p: dict[str, Any]) -> dict[str, Any]:
     """The answer of `plan=1`: {status: 'plan', plan{hypotheses, exposures, ...}, fields, estimate_s, limit} (no exposure is read)."""
+    memo = json.dumps(p, sort_keys=True)
+    if memo in _PLANS:
+        return _PLANS[memo]
     geo, pl = plan_geometry(index, p)
     if geo is None:
         return {"status": pl["status"], "plan": pl, "fields": p["fields"], "estimate_s": None, "limit": HYPOTHESES_MAX}
     status = "plan" if pl["hypotheses"] <= HYPOTHESES_MAX else "too-many-hypotheses"
-    return {"status": status, "plan": pl, "fields": p["fields"], "estimate_s": pl["estimate_s"], "limit": HYPOTHESES_MAX}
+    out = {"status": status, "plan": pl, "fields": p["fields"], "estimate_s": pl["estimate_s"], "limit": HYPOTHESES_MAX}
+    if len(_PLANS) > 200:
+        _PLANS.clear()
+    _PLANS[memo] = out  # the count of the orbits takes seconds: the page asks again while the person edits the fields
+    return out
 
 
 def _init_worker(path: str, nice: int) -> None:

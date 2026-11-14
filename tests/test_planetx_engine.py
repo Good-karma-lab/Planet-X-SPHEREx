@@ -93,7 +93,7 @@ def test_jump_line_passes_through_the_body_at_its_distance() -> None:
     assert len(line) == 40 and line[0]["d"] < line[-1]["d"]
     ra, dec = sky_of(X0, V0, T2, T1, eorbit.earth(T2))
     off = [math.hypot((x["ra"] - ra) * math.cos(math.radians(dec)), x["dec"] - dec) * 60.0 for x in line]
-    assert min(off) < 12.0  # arcmin: the radial speed and the curve of the orbit are not known, the line stays within a corridor
+    assert min(off) < 2.0  # arcmin: the radial speed and the curve of the orbit are not known, the line stays within a corridor
     assert line[int(np.argmin(off))]["d"] > 70.0
     # at zero own motion and distance the line is the parallax line: it is long (the Earth moved by ~2 au)
     ras = np.array([x["ra"] for x in line])

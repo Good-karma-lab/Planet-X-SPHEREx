@@ -3,15 +3,11 @@
 """Find Planet X, link and jump.
 
 link   the candidates of two or three finished one-pass results (`distant` products, by key) are linked by ONE heliocentric orbit
-through their tracks:
-       between two passes a distant body jumps by twice its parallax, so two candidates belong together if one orbit passes through
-       both; the fit gives
-       the distance and a third pass tests it (engine/link.py)
+       through their tracks: between two passes a distant body jumps by twice its parallax, so two candidates belong together if one
+       orbit passes through both; the fit gives the distance and a third pass tests it (engine/link.py)
 jump   where a candidate of one pass is in the next pass, as a line of places by distance (the body seen at the candidate's place with
-no radial
-       speed and its own motion carried over, seen from the Earth at the next pass), and which candidates of the one-pass results
-       already on disk lie
-       within a corridor of that line
+       no radial speed and the apparent rate it had, split into parallax and own motion for each distance, carried over), and which
+       candidates of the one-pass results already on disk lie within a corridor of that line
 
 Both read the results of `distant` products; neither reads an exposure.
 """
@@ -165,8 +161,11 @@ def jump_line(
     r: dict[str, Any], c: dict[str, Any], t2: float, dmin: float | None = None, dmax: float | None = None, n: int = 40
 ) -> list[dict[str, float]]:
     """The places of candidate `c` of the one-pass result `r` in the pass whose reference time is `t2`, for n distances inside the
-    candidate's interval
-    (or dmin..dmax). -> [{d, ra, dec}]"""
+    candidate's interval (or dmin..dmax) -> [{d, ra, dec}].
+
+    The body is taken at the candidate's place at the pass's reference time with zero radial speed. What the pass measured is the
+    apparent rate on the sky at that time (the parallax rate of the candidate's distance plus its own motion); for another distance the
+    own motion is what is left after that distance's parallax rate, and it is carried over t2 − t1."""
     g = r["grid"]
     T = edist.Tangent(g["ra0"], g["dec0"])
     N = g["n"]
@@ -175,18 +174,27 @@ def jump_line(
     n1 = n1 / np.linalg.norm(n1)
     t1 = float(r["t0"])
     R1, R2 = eorbit.earth(t1), eorbit.earth(t2)
+    h = 3.0
+    Rh = np.array([eorbit.earth(t1 - h), eorbit.earth(t1 + h)])
+
+    def parallax_rate(dd: float) -> Any:
+        pu, pv = edist.parallax(dd, Rh, R1, T)
+        return np.array([(pu[1] - pu[0]) / (2 * h), (pv[1] - pv[0]) / (2 * h)])
+
+    apparent = parallax_rate(float(c["d"])) + np.asarray(c["mu"], float)
     lo = float(dmin if dmin is not None else (c.get("d_lo") or c["d"] / 1.5))
     hi = float(dmax if dmax is not None else (c.get("d_hi") or c["d"] * 1.5))
     out = []
     for d in np.geomspace(max(lo, 5.0), max(hi, lo * 1.05), n):
         dd = float(d)
+        mu = apparent - parallax_rate(dd)
         b0 = R1 @ n1
         rho = -b0 + math.sqrt(max(b0 * b0 - R1 @ R1 + (dd * eorbit.AU) ** 2, 0.0))
         X1 = R1 + rho * n1
         w = X1 - R2
         w = w / np.linalg.norm(w)
         pu, pv = T.vec2uv(w)
-        pu, pv = float(pu) + float(c["mu"][0]) * (t2 - t1), float(pv) + float(c["mu"][1]) * (t2 - t1)
+        pu, pv = float(pu) + float(mu[0]) * (t2 - t1), float(pv) + float(mu[1]) * (t2 - t1)
         ra, dec = T.uv2sky(pu, pv)
         out.append({"d": round(dd, 2), "ra": round(float(ra), 5), "dec": round(float(dec), 5)})
     return out
