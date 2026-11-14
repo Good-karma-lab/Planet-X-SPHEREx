@@ -66,6 +66,10 @@ export interface DistantAim {
   /** the pass to search: its index, or null for the pass of this MJD */
   pass?: number | null;
   mjd?: number;
+  /** a distance range and detectors other than the defaults (from a link: the Planet X page's "Run Find Planet X") */
+  dmin?: number;
+  dmax?: number;
+  det?: string;
 }
 
 /** What the sliders hold, for the address: distance index, own motion in percent of the limit, the noise view. */
@@ -106,9 +110,10 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
       ra: String(aim.ra),
       dec: String(aim.dec),
       fov: String(aim.fov >= 20 ? 18 : aim.fov),
-      dmin: String(DMIN),
-      dmax: String(DMAX),
+      dmin: String(aim.dmin ?? DMIN),
+      dmax: String(aim.dmax ?? DMAX),
     });
+    if (aim.det) q.set('det', aim.det);
     if (pass != null) q.set('pass', String(pass));
     else if (aim.mjd != null) q.set('mjd', String(aim.mjd));
     try {
@@ -123,7 +128,8 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
       if (!j) return setDs({ state: 'none', text: 'The service does not make this search yet.' });
       const r = j.result as unknown as DistantResult;
       if (r?.status === 'no-coverage') return setDs({ state: 'none', text: 'No SPHEREx exposure of detectors D1–D3 covers this field.' });
-      if (!r || (r.status !== 'ok' && r.status !== 'one-pass')) return setDs({ state: 'none', text: (r?.notes ?? []).join(' ') || 'No result for this field.' });
+      if (!r || (r.status !== 'ok' && r.status !== 'one-pass'))
+        return setDs({ state: 'none', text: (r?.notes ?? []).join(' ') || 'No result for this field.' });
       const binUrl = r.bin_url || `/api/v1/distant/${String(j.key)}/bin`;
       const br = await fetch(binUrl);
       if (!br.ok) throw new Error(`the sum of the differences could not be read (${br.status})`);
@@ -199,7 +205,14 @@ export function useDistantPlan(aim: DistantAim, enabled: boolean): DistantPlan |
     setPlan(null);
     if (!enabled) return;
     const ctl = new AbortController();
-    const q = new URLSearchParams({ ra: String(aim.ra), dec: String(aim.dec), fov: String(aim.fov >= 20 ? 18 : aim.fov), dmin: String(DMIN), dmax: String(DMAX), plan: '1' });
+    const q = new URLSearchParams({
+      ra: String(aim.ra),
+      dec: String(aim.dec),
+      fov: String(aim.fov >= 20 ? 18 : aim.fov),
+      dmin: String(DMIN),
+      dmax: String(DMAX),
+      plan: '1',
+    });
     if (aim.pass != null) q.set('pass', String(aim.pass));
     else if (aim.mjd != null) q.set('mjd', String(aim.mjd));
     fetch(`/api/v1/distant?${q}`, { signal: ctl.signal })
@@ -310,7 +323,14 @@ export function DistantCanvas({ d }: { d: Distant }) {
     c.strokeText(t1, 10 * dpr, cv.height - 12 * dpr);
     c.fillText(t1, 10 * dpr, cv.height - 12 * dpr);
     d.setPeak(peak);
-  }, [s.state === 'ok' ? s.r : null, s.state === 'ok' ? s.bin : null, s.state === 'ok' ? s.di : 0, s.state === 'ok' ? s.mu[0] : 0, s.state === 'ok' ? s.mu[1] : 0, s.state === 'ok' && s.neg]);
+  }, [
+    s.state === 'ok' ? s.r : null,
+    s.state === 'ok' ? s.bin : null,
+    s.state === 'ok' ? s.di : 0,
+    s.state === 'ok' ? s.mu[0] : 0,
+    s.state === 'ok' ? s.mu[1] : 0,
+    s.state === 'ok' && s.neg,
+  ]);
   return <canvas ref={ref} class="ds-canvas" aria-label="The sum of the differences shifted for the chosen distance" />;
 }
 
@@ -343,7 +363,10 @@ export function DistantPanel({
   if (ds.state === 'idle')
     return (
       <div class="dsbox">
-        <div class="srrow" title="Too faint for any single frame, a body this far out shows only when the visits of a pass are added along its motion. Drag a distance slider and watch a point come into focus. Reads every exposure of this field (D1–D3, all passes): a few minutes the first time.">
+        <div
+          class="srrow"
+          title="Too faint for any single frame, a body this far out shows only when the visits of a pass are added along its motion. Drag a distance slider and watch a point come into focus. Reads every exposure of this field (D1–D3, all passes): a few minutes the first time."
+        >
           <span class="srt">Find Planet X</span>
           <button class="btn sm" onClick={() => void d.start(null)}>
             Search
@@ -352,7 +375,9 @@ export function DistantPanel({
         <div class="mono-s">
           searches the pass on show: pass {currentPass + 1}
           {passLabel ? ` · ${passLabel}` : ''} · distance {DMIN}–{DMAX} au ·{' '}
-          {plan ? `${plan.exposures} exposures in ${plan.visits} visits · ${plan.hypotheses.toLocaleString('en-US')} orbits · ${about(plan.estimate_s)} the first time` : 'a few minutes the first time'}
+          {plan
+            ? `${plan.exposures} exposures in ${plan.visits} visits · ${plan.hypotheses.toLocaleString('en-US')} orbits · ${about(plan.estimate_s)} the first time`
+            : 'a few minutes the first time'}
         </div>
       </div>
     );
@@ -385,7 +410,12 @@ export function DistantPanel({
         <>
           <div class="chips">
             {ds.r.passes.map((p) => (
-              <button key={p.index} class={`chip${p.index === ds.r.pass ? ' on' : ''}`} title={`${p.n} exposures`} onClick={() => void d.start(p.index)}>
+              <button
+                key={p.index}
+                class={`chip${p.index === ds.r.pass ? ' on' : ''}`}
+                title={`${p.n} exposures`}
+                onClick={() => void d.start(p.index)}
+              >
                 pass {p.index + 1} · {utDate(p.mjd0)}
               </button>
             ))}
@@ -395,7 +425,8 @@ export function DistantPanel({
           <Slider label="Own motion, east–west" min={-100} max={100} value={ds.mu[0]} onInput={(v) => d.setMu([v, ds.mu[1]])} />
           <Slider label="Own motion, north–south" min={-100} max={100} value={ds.mu[1]} onInput={(v) => d.setMu([ds.mu[0], v])} />
           <label class="ds-chk">
-            <input type="checkbox" checked={ds.neg} onChange={(e) => d.setNeg((e.target as HTMLInputElement).checked)} /> Show the noise: the same sum of the negated differences
+            <input type="checkbox" checked={ds.neg} onChange={(e) => d.setNeg((e.target as HTMLInputElement).checked)} /> Show the noise:
+            the same sum of the negated differences
           </label>
           <DistantLines r={ds.r} />
           {ds.r.candidates.map((c, i) => (
@@ -417,11 +448,31 @@ export function DistantPanel({
   );
 }
 
-function Slider({ label, min, max, value, onInput }: { label: string; min: number; max: number; value: number; onInput: (v: number) => void }) {
+function Slider({
+  label,
+  min,
+  max,
+  value,
+  onInput,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  value: number;
+  onInput: (v: number) => void;
+}) {
   return (
     <>
       <label class="ds-lab">{label}</label>
-      <input type="range" min={min} max={max} step={1} value={value} aria-label={label} onInput={(e) => onInput(Number((e.currentTarget as HTMLInputElement).value))} />
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={1}
+        value={value}
+        aria-label={label}
+        onInput={(e) => onInput(Number((e.currentTarget as HTMLInputElement).value))}
+      />
     </>
   );
 }
@@ -434,7 +485,12 @@ export function noteText(notes: string[]): string {
     m.set(k, (m.get(k) ?? 0) + 1);
   }
   const all = [...m.entries()].sort((a, b) => b[1] - a[1]);
-  return all.slice(0, 4).map(([k, n]) => (n > 1 ? `${k} ×${n}` : k)).join(' · ') + (all.length > 4 ? ` · and ${all.length - 4} more kinds` : '');
+  return (
+    all
+      .slice(0, 4)
+      .map(([k, n]) => (n > 1 ? `${k} ×${n}` : k))
+      .join(' · ') + (all.length > 4 ? ` · and ${all.length - 4} more kinds` : '')
+  );
 }
 
 /** The status lines of a result, in the words of the search: what it did, what the noise reaches, how many peaks, how far a blind search reaches. */
@@ -447,12 +503,31 @@ export function DistantLines({ r }: { r: DistantResult }) {
   );
   return (
     <>
-      {L(`${r.n_hypotheses.toLocaleString('en-US')} orbits · ${r.dmin_used ?? r.dmin ?? DMIN}–${r.dmax ?? DMAX} au · ${r.scan_secs} s`, 'Hypotheses of distance and own motion scanned for this pass.')}
-      {L(`noise reaches S/N ${nl != null ? nl.toFixed(1) : '?'} · bar ${r.threshold.toFixed(1)}`, 'The same sum of the negated differences gives the noise ceiling; a peak counts above the bar.')}
-      {L(r.candidates.length ? `${plural(r.candidates.length, 'peak')} above the bar · a lead, not a discovery` : 'nothing above the bar · nothing marked')}
-      {L(`${r.control.measured} control tracks · ${r.control.reach_sn5} reach S/N 5`, 'Photometry on the exposures along the track and on control tracks aside.')}
-      {L('blind limit about V 20–21 · reflected light', 'One blind search of this kind reaches about V 20–21; a Planet Nine of the predicted brightness is fainter.')}
-      {L('Planet Nine: margin 1.4–1.7× only in D4 (3 µm)', 'The one place SPHEREx adds to the existing Planet Nine searches is 3 µm (D4); the margin over the WISE search is small.')}
+      {L(
+        `${r.n_hypotheses.toLocaleString('en-US')} orbits · ${r.dmin_used ?? r.dmin ?? DMIN}–${r.dmax ?? DMAX} au · ${r.scan_secs} s`,
+        'Hypotheses of distance and own motion scanned for this pass.',
+      )}
+      {L(
+        `noise reaches S/N ${nl != null ? nl.toFixed(1) : '?'} · bar ${r.threshold.toFixed(1)}`,
+        'The same sum of the negated differences gives the noise ceiling; a peak counts above the bar.',
+      )}
+      {L(
+        r.candidates.length
+          ? `${plural(r.candidates.length, 'peak')} above the bar · a lead, not a discovery`
+          : 'nothing above the bar · nothing marked',
+      )}
+      {L(
+        `${r.control.measured} control tracks · ${r.control.reach_sn5} reach S/N 5`,
+        'Photometry on the exposures along the track and on control tracks aside.',
+      )}
+      {L(
+        'blind limit about V 20–21 · reflected light',
+        'One blind search of this kind reaches about V 20–21; a Planet Nine of the predicted brightness is fainter.',
+      )}
+      {L(
+        'Planet Nine: margin 1.4–1.7× only in D4 (3 µm)',
+        'The one place SPHEREx adds to the existing Planet Nine searches is 3 µm (D4); the margin over the WISE search is small.',
+      )}
       {r.notes && r.notes.length > 0 && <div class="mono-s">{noteText(r.notes)}</div>}
     </>
   );
@@ -461,8 +536,16 @@ export function DistantLines({ r }: { r: DistantResult }) {
 /** The rows of the card of a peak (the owner shows them in its find card). */
 export function peakRows(c: DistantCandidate, r: DistantResult): [string, string, string][] {
   return [
-    ['Signal', `S/N ${c.sn} in the sum · ${c.phot_sn != null ? `${c.phot_sn} σ` : 'n/a'} in photometry`, 'the sum over the visits along one orbit, and PSF photometry along it'],
-    ['Bar and noise', `bar ${r.threshold.toFixed(1)} · noise reaches ${r.null?.[0]?.toFixed(1) ?? '?'}`, 'the highest peak of the negated sum'],
+    [
+      'Signal',
+      `S/N ${c.sn} in the sum · ${c.phot_sn != null ? `${c.phot_sn} σ` : 'n/a'} in photometry`,
+      'the sum over the visits along one orbit, and PSF photometry along it',
+    ],
+    [
+      'Bar and noise',
+      `bar ${r.threshold.toFixed(1)} · noise reaches ${r.null?.[0]?.toFixed(1) ?? '?'}`,
+      'the highest peak of the negated sum',
+    ],
     ['Distance', `${c.d} au (${c.d_lo}–${c.d_hi})`, 'of the best orbit, and the range the knob keeps within 10 % of the peak'],
     ['Own motion', `${c.mu[0]}, ${c.mu[1]} ″/day`, 'east, north'],
     ['Control tracks', c.control_sn?.length ? `${c.control_sn.join(', ')} σ` : 'n/a', 'tracks beside the peak'],

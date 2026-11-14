@@ -264,7 +264,7 @@ function PathHero() {
         <div class="lp-pnow" style={{ left: `${nx + R + 2.4}%`, top: `${ny}%` }}>
           <b>Barnard's Star</b>seen by SPHEREx 2025–26
           <br />
-          moves 10.4″ a year
+          moves 10.4″ a year (Gaia)
         </div>
         <div class="lp-pyear">
           {Math.round(ts)}
@@ -532,7 +532,7 @@ export function Landing() {
                 <div class="lp-body">
                   <span class="lp-kind">Nearby star</span>
                   <h3>Barnard's Star</h3>
-                  <p>The fastest star in our sky, 6 light-years away. Three SPHEREx passes measure 10.7″ a year, the same motion ESA Gaia gives.</p>
+                  <p>The fastest star in our sky, 6 light-years away. In a 20′ field three SPHEREx passes measure 10.7 ± 0.8″ a year; ESA Gaia gives 10.4. (On a 5′ field the star's saturated core pulls the measure to 11.4 ± 0.5, and the lab says so.)</p>
                   <span class="lp-go">Watch it move →</span>
                 </div>
               </a>

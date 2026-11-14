@@ -783,6 +783,20 @@ export function Globe() {
     }
     flyRef.current(ra, dec, zoom ? spanOf(o, a.fov) : undefined);
   };
+  // a link that names an object (#/explore?sel=<name>&path=1, e.g. the landing's "Watch a star move"): select it once the catalogue
+  // is in, and with path=1 fly to it with its path drawn, as Show on map does
+  const linked = useRef(false);
+  useEffect(() => {
+    if (linked.current || !catalog.length) return;
+    const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
+    const name = q.get('sel');
+    if (!name) return;
+    const o = catalog.find((x) => x.n.toLowerCase() === name.toLowerCase());
+    if (!o) return;
+    linked.current = true;
+    setTimeout(() => select(o, q.get('path') === '1'), 300);
+  }, [catalog]);
+
   /** The lab at the object's place during the SPHEREx survey (where it is in the pictures the lab shows). */
   const openObj = (o: Obj) => {
     const [ra, dec] = epochPlace(o);

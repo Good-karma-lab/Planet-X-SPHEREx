@@ -491,13 +491,31 @@ export function Lab({ route }: { route: Route }) {
   // the asteroid search runs on its own for the middle pass of the field (in Days: the pass on show)
   const astMjd = film ? film : meta?.passes[Math.floor((meta?.passes.length ?? 1) / 2)]?.mjd_mid;
   const ast = useAsteroidSearch(ra, dec, fov, astMjd, valid && !!meta);
+  // a link from the Planet X page (fpx=1) sets the search's distance range and detectors and starts it once the field is open
+  const fpx = p['fpx'] === '1';
+  const fpxRange = fpx
+    ? {
+        dmin: Number(p['dmin']) > 0 ? Number(p['dmin']) : undefined,
+        dmax: Number(p['dmax']) > 0 ? Number(p['dmax']) : undefined,
+        det: /^[1-6]{1,6}$/.test(p['det'] ?? '') ? p['det'] : undefined,
+      }
+    : {};
   const distRef = useDistant({
     ra,
     dec,
     fov,
     pass: null,
     mjd: (meta?.passes.find((q) => q.index === (shown?.pass ?? 0)) ?? meta?.passes[0])?.mjd_mid,
+    ...fpxRange,
   });
+  const fpxStarted = useRef('');
+  useEffect(() => {
+    const key = `${ra},${dec},${fov}`;
+    if (!fpx || !meta || distRef.available !== true || distRef.ds.state !== 'idle' || fpxStarted.current === key) return;
+    fpxStarted.current = key;
+    setTab('find');
+    void distRef.start(null);
+  }, [fpx, meta, distRef.available, distRef.ds.state, ra, dec, fov]);
   const trackSelRef = useRef(-1);
   trackSelRef.current = trackSel;
   const [raIn, setRaIn] = useState('');
