@@ -10,6 +10,7 @@ import asyncio
 import os
 from collections import OrderedDict
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Any
 
 import httpx
@@ -17,7 +18,7 @@ from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from engine.extras import ades, allwise, cadc_ref
+from engine.extras import ades, allwise, cadc_ref, spherex_orbit
 from engine.extras.cloudcat import Reader, separation_arcsec
 from engine.extras.cube import PIXEL_SR, CubeSource, RangeReader
 from service.reader.s3 import S3, ReadError
@@ -58,6 +59,7 @@ class AdesRequest(BaseModel):
     ast_cat: str = Field(default="UNK", max_length=12)
     mode: str = Field(default="UNK", max_length=4)
     comment: str = Field(default="", max_length=200)
+    fill_positions: bool = False  # ask JPL Horizons for the spacecraft's position wherever an observation has none
 
 
 class Extras:
@@ -285,6 +287,15 @@ def build_router(extras: Extras) -> APIRouter:
     async def export_ades(req: AdesRequest) -> Any:
         """An MPC ADES (pipe-separated) file for a mover lead's positions, and what is missing before it can be sent. Nothing is sent."""
         obs = [ades.Observation(**o.model_dump(exclude={"position_km"}), position_km=o.position_km) for o in req.observations]
+        notes: list[str] = []
+        missing = [i for i, o in enumerate(obs) if o.position_km is None]
+        if req.fill_positions and missing:
+            try:
+                pos = await spherex_orbit.positions(extras.cadc(), [obs[i].mjd_utc for i in missing])
+                for i, p in zip(missing, pos, strict=True):
+                    obs[i] = replace(obs[i], position_km=p)
+            except (spherex_orbit.OrbitError, httpx.HTTPError) as e:
+                notes.append(f"the spacecraft position could not be fetched from JPL Horizons: {type(e).__name__}")
         header = ades.Header(
             submitter=req.submitter,
             institution=req.institution,
@@ -296,7 +307,7 @@ def build_router(extras: Extras) -> APIRouter:
         )
         issues = ades.problems(req.track_id, obs, header)
         text = ades.to_psv(req.track_id, obs, header) if _track_id_ok(req.track_id) else ""
-        return {"ready": not issues, "problems": issues, "observatory_code": ades.OBSERVATORY_CODE, "text": text}
+        return {"ready": not issues, "problems": issues, "notes": notes, "observatory_code": ades.OBSERVATORY_CODE, "text": text}
 
     return router
 

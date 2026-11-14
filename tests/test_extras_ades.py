@@ -114,3 +114,81 @@ def test_the_route_returns_the_file_and_its_problems() -> None:
     r2 = c.post("/api/v1/export/ades", json=body).json()
     assert r2["ready"] is False and any("spacecraft position" in x for x in r2["problems"])
     assert c.post("/api/v1/export/ades", json={**body, "observations": []}).status_code == 422
+
+
+HORIZONS_ANSWER = """header
+$$SOE
+2461023.960000000, A.D. 2025-Dec-14 11:02:24.0000, -5.964146401906273E+03,  2.635442548071303E+03,  2.600970692238243E+03,
+2461024.460000000, A.D. 2025-Dec-14 23:02:24.0000,  6.617803039943597E+03,  3.472872854075883E+02,  2.342327558059281E+03,
+$$EOE
+tail"""
+
+
+def test_horizons_vectors_are_parsed_and_asked_in_icrf_geocentric() -> None:
+    import asyncio
+
+    import httpx
+
+    from engine.extras import spherex_orbit
+
+    seen: dict[str, str] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.update(request.url.params)
+        return httpx.Response(200, json={"result": HORIZONS_ANSWER})
+
+    async def go() -> list[tuple[float, float, float]]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+            return await spherex_orbit.positions(c, [61023.46, 61023.96])
+
+    pos = asyncio.run(go())
+    assert pos[0] == (-5964.146401906273, 2635.442548071303, 2600.970692238243) and len(pos) == 2
+    assert seen["COMMAND"] == "'-163182'" and seen["CENTER"] == "'500@399'" and seen["REF_PLANE"] == "FRAME"
+    assert seen["TLIST"].startswith("'2461023.960000 2461024.460000")
+
+
+def test_horizons_errors_and_short_answers_are_refused() -> None:
+    import asyncio
+
+    import httpx
+    import pytest
+
+    from engine.extras import spherex_orbit
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"error": 'No ephemeris for target "SPHEREx" prior to 2025-MAR-12'})
+
+    async def go(h: object) -> None:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(h)) as c:  # type: ignore[arg-type]
+            await spherex_orbit.positions(c, [50000.0])
+
+    with pytest.raises(spherex_orbit.OrbitError):
+        asyncio.run(go(refuse))
+    with pytest.raises(spherex_orbit.OrbitError):
+        asyncio.run(go(lambda r: httpx.Response(200, json={"result": HORIZONS_ANSWER})))
+
+
+def test_the_route_can_fill_the_spacecraft_position_from_horizons() -> None:
+    import httpx
+
+    app = FastAPI()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"result": HORIZONS_ANSWER})
+
+    register(app, Extras(cadc_client=httpx.AsyncClient(transport=httpx.MockTransport(handler))))
+    body = {
+        "track_id": "SPX0001",
+        "observations": [
+            {"mjd_utc": 61023.46, "ra": 169.89, "dec": 4.35, "rms_ra_arcsec": 1.2, "rms_dec_arcsec": 1.2},
+            {"mjd_utc": 61023.96, "ra": 169.8905, "dec": 4.3495, "rms_ra_arcsec": 1.2, "rms_dec_arcsec": 1.2},
+        ],
+        "submitter": "A. Person",
+        "observers": ["A. Person"],
+        "measurers": ["A. Person"],
+        "ast_cat": "Gaia3",
+        "mode": "CMOS",
+        "fill_positions": True,
+    }
+    r = TestClient(app).post("/api/v1/export/ades", json=body).json()
+    assert r["ready"] is True and "ICRF_KM" in r["text"] and "-5964.1464" in r["text"] and r["notes"] == []
