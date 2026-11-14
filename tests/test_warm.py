@@ -26,7 +26,7 @@ def test_runner_counts_and_retries_failures() -> None:
 
     async def ensure(f):  # type: ignore[no-untyped-def]
         calls.append(f.label)
-        if f.fov == 5:
+        if f.label == "ε Indi B":
             raise RuntimeError("S3 did not answer")
         return True
 

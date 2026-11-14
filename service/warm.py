@@ -39,7 +39,9 @@ def warm_set(data: Path = DATA) -> list[WarmField]:
         out += [WarmField(name, ra, dec, float(s)) for s in w["sizes"]]
     for d in w["demo_fields"]:
         out += [WarmField(d["label"], float(d["ra"]), float(d["dec"]), float(s)) for s in d["sizes"]]
-    return out
+    # the sizes a visitor opens first come first for every target; the slow 60′ fields last
+    rank = {5.0: 0, 10.0: 1, 20.0: 2, 2.0: 3, 60.0: 4}
+    return sorted(out, key=lambda f: rank.get(f.fov, 5))
 
 
 @dataclass
