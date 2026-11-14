@@ -285,29 +285,56 @@ function fetchTile(id: string, o: number, i: number): Promise<Got> {
   });
 }
 
-// the Allsky image is a mosaic of tiles: a blur over the whole mosaic bleeds each tile into its neighbours and draws the tile edges as
-// seams on the sphere, so it stays off until the blur is done tile by tile
-const ALLSKY_SOFT = 0;
+// The Allsky image is a mosaic of 64 x 64 tile cells (27 to a row). It is smoothed a little, as on the research globe (its JPEG blocks and chroma speckle would
+// show on the whole-sky view), but cell by cell with the edges clamped inside the cell: a blur over the whole mosaic bleeds each tile into its neighbours and
+// draws the cell edges as seams on the sphere.
+const KERNEL = [0.0374, 0.2402, 0.4448, 0.2402, 0.0374]; // sigma 0.9 px
+
+function softenCells(d: Uint8ClampedArray, w: number, h: number): void {
+  const ts = Math.round(w / 27);
+  if (ts < 8 || w % ts > 2) return; // not the mosaic of 27 cells per row: leave it alone
+  const tmp = new Float32Array(ts * ts * 3);
+  for (let r0 = 0; r0 + ts <= h; r0 += ts)
+    for (let c0 = 0; c0 + ts <= w; c0 += ts) {
+      // horizontal pass into tmp, edges clamped inside the cell
+      for (let y = 0; y < ts; y++)
+        for (let x = 0; x < ts; x++)
+          for (let c = 0; c < 3; c++) {
+            let v = 0;
+            for (let k = -2; k <= 2; k++) v += KERNEL[k + 2]! * d[((r0 + y) * w + c0 + Math.min(ts - 1, Math.max(0, x + k))) * 4 + c]!;
+            tmp[(y * ts + x) * 3 + c] = v;
+          }
+      // vertical pass back into the image
+      for (let y = 0; y < ts; y++)
+        for (let x = 0; x < ts; x++)
+          for (let c = 0; c < 3; c++) {
+            let v = 0;
+            for (let k = -2; k <= 2; k++) v += KERNEL[k + 2]! * tmp[(Math.min(ts - 1, Math.max(0, y + k)) * ts + x) * 3 + c]!;
+            d[((r0 + y) * w + c0 + x) * 4 + c] = v;
+          }
+    }
+}
+
 let decoder: HTMLCanvasElement | null = null;
-async function decode(b: Blob, soft = 0): Promise<Tile> {
+async function decode(b: Blob, allsky = false): Promise<Tile> {
   const bm = await createImageBitmap(b);
   decoder ??= document.createElement('canvas');
   decoder.width = bm.width;
   decoder.height = bm.height;
   const x = decoder.getContext('2d', { willReadFrequently: true })!;
-  // the Allsky image is smoothed a little (0.9 px) as on the research globe: its JPEG blocks and chroma speckle would show on the whole-sky view
-  x.filter = soft ? `blur(${soft}px)` : 'none';
   x.drawImage(bm, 0, 0);
   const w = bm.width;
   const h = bm.height;
   bm.close();
-  return { w, h, d: x.getImageData(0, 0, w, h).data, used: performance.now() };
+  const img = x.getImageData(0, 0, w, h);
+  if (allsky) softenCells(img.data, w, h);
+  return { w, h, d: img.data, used: performance.now() };
 }
 
 function start(key: string, q: Want): void {
   inflight.add(key);
   fetchTile(q.id, q.o, q.i)
-    .then((g) => (g === 'missing' ? null : decode(g, ALLSKY_SOFT && q.o === ALLSKY ? ALLSKY_SOFT : 0)))
+    .then((g) => (g === 'missing' ? null : decode(g, q.o === ALLSKY)))
     .then((t) => put(q.id, q.o, q.i, t))
     .catch(() => failed.set(key, performance.now()))
     .finally(() => {
