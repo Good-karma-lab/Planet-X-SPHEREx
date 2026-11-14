@@ -1,2 +1,5 @@
 .search-h { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; }
 .ctxbox .okv { margin-bottom: 6px; }
+.known .sb-bar { padding: 8px 14px; display: flex; flex-direction: column; gap: 6px; }
+.known-q { width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--edge); border-radius: 9px; color: var(--ink); padding: 6px 10px; font-size: 12.5px; }
+.known-note { padding: 4px 14px; }
