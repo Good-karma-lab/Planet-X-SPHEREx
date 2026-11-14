@@ -4,6 +4,8 @@ import { outline } from '../lib/healpix';
 import { formatHash, type Screen } from '../lib/route';
 import { D2R } from '../lib/sky';
 import { NeossatCard } from './neossat';
+import { FindingPicture } from './findings/thumb';
+import './findings/findings.css';
 
 const fmtN = (n: number | undefined | null) => (n ?? 0).toLocaleString('en-US');
 const kv = (k: string, v: string) => (
@@ -166,7 +168,7 @@ interface Live {
   name: string;
   ra: number;
   dec: number;
-  movers: { state: string; result?: { passes: number; sources_per_pass: number[]; tracks: TrackLite[] } } | null;
+  movers: { state: string; result?: { field?: string; passes: number; sources_per_pass: number[]; tracks: TrackLite[]; pairs?: unknown[] } } | null;
   anomalies: {
     state: string;
     result?: { with_spectrum: number; threshold: number | null; anomalies: AnomalyLite[]; reason: string } | null;
@@ -221,66 +223,72 @@ function FindingsPage() {
           system on SPHEREx Level-2 files.
         </p>
       </div>
+      <div class="fsum">
+        <div><b>{live.length}</b><span>fields searched</span></div>
+        <div><b>{live.reduce((a, l) => a + (l.movers?.result?.tracks.length ?? 0), 0)}</b><span>tracks between passes</span></div>
+        <div><b>{live.reduce((a, l) => a + (l.movers?.result?.tracks.filter((t) => t.check === 'same').length ?? 0), 0)}</b><span>of them a Gaia star with the same motion</span></div>
+        <div><b>{live.reduce((a, l) => a + (l.anomalies?.result?.anomalies.length ?? 0), 0)}</b><span>spectral anomalies</span></div>
+      </div>
       <div class="pg-grid">
         {live.map((l) => {
           const mv = l.movers?.result;
           const an = l.anomalies?.result;
+          const chips: [string, string][] = [];
+          if (mv && mv.passes >= 3) {
+            for (const t of mv.tracks) chips.push([t.check === 'same' ? 'good' : 'warn', `${t.speed.toFixed(2)}″/yr · ${CHECK[t.check] ?? t.check}`]);
+            if (mv.pairs?.length) chips.push(['warn', `${mv.pairs.length} pair${mv.pairs.length === 1 ? '' : 's'} changing in place`]);
+          }
+          if (an?.anomalies?.length) chips.push(['warn', `${an.anomalies.length} spectral anomal${an.anomalies.length === 1 ? 'y' : 'ies'}`]);
           return (
-            <section class="card glass" key={l.name}>
-              <h3>
-                {l.name} · {FIELD}′ field
-              </h3>
-              <a href={lab(l.ra, l.dec, FIELD)} title="Open this field in the lab">
-                <img
-                  class="fimg"
-                  src={`/findings/${l.name
-                    .normalize('NFKD')
-                    .replace(/[^\w]+/g, '-')
-                    .replace(/^-|-$/g, '')
-                    .toLowerCase()}.jpg`}
-                  alt={`The lab's picture of the ${FIELD}′ field of ${l.name}: SPHEREx stacks, the target ringed`}
-                  loading="lazy"
-                />
-              </a>
-              <dl class="kv">
-                {kv(
-                  'Movers',
-                  !l.movers || l.movers.state === 'waiting'
-                    ? 'field not built yet'
-                    : !mv
-                      ? l.movers.state
-                      : mv.passes < 3
-                        ? `${mv.passes} passes: a track needs 3`
-                        : mv.tracks.length
-                          ? mv.tracks
-                              .map(
-                                (t) =>
-                                  `${t.speed.toFixed(2)}″/yr toward ${t.pa.toFixed(0)}° in ${t.passes.length} passes (${CHECK[t.check] ?? t.check})`,
-                              )
-                              .join('; ')
-                          : `none among ${mv.sources_per_pass.join(' / ')} sources per pass`,
-                )}
-                {kv(
-                  'Anomalies',
-                  !l.anomalies || l.anomalies.state === 'waiting' || l.anomalies.state === 'idle'
-                    ? 'not searched yet'
-                    : !an
-                      ? l.anomalies.state
-                      : an.reason ||
-                        (an.anomalies.length
-                          ? an.anomalies
-                              .slice(0, 3)
-                              .map(
-                                (a) =>
-                                  `${a.n}. ${a.identified?.simbad?.name ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')} (score ${a.score.toFixed(1)})`,
-                              )
-                              .join('; ')
-                          : `none of ${an.with_spectrum} spectra above ${an.threshold?.toFixed(2)}`),
-                )}
-              </dl>
-              <p>
-                <a href={lab(l.ra, l.dec, FIELD)}>Open in the lab</a>
-              </p>
+            <section class="card glass fcard" key={l.name}>
+              <FindingPicture name={l.name} href={lab(l.ra, l.dec, FIELD)} fieldKey={mv?.field ?? null} passes={mv?.passes ?? 0} />
+              <div class="fbody">
+                <h3>
+                  {l.name} · {FIELD}′ field
+                </h3>
+                <div class="fchips">
+                  {chips.length ? chips.map(([k, t], i) => <span key={i} class={`badge ${k === 'good' ? 'green' : 'orange'}`}>{t}</span>) : <span class="mono-s">nothing marked: nothing above the bar</span>}
+                </div>
+                <dl class="kv">
+                  {kv(
+                    'Movers',
+                    !l.movers || l.movers.state === 'waiting'
+                      ? 'field not built yet'
+                      : !mv
+                        ? l.movers.state
+                        : mv.passes < 3
+                          ? `${mv.passes} passes: a track needs 3`
+                          : mv.tracks.length
+                            ? mv.tracks
+                                .map(
+                                  (t) =>
+                                    `${t.speed.toFixed(2)}″/yr toward ${t.pa.toFixed(0)}° in ${t.passes.length} passes (${CHECK[t.check] ?? t.check})`,
+                                )
+                                .join('; ')
+                            : `none among ${mv.sources_per_pass.join(' / ')} sources per pass`,
+                  )}
+                  {kv(
+                    'Anomalies',
+                    !l.anomalies || l.anomalies.state === 'waiting' || l.anomalies.state === 'idle'
+                      ? 'not searched yet'
+                      : !an
+                        ? l.anomalies.state
+                        : an.reason ||
+                          (an.anomalies.length
+                            ? an.anomalies
+                                .slice(0, 3)
+                                .map(
+                                  (a) =>
+                                    `${a.n}. ${a.identified?.simbad?.name ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')} (score ${a.score.toFixed(1)})`,
+                                )
+                                .join('; ')
+                            : `none of ${an.with_spectrum} spectra above ${an.threshold?.toFixed(2)}`),
+                  )}
+                </dl>
+                <p>
+                  <a href={lab(l.ra, l.dec, FIELD)}>Open in the lab</a>
+                </p>
+              </div>
             </section>
           );
         })}
