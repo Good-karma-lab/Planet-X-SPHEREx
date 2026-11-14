@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { formatDec, formatRA } from '../lib/sky';
 import { binNote, binSpectrum, type Bin } from './spectrum/bins';
 import { CatalogueCheck } from './spectrum/catalogue';
+import { useQuicklook, type Quick } from './spectrum/quicklook';
 import { StampPanels, useStamps } from './spectrum/stamps';
 import type { Source, SpecPoint } from './spectrum/types';
 import './spectrum/extra.css';
@@ -86,7 +87,7 @@ export function useSpectrum(src: Source | null): {
   return { view, points, error };
 }
 
-function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]; cur: SpecPoint | null }) {
+function SpectrumChart({ points, bins, cur, quick }: { points: SpecPoint[]; bins: Bin[]; cur: SpecPoint | null; quick: Quick | null }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const cv = ref.current;
@@ -101,7 +102,7 @@ function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]
     c.clearRect(0, 0, W, H);
     const ok = points.filter((p) => p.ok && p.flux != null);
     const L = 42;
-    const R = 8;
+    const R = quick ? 40 : 8;
     const T = 20;
     const B = 26;
     const x = (lam: number) => L + ((lam - 0.7) / (5.05 - 0.7)) * (W - L - R);
@@ -141,6 +142,37 @@ function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]
       c.moveTo(L, y(0));
       c.lineTo(W - R, y(0));
       c.stroke();
+    }
+    // the quick look of the all-sky cube on its own scale (right axis), faint once the measured spectrum has points of its own
+    if (quick) {
+      const qf = quick.flux.map((v) => (v != null && Number.isFinite(v) ? v : null));
+      const qmax = Math.max(1e-9, ...qf.filter((v): v is number => v != null));
+      const qy = (v: number) => T + (1 - v / (qmax * 1.1)) * (H - T - B);
+      const faint = ok.length >= 20;
+      c.save();
+      c.strokeStyle = faint ? 'rgba(200,215,222,0.22)' : 'rgba(200,215,222,0.7)';
+      c.lineWidth = 1.4;
+      c.beginPath();
+      let pen = false;
+      quick.lam.forEach((lam, i) => {
+        const v = qf[i];
+        if (v == null) {
+          pen = false;
+          return;
+        }
+        if (pen) c.lineTo(x(lam), qy(v));
+        else c.moveTo(x(lam), qy(v));
+        pen = true;
+      });
+      c.stroke();
+      c.fillStyle = faint ? 'rgba(160,185,194,0.4)' : 'rgba(160,185,194,0.9)';
+      c.font = '500 10px ui-monospace, Menlo, monospace';
+      c.textAlign = 'left';
+      for (let k = 0; k <= 2; k++) c.fillText(fmt((qmax * 1.1 * (2 - k)) / 2), W - R + 3, qy((qmax * 1.1 * (2 - k)) / 2) + 3);
+      c.fillText(quick.unit, W - R + 3, 12);
+      c.textAlign = 'right';
+      c.fillText('quick look (all-sky cube)', W - R - 4, T + 10);
+      c.restore();
     }
     for (const p of ok) {
       const col = `hsl(${DET_HUE[p.det - 1]},80%,62%)`;
@@ -201,7 +233,7 @@ function SpectrumChart({ points, bins, cur }: { points: SpecPoint[]; bins: Bin[]
         c.setLineDash([]);
       }
     }
-  }, [points, bins, cur]);
+  }, [points, bins, cur, quick]);
   return <canvas ref={ref} class="spec-chart" aria-label="Spectrum: flux against wavelength" />;
 }
 
@@ -282,6 +314,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const shown = src && src !== cleared ? src : null;
   const { view, points, error } = useSpectrum(shown);
   const { stamps, finished: stampsDone } = useStamps(shown, view?.state === 'running' || !view);
+  const quick = useQuicklook(shown);
   const [at, setAt] = useState<number | null>(null); // null: the newest exposure
   const [playing, setPlaying] = useState(false);
   const rows = useMemo(() => [...points].sort((a, b) => a.i - b.i), [points]);
@@ -340,7 +373,8 @@ export function SpectrumTab({ src }: { src: Source | null }) {
       {(view?.no_spectrum || (view && view.measured >= 20 && view.saturated > 0.5 * view.measured)) && (
         <div class="partial">Saturated in most exposures: no SPHEREx spectrum (the core of this star overflows the detector)</div>
       )}
-      <SpectrumChart points={points} bins={bins} cur={cur} />
+      <SpectrumChart points={points} bins={bins} cur={cur} quick={quick} />
+      {quick?.note && <div class="spec-bin-note">quick look: {quick.note}</div>}
       {bins.length > 0 && <div class="spec-bin-note">{binNote(bins)}</div>}
       <div class="spec-dets">
         {perDet.map((n, i) => (

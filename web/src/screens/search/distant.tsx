@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { runJob, progressText, useProduct } from './jobs';
+import { about, runJob, progressText, useProduct } from './jobs';
 import './search.css';
 
 export interface DistantCandidate {
@@ -33,6 +33,7 @@ export interface DistantSlider {
 
 /** The one-pass result of the search for bodies beyond Neptune. */
 export interface DistantResult {
+  /** ok, or one-pass (the field has fewer than two passes: the one-pass result is all there is) */
   status: string;
   pass: number;
   n_visits: number;
@@ -121,8 +122,12 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
       if (my !== tok.current) return;
       if (!j) return setDs({ state: 'none', text: 'The service does not make this search yet.' });
       const r = j.result as unknown as DistantResult;
-      if (!r || r.status !== 'ok') return setDs({ state: 'none', text: (r?.notes ?? []).join(' ') || 'No result for this field.' });
-      const bin = new Uint8Array(await (await fetch(r.bin_url)).arrayBuffer());
+      if (r?.status === 'no-coverage') return setDs({ state: 'none', text: 'No SPHEREx exposure of detectors D1–D3 covers this field.' });
+      if (!r || (r.status !== 'ok' && r.status !== 'one-pass')) return setDs({ state: 'none', text: (r?.notes ?? []).join(' ') || 'No result for this field.' });
+      const binUrl = r.bin_url || `/api/v1/distant/${String(j.key)}/bin`;
+      const br = await fetch(binUrl);
+      if (!br.ok) throw new Error(`the sum of the differences could not be read (${br.status})`);
+      const bin = new Uint8Array(await br.arrayBuffer());
       const a = keep.current;
       const nd = r.slider.distances.length;
       const key = String(j.key ?? '');
@@ -178,6 +183,35 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
 const clamp100 = (v: number) => Math.max(-100, Math.min(100, v));
 
 export type Distant = ReturnType<typeof useDistant>;
+
+/** What the search will read and how long it will take, answered at once by the service before anything starts (plan=1). */
+export interface DistantPlan {
+  exposures: number;
+  visits: number;
+  hypotheses: number;
+  estimate_s: number;
+  dmin_used?: number;
+}
+
+export function useDistantPlan(aim: DistantAim, enabled: boolean): DistantPlan | null {
+  const [plan, setPlan] = useState<DistantPlan | null>(null);
+  useEffect(() => {
+    setPlan(null);
+    if (!enabled) return;
+    const ctl = new AbortController();
+    const q = new URLSearchParams({ ra: String(aim.ra), dec: String(aim.dec), fov: String(aim.fov >= 20 ? 18 : aim.fov), dmin: String(DMIN), dmax: String(DMAX), plan: '1' });
+    if (aim.pass != null) q.set('pass', String(aim.pass));
+    else if (aim.mjd != null) q.set('mjd', String(aim.mjd));
+    fetch(`/api/v1/distant?${q}`, { signal: ctl.signal })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: (DistantPlan & { status?: string }) | null) => {
+        if (d && d.status === 'plan') setPlan(d);
+      })
+      .catch(() => {});
+    return () => ctl.abort();
+  }, [aim.ra, aim.dec, aim.fov, aim.pass, aim.mjd, enabled]);
+  return plan;
+}
 
 /** The reading under the sliders: distance, own motion, and the brightest point in view. */
 export function readText(s: Extract<DistantState, { state: 'ok' }>, peak: number | null): string {
@@ -289,11 +323,14 @@ const utDate = (m: number) => new Date((m - 40587) * 864e5).toISOString().slice(
  */
 export function DistantPanel({
   d,
+  plan,
   currentPass,
   passLabel,
   onPick,
 }: {
   d: Distant;
+  /** from useDistantPlan: shown before the search starts */
+  plan?: DistantPlan | null;
   /** the pass on show in the picture (0-based) and its label, for the button */
   currentPass: number;
   passLabel?: string;
@@ -312,7 +349,11 @@ export function DistantPanel({
             Search
           </button>
         </div>
-        <div class="mono-s">searches the pass on show: pass {currentPass + 1}{passLabel ? ` · ${passLabel}` : ''} · distance {DMIN}–{DMAX} au · a few minutes the first time</div>
+        <div class="mono-s">
+          searches the pass on show: pass {currentPass + 1}
+          {passLabel ? ` · ${passLabel}` : ''} · distance {DMIN}–{DMAX} au ·{' '}
+          {plan ? `${plan.exposures} exposures in ${plan.visits} visits · ${plan.hypotheses.toLocaleString('en-US')} orbits · ${about(plan.estimate_s)} the first time` : 'a few minutes the first time'}
+        </div>
       </div>
     );
   return (
