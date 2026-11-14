@@ -135,6 +135,7 @@ interface Opts {
   archive: boolean;
   anomalies: boolean;
   movers: boolean;
+  red: boolean;
   marker: boolean;
   sharp: boolean;
   trim: 'fixed' | 'p999' | 'p995' | 'adaptive';
@@ -364,6 +365,7 @@ export function Lab({ route }: { route: Route }) {
     archive: p['arch'] === '1',
     anomalies: p['ano'] !== '0',
     movers: p['movers'] !== '0',
+    red: p['red'] !== '0',
     marker: p['marker'] !== '0',
     sharp: p['sharp'] !== '0',
     trim: p['trim'] === 'p999' || p['trim'] === 'p995' || p['trim'] === 'adaptive' ? p['trim'] : 'fixed',
@@ -1135,7 +1137,7 @@ export function Lab({ route }: { route: Route }) {
         }
       }
       const rv = redRef.current;
-      if (rv?.result && !days) {
+      if (rv?.result && !days && st.opts.red) {
         rv.result.red.forEach((x, i) => {
           if (i >= ringMax) return;
           const [rra, rdec] =
@@ -1158,7 +1160,7 @@ export function Lab({ route }: { route: Route }) {
         });
       }
       const dw = dwarfsRef.current?.result;
-      if (dw && !days) {
+      if (dw && !days && st.opts.red) {
         dw.candidates.forEach((c, i) => {
           const [cra, cdec] =
             c.ra_j2000 != null && c.dec_j2000 != null
@@ -2676,38 +2678,32 @@ export function Lab({ route }: { route: Route }) {
               </section>
               <section class="psec">
                 <div class="psh">Display</div>
-                <div class="psub">On the picture</div>
+                <div class="psub">Objects</div>
                 <div class="swgrid">
                   {sw(
                     'ringChk',
-                    'Marker',
+                    'Target marker',
                     'Marker: a ring and the name of the test target, of the selected source and of the known asteroids, at their place on the date shown',
                     opts.marker,
                     (v) => set({ marker: v ? null : '0' }),
                   )}
                   {sw(
-                    'trailChk',
-                    'Trajectory',
-                    'Trajectory: the path of the test target (or of a found mover) over the passes, a dot at each pass date',
-                    opts.trajectory,
-                    (v) => set({ traj: v ? null : '0' }),
-                  )}
-                  {sw(
-                    'ringsChk',
-                    'Speed rings',
-                    'Speed rings: how far a body of 1, 3, 10, 30, 100 or 300 ″/yr moves between the first and the last pass (″/h between the first and last visit in Days), centred on the selected source',
-                    opts.rings,
-                    (v) => set({ rings: v ? '1' : null }),
-                  )}
-                  {sw(
                     'movChk',
-                    'Mover rings',
+                    'Movers',
                     'Mover rings: a ring and a path for every track a search found (between passes in Months, inside the pass in Days)',
                     opts.movers && (film === null || (ft.state === 'ok' && ft.tracks.length > 0)),
                     film === null || (ft.state === 'ok' && ft.tracks.length > 0) ? (v) => set({ movers: v ? null : '0' }) : null,
                     ft.state === 'ok'
                       ? 'the asteroid search found no track in this pass'
                       : 'the asteroid search of this pass has not finished yet',
+                  )}
+                  {sw(
+                    'redChk',
+                    'Red sources',
+                    'Red sources: a ring and the name on every source that is bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (the brown dwarf candidates are among them)',
+                    opts.red && !!redv?.result?.red.length,
+                    redv?.result?.red.length ? (v) => set({ red: v ? null : '0' }) : null,
+                    redv?.result ? 'the red-source search found none in this field' : 'the red-source search of this field has not finished yet',
                   )}
                   {sw(
                     'anoChk',
@@ -2728,7 +2724,24 @@ export function Lab({ route }: { route: Route }) {
                     'shown on the Picture and in Days, not on the walls',
                   )}
                 </div>
-                <div class="psub">Image</div>
+                <div class="psub">Paths</div>
+                <div class="swgrid">
+                  {sw(
+                    'trailChk',
+                    'Trajectory',
+                    'Trajectory: the path of the test target (or of a found mover) over the passes, a dot at each pass date',
+                    opts.trajectory,
+                    (v) => set({ traj: v ? null : '0' }),
+                  )}
+                  {sw(
+                    'ringsChk',
+                    'Speed rings',
+                    'Speed rings: how far a body of 1, 3, 10, 30, 100 or 300 ″/yr moves between the first and the last pass (″/h between the first and last visit in Days), centred on the selected source',
+                    opts.rings,
+                    (v) => set({ rings: v ? '1' : null }),
+                  )}
+                </div>
+                <div class="psub">Picture</div>
                 <div class="swgrid">
                   {sw(
                     'boostChk',
@@ -2736,6 +2749,13 @@ export function Lab({ route }: { route: Route }) {
                     'Brighten: a lower white point, so faint sources stand out (bright stars saturate)',
                     opts.boost,
                     (v) => set({ boost: v ? '1' : null }),
+                  )}
+                  {sw(
+                    'sharpChk',
+                    'Sharpen',
+                    'Sharpen: faint stars crisper on screen; boost only, the same gain in every channel (colours never change), never near saturated cores',
+                    opts.sharp,
+                    (v) => set({ sharp: v ? null : '0' }),
                   )}
                   {sw(
                     'satChk',
@@ -2746,12 +2766,15 @@ export function Lab({ route }: { route: Route }) {
                     'the visits of the Days scale carry no saturation layer: their cores are always drawn white',
                   )}
                   {sw(
-                    'sharpChk',
-                    'Sharpen',
-                    'Sharpen: faint stars crisper on screen; boost only, the same gain in every channel (colours never change), never near saturated cores',
-                    opts.sharp,
-                    (v) => set({ sharp: v ? null : '0' }),
+                    'refChk',
+                    'Reference',
+                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
+                    opts.reference,
+                    (v) => set({ ref: v ? '1' : null }),
                   )}
+                </div>
+                <div class="psub">Playback</div>
+                <div class="swgrid">
                   {sw(
                     'morphChk',
                     'Interpolate',
@@ -2766,13 +2789,6 @@ export function Lab({ route }: { route: Route }) {
                     opts.motion && film !== null,
                     film !== null && filmData ? (v) => set({ mot: v ? '1' : null }) : null,
                     'Days scale only',
-                  )}
-                  {sw(
-                    'refChk',
-                    'Reference',
-                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
-                    opts.reference,
-                    (v) => set({ ref: v ? '1' : null }),
                   )}
                 </div>
                 <div class="seg sm" role="group" aria-label="Blend">
