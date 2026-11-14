@@ -1,94 +1,497 @@
-// Tiles of all-sky surveys (HiPS), read through the service's tile cache and decoded to pixels once; a sampler that answers the
-// colour of a survey at any sky position from the deepest tile at hand, and cutouts of a field drawn from those tiles.
+// Tiles of all-sky surveys (HiPS), decoded to pixels once and kept in memory; a sampler that answers the colour of a survey at
+// any sky position from the deepest tile at hand (bilinear inside a tile, so neither HEALPix diamonds nor tile seams show), and
+// cutouts of a field drawn from those tiles.
+//
+// Where tiles come from: IRSA's HiPS servers directly (they answer any origin), and the service's tile cache
+// (/api/v1/hips/...) when IRSA fails or is slower than FALLBACK_MS. The SPHEREx cube frames are read through the service only.
+// At most MAX_INFLIGHT tiles are on their way at once; the tiles of the latest view go first, and requests of views the
+// globe has left are dropped.
 
-import { ang2pix, faceXY } from './healpix';
+/** IRSA's HiPS root (CORS open). */
+const IRSA = 'https://irsa.ipac.caltech.edu/data/hips/';
+const FALLBACK_MS = 3000;
+const MAX_INFLIGHT = 8;
+/** decoded tiles kept (a 512² tile is 1 MB); tiles drawn in the last KEEP_MS are never dropped */
+const CAP = 200;
+const KEEP_MS = 4000;
+/** a failed tile is not asked for again before this */
+const RETRY_MS = 15000;
 
-/** Tiles of the all-sky surveys, read through the service and decoded to pixels once. */
-export const tiles = (() => {
-  const cache = new Map<string, { w: number; h: number; d: Uint8ClampedArray } | null>();
-  const pending = new Set<string>();
-  let onTile: () => void = () => {};
-  const load = (key: string, url: string, soft: number) => {
-    if (cache.has(key) || pending.has(key)) return;
-    pending.add(key);
-    const im = new Image();
-    im.onload = () => {
-      pending.delete(key);
-      const c = document.createElement('canvas');
-      c.width = im.width;
-      c.height = im.height;
-      const x = c.getContext('2d', { willReadFrequently: true })!;
-      if (soft) x.filter = `blur(${soft}px)`;
-      x.drawImage(im, 0, 0);
-      cache.set(key, { w: im.width, h: im.height, d: x.getImageData(0, 0, im.width, im.height).data });
-      if (cache.size > 180) for (const k of cache.keys()) if (!k.endsWith('/allsky')) { cache.delete(k); break; }
-      onTile();
-    };
-    im.onerror = () => {
-      pending.delete(key);
-      cache.set(key, null);
-    };
-    im.src = url;
-  };
-  const px = (t: { w: number; d: Uint8ClampedArray }, row: number, col: number): [number, number, number] => {
-    const q = (row * t.w + col) * 4;
-    return [t.d[q]!, t.d[q + 1]!, t.d[q + 2]!];
-  };
-  /** Colour of a survey at a position, from the deepest tile at hand up to `order`; null until something has arrived. */
-  function sample(id: string, ra: number, dec: number, order: number): [number, number, number] | null {
-    for (let n = order; n >= 3 && order >= 3; n--) {
-      const i = ang2pix(n, ra, dec);
-      const key = `${id}/${n}/${i}`;
-      const t = cache.get(key);
-      if (t) {
-        const bits = Math.round(Math.log2(t.w));
-        const f = faceXY(n + bits, ra, dec);
-        return px(t, f.ix & (t.w - 1), f.iy & (t.w - 1));
-      }
-      if (t === undefined && n === order) load(key, `/api/v1/hips/${id}/${n}/${i}`, 0);
-    }
-    const key = `${id}/3/allsky`;
-    const a = cache.get(key);
-    if (a === undefined) {
-      load(key, `/api/v1/hips/${id}/3/allsky`, 0.9);
-      return null;
-    }
-    if (!a) return null;
-    const ts = Math.round(a.w / 27);
-    const bits = Math.round(Math.log2(ts));
-    const f = faceXY(3 + bits, ra, dec);
-    const tile = f.face * 64 + ang2pixLocal(f.ix >> bits, f.iy >> bits);
-    return px(a, Math.floor(tile / 27) * ts + (f.ix & (ts - 1)), (tile % 27) * ts + (f.iy & (ts - 1)));
-  }
-  const listeners = new Set<() => void>();
-  onTile = () => listeners.forEach((f) => f());
-  return {
-    sample,
-    /** called whenever a tile arrives; returns the function that stops it */
-    onTile: (f: () => void) => {
-      listeners.add(f);
-      return () => listeners.delete(f);
-    },
-  };
-})();
-
-/** Nested index of (x, y) inside a face at order 3. */
-function ang2pixLocal(x: number, y: number): number {
-  let r = 0;
-  for (let b = 0; b < 3; b++) r += (((x >> b) & 1) << (2 * b)) + (((y >> b) & 1) << (2 * b + 1));
-  return r;
+interface Survey {
+  /** path under IRSA's HiPS root; none: through the service only */
+  path?: string;
+  /** deepest order */
+  max: number;
+  /** shallowest tile order IRSA has (the service serves order 3 and deeper) */
+  min: number;
+  /** tile width, pixels */
+  w: number;
 }
 
+/** The surveys the globe and the lab read (the same map the service's tile cache uses). */
+export const HIPS: Record<string, Survey> = {
+  dss2: { path: 'CDS/DSS2/color', max: 9, min: 0, w: 512 },
+  '2mass': { path: 'CDS/2MASS/Color', max: 9, min: 0, w: 512 },
+  wise: { path: 'CDS/AllWISE/RGB-W4-W2-W1', max: 8, min: 0, w: 512 },
+  dust: { path: 'CDS/IRIS/color', max: 3, min: 3, w: 256 },
+  dss2red: { path: 'CDS/DSS2/red', max: 9, min: 0, w: 512 },
+  '2massk': { path: 'CDS/2MASS/K', max: 9, min: 0, w: 512 },
+  wise1: { path: 'CDS/AllWISE/W1', max: 8, min: 0, w: 512 },
+  sdss: { path: 'CDS/SDSS/DR9/color', max: 10, min: 3, w: 512 },
+  spx8: { max: 5, min: 3, w: 512 },
+  spx40: { max: 5, min: 3, w: 512 },
+  spx88: { max: 5, min: 3, w: 512 },
+};
 
-/** A cutout of a survey around a place: north up, east left, `size` pixels for `fovDeg` degrees (gnomonic). Returns the RGBA pixels
- *  and whether every pixel had a tile of the order asked for (false while tiles are still arriving). */
+// ---------------------------------------------------------------------------------------------------------------------------
+// HEALPix (nested): continuous coordinates inside a base face
+
+/** A sky position as a base face (0–11) and continuous coordinates x, y in [0, 1) inside it. */
+export interface FacePt {
+  face: number;
+  x: number;
+  y: number;
+}
+
+const ONE = 1 - 1e-12;
+
+/** Face coordinates of a position given by its RA (degrees) and z = sin(dec); the integer pixel at order n is floor(x·2ⁿ), floor(y·2ⁿ). */
+export function facePt(ra: number, z: number, out: FacePt = { face: 0, x: 0, y: 0 }): FacePt {
+  const za = Math.abs(z);
+  let tt = ((((ra % 360) + 360) % 360) / 90);
+  if (tt >= 4) tt -= 4;
+  if (za <= 2 / 3) {
+    const a = 0.5 + tt - 0.75 * z;
+    const b = 0.5 + tt + 0.75 * z;
+    const ifp = Math.floor(a);
+    const ifm = Math.floor(b);
+    out.face = ifp === ifm ? (ifp % 4) + 4 : ifp < ifm ? ifp % 4 : (ifm % 4) + 8;
+    out.x = Math.min(ONE, b - ifm);
+    out.y = Math.min(ONE, Math.max(0, 1 - (a - ifp)));
+  } else {
+    const ntt = Math.min(Math.floor(tt), 3);
+    const tp = tt - ntt;
+    const tmp = Math.sqrt(3 * (1 - za));
+    const p = Math.min(ONE, tp * tmp);
+    const m = Math.min(ONE, (1 - tp) * tmp);
+    if (z >= 0) {
+      out.face = ntt;
+      out.x = Math.min(ONE, 1 - m);
+      out.y = Math.min(ONE, 1 - p);
+    } else {
+      out.face = ntt + 8;
+      out.x = p;
+      out.y = m;
+    }
+  }
+  return out;
+}
+
+/** Spread the bits of v: … b2 b1 b0 → … b2 0 b1 0 b0 (orders up to 13). */
+function spread(v: number): number {
+  v &= 0x3fff;
+  v = (v | (v << 8)) & 0x00ff00ff;
+  v = (v | (v << 4)) & 0x0f0f0f0f;
+  v = (v | (v << 2)) & 0x33333333;
+  v = (v | (v << 1)) & 0x55555555;
+  return v;
+}
+
+/** Nested pixel number at an order from face coordinates. */
+export function pixAt(order: number, f: FacePt): number {
+  const n = 1 << order;
+  return f.face * n * n + spread(Math.floor(f.x * n)) + 2 * spread(Math.floor(f.y * n));
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// tile store
+
+interface Tile {
+  w: number;
+  h: number;
+  d: Uint8ClampedArray;
+  used: number;
+}
+/** null: the tile does not exist (outside the survey) */
+type Slot = Tile | null;
+
+interface Layer {
+  levels: Map<number, Slot>[];
+  allsky?: Slot;
+}
+const layers = new Map<string, Layer>();
+const layer = (id: string): Layer => {
+  let L = layers.get(id);
+  if (!L) {
+    L = { levels: Array.from({ length: 14 }, () => new Map<number, Slot>()) };
+    layers.set(id, L);
+  }
+  return L;
+};
+let stored = 0;
+let stamp = 0;
+
+const ALLSKY = -1;
+const keyOf = (id: string, o: number, i: number) => (o === ALLSKY ? `${id}/allsky` : `${id}/${o}/${i}`);
+
+interface Want {
+  id: string;
+  o: number;
+  i: number;
+  pri: number;
+  gen: number;
+  seq: number;
+}
+const queue = new Map<string, Want>();
+const inflight = new Set<string>();
+const failed = new Map<string, number>();
+let gen = 0;
+let seq = 0;
+const listeners = new Set<() => void>();
+const notify = () => listeners.forEach((f) => f());
+
+/** IRSA health: after three failures or slow answers in a row the service goes first for a minute. */
+let irsaBad = 0;
+let irsaDownUntil = 0;
+const irsaUp = () => performance.now() >= irsaDownUntil;
+const irsaResult = (ok: boolean) => {
+  if (ok) irsaBad = 0;
+  else if (++irsaBad >= 3) {
+    irsaDownUntil = performance.now() + 60000;
+    irsaBad = 0;
+  }
+};
+
+function want(id: string, o: number, i: number, pri: number): void {
+  const key = keyOf(id, o, i);
+  if (inflight.has(key)) return;
+  const f = failed.get(key);
+  if (f !== undefined && performance.now() - f < RETRY_MS) return;
+  const q = queue.get(key);
+  if (q) {
+    q.gen = gen;
+    q.pri = Math.max(q.pri, pri);
+    q.seq = ++seq;
+    return;
+  }
+  queue.set(key, { id, o, i, pri, gen, seq: ++seq });
+  schedulePump();
+}
+
+let pumpQueued = false;
+function schedulePump(): void {
+  if (pumpQueued) return;
+  pumpQueued = true;
+  queueMicrotask(() => {
+    pumpQueued = false;
+    pump();
+  });
+}
+
+function pump(): void {
+  while (inflight.size < MAX_INFLIGHT && queue.size) {
+    let best: Want | null = null;
+    let bestKey = '';
+    for (const [k, q] of queue) {
+      if (q.gen < gen - 2) {
+        queue.delete(k); // asked for by a view the globe has left
+        continue;
+      }
+      if (!best || q.gen > best.gen || (q.gen === best.gen && (q.pri > best.pri || (q.pri === best.pri && q.seq > best.seq)))) {
+        best = q;
+        bestKey = k;
+      }
+    }
+    if (!best) return;
+    queue.delete(bestKey);
+    start(bestKey, best);
+  }
+}
+
+function urls(id: string, o: number, i: number): { irsa?: string; service?: string } {
+  const s = HIPS[id]!;
+  const rel = o === ALLSKY ? 'Norder3/Allsky' : `Norder${o}/Dir${Math.floor(i / 10000) * 10000}/Npix${i}`;
+  return {
+    irsa: s.path ? `${IRSA}${s.path}/${rel}.jpg` : undefined,
+    service: o === ALLSKY ? `/api/v1/hips/${id}/3/allsky` : o >= 3 ? `/api/v1/hips/${id}/${o}/${i}` : undefined,
+  };
+}
+
+type Got = Blob | 'missing';
+async function getBlob(url: string, signal: AbortSignal): Promise<Got> {
+  const r = await fetch(url, { signal, mode: 'cors', credentials: 'omit' });
+  if (r.status === 404) return 'missing';
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.blob();
+}
+
+/** The tile from IRSA, or from the service when IRSA fails or has not answered within FALLBACK_MS (whichever answers first wins). */
+function fetchTile(id: string, o: number, i: number): Promise<Got> {
+  const u = urls(id, o, i);
+  const irsa = u.irsa;
+  if (!irsa || (!irsaUp() && u.service)) return getBlob(u.service!, new AbortController().signal);
+  return new Promise<Got>((resolve, reject) => {
+    const a1 = new AbortController();
+    const a2 = new AbortController();
+    let done = false;
+    let running = 1;
+    let viaService = false;
+    const ok = (g: Got) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      a1.abort();
+      a2.abort();
+      resolve(g);
+    };
+    const bad = (e: unknown) => {
+      if (--running === 0 && !done) reject(e);
+    };
+    const service = () => {
+      if (viaService || done || !u.service) return;
+      viaService = true;
+      running++;
+      getBlob(u.service, a2.signal).then(ok, bad);
+    };
+    const timer = window.setTimeout(() => {
+      irsaResult(false);
+      service();
+    }, FALLBACK_MS);
+    getBlob(irsa, a1.signal).then(
+      (g) => {
+        if (!done) irsaResult(true);
+        ok(g);
+      },
+      (e) => {
+        if (!done && !a1.signal.aborted) irsaResult(false);
+        service();
+        bad(e);
+      },
+    );
+  });
+}
+
+let decoder: HTMLCanvasElement | null = null;
+async function decode(b: Blob): Promise<Tile> {
+  const bm = await createImageBitmap(b);
+  decoder ??= document.createElement('canvas');
+  decoder.width = bm.width;
+  decoder.height = bm.height;
+  const x = decoder.getContext('2d', { willReadFrequently: true })!;
+  x.drawImage(bm, 0, 0);
+  const w = bm.width;
+  const h = bm.height;
+  bm.close();
+  return { w, h, d: x.getImageData(0, 0, w, h).data, used: performance.now() };
+}
+
+function start(key: string, q: Want): void {
+  inflight.add(key);
+  fetchTile(q.id, q.o, q.i)
+    .then((g) => (g === 'missing' ? null : decode(g)))
+    .then((t) => put(q.id, q.o, q.i, t))
+    .catch(() => failed.set(key, performance.now()))
+    .finally(() => {
+      inflight.delete(key);
+      pump();
+      notify();
+    });
+}
+
+function put(id: string, o: number, i: number, t: Slot): void {
+  const L = layer(id);
+  if (o === ALLSKY) L.allsky = t;
+  else {
+    L.levels[o]!.set(i, t);
+    if (t) stored++;
+  }
+  if (stored > CAP) evict();
+}
+
+/** Drops the tiles drawn longest ago (never the Allsky images, never a tile drawn in the last KEEP_MS). */
+function evict(): void {
+  const now = performance.now();
+  const old: { m: Map<number, Slot>; i: number; used: number }[] = [];
+  for (const L of layers.values())
+    for (const m of L.levels) for (const [i, t] of m) if (t && now - t.used > KEEP_MS) old.push({ m, i, used: t.used });
+  old.sort((a, b) => a.used - b.used);
+  for (const e of old) {
+    if (stored <= CAP * 0.8) break;
+    e.m.delete(e.i);
+    stored--;
+  }
+}
+
+// ---------------------------------------------------------------------------------------------------------------------------
+// sampling
+
+/** Bilinear colour at continuous tile coordinates (X along the image rows, Y along the columns), clamped inside the tile
+ *  (or inside a sub-square of an Allsky image), written to out[k..k+2]. */
+function bilinear(t: Tile, X: number, Y: number, size: number, r0: number, c0: number, out: Float32Array | number[], k: number): void {
+  let u = X - 0.5;
+  let v = Y - 0.5;
+  if (u < 0) u = 0;
+  if (v < 0) v = 0;
+  if (u > size - 1) u = size - 1;
+  if (v > size - 1) v = size - 1;
+  const i0 = Math.floor(u);
+  const j0 = Math.floor(v);
+  const i1 = i0 + 1 < size ? i0 + 1 : i0;
+  const j1 = j0 + 1 < size ? j0 + 1 : j0;
+  const fu = u - i0;
+  const fv = v - j0;
+  const d = t.d;
+  const W = t.w;
+  const q00 = ((r0 + i0) * W + c0 + j0) * 4;
+  const q01 = ((r0 + i0) * W + c0 + j1) * 4;
+  const q10 = ((r0 + i1) * W + c0 + j0) * 4;
+  const q11 = ((r0 + i1) * W + c0 + j1) * 4;
+  const w00 = (1 - fu) * (1 - fv);
+  const w01 = (1 - fu) * fv;
+  const w10 = fu * (1 - fv);
+  const w11 = fu * fv;
+  out[k] = d[q00]! * w00 + d[q01]! * w01 + d[q10]! * w10 + d[q11]! * w11;
+  out[k + 1] = d[q00 + 1]! * w00 + d[q01 + 1]! * w01 + d[q10 + 1]! * w10 + d[q11 + 1]! * w11;
+  out[k + 2] = d[q00 + 2]! * w00 + d[q01 + 2]! * w01 + d[q10 + 2]! * w10 + d[q11 + 2]! * w11;
+}
+
+/** Order used by a sample: a tile order, the Allsky image, or nothing at hand yet. */
+export const FROM_ALLSKY = -1;
+export const FROM_NOTHING = -2;
+
+/**
+ * Samples one survey at one tile order, asking for the tiles it lacks. `at` answers the colour from the deepest tile at hand
+ * (the order asked for, a shallower one, the base tiles or the Allsky image) and returns the order it came from.
+ * order = FROM_ALLSKY reads the Allsky image only (the whole-sky views of a survey without shallow tiles).
+ */
+export class Sampler {
+  private L: Layer;
+  private s: Survey;
+  /** tiles of the order asked for that are not here yet (0: the picture is as sharp as it can be) */
+  unresolved = 0;
+  private lastPix = -1;
+  private lastSlot: Slot | undefined = undefined;
+
+  constructor(
+    readonly id: string,
+    readonly order: number,
+  ) {
+    this.L = layer(id);
+    this.s = HIPS[id]!;
+    stamp = performance.now();
+  }
+
+  /** shallowest tile order that can be asked for now */
+  private get floor(): number {
+    return this.s.path && irsaUp() ? this.s.min : Math.max(3, this.s.min);
+  }
+
+  at(f: FacePt, out: Float32Array | number[], k: number): number {
+    const n = this.order;
+    const floor = this.floor;
+    if (n >= 0) {
+      const pix = pixAt(n, f);
+      let t: Slot | undefined;
+      if (pix === this.lastPix) t = this.lastSlot;
+      else {
+        t = this.L.levels[n]!.get(pix);
+        this.lastPix = pix;
+        this.lastSlot = t;
+        if (t === undefined) {
+          this.unresolved++;
+          if (n >= floor) want(this.id, n, pix, 2);
+          // one shallower tile covers the view at an eighth of the resolution in one request
+          const c = n - 3;
+          if (c > floor && this.L.levels[c]!.get(pixAt(c, f)) === undefined) want(this.id, c, pixAt(c, f), 3);
+        }
+      }
+      if (t) return this.read(t, n, f, out, k);
+      for (let m = n - 1; m >= this.s.min; m--) {
+        const u = this.L.levels[m]!.get(pixAt(m, f));
+        if (u) return this.read(u, m, f, out, k);
+      }
+      // the base: the shallowest tiles from IRSA (a dozen small tiles cover the sky), else the Allsky image
+      if (floor < 3) {
+        const bp = pixAt(floor, f);
+        const b = this.L.levels[floor]!.get(bp);
+        if (b === undefined && n > floor) want(this.id, floor, bp, 1);
+        const lost = b === null || failed.has(keyOf(this.id, floor, bp));
+        return this.allsky(f, out, k, lost);
+      }
+    }
+    return this.allsky(f, out, k, true);
+  }
+
+  private read(t: Tile, n: number, f: FacePt, out: Float32Array | number[], k: number): number {
+    t.used = stamp;
+    const N = 1 << n;
+    const X = f.x * N * t.w;
+    const Y = f.y * N * t.w;
+    bilinear(t, X - Math.floor(f.x * N) * t.w, Y - Math.floor(f.y * N) * t.w, t.w, 0, 0, out, k);
+    return n;
+  }
+
+  private allsky(f: FacePt, out: Float32Array | number[], k: number, ask: boolean): number {
+    const a = this.L.allsky;
+    if (a === undefined) {
+      if (ask) want(this.id, ALLSKY, 0, 1);
+      return FROM_NOTHING;
+    }
+    if (!a) return FROM_NOTHING;
+    const ts = Math.round(a.w / 27);
+    const tile = pixAt(3, f);
+    const X = f.x * 8 * ts - Math.floor(f.x * 8) * ts;
+    const Y = f.y * 8 * ts - Math.floor(f.y * 8) * ts;
+    bilinear(a, X, Y, ts, Math.floor(tile / 27) * ts, (tile % 27) * ts, out, k);
+    return FROM_ALLSKY;
+  }
+}
+
+/** The tile order that matches a globe of radius R pixels (a tile pixel about one screen pixel); FROM_ALLSKY when the Allsky image is enough. */
+export function orderFor(id: string, R: number, irsaShallow = true): number {
+  const s = HIPS[id]!;
+  const n = Math.log2((1.023 * R) / s.w) + 0.2;
+  const floor = s.path && irsaShallow ? s.min : Math.max(3, s.min);
+  if (floor >= 3) return n < 2.3 ? FROM_ALLSKY : Math.min(s.max, Math.max(3, Math.round(n)));
+  return Math.min(s.max, Math.max(floor, Math.round(n)));
+}
+
+/** Tile pixels of all surveys, shared by the globe and the lab. */
+export const tiles = {
+  /** a new view of the globe: requests of views two frames old or more are dropped from the queue */
+  frame(): void {
+    gen++;
+    stamp = performance.now();
+  },
+  /** Colour of a survey at a position, from the deepest tile at hand up to `order`; null until something has arrived. */
+  sample(id: string, ra: number, dec: number, order: number): [number, number, number] | null {
+    const out = [0, 0, 0];
+    const r = new Sampler(id, order).at(facePt(ra, Math.sin((dec * Math.PI) / 180)), out, 0);
+    return r === FROM_NOTHING ? null : [out[0]!, out[1]!, out[2]!];
+  },
+  /** called whenever a tile arrives (or fails); returns the function that stops it */
+  onTile(f: () => void): () => void {
+    listeners.add(f);
+    return () => listeners.delete(f);
+  },
+  /** tiles on their way or waiting */
+  busy: () => inflight.size + queue.size,
+};
+
+/**
+ * A cutout of a survey around a place: north up, east left, `size` pixels for `fovDeg` degrees (gnomonic). Returns the RGBA
+ * pixels and whether every pixel came from a tile of the order the scale needs (false while those tiles are on their way).
+ * Pixels whose tiles are far coarser than the scale (the Allsky image under a 5′ field) stay black instead of showing
+ * HEALPix cells.
+ */
 export function cutout(id: string, maxOrder: number, ra0: number, dec0: number, fovDeg: number, size: number): { data: ImageData; complete: boolean } {
   const D = Math.PI / 180;
   const scale = (fovDeg * 3600) / size; // ″ per output pixel
-  const order = Math.max(3, Math.min(maxOrder, Math.ceil(Math.log2(412 / scale))));
+  const order = Math.max(3, Math.min(maxOrder, HIPS[id]?.max ?? maxOrder, Math.ceil(Math.log2(412 / scale))));
+  const smp = new Sampler(id, order);
   const img = new ImageData(size, size);
   const vals = new Float32Array(size * size * 3);
-  let complete = true;
+  const f: FacePt = { face: 0, x: 0, y: 0 };
   const sd = Math.sin(dec0 * D);
   const cd = Math.cos(dec0 * D);
   for (let j = 0; j < size; j++)
@@ -98,17 +501,11 @@ export function cutout(id: string, maxOrder: number, ra0: number, dec0: number, 
       const eta = (0.5 - (j + 0.5) / size) * fovDeg * D;
       const den = cd - eta * sd;
       const ra = ra0 + Math.atan2(xi, den) / D;
-      const dec = Math.atan2(sd + eta * cd, Math.hypot(xi, den)) / D;
-      const c = tiles.sample(id, ((ra % 360) + 360) % 360, dec, order);
+      const z = (sd + eta * cd) / Math.hypot(xi, sd + eta * cd, den);
       const q = (j * size + i) * 3;
-      if (c) {
-        vals[q] = c[0];
-        vals[q + 1] = c[1];
-        vals[q + 2] = c[2];
-      } else {
-        complete = false;
-        vals[q] = vals[q + 1] = vals[q + 2] = NaN;
-      }
+      const from = smp.at(facePt(ra, z, f), vals, q);
+      // a tile up to four times coarser than the scale is a fair stand-in while the right one arrives
+      if (from < order - 2) vals[q] = vals[q + 1] = vals[q + 2] = NaN;
     }
   // stretch: the 2nd percentile to black, the 99.7th to white
   const lum: number[] = [];
@@ -117,12 +514,9 @@ export function cutout(id: string, maxOrder: number, ra0: number, dec0: number, 
   const lo = lum.length ? lum[Math.floor(0.02 * (lum.length - 1))]! : 0;
   const hi = lum.length ? Math.max(lo + 1, lum[Math.floor(0.997 * (lum.length - 1))]!) : 255;
   for (let k = 0, p = 0; k < vals.length; k += 3, p += 4) {
-    if (!Number.isFinite(vals[k]!)) {
-      img.data[p + 3] = 255;
-      continue;
-    }
-    for (let c = 0; c < 3; c++) img.data[p + c] = Math.max(0, Math.min(255, ((vals[k + c]! - lo) / (hi - lo)) * 255));
     img.data[p + 3] = 255;
+    if (!Number.isFinite(vals[k]!)) continue;
+    for (let c = 0; c < 3; c++) img.data[p + c] = Math.max(0, Math.min(255, ((vals[k + c]! - lo) / (hi - lo)) * 255));
   }
-  return { data: img, complete };
+  return { data: img, complete: smp.unresolved === 0 };
 }
