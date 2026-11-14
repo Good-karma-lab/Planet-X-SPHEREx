@@ -43,7 +43,7 @@ async def read_native(
 ) -> NativeExposure | None:
     """The exposure inside the field, or None when the field is off this detector."""
     lay = await fr.layout(key)
-    w = spxwcs.celestial(lay.image_header)
+    w = fr.wcs_of(key, lay)
     ra, dec = grid_outline(grid)
     px, py = spxwcs.sky2pix(w, ra, dec)
     ok = np.isfinite(px) & np.isfinite(py)

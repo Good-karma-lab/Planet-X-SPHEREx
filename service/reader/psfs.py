@@ -44,6 +44,14 @@ class PsfProvider:
             self._by_family[family] = ps
             return ps
 
+    async def path_for_file(self, key: str) -> str:
+        """The PSF set of the file's family on disk (read and kept first if needed): what a worker process loads by itself, so the
+        10 MB set is never sent from the API process with every exposure."""
+        await self.for_file(key)
+        lay = await self.files.layout(key)
+        assert lay.psf is not None and lay.psf_kind is not None
+        return str(self._path((lay.detector, lay.psf_kind, lay.psf.data_size)))
+
     def _load(self, family: tuple[int, str, int]) -> spxpsf.PsfSet | None:
         z = load_npz(self._path(family))
         if z is None:
@@ -64,3 +72,18 @@ class PsfProvider:
             checksum=np.str_(ps.checksum),
         )
         return ps
+
+
+_WORKER_PSF: dict[str, spxpsf.PsfSet] = {}
+
+
+def psf_from_path(path: str) -> spxpsf.PsfSet:
+    """In a worker process: a PSF set from its file on disk, kept for the process's lifetime."""
+    ps = _WORKER_PSF.get(path)
+    if ps is None:
+        z = load_npz(Path(path))
+        if z is None:
+            raise ValueError(f"no PSF set at {path}")
+        ps = spxpsf.PsfSet(str(z["kind"]), int(z["osf"]), z["zones"], z["xc"], z["yc"], str(z["checksum"]))
+        _WORKER_PSF[path] = ps
+    return ps

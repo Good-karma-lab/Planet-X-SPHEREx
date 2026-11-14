@@ -158,8 +158,27 @@ async def run_field(
     return {"exposures": len(b.exposures), "passes": len(built)}
 
 
+_SIGNATURES: dict[tuple[str, int], str] = {}
+
+
 def exposure_signature(index: Index, params: dict[str, Any]) -> str:
-    """What the field is built from: its overlapping exposures (a new period changes only the keys of the fields it touches)."""
+    """What the field is built from: its overlapping exposures (a new period changes only the keys of the fields it touches). Kept in
+    memory per field and index size, so opening a field again asks nothing of the index."""
+    version = getattr(index, "version", None)
+    if version is None:  # an index without a version token (tests): no memory
+        return _signature(index, params)
+    memo = (json.dumps(params, sort_keys=True), int(version()))
+    hit = _SIGNATURES.get(memo)
+    if hit is not None:
+        return hit
+    sig = _signature(index, params)
+    if len(_SIGNATURES) > 5000:
+        _SIGNATURES.clear()
+    _SIGNATURES[memo] = sig
+    return sig
+
+
+def _signature(index: Index, params: dict[str, Any]) -> str:
     found = index.overlapping(params["ra"], params["dec"], params["fov"] / 60.0 / 2.0 * 2**0.5)
     import hashlib
 

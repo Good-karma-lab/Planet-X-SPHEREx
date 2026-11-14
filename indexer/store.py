@@ -166,6 +166,10 @@ class Index:
         return dict(self.db.execute("SELECT k, v FROM meta").fetchall())
 
     # ---- queries ----------------------------------------------------------------------------------------------------------------
+    def version(self) -> int:
+        """A cheap token that changes when files are added (the largest row id)."""
+        return int(self.db.execute("SELECT COALESCE(MAX(rowid), 0) FROM files").fetchone()[0])
+
     def count(self) -> int:
         return int(self.db.execute("SELECT COUNT(*) FROM files").fetchone()[0])
 

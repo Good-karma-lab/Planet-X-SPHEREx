@@ -193,7 +193,7 @@ class Spectra:
 
     async def measure(self, params: dict[str, Any], e: Exposure) -> dict[str, Any]:
         lay = await self.files.layout(e.key)
-        w = spxwcs.celestial(lay.image_header)
+        w = self.files.wcs_of(e.key, lay)
         ra_t, dec_t = place_at(params, lay.mjd)
         px, py = spxwcs.sky2pix(w, [ra_t], [dec_t])
         x, y = float(px[0]), float(py[0])

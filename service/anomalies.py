@@ -34,7 +34,7 @@ from service.products.store import Store, product_key
 from service.products.sxp import decode
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
-from service.reader.psfs import PsfProvider
+from service.reader.psfs import PsfProvider, psf_from_path
 from service.spectrum import place_at
 from service.upstream import gaia, gaia_hats
 from service.upstream.breaker import Breaker, BreakerOpenError
@@ -177,7 +177,7 @@ class Anomalies:
 
     async def _measure(self, e: Exposure, sources: list[dict[str, Any]]) -> list[tuple[int, float, float]]:
         lay = await self.files.layout(e.key)
-        w = spxwcs.celestial(lay.image_header)
+        w = self.files.wcs_of(e.key, lay)
         nx, ny = lay.image.nx, lay.image.ny
         places = [place_at(s, lay.mjd) for s in sources]
         px, py = spxwcs.sky2pix(w, [p[0] for p in places], [p[1] for p in places])
@@ -190,12 +190,12 @@ class Anomalies:
         x1 = int(np.ceil(px[inside].max())) + HALF + 1
         img = (await self.files.rows(e.key, "image", y0, y1))[:, x0:x1].astype(np.float64)
         flg = (await self.files.rows(e.key, "flags", y0, y1))[:, x0:x1].astype(np.int64)
-        ps = await self.psfs.for_file(e.key)
+        ps_path = await self.psfs.path_for_file(e.key)
         cw, _ = await self.wavelengths.get(lay.detector)
         table, _, _ = spxflags.resolve(lay.flags_header)
         box = np.ascontiguousarray(cw[y0:y1, x0:x1])  # only the box crosses to the worker, not the detector's whole map
         moves = [bool(s["moves"]) for s in sources]
-        return await cpu.run(fit_all, img, flg, table, ps, box, px, py, inside, x0, y0, moves)
+        return await cpu.run(fit_all, img, flg, table, ps_path, box, px, py, inside, x0, y0, moves)
 
     # ---- identification ----------------------------------------------------------------------------------------------------------
     async def _tap(self, which: str, url: str, adql: str) -> list[dict[str, Any]]:
@@ -311,7 +311,7 @@ def fit_all(
     img: np.ndarray,
     flg: np.ndarray,
     table: dict[str, int],
-    ps: spxpsf.PsfSet,
+    ps_or_path: spxpsf.PsfSet | str,
     cw: np.ndarray,
     px: np.ndarray,
     py: np.ndarray,
@@ -321,6 +321,7 @@ def fit_all(
     moves: list[bool],
 ) -> list[tuple[int, float, float]]:
     """PSF fits of the sources inside one exposure's box (runs in a worker process; cw is the wavelength map of the box)."""
+    ps = psf_from_path(ps_or_path) if isinstance(ps_or_path, str) else ps_or_path
     bad_all = spxflags.mask_of(table, spxflags.BAD_ALWAYS)
     bad_mover = spxflags.mask_of(table, [n for n in spxflags.BAD_ALWAYS if n not in spxflags.MOVER_KEEP])
     overflow = (flg & spxflags.mask_of(table, spxflags.SATURATION)) != 0

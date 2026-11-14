@@ -10,13 +10,14 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 from astropy.io import fits
 from numpy.typing import NDArray
 
 from engine.spx import rows as spxrows
+from engine.spx import wcs as spxwcs
 from engine.spx.fitsio import HDU, hdu_at, header_length
 from engine.spx.layout import Layout, PlainImage, RiceImage, layout_from_hdus
 from service import cpu
@@ -34,6 +35,17 @@ class FileReader:
     store: Path
     _layouts: dict[str, Layout] = field(default_factory=dict)
     _locks: dict[str, asyncio.Lock] = field(default_factory=dict)
+    _wcs: dict[str, Any] = field(default_factory=dict)
+
+    def wcs_of(self, key: str, lay: Layout) -> Any:
+        """The celestial WCS of a file, built once (building it from the header costs milliseconds, and searches ask for the same
+        file again and again)."""
+        w = self._wcs.get(key)
+        if w is None:
+            if len(self._wcs) > 6000:
+                self._wcs.clear()
+            w = self._wcs[key] = spxwcs.celestial(lay.image_header)
+        return w
 
     # ---- layout -------------------------------------------------------------------------------------------------------------
     def _headers_path(self, key: str) -> Path:
