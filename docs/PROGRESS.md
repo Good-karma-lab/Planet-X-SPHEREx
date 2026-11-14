@@ -50,15 +50,27 @@ Done and deployed (commit):
 - Warm set with every test field's searches, target and anomaly spectra — 62ac577, af07bcd. Pages: Method of this service — d156b3c;
   Findings cards, leads, tour, About — 794b8fa, d348017.
 
+Done since 8cbe33a (QA round 6): the landing's "Watch a star move" opens the globe on Barnard's Star with its path, and Barnard's
+rate agrees between landing and lab (20′: 10.7 ± 0.8″/yr, Gaia 10.4) — 10c28f5; brown dwarf figures from the service's counts — 7dd311b;
+a Find Planet X link from the Planet X page (`fpx=1&dmin&dmax&det`) applies its range and detectors and starts the search (checked
+live: 250–2000 au, D4) and a trajectory year never sits under the object's label — 88e91a2; the phone rail's words keep a gap down
+to 320 px — e821bd2.
+
 Open, with owner (the app pauses this session's messages to the other sessions, so these are the hand-over notes):
-- lab-ui / design-review: the landing's "Watch a star move" (`path=1`) should draw Barnard's path on the globe at once; the hero card
-  is cut on the right; the film slot waits for the new video; the landing quotes 10.4 / 10.7″/yr while the lab's 5′ track is
-  11.4 ± 0.5 on a saturated core, 2.1σ from Gaia — quote the 20′ value (10.7 ± 0.8) or Gaia's.
-- sky-service: Find Planet X in workers is slower on 5′ fields (43 s per block) and its ETA does not move; the ε Indi B 20′
-  brown-dwarf scan finds nothing (the T dwarf should come out as known); WISE 0855 5′ movers find no track (blend).
+- sky-service: on WISE 0855, Find Planet X reports "10 exposures were not read" per field (3 visits); the overnight deep sums show
+  the same (9–15 per field) — worth a look at which files fail. ε Indi B Find Planet X runs 48 blocks with an ETA that does not move.
+  WISE 0855 5′ movers find no track (blend).
+- lab-ui (Planet X page): "4 known worlds" counts Eris twice; Eris is quoted as 95.89 ± 0.54 au in one place and 95.9 ± 0.6 in
+  another; the Solar System model piles labels up near the Sun, shows a "Sedna (test)" marker and a True-scale blob; the phone
+  stats read "—".
+- lab-ui / design-review: the landing hero card is cut on the right; the film slot waits for the new video.
 - prod-build: Sunday video, slides and texts; Download video not clicked by QA (it writes a file).
-- Overnight on the VM: IRAS/AKARI field done, nothing above threshold (best 6.6σ against 6.74σ, ceiling 6.41σ, 250–800 au, passes 1
-  and 3); the ecliptic field of the 394 au peak follows.
+- Overnight on the VM, both fields done, nothing detected (250–800 au, deep sum, every person's job first):
+  - IRAS/AKARI Planet Nine field (passes 1 and 3): best 6.6σ against a 6.74σ threshold, ceiling 6.41σ.
+  - Ecliptic field of the 394 au peak (3 passes, 620 160 hypotheses): sum peak 7.21σ against a 7.52σ threshold (ceiling 7.16σ);
+    control tracks: none reaches 5σ; the strongest photometry is 6.7σ at 648 au (RA 60.8063, Dec +8.4559, 0.022 mJy), above the
+    5.39σ photometry threshold but below the sum threshold, while the negated sums reach 5.1σ in photometry — a lead to re-observe,
+    not a detection.
 
 ## Next
 
