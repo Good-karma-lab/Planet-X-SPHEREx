@@ -25,6 +25,7 @@ import {
   PairButton,
   PairCard,
   drawTracks,
+  hitTrack,
   useDistant,
   useFilmTracks,
   type FilmTrack,
@@ -1078,7 +1079,19 @@ export function Lab({ route }: { route: Route }) {
       }
       const fts = ftRef.current;
       if (days && F && fts && st.opts.movers) {
-        drawTracks(ctx, fts, { scale: wcss / F.meta.grid.n, k: shownVisit, rings: true, trail: false, selected: trackSelRef.current }, 1);
+        drawTracks(
+          ctx,
+          fts,
+          {
+            scale: wcss / F.meta.grid.n,
+            k: shownVisit,
+            rings: true,
+            trail: false,
+            selected: trackSelRef.current,
+            mjd: F.meta.frames.map((f) => f.mjd),
+          },
+          1,
+        );
       }
       const sl = st.opts.marker ? selRef.current : null;
       let selMark: Mark | null = null;
@@ -1954,6 +1967,23 @@ export function Lab({ route }: { route: Route }) {
                   return;
                 }
                 if ((e.target as HTMLElement).closest('.float')) return;
+                if (film !== null && filmData && ft.state === 'ok') {
+                  // a click on a track's badge selects the track and opens the findings
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  const hit = hitTrack(
+                    ft.tracks,
+                    visit,
+                    r.width / filmData.meta.grid.n,
+                    e.clientX - r.left,
+                    e.clientY - r.top,
+                    filmData.meta.frames.map((f) => f.mjd),
+                  );
+                  if (hit >= 0) {
+                    setTrackSel(hit);
+                    setTab('find');
+                    return;
+                  }
+                }
                 pick(e);
               }}
               onPointerDown={(e) => {
