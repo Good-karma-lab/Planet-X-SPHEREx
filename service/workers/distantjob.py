@@ -42,6 +42,7 @@ KIND = "distant"
 MAX_PHOTOMETRY_CANDIDATES = 12
 SEC_PER_HYPOTHESIS = 8e-4  # the scan on the service's threads: 3.6e5 hypotheses took 276 s
 SEC_PER_EXPOSURE = 0.5
+SCAN_THREADS = 6  # SEC_PER_HYPOTHESIS was measured with the scan on this many threads
 
 
 def distant_params(
@@ -124,6 +125,10 @@ def plan(index: Index, p: dict[str, Any]) -> dict[str, Any]:
 async def plan_async(index: Index, p: dict[str, Any]) -> dict[str, Any]:
     """The same, the index query here and the numbers in a worker process."""
     result: dict[str, Any] = await cpu.run(plan_result, plan_input(index, p), p)
+    if result.get("status") == "plan":
+        # the scan's blocks run side by side on the pool: its part of the estimate shrinks with the workers
+        scan = result["hypotheses"] * SEC_PER_HYPOTHESIS
+        result["estimate_s"] = int(result["estimate_s"] - scan + scan * SCAN_THREADS / max(SCAN_THREADS, cpu.workers()))
     return result
 
 

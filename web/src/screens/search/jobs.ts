@@ -43,16 +43,26 @@ export async function runJob(
 }
 
 /** "about a minute", "about 12 minutes", "about 1.5 hours" */
-export const about = (s: number) => (s < 90 ? 'about a minute' : s < 5400 ? `about ${Math.round(s / 60)} minutes` : `about ${(s / 3600).toFixed(1)} hours`);
+export const about = (s: number) =>
+  s < 90 ? 'about a minute' : s < 5400 ? `about ${Math.round(s / 60)} minutes` : `about ${(s / 3600).toFixed(1)} hours`;
 
 /** The progress line of a running job: the phase, "n of m", the time so far and the time left (the service's estimate, else from the rate). */
 export function progressText(j: JobView | null, t0: number, head = ''): { text: string; frac: number | null } {
   const el = (Date.now() - t0) / 1000;
   const frac = j && j.total ? Math.min(0.99, (j.done ?? 0) / j.total) : null;
   let left = '';
-  if (j?.estimate_s && j.estimate_s > el) left = ` · ${about(j.estimate_s - el).replace('about ', '~')} left`;
+  // the service's own words win when its phase already says the time left (the scan blocks do)
+  if (/\bleft\b/.test(j?.phase ?? '')) left = '';
+  else if (j?.estimate_s && j.estimate_s > el) left = ` · ${about(j.estimate_s - el).replace('about ', '~')} left`;
+  else if (j?.estimate_s) left = ' · finishing';
   else if (frac != null && frac > 0.05 && el > 20) left = ` · ${about((el * (1 - frac)) / frac).replace('about ', '~')} left`;
-  const sofar = el >= 60 ? ` · ${Math.round(el / 60)} min` : el >= 5 ? ` · ${Math.round(el)} s` : '';
+  // the time so far moves every second it is shown, so it is never read as a time left that is stuck
+  const sofar =
+    el >= 60
+      ? ` · ${Math.floor(el / 60)} min ${String(Math.floor(el % 60)).padStart(2, '0')} s so far`
+      : el >= 5
+        ? ` · ${Math.round(el)} s so far`
+        : '';
   return { text: `${head}${j?.phase || 'working'}${j?.total ? ` · ${j.done ?? 0} of ${j.total}` : ''}${sofar}${left}`, frac };
 }
 
