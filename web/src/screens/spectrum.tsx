@@ -75,7 +75,7 @@ export function useSpectrum(src: Source | null): {
         } catch (e) {
           setError(String(e));
         }
-        await new Promise((res) => setTimeout(res, 700));
+        await new Promise((res) => setTimeout(res, 350));
       }
     };
     void poll();
@@ -281,7 +281,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const [cleared, setCleared] = useState<Source | null>(null);
   const shown = src && src !== cleared ? src : null;
   const { view, points, error } = useSpectrum(shown);
-  const { stamps } = useStamps(shown, view?.state === 'running' || !view);
+  const { stamps, finished: stampsDone } = useStamps(shown, view?.state === 'running' || !view);
   const [at, setAt] = useState<number | null>(null); // null: the newest exposure
   const [playing, setPlaying] = useState(false);
   const rows = useMemo(() => [...points].sort((a, b) => a.i - b.i), [points]);
@@ -332,6 +332,11 @@ export function SpectrumTab({ src }: { src: Source | null }) {
               ? `${usable} points from the ${view.total} exposures that cover this place`
               : `Failed: ${view.error}`}
       </div>
+      {(!view || view.state === 'running') && (
+        <div class={`spec-prog${!view || view.total === 0 ? ' indet' : ''}`} aria-label="Measuring the spectrum">
+          <i style={view && view.total > 0 ? `width:${Math.round((100 * view.measured) / view.total)}%` : ''} />
+        </div>
+      )}
       {(view?.no_spectrum || (view && view.measured >= 20 && view.saturated > 0.5 * view.measured)) && (
         <div class="partial">Saturated in most exposures: no SPHEREx spectrum (the core of this star overflows the detector)</div>
       )}
@@ -362,6 +367,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           note={!cur.ok ? `no fit: ${cur.why || 'no usable measurement'}` : undefined}
         />
       )}
+      {cur && stampsDone && stamps.size === 0 && <div class="mono-s">The pixels were not kept for this spectrum (it was measured before they were stored).</div>}
       {why.size > 0 && <div class="mono-s">Not used: {[...why.entries()].map(([k2, n]) => `${n} ${k2}`).join(' · ')}</div>}
       {error && (
         <div class="mono-s" style={{ color: 'var(--amber)' }}>

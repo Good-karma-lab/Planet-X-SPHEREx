@@ -5,14 +5,17 @@ import type { Source, Stamp } from './types';
  * The pixels behind every point of a spectrum, as the service keeps them (GET /api/v1/spectrum/stamps, asked from index `from` on while the measurement runs).
  * 404 means the spectrum was not asked for yet (or the service has no such route): asked again for a while, then given up.
  */
-export function useStamps(src: Source | null, running: boolean): { stamps: Map<number, Stamp>; absent: boolean } {
+export function useStamps(src: Source | null, running: boolean): { stamps: Map<number, Stamp>; absent: boolean; finished: boolean } {
   const [stamps, setStamps] = useState<Map<number, Stamp>>(new Map());
   const [absent, setAbsent] = useState(false);
+  /** the service says the measurement is done: no more stamps will come */
+  const [finished, setFinished] = useState(false);
   const runningRef = useRef(running);
   runningRef.current = running;
   useEffect(() => {
     setStamps(new Map());
     setAbsent(false);
+    setFinished(false);
     if (!src) return;
     let stop = false;
     const held = new Map<number, Stamp>();
@@ -37,8 +40,10 @@ export function useStamps(src: Source | null, running: boolean): { stamps: Map<n
               next = Math.max(next, s.i + 1);
             }
             if (d.stamps.length) setStamps(new Map(held));
-            if (d.state !== 'running' && held.size >= (d.total ?? 0)) return;
-            if (d.state !== 'running' && !d.stamps.length) return;
+            if (d.state !== 'running' && (held.size >= (d.total ?? 0) || !d.stamps.length)) {
+              setFinished(true);
+              return;
+            }
           }
         } catch {
           // asked again
@@ -50,7 +55,7 @@ export function useStamps(src: Source | null, running: boolean): { stamps: Map<n
       stop = true;
     };
   }, [src?.ra, src?.dec, src?.pmra, src?.pmdec]);
-  return { stamps, absent };
+  return { stamps, absent, finished };
 }
 
 type Grid = (number | null)[][];
