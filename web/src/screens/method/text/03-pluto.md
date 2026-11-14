@@ -20,7 +20,7 @@ Tombaugh photographed the region of Delta Geminorum on 21, 23 and 29 January 193
 
 Pluto turned out to be about 0.002 Earth masses, far too small to disturb Neptune and Uranus as Lowell had calculated; later better measurements of Neptune's mass removed the supposed irregularities. The planet was found by a systematic search, not by the prediction.
 
-Sources: Lowell exhibit and APS News above; Pluto's mass from [NASA](https://science.nasa.gov/dwarf-planets/pluto/facts/) (about one sixth of the Moon's mass).
+Sources: Lowell exhibit and APS News above; the announcement is the Lowell Observatory Observation Circular of 13 March 1930 ([V. M. Slipher, reprinted in JRASC 24, 282](https://ui.adsabs.harvard.edu/abs/1930JRASC..24..282S/abstract)); Tombaugh's own account is the [1946 leaflet of the Astronomical Society of the Pacific](https://ui.adsabs.harvard.edu/abs/1946ASPL....5...73T/abstract); Pluto's mass from [NASA](https://science.nasa.gov/dwarf-planets/pluto/facts/) (about one sixth of the Moon's mass).
 
 ## Our blink
 
