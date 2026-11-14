@@ -137,6 +137,21 @@ interface Track {
   check: 'same' | 'none' | 'pending' | 'still';
   gaia: { source_id: string; pm: number; pa?: number; g?: number | null; offset_arcsec: number } | null;
 }
+/** The designation JPL and CADC understand: the number of a numbered body, else its provisional designation. */
+function sbdbName(name: string): string {
+  const m = name.match(/^\s*\(?(\d+)\)?\s/);
+  if (m) return m[1]!;
+  const d = name.match(/^([CPI]\/\d{4} [A-Z]+\d*)/);
+  return d ? d[1]! : name.replace(/\s*\(.*\)\s*$/, '');
+}
+
+function ssoisUrl(name: string, mjd: number | null): string {
+  const day = (m: number) => new Date((m - 40587) * 86400000).toISOString().slice(0, 10).replace(/-/g, '+');
+  const m0 = (mjd ?? 61000) - 15;
+  const m1 = (mjd ?? 61000) + 15;
+  return `https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/ssos/ssos.pl?object=${encodeURIComponent(sbdbName(name))}&search=bynameall&epoch1=${day(m0)}&epoch2=${day(m1)}&eunits=bothdays&extres=no&xyres=no&format=tsv`;
+}
+
 interface RedRow {
   ra: number;
   dec: number;
@@ -316,6 +331,7 @@ export function Lab({ route }: { route: Route }) {
   const [redv, setRedv] = useState<RedView | null>(null);
   const redRef = useRef<RedView | null>(null);
   redRef.current = redv;
+  const filmMjd = film ? film : null;
   const [filmBodies, setFilmBodies] = useState<{ state: string; bodies: KnownBody[]; vLimit: number } | null>(null);
   const archive = useRef<ArchiveSet | null>(null);
   const [archTick, setArchTick] = useState(0);
@@ -1911,6 +1927,24 @@ export function Lab({ route }: { route: Route }) {
                               ? ` · along its track z ${b.stackZ.toFixed(1)} (chance ${b.controlZ?.toFixed(1)})`
                               : ''}
                             {b.planes != null ? ` · in ${b.planes} detector images` : ''}
+                          </span>
+                          <span class="bodylinks">
+                            <a
+                              target="_blank"
+                              rel="noopener"
+                              href={`https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}`}
+                              title="The body's orbit and data at JPL's Small-Body Database"
+                            >
+                              JPL
+                            </a>
+                            <a
+                              target="_blank"
+                              rel="noopener"
+                              href={ssoisUrl(b.name, filmMjd)}
+                              title="Other telescopes' images of this body around the same dates (CADC's Solar System Object Image Search)"
+                            >
+                              SSOIS
+                            </a>
                           </span>
                         </div>
                       ))}
