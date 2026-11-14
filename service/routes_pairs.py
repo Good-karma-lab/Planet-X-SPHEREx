@@ -46,6 +46,16 @@ def make_pairs_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         if pairs is not None:
             extra.update(pairs.view(pairs.get_or_start(key)))
         result = body.get("result")
+        dwarfs = getattr(st, "dwarfs", None)
+        if dwarfs is not None and result is not None:
+            # moving red sources (brown dwarfs) that the white stacks do not show are tracks too: the search is done when that scan is
+            drun = dwarfs.get_or_start(key)
+            if drun.state == "running":
+                body["state"], body["phase"] = "running", "looking for moving red sources"
+            elif drun.state == "done":
+                red = dwarfs.red_tracks(drun)
+                result["tracks"] = list(result["tracks"]) + red
+                result["red_tracks"] = len(red)
         extra["chance"] = None if result is None else {k: result["chance"][k] for k in ("mean", "trials")}
         body.update(extra)
         if result is not None:
