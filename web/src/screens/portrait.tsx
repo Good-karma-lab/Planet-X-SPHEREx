@@ -84,9 +84,7 @@ export function Portrait({ data, x, y, label }: { data: PortraitData; x: number;
             <span style={{ flex: 1, background: `rgb(${c.map((v) => Math.round(255 * v)).join(',')})` }} />
           ))}
         </div>
-        0.75 µm → 5 µm: each detector in the colour of its wavelength, added. A saturated core is white.
-        <br />
-        {boxArcsec}″ across, north up, east left.
+        {boxArcsec}″ · colour = its spectrum
       </div>
     </div>
   );

@@ -2192,3 +2192,66 @@ input[type='range']::-moz-range-thumb {
   width: 140px;
 }
 .fimg { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; box-shadow: 0 0 0 1px var(--edge-hi); margin: 4px 0 8px; background: #02070a; }
+
+/* ---- the lab, approved layout: floating rows over the picture, one time bar, panel sections, the searches bar ---- */
+.lab .vwrap { gap: 8px; padding: 10px 12px 10px; }
+.vsq .float { position: absolute; z-index: 3; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 10px; background: rgba(6, 10, 14, 0.66); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.08); font-size: 12px; color: var(--ink); }
+.vsq .ftitle { left: 10px; top: 10px; max-width: calc(100% - 360px); white-space: nowrap; overflow: hidden; }
+.vsq .ftitle b { font: 650 13.5px var(--font); }
+.vsq .ftitle span { font: 500 11.5px var(--mono); color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.vsq .factions { right: 10px; top: 10px; padding: 3px 4px 3px 6px; }
+.vsq .fstatus { left: 10px; bottom: 54px; max-width: calc(100% - 20px); font: 500 11.5px var(--font); color: #dbe8ee; line-height: 1.35; flex-wrap: wrap; }
+.vsq .fstatus .dkey { display: inline-flex; align-items: center; gap: 5px; margin-left: 8px; color: var(--muted); }
+.vsq .fstatus .dkey i { width: 9px; height: 9px; border-radius: 2px; display: inline-block; }
+.vsq .fbands { left: 50%; transform: translateX(-50%); bottom: 10px; max-width: calc(100% - 20px); flex-wrap: wrap; justify-content: center; padding: 4px 5px; gap: 4px; }
+.vsq .fbands .bchip { padding: 3px 7px; }
+.vsq .fbands .bchip .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); opacity: 0.55; }
+.vsq .fbands .bchip.on .dot { opacity: 1; }
+.mini { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 7px; border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.05); color: var(--ink); font-size: 11.5px; font-weight: 600; white-space: nowrap; }
+.mini:hover:not(:disabled) { border-color: rgba(95, 227, 214, 0.55); color: var(--accent-l); }
+.mini:disabled { opacity: 0.45; }
+.mini svg { width: 14px; height: 14px; }
+.vsq .refbox { top: 52px; left: 10px; }
+.vsq .vwait { z-index: 2; }
+.tbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 12px; background: rgba(0, 0, 0, 0.28); border: 1px solid var(--edge-soft); min-width: 0; }
+.tbar .play { flex: none; width: 34px; height: 34px; }
+.tbar .seg.scale button { padding: 3px 9px; min-height: 26px; font-size: 11.5px; }
+.tbar .seg.scale button:disabled { opacity: 0.4; }
+.tbar .tl-mid { flex: 1; min-width: 120px; }
+.tbar .spd { flex: none; width: auto; font-size: 11.5px; padding: 3px 6px; }
+.lab .panel { display: flex; flex-direction: column; }
+.psec { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; border-bottom: 1px solid var(--edge-soft); }
+.psec:last-child { border-bottom: 0; }
+.psh { font: 650 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.psub { font-size: 11px; color: var(--faint); margin-top: 2px; }
+.swgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
+.sw { display: flex; align-items: center; gap: 8px; min-height: 24px; cursor: pointer; user-select: none; white-space: nowrap; min-width: 0; font-size: 12px; color: var(--ink); }
+.sw input { appearance: none; -webkit-appearance: none; width: 26px; height: 15px; flex: none; border-radius: 999px; background: rgba(255, 255, 255, 0.16); position: relative; margin: 0; cursor: pointer; transition: background 0.15s; }
+.sw input::after { content: ''; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: #dfe7ec; transition: transform 0.15s; }
+.sw input:checked { background: var(--accent); }
+.sw input:checked::after { transform: translateX(11px); background: #fff; }
+.sw input:disabled { opacity: 0.35; cursor: default; }
+.sw.dis { color: var(--faint); cursor: default; }
+.sw .why { margin-left: auto; font-size: 10.5px; font-style: normal; color: var(--faint); }
+.sbar { flex: none; max-height: 38%; overflow: auto; border-top: 1px solid var(--edge-soft); background: rgba(6, 14, 20, 0.92); padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 3px; }
+.sbh { display: flex; justify-content: space-between; align-items: baseline; font: 650 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.sbh em { font-style: normal; letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--faint); }
+.sline { display: grid; grid-template-columns: minmax(0, 1fr) 90px 72px; align-items: center; gap: 8px; min-height: 22px; font-size: 12px; }
+.sline b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sline .sval { text-align: right; font: 500 11px var(--mono); color: var(--muted); white-space: nowrap; }
+.sline .sval.wide { grid-column: 2 / 4; }
+.sprog { height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.1); overflow: hidden; position: relative; }
+.sprog i { display: block; height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.4s; }
+.sprog.busy i { animation: sbusy 1.4s ease-in-out infinite; }
+@keyframes sbusy { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+.sbar .mvrow, .sbar .anrow { padding: 4px 8px; font-size: 11.5px; }
+.ssum { font-size: 11px; color: var(--faint); line-height: 1.35; margin: -2px 0 2px; }
+.sline { grid-template-columns: minmax(0, 1fr) 80px 96px; }
+.vsq .fbands { flex-wrap: nowrap; gap: 3px; }
+.vsq .fbands .bchip { padding: 2px 6px; font-size: 10.5px; gap: 4px; }
+.vsq .fbands .bchip em { font-size: 9.5px; }
+.vsq .fbands .mini { height: 22px; padding: 0 6px; font-size: 10.5px; }
+.psec .coords { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.psec .coords .field { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.psec .coords label { font: 600 10.5px var(--font); color: var(--muted); }
+.psec .coords .inp { min-width: 0; width: 100%; font: 500 12px var(--mono); padding: 4px 7px; }

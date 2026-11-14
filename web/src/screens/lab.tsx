@@ -16,7 +16,21 @@ import { LightCurves } from './lightcurve';
 import { ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
 import { halfToFloat } from '../lib/sxp';
 import { Portrait, type PortraitData } from './portrait';
-import { ContextRows, FilmTracks, drawTracks, useFilmTracks, type FilmTrack } from './search';
+import {
+  ContextRows,
+  DeepSumPanel,
+  DistantCanvas,
+  DistantPanel,
+  LinkPanel,
+  PairButton,
+  PairCard,
+  drawTracks,
+  useDistant,
+  useFilmTracks,
+  type FilmTrack,
+  type Pair,
+} from './search';
+import { useAsteroidSearch } from './asteroids';
 
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
@@ -225,7 +239,18 @@ function eclipticLat(ra: number, dec: number): number {
 }
 
 /** The Movers rows of the Searches list: the state of the search between passes and one row per track. */
-function MoversRows({ mv, names, onPick }: { mv: MoversView | null; names: string[]; onPick: (t: Track, name: string) => void }) {
+function MoversRows({
+  mv,
+  names,
+  onPick,
+  bare,
+}: {
+  mv: MoversView | null;
+  names: string[];
+  onPick: (t: Track, name: string) => void;
+  /** in the searches bar: the summary as a quiet line under the row that already names the search */
+  bare?: boolean;
+}) {
   const r = mv?.result;
   const state = !mv
     ? 'waiting for the field'
@@ -240,13 +265,17 @@ function MoversRows({ mv, names, onPick }: { mv: MoversView | null; names: strin
             : `${r.tracks.length} track${r.tracks.length === 1 ? '' : 's'} · ${r.sources_per_pass.join(' / ')} sources per pass${r.still ? ` · ${r.still} centroid shift${r.still === 1 ? '' : 's'} rejected` : ''}${r.weak ? ` · ${r.weak} weak` : ''}${r.chance?.trials ? ` · chance ${r.chance.mean.toFixed(2)} tracks per field (${r.chance.trials} trials)` : ''}${r.passes_left_out?.length ? ` · season ${r.passes_left_out.map((i) => i + 1).join(', ')} left out (it covers only part of the field)` : ''}`;
   return (
     <>
-      <div
-        class="srow"
-        title="Search between passes: sources that move in a straight line over the seasons (3–120 ″/yr), checked against Gaia DR3 afterwards"
-      >
-        <b>Movers</b>
-        <span class="st">{state}</span>
-      </div>
+      {bare ? (
+        <div class="ssum">{state}</div>
+      ) : (
+        <div
+          class="srow"
+          title="Search between passes: sources that move in a straight line over the seasons (3–120 ″/yr), checked against Gaia DR3 afterwards"
+        >
+          <b>Movers</b>
+          <span class="st">{state}</span>
+        </div>
+      )}
       {r?.tracks.map((t, i) => (
         <button
           key={i}
@@ -346,6 +375,7 @@ export function Lab({ route }: { route: Route }) {
   const [sel, setSel] = useState<Source | null>(null);
   const pictures = useRef(new Map<number, { n: number; rgb: Uint16Array }>());
   const detsData = useRef(new Map<number, { n: number; dets: Uint16Array }>());
+  const noiseRef = useRef(new Map<number, { bg: number; sigma: number }>());
   const satData = useRef(new Map<number, Uint8Array>());
   const [portraitTick, setPortraitTick] = useState(0);
   const selRef = useRef<Source | null>(null);
@@ -409,6 +439,18 @@ export function Lab({ route }: { route: Route }) {
   const ftRef = useRef<FilmTrack[] | null>(null);
   ftRef.current = ft.state === 'ok' ? ft.tracks : null;
   const [trackSel, setTrackSel] = useState(-1);
+  const [note, setNote] = useState('');
+  const [pairSel, setPairSel] = useState<number | null>(null);
+  // the asteroid search runs on its own for the middle pass of the field (in Days: the pass on show)
+  const astMjd = film ? film : meta?.passes[Math.floor((meta?.passes.length ?? 1) / 2)]?.mjd_mid;
+  const ast = useAsteroidSearch(ra, dec, fov, astMjd, valid && !!meta);
+  const distRef = useDistant({
+    ra,
+    dec,
+    fov,
+    pass: null,
+    mjd: (meta?.passes.find((q) => q.index === (shown?.pass ?? 0)) ?? meta?.passes[0])?.mjd_mid,
+  });
   const trackSelRef = useRef(-1);
   trackSelRef.current = trackSel;
   const [raIn, setRaIn] = useState('');
@@ -479,6 +521,7 @@ export function Lab({ route }: { route: Route }) {
     state.current.meta = null;
     pictures.current.clear();
     detsData.current.clear();
+    noiseRef.current.clear();
     satData.current.clear();
     artMap.current.clear();
     artRef.current = null;
@@ -541,6 +584,7 @@ export function Lab({ route }: { route: Route }) {
         if (lv) {
           noised.add(k);
           r.setNoise(k, lv.bg, lv.sigma);
+          noiseRef.current.set(k, { bg: lv.bg, sigma: lv.sigma });
           if (stack === 'picture' && k === 0) trims = { p995: lv.p995, p999: lv.p999 };
         }
       }
@@ -558,6 +602,18 @@ export function Lab({ route }: { route: Route }) {
       onError: (t) => setPhase(`failed: ${t}`),
       onMeta: (m) => {
         setMeta(m);
+        // the test target in the field is selected from the start (Object and Spectrum tabs show it); a click selects another source
+        if (!selRef.current) {
+          const half = (m.grid.n * m.grid.step_arcsec) / 2 / 3600;
+          const o = targets.current.find((t) => {
+            const [tra, tdec] = atEpoch(t.ra, t.dec, t.pmra ?? 0, t.pmdec ?? 0, 2025.9);
+            return (
+              Math.abs(tdec - m.grid.dec0) < half &&
+              Math.abs(((tra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((tdec * Math.PI) / 180) < half
+            );
+          });
+          if (o) setSel({ ra: o.ra, dec: o.dec, name: o.n, pmra: o.pmra ?? 0, pmdec: o.pmdec ?? 0 });
+        }
         state.current.meta = m;
         r.setDetectorPixel(6.15 / m.grid.step_arcsec);
         for (const q of m.passes) if (!balanced.has(q.index)) r.setWhiteBalance(q.index, q.white_balance.kr, q.white_balance.kb);
@@ -669,7 +725,7 @@ export function Lab({ route }: { route: Route }) {
           const z = zoomOn();
           if (z) {
             const S = Math.round(Math.min(220, w * 0.26));
-            inset = { x: 8, y: 8, w: S, h: S, zoom: z };
+            inset = { x: 10, y: 52, w: S, h: S, zoom: z };
             r.panel({ ...base, ...inset }, k, k2, t);
           }
           shownVisit = t < 0.5 ? k : k2;
@@ -734,7 +790,7 @@ export function Lab({ route }: { route: Route }) {
             const z = zoomOn();
             if (z) {
               const S = Math.round(Math.min(220, w * 0.26));
-              inset = { x: 8, y: 8, w: S, h: S, zoom: z };
+              inset = { x: 10, y: 52, w: S, h: S, zoom: z };
               panels.push({ ...panels[0]!, ...inset });
             }
           } else if (st.view === 'bands') {
@@ -814,6 +870,7 @@ export function Lab({ route }: { route: Route }) {
       motion?: [number, number];
       dashed?: boolean;
       selected?: boolean;
+      ghost?: boolean;
     };
     const drawRings = () => {
       const ov = overlay.current;
@@ -853,7 +910,7 @@ export function Lab({ route }: { route: Route }) {
         days && F ? (F.meta.frames[shownVisit]?.mjd ?? F.meta.pass.mjd0) : ((m?.passes[shownPass] ?? m?.passes[0])?.mjd_mid ?? 60994.5);
       const year = 2000 + (shownMjd - 51544.5) / 365.25;
       const marks: Mark[] = [];
-      if (st.opts.marker) {
+      if (st.opts.marker || st.opts.trajectory) {
         for (const o of targets.current) {
           const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, year);
           const [u, v] = uvOf(tra, tdec);
@@ -869,6 +926,7 @@ export function Lab({ route }: { route: Route }) {
             rr: 18,
             path: m?.passes.map((pp) => atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2000 + (pp.mjd_mid - 51544.5) / 365.25)),
             motion: (o.pmra ?? 0) || (o.pmdec ?? 0) ? [o.pmra ?? 0, o.pmdec ?? 0] : undefined,
+            ghost: !st.opts.marker, // Trajectory alone: the path without the ring and the name
           });
         }
       }
@@ -966,6 +1024,13 @@ export function Lab({ route }: { route: Route }) {
             fill: seen ? '#ffd08a' : '#d6e7ed',
             rr: 12,
             dashed: !seen,
+            // its path through the visits of the pass, where JPL predicts it on each (Trajectory)
+            path: b.frames
+              .filter((q) => q.inside)
+              .map((q) => [
+                grid.ra0 - ((q.x + 0.5 - n / 2) * grid.step_arcsec) / 3600 / cosd,
+                grid.dec0 - ((q.y + 0.5 - n / 2) * grid.step_arcsec) / 3600,
+              ]),
           });
         }
       }
@@ -973,7 +1038,7 @@ export function Lab({ route }: { route: Route }) {
       if (days && F && fts && st.opts.movers) {
         drawTracks(ctx, fts, { scale: wcss / F.meta.grid.n, k: shownVisit, rings: true, trail: false, selected: trackSelRef.current }, 1);
       }
-      const sl = selRef.current;
+      const sl = st.opts.marker ? selRef.current : null;
       let selMark: Mark | null = null;
       if (sl) {
         const [sra, sdec] = sl.pmra || sl.pmdec ? atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, year) : [sl.ra, sl.dec];
@@ -1012,12 +1077,18 @@ export function Lab({ route }: { route: Route }) {
       const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
         const lines = [mk.name, ...mk.lines].filter(Boolean);
         if (!lines.length) return;
-        ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-        const tw = Math.max(...lines.map((l, i) => ctx.measureText(l).width * (i ? 0.92 : 1)));
+        const tw = Math.max(
+          ...lines.map((l, i) => {
+            ctx.font = i
+              ? '500 10.5px ui-monospace, Menlo, monospace'
+              : '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+            return ctx.measureText(l).width;
+          }),
+        );
         const th = 13 * lines.length;
         // right of the ring, else left; moved down past labels already placed
         let lx = x + rr + 8;
-        if (lx + tw > box.x + box.w - 2) lx = x - rr - 8 - tw;
+        if (lx + tw > box.x + box.w - 4) lx = Math.max(box.x + 4, x - rr - 8 - tw);
         let ly = y - rr * 0.35 - 9;
         for (let tries = 0; tries < 8; tries++) {
           const hit = placed.find((p) => lx < p.x1 && lx + tw > p.x0 && ly < p.y1 && ly + th > p.y0);
@@ -1090,7 +1161,7 @@ export function Lab({ route }: { route: Route }) {
       };
       const wall = !days && st.view !== 'picture';
       const underInset = (x: number, y: number) =>
-        !!inset && x > inset.x - 4 && y > inset.y - 4 && x < inset.x + inset.w + 4 && y < inset.y + inset.h + 4;
+        (!!inset && x > inset.x - 4 && y > inset.y - 4 && x < inset.x + inset.w + 4 && y < inset.y + inset.h + 4) || (!wall && y < 46); // nor under the title row floating over the top of the picture
       ctx.save();
       for (const box of rects) {
         if (wall) {
@@ -1109,12 +1180,12 @@ export function Lab({ route }: { route: Route }) {
           const y = box.y + v * box.h;
           if (x < box.x - 30 || y < box.y - 30 || x > box.x + box.w + 30 || y > box.y + box.h + 30) continue;
           if (wall) {
-            if (mk.kind !== 'target' && !mk.selected) continue;
+            if ((mk.kind !== 'target' && !mk.selected) || mk.ghost) continue;
             ring(x, y, mk, Math.max(8, Math.min(14, box.w / 22)), mk.kind === 'target');
             continue;
           }
           if (underInset(x, y)) continue;
-          ring(x, y, mk, mk.rr, mk.kind === 'target');
+          if (!mk.ghost) ring(x, y, mk, mk.rr, mk.kind === 'target');
           pathOf(mk, box, mk.rr, x, y);
         }
         if (!wall)
@@ -1122,14 +1193,14 @@ export function Lab({ route }: { route: Route }) {
             const [u, v] = uvOf(mk.ra, mk.dec);
             const x = box.x + u * box.w;
             const y = box.y + v * box.h;
-            if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y)) continue;
+            if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y) || mk.ghost) continue;
             label(x, y, mk.rr, mk, box);
           }
         ctx.restore();
       }
       if (inset) {
         // the 2′ zoom: the selected object ringed, scaled with the zoom
-        const mk = all.find((k) => k.selected) ?? all.find((k) => k.kind === 'target');
+        const mk = all.find((k) => k.selected) ?? all.find((k) => k.kind === 'target' && !k.ghost);
         if (mk) {
           const [u, v] = uvOf(mk.ra, mk.dec);
           const x = inset.x + ((u - inset.zoom.cx) / inset.zoom.s + 0.5) * inset.w;
@@ -1143,7 +1214,7 @@ export function Lab({ route }: { route: Route }) {
         }
       }
       ctx.restore();
-      if (!st.opts.rings || wall) return;
+      if (!st.opts.rings) return;
       // speed rings, centred on the field: how far a body of that speed moves between the first and the last season
       // (in the Days scale: between the first and the last visit, in ″ per hour)
       let dt: number;
@@ -1162,15 +1233,27 @@ export function Lab({ route }: { route: Route }) {
       ctx.fillStyle = 'rgba(255,200,130,0.95)';
       ctx.font = '600 10px ui-monospace, Menlo, monospace';
       ctx.lineWidth = 1;
-      for (const v of speeds) {
-        const rpx = ((v * dt) / fovArc) * wcss;
-        if (rpx < 14 || rpx > wcss * 0.72) continue;
+      // centred on the selected source, else the test target, else the middle of the field
+      const centre = all.find((k) => k.selected) ?? all.find((k) => k.kind === 'target');
+      for (const box of rects) {
+        const [cu, cv] = centre ? uvOf(centre.ra, centre.dec) : [0.5, 0.5];
+        const cx = box.x + cu * box.w;
+        const cy = box.y + cv * box.h;
+        ctx.save();
         ctx.beginPath();
-        ctx.setLineDash([4, 4]);
-        ctx.arc(wcss / 2, hcss / 2, rpx, 0, 2 * Math.PI);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillText(`${v}${unit}`, wcss / 2 + rpx * 0.7071 + 3, hcss / 2 - rpx * 0.7071 - 3);
+        ctx.rect(box.x, box.y, box.w, box.h);
+        ctx.clip();
+        for (const v of speeds) {
+          const rpx = ((v * dt) / fovArc) * box.w;
+          if (rpx < 14 || rpx > box.w * 0.72) continue;
+          ctx.beginPath();
+          ctx.setLineDash([4, 4]);
+          ctx.arc(cx, cy, rpx, 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          if (!wall || box === rects[0]) ctx.fillText(`${v}${unit}`, cx + rpx * 0.7071 + 3, cy - rpx * 0.7071 - 3);
+        }
+        ctx.restore();
       }
     };
 
@@ -1301,12 +1384,13 @@ export function Lab({ route }: { route: Route }) {
     setSelAn(null);
     setRedv(null);
     if (!valid || !meta) return;
-    void followAnomalies(false);
+    // the searches of a field start by themselves once it is built: anomalies and red sources (movers and asteroids have their own)
+    void followAnomalies(true);
+    void findRed();
     return () => {
       anPoll.current++;
     };
   }, [ra, dec, fov, valid, meta]);
-  const startAnomalies = () => followAnomalies(true);
   const findRed = async () => {
     setRedv({ state: 'waiting', error: 'busy', result: null });
     try {
@@ -1492,15 +1576,23 @@ export function Lab({ route }: { route: Route }) {
    *  brightest pixel within 3 grid pixels of the click in the season shown. */
   const pick = (e: MouseEvent) => {
     const m = meta;
-    if (!m || film !== null || view !== 'picture') return;
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    if (insetBox && !opts.reference) {
-      const lx = e.clientX - rect.left;
-      const ly = e.clientY - rect.top;
+    if (!m || film !== null) return;
+    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const lx = e.clientX - box.left;
+    const ly = e.clientY - box.top;
+    if (view === 'picture' && insetBox && !opts.reference) {
       if (lx >= insetBox.x && ly >= insetBox.y && lx <= insetBox.x + insetBox.w && ly <= insetBox.y + insetBox.h) return; // the zoom itself
     }
-    let gx = ((e.clientX - rect.left) / rect.width) * m.grid.n;
-    let gy = ((e.clientY - rect.top) / rect.height) * m.grid.n;
+    // the panel under the click (the whole picture, or one panel of a wall)
+    const panel =
+      view === 'picture'
+        ? { x: 0, y: 0, w: box.width, h: box.height }
+        : layoutRef.current.rects.find((q) => lx >= q.x && ly >= q.y && lx <= q.x + q.w && ly <= q.y + q.h);
+    if (!panel) return;
+    const rect = { width: panel.w, height: panel.h };
+    let gx = ((lx - panel.x) / panel.w) * m.grid.n;
+    let gy = ((ly - panel.y) / panel.h) * m.grid.n;
+    setPairSel(null);
     const toSky = (x: number, y: number): [number, number] => [
       (m.grid.ra0 - ((x - m.grid.n / 2) * m.grid.step_arcsec) / 3600 / Math.cos((m.grid.dec0 * Math.PI) / 180) + 360) % 360,
       m.grid.dec0 - ((y - m.grid.n / 2) * m.grid.step_arcsec) / 3600,
@@ -1538,7 +1630,8 @@ export function Lab({ route }: { route: Route }) {
         return;
       }
     }
-    const pic = pictures.current.get(shown?.pass ?? 0) ?? pictures.current.values().next().value;
+    const pk = pictures.current.has(shown?.pass ?? 0) ? (shown?.pass ?? 0) : (pictures.current.keys().next().value ?? 0);
+    const pic = pictures.current.get(pk);
     if (pic) {
       const N = pic.n * pic.n;
       let best = -Infinity;
@@ -1559,6 +1652,13 @@ export function Lab({ route }: { route: Route }) {
         }
       gx = bx;
       gy = by;
+      // nothing there: empty sky is said, not measured
+      const lv = noiseRef.current.get(pk);
+      if (lv && best / 3 < lv.bg + 5 * lv.sigma) {
+        setNote('Empty sky here: no source above 5σ within 3 grid pixels of the click, nothing to measure.');
+        setTimeout(() => setNote(''), 3500);
+        return;
+      }
     }
     const [ra2, dec2] = toSky(gx, gy);
     setSelAn(null);
@@ -1663,16 +1763,16 @@ export function Lab({ route }: { route: Route }) {
     set({ film: null });
   };
 
-  const dchk = (
+  const sw = (
     id: string,
-    ico: string,
     text: string,
     title: string,
     checked: boolean,
     onChange: ((v: boolean) => void) | null,
     why = 'not available in this view',
+    whyShort = '',
   ) => (
-    <label class={`chk ${onChange ? '' : 'disabled'}`} title={onChange ? title : `${title} (${why})`}>
+    <label class={`sw ${onChange ? '' : 'dis'}`} title={onChange ? title : `${title} (${why})`}>
       <input
         type="checkbox"
         id={id}
@@ -1681,55 +1781,48 @@ export function Lab({ route }: { route: Route }) {
         disabled={!onChange}
         onChange={(e) => onChange?.((e.target as HTMLInputElement).checked)}
       />
-      <span dangerouslySetInnerHTML={{ __html: icon(ico, 16) }} style={{ display: 'contents' }} />
-      {text}
+      <span>{text}</span>
+      {!onChange && whyShort && <em class="why">{whyShort}</em>}
     </label>
   );
+  const pct = (f: number | null | undefined) => (f === null || f === undefined ? null : Math.max(0, Math.min(100, Math.round(f * 100))));
+  const srow = (name: string, frac: number | null, right: string, title: string, testid?: string) => (
+    <div class="sline" title={title} data-testid={testid}>
+      <b>{name}</b>
+      <span class={`sprog ${frac === null ? 'busy' : ''}`}>
+        <i style={{ width: `${frac === null ? 30 : Math.max(2, frac * 100)}%` }} />
+      </span>
+      <span class="sval">{right}</span>
+    </div>
+  );
+  const mvr = mv?.result;
+  const pairs = ((mv as unknown as { pairs?: Pair[] } | null)?.pairs ?? []) as Pair[];
+  const pairMjds = (mv as unknown as { mjd?: number[] } | null)?.mjd ?? passes.map((q) => q.mjd_mid);
+  const anFrac = an?.state === 'done' ? 1 : an?.state === 'running' ? (an.total ? an.done / an.total : null) : 0;
+  const dist = distRef;
 
   return (
     <div class="screen">
       <div class="lab">
         <div class="vwrap" ref={wrap}>
-          <div class="vtop">
-            <div class="vtitle" data-testid="field-title">
-              <b>{fieldName}</b>
-              <span>
-                {formatRA(ra)} {formatDec(dec)}
-              </span>
-            </div>
-            <label class="fovsel" title="Field of view">
-              <span>Field</span>
-              <select
-                class="inp"
-                value={String(fov)}
-                onChange={(e) => set({ fov: (e.target as HTMLSelectElement).value })}
-                data-testid="fov"
-              >
-                {SIZES.map((s) => (
-                  <option key={s} value={String(s)}>
-                    {s}′
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
           <div class="vstage" ref={stageRef}>
             <div
               class="vsq"
               style={{
                 width: `${wallView ? stage.w : side}px`,
                 height: `${wallView ? stage.h : side}px`,
-                cursor: view === 'picture' ? 'crosshair' : undefined,
+                cursor: 'crosshair',
               }}
               onClick={(e) => {
                 if (dragged.current) {
                   dragged.current = false;
                   return;
                 }
+                if ((e.target as HTMLElement).closest('.float')) return;
                 pick(e);
               }}
               onPointerDown={(e) => {
-                if (film !== null || view !== 'picture' || !meta) return;
+                if (film !== null || view !== 'picture' || !meta || (e.target as HTMLElement).closest('.float')) return;
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
                 dragFrom.current = { x: e.clientX - r.left, y: e.clientY - r.top };
               }}
@@ -1807,65 +1900,253 @@ export function Lab({ route }: { route: Route }) {
                   <span>Reference · DSS2 red · 1985–1999</span>
                 </div>
               )}
-              {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length ? (
-                <div class="vlabel">
-                  {ARCHIVE[archStep]!.name} · {ARCHIVE[archStep]!.years}
-                </div>
-              ) : film !== null ? (
-                filmData && (
-                  <div class="vlabel">
-                    SPHEREx · visit {visit + 1} of {filmData.meta.frames.length} · {utc(filmData.meta.frames[visit]?.mjd ?? 0)} · D
-                    {filmData.meta.frames[visit]?.det}
-                  </div>
-                )
-              ) : (
-                view === 'picture' &&
-                passMeta && <div class="vlabel">{time === 'sum' ? 'all seasons' : `SPHEREx · ${season(passMeta.mjd_mid)}`}</div>
-              )}
               {film !== null && !filmData && <div class="vwait">{filmNote || 'asking for the visits of the pass…'}</div>}
+              {dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
+              <div class="float ftitle" data-testid="field-title">
+                <b>{fieldName}</b>
+                <span>
+                  {formatRA(ra)} {formatDec(dec)}
+                </span>
+              </div>
+              <div class="float factions">
+                <button
+                  class="mini"
+                  onClick={() => {
+                    const done = (t: string) => {
+                      setCopied(t);
+                      setTimeout(() => setCopied(''), 2000);
+                    };
+                    try {
+                      navigator.clipboard.writeText(location.href).then(
+                        () => done('Copied'),
+                        () => done('Copy blocked'),
+                      );
+                    } catch {
+                      done('Copy blocked');
+                    }
+                  }}
+                  title="Copy a link to this exact view"
+                >
+                  <span dangerouslySetInnerHTML={{ __html: icon('link', 14) }} style={{ display: 'contents' }} />
+                  <span class="t">{copied || 'Copy link'}</span>
+                </button>
+                <button
+                  class="mini"
+                  disabled={recording || film !== null || !passes.length}
+                  onClick={() => void recordVideo()}
+                  title="Download one full cycle of the seasons as a video (WebM)"
+                >
+                  <span dangerouslySetInnerHTML={{ __html: icon('download-simple', 14) }} style={{ display: 'contents' }} />
+                  <span class="t">{recording ? 'Recording…' : 'Download video'}</span>
+                </button>
+                <label class="fovsel" title="Field of view">
+                  <span>Field</span>
+                  <select
+                    class="inp"
+                    value={String(fov)}
+                    onChange={(e) => set({ fov: (e.target as HTMLSelectElement).value })}
+                    data-testid="fov"
+                  >
+                    {SIZES.map((s) => (
+                      <option key={s} value={String(s)}>
+                        {s}′
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
+                {note || (film !== null ? daysStatus : status)}
+                {time === 'diff' && film === null && (
+                  <span class="dkey">
+                    <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter
+                  </span>
+                )}
+              </div>
+              <div class="float fbands" role="group" aria-label={view === 'det' ? 'Detectors' : 'Spectral bands'}>
+                {view === 'det'
+                  ? DETECTORS.map((d, i) => (
+                      <button
+                        key={i}
+                        class={`bchip ${dets.includes(i + 1) ? 'on' : ''}`}
+                        style={{ '--c': `hsl(${d.hue},80%,60%)` }}
+                        aria-pressed={dets.includes(i + 1)}
+                        onClick={() => toggleDet(i + 1)}
+                        title={`Detector D${i + 1}: ${d.name}, ${d.range}`}
+                      >
+                        <b>D{i + 1}</b>
+                        <em>{d.range}</em>
+                      </button>
+                    ))
+                  : BANDS.map((bd) => (
+                      <button
+                        key={bd.key}
+                        class={`bchip ${bands.includes(bd.key) ? 'on' : ''}`}
+                        style={{ '--c': `hsl(${bd.hue},80%,60%)` }}
+                        aria-pressed={bands.includes(bd.key)}
+                        onClick={() => toggleBand(bd.key)}
+                        data-testid={`band-${bd.key}`}
+                        title={`${bd.name}: ${bd.band}`}
+                      >
+                        <i class="dot" />
+                        <b>{bd.name}</b>
+                      </button>
+                    ))}
+                <button class="mini" onClick={() => set(view === 'det' ? { dets: null } : { bands: null })} title="Switch every one on">
+                  ALL
+                </button>
+                <button
+                  class="mini"
+                  onClick={() => set(view === 'det' ? { dets: '1' } : { bands: BANDS[0]!.key })}
+                  title={view === 'det' ? 'Only D1' : 'Only Starlight'}
+                >
+                  NONE
+                </button>
+              </div>
             </div>
           </div>
-          <div class="vbottom" role="group" aria-label={view === 'det' ? 'Detectors' : 'Spectral bands'}>
-            {view === 'det'
-              ? DETECTORS.map((d, i) => (
-                  <button
-                    key={i}
-                    class={`bchip ${dets.includes(i + 1) ? 'on' : ''}`}
-                    style={{ '--c': `hsl(${d.hue},80%,60%)` }}
-                    aria-pressed={dets.includes(i + 1)}
-                    onClick={() => toggleDet(i + 1)}
-                    title={`Detector D${i + 1}: ${d.name}, ${d.range}`}
-                  >
-                    <b>D{i + 1}</b>
-                    <em>{d.range}</em>
-                  </button>
-                ))
-              : BANDS.map((bd) => (
-                  <button
-                    key={bd.key}
-                    class={`bchip ${bands.includes(bd.key) ? 'on' : ''}`}
-                    style={{ '--c': `hsl(${bd.hue},80%,60%)` }}
-                    aria-pressed={bands.includes(bd.key)}
-                    onClick={() => toggleBand(bd.key)}
-                    data-testid={`band-${bd.key}`}
-                    title={`${bd.name}: ${bd.band}`}
-                  >
-                    <span class="ti" dangerouslySetInnerHTML={{ __html: icon(bd.icon, 14) }} />
-                    <b>{bd.name}</b>
-                  </button>
-                ))}
-            <span class="bchip-acts">
-              <button class="lnk" onClick={() => set(view === 'det' ? { dets: null } : { bands: null })} title="Switch every one on">
-                All
+          <div class="tbar">
+            <button
+              class="play"
+              onClick={() => {
+                setFrame(null);
+                setPlaying(!playing);
+              }}
+              title="Play / pause (Space)"
+              dangerouslySetInnerHTML={{ __html: icon(playing && frame === null ? 'pause' : 'play', 16) }}
+            />
+            <div class="seg sm scale" role="group" aria-label="Time scale">
+              <button
+                class={film === null ? 'on' : ''}
+                aria-pressed={film === null}
+                onClick={toMonths}
+                title="Months: the passes (seasons) of the field, about six months apart: stars that move over the year"
+                data-testid="scale-months"
+              >
+                Months
               </button>
               <button
-                class="lnk"
-                onClick={() => set(view === 'det' ? { dets: '1' } : { bands: BANDS[0]!.key })}
-                title={view === 'det' ? 'Only D1' : 'Only Starlight'}
+                class={film !== null ? 'on' : ''}
+                aria-pressed={film !== null}
+                onClick={toDays}
+                disabled={!passes.length && film === null}
+                title="Days: the visits inside the pass shown, a few hours to days apart: asteroids hop from visit to visit"
+                data-testid="scale-days"
               >
-                None
+                Days
               </button>
-            </span>
+            </div>
+            <div class="seg sm scale" role="group" aria-label="Time">
+              {(
+                [
+                  ['loop', 'eye', 'Blink', 'Blink: seasons play one after another. Look for sources that move or vary'],
+                  [
+                    'diff',
+                    'plus-minus',
+                    'Difference',
+                    'Difference against season 1: a real change is shown (magenta brighter, cyan fainter)',
+                  ],
+                  ['sum', 'sigma', 'Co-add', 'Co-add all seasons into one frame: the faintest sources emerge'],
+                ] as const
+              ).map(([k, ico, n, tip]) => (
+                <button
+                  key={k}
+                  class={time === k && film === null ? 'on' : ''}
+                  title={film !== null ? `${tip} (Months scale only)` : tip}
+                  disabled={film !== null}
+                  onClick={() => set({ time: k === 'loop' ? null : k })}
+                  data-testid={`time-${k}`}
+                >
+                  <span dangerouslySetInnerHTML={{ __html: icon(ico, 14) }} style={{ display: 'contents' }} />
+                  {n}
+                </button>
+              ))}
+            </div>
+            <div class="tl-mid">
+              {film === null ? (
+                <>
+                  <div class="tl-labels">
+                    {passes.map((q, i) => (
+                      <span
+                        key={q.index}
+                        class={frameIndex === q.index && time !== 'sum' ? 'on' : ''}
+                        style={{
+                          left: passes.length > 1 ? `${(i / (passes.length - 1)) * 100}%` : '0%',
+                          transform: `translateX(${i === 0 ? 0 : i === passes.length - 1 ? -100 : -50}%)`,
+                        }}
+                        onClick={() => {
+                          setPlaying(false);
+                          setFrame(q.index);
+                        }}
+                      >
+                        {season(q.mjd_mid)}
+                      </span>
+                    ))}
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, passes.length - 1)}
+                    step={1}
+                    value={frameIndex}
+                    aria-label="Season"
+                    onInput={(e) => {
+                      setPlaying(false);
+                      setFrame(Number((e.target as HTMLInputElement).value));
+                    }}
+                  />
+                </>
+              ) : (
+                <>
+                  <div class="tl-labels ticks">
+                    {(filmData?.meta.frames ?? []).map((fr, i, all) => {
+                      const mid = (all.length - 1) >> 1;
+                      const label = i === 0 || i === all.length - 1 || (i === mid && all.length > 4);
+                      return (
+                        <span
+                          key={i}
+                          class={`${visit === i ? 'on' : ''} ${label ? '' : 'tick'}`}
+                          style={{
+                            left: all.length > 1 ? `${(i / (all.length - 1)) * 100}%` : '0%',
+                            transform: `translateX(${i === 0 ? 0 : i === all.length - 1 ? -100 : -50}%)`,
+                          }}
+                          title={`visit ${i + 1}: ${utc(fr.mjd)} · D${fr.det} · ${fr.exposures} exposures`}
+                          onClick={() => {
+                            setPlaying(false);
+                            setFrame(i);
+                          }}
+                        >
+                          {label ? mjdToDate(fr.mjd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' }) : '·'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(0, nVisits - 1)}
+                    step={1}
+                    value={frame ?? visit}
+                    aria-label="Visit"
+                    disabled={!filmData}
+                    onInput={(e) => {
+                      setPlaying(false);
+                      setFrame(Number((e.target as HTMLInputElement).value));
+                    }}
+                  />
+                </>
+              )}
+            </div>
+            <select
+              class="inp spd"
+              value={String(speed)}
+              onChange={(e) => setSpeed(Number((e.target as HTMLSelectElement).value))}
+              title={`Playback speed ([ and ] change it); 1× = ${HOLD_MS + FADE_MS} ms a season`}
+            >
+              {[0.25, 0.5, 1, 2, 4].map((v) => (
+                <option value={String(v)}>{`${v}×`}</option>
+              ))}
+            </select>
           </div>
         </div>
         <aside class="panel">
@@ -1886,7 +2167,8 @@ export function Lab({ route }: { route: Route }) {
           </div>
           {tab === 'ctl' && (
             <div class="pbody">
-              <section class="aim">
+              <section class="psec">
+                <div class="psh">Place</div>
                 <div class="coords">
                   <div class="field">
                     <label for="raIn">RA</label>
@@ -1914,169 +2196,124 @@ export function Lab({ route }: { route: Route }) {
                   </div>
                 </div>
               </section>
-              <div class="vswitch">
-                {VIEWS.map((v) => (
-                  <button
-                    key={v.id}
-                    class={v.id === view && film === null ? 'on' : ''}
-                    title={v.tip}
-                    onClick={() =>
-                      set({
-                        view: v.id === 'picture' ? null : v.id,
-                        film: null,
-                      })
-                    }
-                    data-testid={`view-${v.id}`}
-                  >
-                    <span dangerouslySetInnerHTML={{ __html: v.icon }} style={{ display: 'contents' }} />
-                    <span>
-                      <b>{v.name}</b>
-                    </span>
-                  </button>
-                ))}
-              </div>
-              <div class="seg" role="group" aria-label="Time">
-                {(
-                  [
-                    ['loop', 'eye', 'Blink', 'Blink: seasons play one after another. Look for sources that move or vary'],
-                    [
-                      'diff',
-                      'plus-minus',
-                      'Difference',
-                      'Difference against season 1: per-pixel significance, |z| > 4 (cyan fainter, magenta brighter)',
-                    ],
-                    ['sum', 'sigma', 'Co-add', 'Co-add all seasons into one frame: the faintest sources emerge'],
-                  ] as const
-                ).map(([k, ico, n, tip]) => (
-                  <button
-                    key={k}
-                    class={time === k && film === null ? 'on' : ''}
-                    title={film !== null ? `${tip} (Months scale only)` : tip}
-                    disabled={film !== null}
-                    onClick={() => set({ time: k === 'loop' ? null : k })}
-                    data-testid={`time-${k}`}
-                  >
-                    <span dangerouslySetInnerHTML={{ __html: icon(ico, 16) }} style={{ display: 'contents' }} />
-                    {n}
-                  </button>
-                ))}
-              </div>
-              {time === 'diff' && (
-                <div class="diffkey">
-                  <span>
-                    <span class="sw" style={{ background: 'var(--magenta)' }} />
-                    brighter
-                  </span>
-                  <span>
-                    <span class="sw" style={{ background: 'var(--cyan)' }} />
-                    fainter
-                  </span>
+              <section class="psec">
+                <div class="psh">View</div>
+                <div class="seg sm" role="group" aria-label="View">
+                  {VIEWS.map((v) => (
+                    <button
+                      key={v.id}
+                      class={v.id === view && film === null ? 'on' : ''}
+                      title={v.tip}
+                      onClick={() => set({ view: v.id === 'picture' ? null : v.id, film: null })}
+                      data-testid={`view-${v.id}`}
+                    >
+                      <span dangerouslySetInnerHTML={{ __html: v.icon }} style={{ display: 'contents' }} />
+                      {v.name}
+                    </button>
+                  ))}
                 </div>
-              )}
-              <div class="dgroup">
-                <div class="sechead">
-                  <span class="h2">Display</span>
+              </section>
+              <section class="psec">
+                <div class="psh">Display</div>
+                <div class="psub">On the picture</div>
+                <div class="swgrid">
+                  {sw(
+                    'ringChk',
+                    'Marker',
+                    'Marker: a ring and the name of the test target, of the selected source and of the known asteroids, at their place on the date shown',
+                    opts.marker,
+                    (v) => set({ marker: v ? null : '0' }),
+                  )}
+                  {sw(
+                    'trailChk',
+                    'Trajectory',
+                    'Trajectory: the path of the test target (or of a found mover) over the passes, a dot at each pass date',
+                    opts.trajectory,
+                    (v) => set({ traj: v ? null : '0' }),
+                  )}
+                  {sw(
+                    'ringsChk',
+                    'Speed rings',
+                    'Speed rings: how far a body of 1, 3, 10, 30, 100 or 300 ″/yr moves between the first and the last pass (″/h between the first and last visit in Days), centred on the selected source',
+                    opts.rings,
+                    (v) => set({ rings: v ? '1' : null }),
+                  )}
+                  {sw(
+                    'movChk',
+                    'Mover rings',
+                    'Mover rings: a ring and a path for every track a search found (between passes in Months, inside the pass in Days)',
+                    opts.movers && (film === null || (ft.state === 'ok' && ft.tracks.length > 0)),
+                    film === null || (ft.state === 'ok' && ft.tracks.length > 0) ? (v) => set({ movers: v ? null : '0' }) : null,
+                    ft.state === 'ok'
+                      ? 'the asteroid search found no track in this pass'
+                      : 'the asteroid search of this pass has not finished yet',
+                    ft.state === 'ok' ? 'none here' : '↓ search',
+                  )}
+                  {sw(
+                    'anoChk',
+                    'Anomalies',
+                    'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
+                    opts.anomalies && !!an?.result?.anomalies.length,
+                    an?.result?.anomalies.length ? (v) => set({ ano: v ? null : '0' }) : null,
+                    an?.result
+                      ? 'the anomaly search found no anomaly in this field'
+                      : 'the anomaly search of this field has not finished yet',
+                    an?.result ? 'none here' : '↓ search',
+                  )}
+                  {sw(
+                    'maskChk',
+                    'Artifacts',
+                    'Artifacts: red where the SPHEREx pipeline flagged the pixel in many exposures of the season shown',
+                    opts.artifacts,
+                    wallView ? null : (v) => set({ art: v ? '1' : null }),
+                    'shown on the Picture and in Days, not on the walls',
+                  )}
+                  {sw(
+                    'refChk',
+                    'Reference',
+                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
+                    opts.reference,
+                    (v) => set({ ref: v ? '1' : null }),
+                  )}
                 </div>
-                <div class="dchecks">
-                  {dchk(
+                <div class="psub">Image</div>
+                <div class="swgrid">
+                  {sw(
                     'boostChk',
-                    'sun',
                     'Brighten',
                     'Brighten: a lower white point, so faint sources stand out (bright stars saturate)',
                     opts.boost,
                     (v) => set({ boost: v ? '1' : null }),
                   )}
-                  {dchk(
+                  {sw(
                     'satChk',
-                    'sparkle',
                     'White cores',
                     'Saturated cores white: pixels saturated in most exposures are drawn white, never as missing data',
                     opts.sat,
                     film !== null ? null : (v) => set({ sat: v ? null : '0' }),
-                    'the visits of the Days scale carry no saturation layer: their brightest pixels are drawn at full white',
+                    'the visits of the Days scale carry no saturation layer: their cores are always drawn white',
                   )}
-                  {dchk(
-                    'ringChk',
-                    'target',
-                    'Marker',
-                    'Marker: a ring and the name of the test target in the field, at its place on the date of the season shown',
-                    opts.marker,
-                    (v) => set({ marker: v ? null : '0' }),
-                  )}
-                  {dchk(
-                    'ringsChk',
-                    'target',
-                    'Speed rings',
-                    'Speed rings: 1, 3, 10, 30, 100 and 300 ″/yr: how far a body of that speed moves between the first and the last season',
-                    opts.rings,
-                    (v) => set({ rings: v ? '1' : null }),
-                  )}
-                  {dchk(
-                    'trailChk',
-                    'path',
-                    'Trajectory',
-                    'Trajectory: the path of the test target over the seasons, a dot at each season’s date',
-                    opts.trajectory,
-                    (v) => set({ traj: v ? null : '0' }),
-                  )}
-                  {dchk(
-                    'movChk',
-                    'binoculars',
-                    'Mover rings',
-                    'Mover rings: a ring and a path for every track the search between passes found',
-                    opts.movers,
-                    (v) => set({ movers: v ? null : '0' }),
-                  )}
-                  {dchk(
-                    'anoChk',
-                    'sparkle',
-                    'Anomalies',
-                    'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
-                    opts.anomalies && !!an?.result,
-                    an?.result ? (v) => set({ ano: v ? null : '0' }) : null,
-                    'no anomaly search has been run for this field yet: “Find spectral anomalies here” runs it',
-                  )}
-                  {dchk(
-                    'maskChk',
-                    'warning',
-                    'Artifacts',
-                    'Artifacts: red where the SPHEREx pipeline flagged the pixel in many exposures of the season shown',
-                    opts.artifacts,
-                    wallView ? null : (v) => set({ art: v ? '1' : null }),
-                    'shown on the Picture (and the Days scale), not on the walls',
-                  )}
-                  {dchk(
-                    'morphChk',
-                    'waveform',
-                    'Interpolate',
-                    'Interpolate: cross-fade between seasons instead of stepping',
-                    opts.morph,
-                    (v) => set({ morph: v ? '1' : null }),
-                  )}
-                  {dchk(
-                    'refChk',
-                    'scan',
-                    'Reference',
-                    'Reference: the DSS2 red picture of the same place (1985–1999), with the test target where it was then',
-                    opts.reference,
-                    (v) => set({ ref: v ? '1' : null }),
-                  )}
-                  {dchk(
+                  {sw(
                     'sharpChk',
-                    'sparkle',
                     'Sharpen',
                     'Sharpen: faint stars crisper on screen; boost only, the same gain in every channel (colours never change), never near saturated cores',
                     opts.sharp,
                     (v) => set({ sharp: v ? null : '0' }),
                   )}
+                  {sw(
+                    'morphChk',
+                    'Interpolate',
+                    'Interpolate: cross-fade between passes (or visits) instead of stepping (seen while playing)',
+                    opts.morph,
+                    (v) => set({ morph: v ? '1' : null }),
+                  )}
                 </div>
-                <div class="seg" role="group" aria-label="Blend">
+                <div class="seg sm" role="group" aria-label="Blend">
                   <button
                     class={opts.mono ? '' : 'on'}
                     onClick={() => set({ blend: null })}
                     title="Each band keeps its colour; bands are screen-blended"
                   >
-                    <span dangerouslySetInnerHTML={{ __html: icon('palette', 16) }} style={{ display: 'contents' }} />
                     Colour blend
                   </button>
                   <button
@@ -2084,12 +2321,6 @@ export function Lab({ route }: { route: Route }) {
                     onClick={() => set({ blend: 'mono' })}
                     title="Sum the bands into one grayscale image"
                   >
-                    <span
-                      dangerouslySetInnerHTML={{
-                        __html: icon('circle-half', 16),
-                      }}
-                      style={{ display: 'contents' }}
-                    />
                     Mono sum
                   </button>
                 </div>
@@ -2111,9 +2342,7 @@ export function Lab({ route }: { route: Route }) {
                     class="inp"
                     value={opts.trim}
                     onChange={(e) =>
-                      set({
-                        trim: (e.target as HTMLSelectElement).value === 'fixed' ? null : (e.target as HTMLSelectElement).value,
-                      })
+                      set({ trim: (e.target as HTMLSelectElement).value === 'fixed' ? null : (e.target as HTMLSelectElement).value })
                     }
                     title="Trim of the bright end: a fixed white point, or the field's own 99.9th / 99.5th percentile"
                   >
@@ -2123,212 +2352,36 @@ export function Lab({ route }: { route: Route }) {
                     <option value="adaptive">Trim adaptive</option>
                   </select>
                 </div>
-                <label
-                  class="archsw"
-                  title="Archive images: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx seasons"
-                >
-                  <input
-                    type="checkbox"
-                    checked={opts.archive}
-                    disabled={film !== null}
-                    onChange={(e) => set({ arch: (e.target as HTMLInputElement).checked ? '1' : null })}
-                  />
-                  Archive images
-                  <span class="mono-s">{ARCHIVE.length} · 1985–2010</span>
-                </label>
-                <div class="dacts">
-                  <select
-                    class="inp"
-                    value={String(speed)}
-                    onChange={(e) => setSpeed(Number((e.target as HTMLSelectElement).value))}
-                    title="Playback speed: the time each season is shown ([ and ] change it)"
-                  >
-                    {[0.25, 0.5, 1, 2, 4].map((v) => (
-                      <option value={String(v)}>{`Speed ${v}× · ${Math.round((HOLD_MS + FADE_MS) / v)} ms`}</option>
-                    ))}
-                  </select>
-                  <button
-                    class="lnk"
-                    onClick={() => {
-                      const done = (t: string) => {
-                        setCopied(t);
-                        setTimeout(() => setCopied(''), 2000);
-                      };
-                      try {
-                        navigator.clipboard.writeText(location.href).then(
-                          () => done('Copied'),
-                          () => done('Copy blocked: use the address bar'),
-                        );
-                      } catch {
-                        done('Copy blocked: use the address bar');
-                      }
-                    }}
-                    title="Copy a link to this exact view"
-                  >
-                    <span dangerouslySetInnerHTML={{ __html: icon('link', 16) }} style={{ display: 'contents' }} />
-                    {copied || 'Copy link'}
-                  </button>
-                  <button
-                    class="lnk"
-                    disabled={recording || film !== null || !passes.length}
-                    onClick={() => void recordVideo()}
-                    title="Download one full cycle of the seasons as a video (WebM)"
-                  >
-                    <span
-                      dangerouslySetInnerHTML={{
-                        __html: icon('download-simple', 16),
-                      }}
-                      style={{ display: 'contents' }}
-                    />
-                    {recording ? 'Recording…' : 'Download video'}
-                  </button>
-                </div>
-              </div>
-              <div class="searches">
-                <div class="sechead">
-                  <span class="h2">Searches</span>
-                </div>
-                {an?.result && (
-                  <>
-                    <div class="srow" title="Spectral anomaly map: every source's spectrum against the ordinary star of this field">
-                      <b>Anomalies</b>
-                      <span class="st">
-                        {an.result.reason ||
-                          `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)} (median ${an.result.median?.toFixed(2)})`}
-                      </span>
-                    </div>
-                    {an.result.anomalies.map((a) => (
-                      <button key={a.n} class="anrow" onClick={() => pickAnomaly(a.n)} title={driverWords(a).join('; ')}>
-                        <b>Anomaly {a.n}</b>
-                        <span class="t">
-                          {a.identified?.simbad?.name ??
-                            (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')}
-                        </span>
-                        <span class="faint">score {a.score.toFixed(1)}</span>
-                      </button>
-                    ))}
-                  </>
+                {sw(
+                  'archChk',
+                  `Archive images · ${ARCHIVE.length} · 1985–2010`,
+                  'Archive images: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
+                  opts.archive,
+                  film !== null ? null : (v) => set({ arch: v ? '1' : null }),
+                  'Months scale only',
                 )}
-                <MoversRows mv={mv} names={trackNames} onPick={pickTrack} />
-                <div
-                  class="srow"
-                  title="Red sources: bright at 3.8–5 µm and faint at 1.1–1.6 µm, against the field's own stars (cold brown dwarfs and the like)"
-                >
-                  <b>Red sources</b>
-                  <span class="st">
-                    {!redv
-                      ? '3.8–5 µm against 1.1–1.6 µm'
-                      : redv.state === 'waiting'
-                        ? redv.error === 'busy'
-                          ? 'measuring…'
-                          : 'starts when the field is finished'
-                        : redv.state === 'failed'
-                          ? `failed: ${redv.error}`
-                          : `${redv.result!.red.length} of ${redv.result!.sources} sources far redder than the field's stars`}
-                  </span>
-                  <button class="btn sm" disabled={!meta || redv?.state === 'done'} onClick={() => void findRed()} data-testid="red">
-                    Find
-                  </button>
-                </div>
-                {redv?.result?.red.map((x, k) => (
-                  <button
-                    key={k}
-                    class="anrow"
-                    onClick={() => pickRed(k)}
-                    title="Select this source: its spectrum is measured in every exposure"
-                  >
-                    <b>Red source {k + 1}</b>
-                    <span class="t">
-                      {redv.result!.median_colour
-                        ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
-                        : ''}
-                      {x.moves && x.pmra != null ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr` : ''}
-                    </span>
-                    <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
-                  </button>
-                ))}
-                {film !== null && filmData && ft.state === 'ok' && (
-                  <FilmTracks
-                    compact
-                    tracks={ft.tracks}
-                    control={ft.control}
-                    nVisits={filmData.meta.frames.length}
-                    fov={fov}
-                    sel={trackSel}
-                    onSel={setTrackSel}
-                    trail={false}
-                    onTrail={() => {}}
-                    blink={false}
-                    onBlink={() => {}}
-                    onAround={(t, f) => {
-                      const g = filmData.meta.grid;
-                      const pt = t.pts[(t.pts.length - 1) >> 1]!;
-                      const cosd = Math.cos((g.dec0 * Math.PI) / 180);
-                      const nra = (g.ra0 - ((pt.x + 0.5 - g.n / 2) * g.step_arcsec) / 3600 / cosd + 360) % 360;
-                      const ndec = g.dec0 - ((pt.y + 0.5 - g.n / 2) * g.step_arcsec) / 3600;
-                      set({ ra: nra.toFixed(5), dec: ndec.toFixed(5), fov: String(f) });
-                    }}
-                  />
-                )}
-                {film !== null && filmBodies && (
-                  <>
-                    <div
-                      class="srow"
-                      title="Known solar-system bodies JPL predicts in this field during the pass (Small-Body Identification + Horizons); seen = the film's motion map shows something at the predicted place on that visit"
-                    >
-                      <b>Known bodies</b>
-                      <span class="st">
-                        {filmBodies.state === 'running'
-                          ? 'asking JPL which bodies cross the field…'
-                          : filmBodies.state === 'unavailable'
-                            ? 'JPL not reachable; asked again next time'
-                            : `${filmBodies.bodies.length} predicted (V ≤ ${filmBodies.vLimit}) · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen on at least one visit · ${filmBodies.bodies.filter((b) => (b.stackZ ?? 0) >= 5).length} stand out when their visits are stacked along JPL's track (z ≥ 5)`}
-                      </span>
-                    </div>
-                    {filmBodies.bodies.some((b) => b.name.includes('3I/ATLAS')) && <NeossatCard />}
-                    {[...filmBodies.bodies]
-                      .sort((a, b) => (b.stackZ ?? 0) - (a.stackZ ?? 0) || (a.v ?? 99) - (b.v ?? 99))
-                      .slice(0, 10)
-                      .map((b) => (
-                        <div key={b.name} class="mvrow body" style={{ cursor: 'default' }}>
-                          <b>
-                            {b.name} · V {b.v?.toFixed(1) ?? '—'}
-                          </b>
-                          <span class="faint">
-                            seen {b.seen.length} of {b.expected.length} film visits
-                            {b.stackZ != null && b.stackN
-                              ? ` · along its track z ${b.stackZ.toFixed(1)} (chance ${b.controlZ?.toFixed(1)})`
-                              : ''}
-                            {b.planes != null ? ` · in ${b.planes} detector images` : ''}
-                          </span>
-                          <span class="bodylinks">
-                            <a
-                              target="_blank"
-                              rel="noopener"
-                              href={`https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}`}
-                              title="The body's orbit and data at JPL's Small-Body Database"
-                            >
-                              JPL
-                            </a>
-                            <a
-                              target="_blank"
-                              rel="noopener"
-                              href={ssoisUrl(b.name, filmMjd)}
-                              title="Other telescopes' images of this body around the same dates (CADC's Solar System Object Image Search)"
-                            >
-                              SSOIS
-                            </a>
-                          </span>
-                        </div>
-                      ))}
-                  </>
-                )}
-              </div>
+              </section>
+              <section class="psec">
+                <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
+                {passes.length >= 3 && <DeepSumPanel ra={ra} dec={dec} fov={fov} passes={passes.map((q) => q.mjd_mid)} />}
+                {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
+              </section>
             </div>
           )}
           {tab === 'obj' && (
             <div class="pbody">
-              {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
+              {pairSel !== null && pairs[pairSel] ? (
+                <PairCard
+                  pair={pairs[pairSel]!}
+                  mjds={pairMjds}
+                  onSpectrum={(pra, pdec) => {
+                    setSelAn(null);
+                    setSel({ ra: pra, dec: pdec });
+                    setTab('spec');
+                  }}
+                  onBack={() => setPairSel(null)}
+                />
+              ) : selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                 <>
                   {portraitOf(
                     an.result.anomalies.find((a) => a.n === selAn)!,
@@ -2388,148 +2441,176 @@ export function Lab({ route }: { route: Route }) {
               <SpectrumTab src={sel} />
             </div>
           )}
-          <div class="panel-foot">
-            {film === null && view === 'picture' && (
-              <>
+          <div class="sbar">
+            <div class="sbh">
+              <span>Searches</span>
+              <em>start by themselves</em>
+            </div>
+            {srow(
+              'Movers',
+              !mv ? 0 : mv.state === 'done' ? 1 : mv.state === 'failed' ? 0 : null,
+              !mv ? 'waiting' : mv.state === 'done' ? `${mvr?.tracks.length ?? 0} found` : mv.state === 'failed' ? 'failed' : 'searching',
+              'Between passes: sources that move in a straight line over the passes (3–120 ″/yr), checked against Gaia DR3',
+              'search-movers',
+            )}
+            <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
+            {pairs.length > 0 &&
+              pairs.map((pr, i) => (
+                <PairButton
+                  key={i}
+                  pair={pr}
+                  on={pairSel === i}
+                  onClick={() => {
+                    setPairSel(i);
+                    setTab('obj');
+                  }}
+                />
+              ))}
+            {srow(
+              `Asteroids${passMeta ? ` · pass of ${season(passMeta.mjd_mid)}` : ''}`,
+              ast.state === 'done' ? 1 : ast.state === 'none' || ast.state === 'failed' || ast.state === 'idle' ? 0 : ast.frac,
+              ast.state === 'done'
+                ? `${ast.tracks?.length ?? 0} found`
+                : ast.state === 'none'
+                  ? 'too few visits'
+                  : ast.state === 'failed'
+                    ? 'failed'
+                    : ast.state === 'idle'
+                      ? 'waiting'
+                      : pct(ast.frac) !== null
+                        ? `${pct(ast.frac)} %`
+                        : 'running',
+              ast.text ||
+                'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
+              'search-asteroids',
+            )}
+            {ast.state === 'done' &&
+              (ast.tracks ?? []).slice(0, 8).map((t, i) => (
                 <button
-                  class="btn primary wide"
-                  disabled={!an || an.state === 'waiting' || an.state === 'running' || an.state === 'done'}
-                  onClick={() => void startAnomalies()}
-                  title={
-                    an?.state === 'waiting'
-                      ? 'Starts once the field is finished'
-                      : 'Find spectral anomalies here: sources whose spectrum differs from an ordinary star of the field. Every exposure of the field is measured; a 20′ field takes a few minutes'
-                  }
-                  data-testid="anomalies"
+                  key={i}
+                  class="mvrow"
+                  onClick={() => {
+                    setTrackSel(i);
+                    if (film === null) toDays();
+                    setFrame(t.pts[0]?.f ?? 0);
+                    setPlaying(false);
+                  }}
+                  title="Show this track in the Days scale (its first visit)"
                 >
-                  <span dangerouslySetInnerHTML={{ __html: icon('sparkle', 16) }} style={{ display: 'contents' }} />
-                  {an?.state === 'running'
-                    ? `Finding anomalies · ${an.done} of ${an.total || '…'} exposures`
-                    : 'Find spectral anomalies here'}
+                  <b>{t.known ? t.known.name : `Track ${i + 1}`}</b>
+                  <span>
+                    {t.rate.toFixed(1)}″/h · {t.n} visits
+                  </span>
+                  <span class="faint">{t.known ? 'known' : t.verified ? 'verified' : 'lead'}</span>
                 </button>
-                {an?.state === 'running' && (
-                  <div class="prog thin">
-                    <i style={{ width: `${an.total ? (100 * an.done) / an.total : 3}%` }} />
-                  </div>
-                )}
-                {an?.state === 'failed' && <div class="mono-s">Anomaly search failed: {an.error}</div>}
+              ))}
+            {srow(
+              'Red sources',
+              !redv ? 0 : redv.state === 'done' ? 1 : redv.state === 'failed' ? 0 : null,
+              !redv
+                ? 'waiting'
+                : redv.state === 'done'
+                  ? `${redv.result!.red.length} found`
+                  : redv.state === 'failed'
+                    ? 'failed'
+                    : 'measuring',
+              'Red sources: bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (cold brown dwarfs and the like)',
+              'search-red',
+            )}
+            {redv?.result?.red.map((x, k) => (
+              <button
+                key={k}
+                class="anrow"
+                onClick={() => pickRed(k)}
+                title="Select this source: its spectrum is measured in every exposure"
+              >
+                <b>Red source {k + 1}</b>
+                <span class="t">
+                  {redv.result!.median_colour
+                    ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
+                    : ''}
+                  {x.moves && x.pmra != null ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr` : ''}
+                </span>
+                <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
+              </button>
+            ))}
+            {srow(
+              'Spectral anomalies',
+              anFrac,
+              !an
+                ? 'waiting'
+                : an.state === 'done'
+                  ? an.result?.reason
+                    ? 'too few spectra'
+                    : `${an.result?.anomalies.length ?? 0} found`
+                  : an.state === 'running'
+                    ? `${pct(anFrac) ?? 0} %`
+                    : an.state === 'failed'
+                      ? 'failed'
+                      : 'waiting',
+              an?.result?.reason ||
+                (an?.result
+                  ? `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)} (median ${an.result.median?.toFixed(2)})`
+                  : 'Every source of the field measured in every exposure; spectra unlike the field’s ordinary star'),
+              'search-anomalies',
+            )}
+            {an?.result?.anomalies.map((a) => (
+              <button key={a.n} class="anrow" onClick={() => pickAnomaly(a.n)} title={driverWords(a).join('; ')}>
+                <b>Anomaly {a.n}</b>
+                <span class="t">
+                  {a.identified?.simbad?.name ??
+                    (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')}
+                </span>
+                <span class="faint">score {a.score.toFixed(1)}</span>
+              </button>
+            ))}
+            {film !== null && filmBodies && (
+              <>
+                <div
+                  class="sline"
+                  title="Known asteroids and comets JPL predicts in this field during the pass; seen = the visit shows something at the predicted place"
+                >
+                  <b>Known bodies</b>
+                  <span class="sval wide">
+                    {filmBodies.state === 'running'
+                      ? 'asking JPL…'
+                      : filmBodies.state === 'unavailable'
+                        ? 'JPL not reachable'
+                        : `${filmBodies.bodies.length} predicted · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen`}
+                  </span>
+                </div>
+                {filmBodies.bodies.some((b) => b.name.includes('3I/ATLAS')) && <NeossatCard />}
+                {[...filmBodies.bodies]
+                  .sort((a, b) => (b.stackZ ?? 0) - (a.stackZ ?? 0) || (a.v ?? 99) - (b.v ?? 99))
+                  .slice(0, 6)
+                  .map((b) => (
+                    <div key={b.name} class="mvrow body" style={{ cursor: 'default' }}>
+                      <b>
+                        {b.name} · V {b.v?.toFixed(1) ?? '—'}
+                      </b>
+                      <span class="faint">
+                        seen {b.seen.length} of {b.expected.length} visits
+                        {b.stackZ != null && b.stackN
+                          ? ` · along its track z ${b.stackZ.toFixed(1)} (chance ${b.controlZ?.toFixed(1)})`
+                          : ''}
+                        {b.planes != null ? ` · in ${b.planes} detector images` : ''}
+                      </span>
+                      <span class="bodylinks">
+                        <a
+                          target="_blank"
+                          rel="noopener"
+                          href={`https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}`}
+                        >
+                          JPL
+                        </a>
+                        <a target="_blank" rel="noopener" href={ssoisUrl(b.name, filmMjd)}>
+                          SSOIS
+                        </a>
+                      </span>
+                    </div>
+                  ))}
               </>
             )}
-            <div class="prow">
-              <button
-                class="play"
-                onClick={() => {
-                  setFrame(null);
-                  setPlaying(!playing);
-                }}
-                title="Play / pause (Space)"
-                dangerouslySetInnerHTML={{
-                  __html: icon(playing && frame === null ? 'pause' : 'play', 18),
-                }}
-              />
-              <div class="seg sm scale" role="group" aria-label="Time scale">
-                <button
-                  class={film === null ? 'on' : ''}
-                  aria-pressed={film === null}
-                  onClick={toMonths}
-                  title="Months: the passes (seasons) of the field, about six months apart: stars that move over the year"
-                  data-testid="scale-months"
-                >
-                  Months
-                </button>
-                <button
-                  class={film !== null ? 'on' : ''}
-                  aria-pressed={film !== null}
-                  onClick={toDays}
-                  disabled={!passes.length && film === null}
-                  title="Days: the visits inside the pass shown, a few hours to days apart: asteroids hop from visit to visit"
-                  data-testid="scale-days"
-                >
-                  Days
-                </button>
-              </div>
-              <div class="tl-mid">
-                {film === null ? (
-                  <>
-                    <div class="tl-labels">
-                      {passes.map((q, i) => (
-                        <span
-                          key={q.index}
-                          class={frameIndex === q.index && time !== 'sum' ? 'on' : ''}
-                          style={{
-                            left: passes.length > 1 ? `${(i / (passes.length - 1)) * 100}%` : '0%',
-                            transform: `translateX(${i === 0 ? 0 : i === passes.length - 1 ? -100 : -50}%)`,
-                          }}
-                          onClick={() => {
-                            setPlaying(false);
-                            setFrame(q.index);
-                          }}
-                        >
-                          {season(q.mjd_mid)}
-                        </span>
-                      ))}
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={Math.max(0, passes.length - 1)}
-                      step={1}
-                      value={frameIndex}
-                      aria-label="Season"
-                      onInput={(e) => {
-                        setPlaying(false);
-                        setFrame(Number((e.target as HTMLInputElement).value));
-                      }}
-                    />
-                  </>
-                ) : (
-                  <>
-                    <div class="tl-labels ticks">
-                      {(filmData?.meta.frames ?? []).map((fr, i, all) => {
-                        const mid = (all.length - 1) >> 1;
-                        const label = i === 0 || i === all.length - 1 || (i === mid && all.length > 4);
-                        return (
-                          <span
-                            key={i}
-                            class={`${visit === i ? 'on' : ''} ${label ? '' : 'tick'}`}
-                            style={{
-                              left: all.length > 1 ? `${(i / (all.length - 1)) * 100}%` : '0%',
-                              transform: `translateX(${i === 0 ? 0 : i === all.length - 1 ? -100 : -50}%)`,
-                            }}
-                            title={`visit ${i + 1}: ${utc(fr.mjd)} · D${fr.det} · ${fr.exposures} exposures`}
-                            onClick={() => {
-                              setPlaying(false);
-                              setFrame(i);
-                            }}
-                          >
-                            {label
-                              ? mjdToDate(fr.mjd).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })
-                              : '·'}
-                          </span>
-                        );
-                      })}
-                    </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={Math.max(0, nVisits - 1)}
-                      step={1}
-                      value={frame ?? visit}
-                      aria-label="Visit"
-                      disabled={!filmData}
-                      onInput={(e) => {
-                        setPlaying(false);
-                        setFrame(Number((e.target as HTMLInputElement).value));
-                      }}
-                    />
-                  </>
-                )}
-              </div>
-            </div>
-            <div class="status" data-testid="lab-status" title={film !== null ? daysStatus : status}>
-              {film !== null ? daysStatus : status}
-            </div>
-            <div class="readout" />
           </div>
         </aside>
       </div>

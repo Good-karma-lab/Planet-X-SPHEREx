@@ -147,7 +147,7 @@ vec3 diffColour(int k) {
 
 void main() {
   uv = uZoom.xy + (vuv - 0.5) * uZoom.z;
-  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { color = vec4(uNoData, 1.0); return; }
+  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) { color = vec4(0.0, 0.0, 0.0, 1.0); return; }  // beyond the field: black
   if (uTime == 2) {
     vec3 acc = vec3(0.0);
     for (int k = 0; k < 16; k++) { if (k >= uPasses) break; acc += passColour(k); }
