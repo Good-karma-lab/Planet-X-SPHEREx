@@ -29,6 +29,7 @@ from service.catalogue_check import check as catalogue_check
 from service.config import Config, load
 from service.context import CatalogueContext
 from service.coverage import coverage_map
+from service.findings import Findings
 from service.jobs.scheduler import Priority, Scheduler
 from service.known import Known
 from service.lightcurves import neowise as lc_neowise
@@ -46,6 +47,7 @@ from service.red import find_red_async
 from service.routes_dwarfs import make_dwarfs_router
 from service.routes_export import make_export_router
 from service.routes_extras import register as register_extras
+from service.routes_findings import make_findings_router
 from service.routes_known import make_known_router
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
@@ -95,6 +97,14 @@ class State:
         self.lightcurves: dict[tuple[float, float, int, int], dict[str, Any]] = {}
         self.identified: dict[tuple[float, float, int, int], dict[str, Any]] = {}
         self.coverage_lock = asyncio.Lock()
+        self.findings: Findings | None = None
+
+
+class _NoAnomalies:
+    """Stands in for the anomaly search when there is no exposure index (nothing to read from it)."""
+
+    def key_of(self, field_key: str) -> str:
+        return "none"
 
 
 def create_app(config: Config | None = None, scheduler: Scheduler | None = None, s3: S3 | None = None) -> FastAPI:
@@ -140,6 +150,10 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.scheduler.start()
         st.searched = Searched(st.store, cfg.store_dir, st.scheduler, st.movers, st.pairs, st.dwarfs)
         st.searched.prime()
+        st.findings = Findings(
+            st.store, cfg.store_dir, st.catalogue, st.movers, st.pairs, st.dwarfs, st.anomalies or _NoAnomalies(), writer=not STANDBY
+        )
+        st.findings.start()
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         warm_task = None
@@ -149,6 +163,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         yield
         if warm_task is not None:
             warm_task.cancel()
+        if st.findings is not None:
+            await st.findings.stop()
         await st.scheduler.stop()
         await st.s3.close()
         await st.hips.close()
@@ -396,6 +412,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_pairs_router(st))
     app.include_router(make_dwarfs_router(st))
     app.include_router(make_searched_router(st))
+    app.include_router(make_findings_router(st))
     app.include_router(make_export_router(st))
     app.include_router(make_planetx_router(st))
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
