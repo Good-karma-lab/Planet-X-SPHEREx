@@ -17,7 +17,6 @@ Every search on this site has a depth and a set of conditions under which it wor
 - Saturated stars have no SPHEREx spectrum, and RW Aurigae and R Draconis give no tracks for the same reason; the spectrum tab says so and shows the catalogue photometry instead.
 - A spectrum checked against 2MASS and WISE is checked on the stars we measured (a field star and ε Indi B); we have no statistic over many stars.
 - One pass of the search for bodies beyond Neptune finds a place but does not fix the distance; the link of several passes does.
-- The searches for bodies beyond Neptune found nothing above their bar in the Planet Nine fields we searched; the depth of each search is printed with its result on the Planet X page.
 - The quick look from the all-sky cube is a placeholder for a few seconds, from a 12.9 arcsecond pixel, and is never a measurement of a source.
 - The survey's own time sampling limits what the film shows: visits come a few times a day with gaps of days, so a body that crosses a field between visits is seen in few frames.
 

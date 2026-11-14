@@ -36,10 +36,6 @@ anomalous : score > median(score) + 6 * 1.4826 * MAD(score)       (the field's o
 fewer than 12 sources with a spectrum -> "an ordinary star of the field cannot be defined (12 needed)"
 ```
 
-**Result:** In the 20′ field of ε Indi, ε Indi B ranks first with a score of 13.8 against a threshold of 2.6 (the next source scores 4.6), driven by an excess at 3.9–4.3 µm of +40σ, the signature of a cold T dwarf. Source: docs/submission/project-page.md, docs/PROGRESS.md.
-
-**Result:** On a 60′ field near the ecliptic the first-ranked source among 93 spectra is a Seyfert 2 galaxy (LEDA 1266968): a galaxy does not look like a star. Source: docs/submission/project-page.md.
-
 [figure: anomaly-map | the spectral anomaly map of the ε Indi field: every source's score against the field's threshold, ε Indi B first]
 
 A blend, a variable star or a bad detector region can also make a spectrum odd, and a field made of one kind of star (a cluster) flags more sources; the passport shows which bins drive each case.

@@ -11,8 +11,6 @@ All numbers were obtained on 2026-11-14. A "live" source is an endpoint of the r
 | Motion of stars against Gaia DR3 | Barnard's Star 11.37 ± 0.47 ″/yr (Gaia 10.393, 2.1σ); ε Indi B 4.59 ± 0.49 ″/yr (Gaia 4.684, 0.2σ); WISE 0855−0714 7.93 ± 0.61 ″/yr (SIMBAD 8.15, −0.4σ) | live `/api/v1/movers` on 5′ fields; WISE 0855 from live `/api/v1/browndwarfs` |
 | Known asteroids found blind | 6 of the 8 known bodies brighter than V 19.1 with at least 4 frames in the 60′ ecliptic film of December 2025; 0 of 6 tracks unmatched | live `/api/v1/film/48c5bbb2c5e028b847075c51/tracks` and `/bodies` (JPL Small-Body Identification and Horizons) |
 | Chance controls | 0.0 chance tracks per field between passes (20 trials, five 5′ fields and ε Indi at 10′, 20′, 60′); in the film search 0.0 at 4 or more visits (12 trials) and 1.83 per trial at 3 or more | live `/api/v1/movers` and the film's search result |
-| Spectra against 2MASS and WISE | field star: 357 of 385 exposures, J 0.99, H 1.02, Ks 1.03, W1 0.985; ε Indi B: 415 of 445 exposures, J 0.92, H 0.94, Ks 0.98, W1 1.18 | `docs/PROGRESS.md`, `docs/submission/project-page.md`; ε Indi B on the live service |
-| Anomaly search | ε Indi B first in its 20′ field: score 13.8 against a threshold of 2.6 (next 4.6) | `docs/submission/project-page.md`, `docs/PROGRESS.md` |
 | Wavelength, index and engine | wavelength of a pixel: median difference 0.00008–0.00048 µm against IRSA's per-pixel calibration; PSF identical in 12 of 12 detector-release pairs; index of 1,628,230 files; the number of exposures that hold a body equals IRSA's Moving Object Search Tool for 4 of 4 asteroids | `docs/validation/` reports of 2026-11-14 |
 
 ## Motions, asteroids and chance
@@ -57,34 +55,6 @@ The 60′ ecliptic film of December 2025 (RA 169.8917°, Dec +4.3514°, 24 visit
 **Result:** with the moving sources of every pass put at random places and the linker re-run (20 trials), chance makes 0.0 tracks per field on all five 5′ fields and on ε Indi at 10′, 20′ and 60′. Source: live `/api/v1/movers`, 2026-11-14.
 
 **Result:** in the film search of the 60′ ecliptic field, scrambled candidate places (12 trials) make 1.83 chance tracks per trial with at least 3 visits and 0.0 with at least 4 visits, which is why a track needs at least 4 visits; the straight-line control (40 trials) makes 0.0 at 4 visits. Source: live `/api/v1/film/48c5bbb2c5e028b847075c51/tracks`, 2026-11-14.
-
-## Spectra and anomalies
-
-### Spectra agree with the catalogues
-
-The measured spectrum is averaged under the 2MASS J, H, Ks and WISE W1 filters (photon counting) and compared with the catalogue magnitude at the survey's epoch, using catalogue quality A or B only.
-
-**Result:** the field star 2MASS J17572542+0446559 gives a point in 357 of 385 exposures, and its spectrum is 0.99, 1.02, 1.03 and 0.985 of the catalogue flux in J, H, Ks and W1; in D2 it is 42 mJy against 39 mJy expected from J = 11.53. Source: `docs/PROGRESS.md`, `docs/submission/project-page.md`.
-
-**Result:** ε Indi B gives a point in 415 of 445 exposures, and its spectrum is 0.92, 0.94, 0.98 and 1.18 of the catalogue flux in J, H, Ks and W1. Source: live spectrum and catalogue check, the service team, 2026-11-14.
-
-The check is made on these two sources; we have no statistic over many stars, and a ratio far from 1 is marked under every spectrum, never hidden.
-
-[figure: spectrum-source | the measured spectrum of the field star with the catalogue points and their ratios]
-
-### The anomaly search finds the brown dwarf first
-
-**Result:** in the 20′ field of ε Indi the anomaly map ranks ε Indi B first with a score of 13.8 against a threshold of 2.6, the next source scoring 4.6, from an excess at 3.9–4.3 µm. Source: `docs/submission/project-page.md`, `docs/PROGRESS.md`.
-
-On a 60′ field near the ecliptic the first-ranked source among 93 spectra is a Seyfert 2 galaxy (LEDA 1266968). Source: `docs/submission/project-page.md`.
-
-## Find Planet X on known bodies
-
-We search for bodies beyond Neptune in one pass (a distance search), in the sum of all passes along one orbit (the deep sum), and by linking passes; the known dwarf planets show whether the method works.
-
-We check the method on Eris and Makemake: each is searched blind in one pass, in the deep sum of its passes and by the link of its passes, and the distances are compared with JPL Horizons.
-
-[figure: slider-eris | the distance slider for Eris: one pass cannot fix the distance, the link of passes can]
 
 ## Recall of the search between passes
 
