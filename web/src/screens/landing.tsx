@@ -558,15 +558,15 @@ export function Landing() {
                   class="lp-pic"
                   style={{ backgroundImage: `url(${IMG}eris_deep_sum_97au.jpg)` }}
                   role="img"
-                  aria-label="A faint orange dot in a noisy field: Eris coming into focus when exposures are stacked for 97 astronomical units"
+                  aria-label="A faint orange dot in a noisy field: Eris coming into focus when its exposures are added along its path"
                 >
-                  <span class="lp-badge">Stacked for 97 au</span>
+                  <span class="lp-badge">Exposures added</span>
                 </div>
                 <div class="lp-body">
                   <span class="lp-kind">Beyond Neptune</span>
                   <h3>Eris, the dwarf planet</h3>
                   <p>
-                    Too faint for one picture. Add the exposures along its slow path and it comes into focus, 95.6 ± 0.4 au from the Sun. A planet far beyond
+                    Too faint for one picture. Add the exposures along its slow path and it comes into focus. A planet far beyond
                     Neptune would be found the same way.
                   </p>
                   <span class="lp-go">Run Find Planet X →</span>
@@ -691,7 +691,7 @@ export function Landing() {
                   against ESA Gaia.
                 </li>
                 <li>
-                  <b>Moving objects found for you:</b> movers between passes, Find Planet X for bodies beyond Neptune (it found Sedna blind), and asteroids
+                  <b>Moving objects found for you:</b> movers between passes, Find Planet X for bodies beyond Neptune, and asteroids
                   inside a pass.
                 </li>
                 <li>
