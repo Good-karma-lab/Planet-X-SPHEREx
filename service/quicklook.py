@@ -5,8 +5,8 @@ each): an IMAGE extension of 102 planes of 512 × 512 float32 pixels (MJy/sr) on
 wavelength of every plane, and further extensions of the same shape. One pixel's spectrum is 102 reads of 4 bytes at offsets
 computed from the header; the headers of a tile are read once and kept. Nothing of the 320 MB file is fetched beyond that.
 
-This is the all-sky map's own value at the place (a mosaic of the survey, about 6″ pixels): a quick look shown while the
-spectrum measured from the individual exposures is still being built, never instead of it.
+This is the all-sky map's own value at the place (a mosaic of the survey on HEALPix order-14 pixels, 12.9″ across): a quick look shown
+while the spectrum measured from the individual exposures is still being built, never instead of it.
 """
 
 from __future__ import annotations
@@ -181,7 +181,7 @@ class QuickLook:
             flux, nhits = await plane_values(lay.data_offset), []
         out: dict[str, Any] = {
             "label": "quick look (all-sky cube)",
-            "source": f"SPHEREx DR1 all-sky spectral cube, HiPS order {ORDER} tile {npix}, pixel ({xi}, {yi})",
+            "source": f"SPHEREx DR1 all-sky spectral cube, HiPS order {ORDER} tile {npix}, pixel ({xi}, {yi}), 12.9″ pixels",
             "unit": "MJy/sr",
             "lam": [round(v, 4) for v in lay.lam] if lay.lam else None,
             "flux": [None if v is None else round(v, 5) for v in flux],
