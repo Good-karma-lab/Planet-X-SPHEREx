@@ -27,12 +27,13 @@ from engine import movers
 from engine.grid import Grid
 from service.products.store import Store, product_key
 from service.products.sxp import decode
+from service.upstream import gaia
 from service.upstream.breaker import Breaker, BreakerOpenError
 from service.workers import fieldjob
 
 KIND = "movers"
-GAIA_TAP = ("https://gea.esac.esa.int/tap-server/tap/sync",)
-GAIA_EPOCH = 2016.0
+GAIA_TAP = (gaia.TAP,)
+GAIA_EPOCH = gaia.EPOCH
 SAME_ARCSEC = 3.0
 NEAR_ARCSEC = 6.0
 PM_MIN = 2.0  # mas/yr
@@ -167,7 +168,7 @@ class Movers:
 
     async def _gaia_near(self, ra: float, dec: float, radius_arcsec: float) -> list[dict[str, Any]]:
         q = (
-            "SELECT source_id, ra, dec, pmra, pmdec, parallax, phot_g_mean_mag FROM gaiadr3.gaia_source "
+            f"SELECT source_id, ra, dec, pmra, pmdec, parallax, phot_g_mean_mag FROM {gaia.TABLE} "
             f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.7f}, {dec:.7f}, {radius_arcsec / 3600.0:.7f}))"
         )
         self.gaia.before()

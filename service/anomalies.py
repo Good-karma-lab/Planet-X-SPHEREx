@@ -34,6 +34,7 @@ from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.psfs import PsfProvider
 from service.spectrum import place_at
+from service.upstream import gaia
 from service.upstream.breaker import Breaker, BreakerOpenError
 from service.workers import fieldjob
 
@@ -43,7 +44,7 @@ MAX_SOURCES = 300
 MAX_EXPOSURES = 800
 IN_FLIGHT = 12
 HALF = photometry.HALF
-GAIA_TAP = "https://gea.esac.esa.int/tap-server/tap/sync"
+GAIA_TAP = gaia.TAP
 SIMBAD_TAP = "https://simbad.harvard.edu/simbad/sim-tap/sync"
 IDENTIFY_ARCSEC = 6.0
 
@@ -351,14 +352,14 @@ class Anomalies:
         except (BreakerOpenError, httpx.HTTPError, ValueError, KeyError) as e:
             out["simbad"] = {"state": "unavailable", "error": str(e)[:120]}
         try:
-            k = 2016.0 - 2000.0
+            k = gaia.EPOCH - 2000.0
             d16 = dec + pmdec * k / 3.6e6
             r16 = ra + pmra * k / 3.6e6 / math.cos(math.radians(d16))
             rows = await self._tap(
                 "gaia",
                 GAIA_TAP,
                 "SELECT TOP 5 source_id, ra, dec, pmra, pmdec, parallax, parallax_error, ruwe, phot_g_mean_mag, bp_rp "
-                "FROM gaiadr3.gaia_source "
+                f"FROM {gaia.TABLE} "
                 f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {r16 % 360.0:.7f}, {d16:.7f}, {IDENTIFY_ARCSEC / 3600.0:.7f}))",
             )
             if rows:
