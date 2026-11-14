@@ -230,6 +230,18 @@ function FindingsPage() {
               <h3>
                 {l.name} · {FIELD}′ field
               </h3>
+              <a href={lab(l.ra, l.dec, FIELD)} title="Open this field in the lab">
+                <img
+                  class="fimg"
+                  src={`/findings/${l.name
+                    .normalize('NFKD')
+                    .replace(/[^\w]+/g, '-')
+                    .replace(/^-|-$/g, '')
+                    .toLowerCase()}.jpg`}
+                  alt={`The lab's picture of the ${FIELD}′ field of ${l.name}: SPHEREx stacks, the target ringed`}
+                  loading="lazy"
+                />
+              </a>
               <dl class="kv">
                 {kv(
                   'Movers',

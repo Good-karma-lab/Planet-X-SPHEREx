@@ -2191,3 +2191,4 @@ input[type='range']::-moz-range-thumb {
   margin: 4px 0;
   width: 140px;
 }
+.fimg { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 6px; box-shadow: 0 0 0 1px var(--edge-hi); margin: 4px 0 8px; background: #02070a; }
