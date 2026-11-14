@@ -11,7 +11,7 @@ concurrency:
 
 jobs:
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest is 26.04, which Playwright 1.59 does not support yet
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -25,7 +25,7 @@ jobs:
       - run: uv run pytest
 
   web:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # ubuntu-latest is 26.04, which Playwright 1.59 does not support yet
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
