@@ -6,6 +6,8 @@ import { D2R } from '../lib/sky';
 import { NeossatCard } from './neossat';
 import { FindingPicture } from './findings/thumb';
 import './findings/findings.css';
+import { FIELD, useLive } from './findings/live';
+import { AboutBody } from './about/About';
 
 const fmtN = (n: number | undefined | null) => (n ?? 0).toLocaleString('en-US');
 const kv = (k: string, v: string) => (
@@ -111,25 +113,30 @@ function IndexPage({ health }: { health: FullHealth | null }) {
     <>
       <div class="pg-h">
         <h1>Exposure index</h1>
-        <p class="hint">What the sky service can search: every SPHEREx Level-2 exposure with its footprint, time and detector.</p>
+        <p class="hint">
+          How much of the SPHEREx archive this site can search, and how current that is. An exposure is one detector's picture of one pointing; the index lists every one
+          with where on the sky it looks and when, so a field opens in seconds instead of searching the archive each time. The map shows how often each part of the sky has been seen.
+        </p>
       </div>
       <div class="pg-grid">
         <section class="card glass">
           <h3>What can be searched</h3>
+          <p class="hint" style="margin-top:0">Every SPHEREx Level-2 exposure in the public archive, with its footprint, time and detector.</p>
           <dl class="kv">
-            {kv('Exposures indexed', fmtN(ix['files'] as number))}
+            {kv('Exposures we can search', fmtN(ix['files'] as number))}
             {kv('Releases', String(ix['releases'] ?? 'DR1 (year 1), QR3 (after it)'))}
-            {kv('Built', String(ix['built_at'] ?? ix['updated_at'] ?? ix['bootstrap_at'] ?? '—').replace('T', ' '))}
+            {kv('Index updated', String(ix['built_at'] ?? ix['updated_at'] ?? ix['bootstrap_at'] ?? '—').replace('T', ' '))}
             {kv('Source', String(ix['source'] ?? 'IRSA TAP, checked against the archive bucket'))}
           </dl>
         </section>
         <section class="card glass">
-          <h3>Service</h3>
+          <h3>The service behind this site</h3>
+          <p class="hint" style="margin-top:0">Opens fields, runs the searches and measures spectra.</p>
           <dl class="kv">
             {kv('Version', h?.version ?? '—')}
-            {kv('Started', (h?.started_at ?? '—').replace('T', ' '))}
+            {kv('Running since', (h?.started_at ?? '—').replace('T', ' '))}
             {kv(
-              'Product versions',
+              'Searches and products (version)',
               Object.entries(h?.product_versions ?? {})
                 .map(([k, v]) => `${k} ${v}`)
                 .join(' · ') || '—',
@@ -143,74 +150,7 @@ function IndexPage({ health }: { health: FullHealth | null }) {
   );
 }
 
-interface CatObj {
-  n: string;
-  ra: number;
-  dec: number;
-  pmra: number | null;
-  pmdec: number | null;
-  b?: number;
-}
-interface TrackLite {
-  speed: number;
-  pa: number;
-  passes: number[];
-  check: string;
-  gaia: { source_id: string; pm: number; g?: number | null } | null;
-}
-interface AnomalyLite {
-  n: number;
-  score: number;
-  drivers: { lo: number; hi: number; z: number; share: number }[];
-  identified?: { simbad?: { state: string; name?: string; type?: string }; gaia?: { state: string; source_id?: string } };
-}
-interface Live {
-  name: string;
-  ra: number;
-  dec: number;
-  movers: { state: string; result?: { field?: string; passes: number; sources_per_pass: number[]; tracks: TrackLite[]; pairs?: unknown[] } } | null;
-  anomalies: {
-    state: string;
-    result?: { with_spectrum: number; threshold: number | null; anomalies: AnomalyLite[]; reason: string } | null;
-  } | null;
-}
-
-const FIELD = 20;
 const CHECK: Record<string, string> = { same: 'Gaia: same motion', none: 'no Gaia motion', pending: 'Gaia not checked yet' };
-
-/** What the searches found in the 20′ fields of the five test targets, read live from the service (nothing is started here). */
-function useLive(): Live[] {
-  const [live, setLive] = useState<Live[]>([]);
-  useEffect(() => {
-    let stop = false;
-    void (async () => {
-      const cat = (await fetch('/catalog.json').then((r) => r.json())) as { catalog: CatObj[] };
-      const targets = cat.catalog.filter((o) => o.b);
-      const out: Live[] = [];
-      for (const o of targets) {
-        const dt = 2025.9 - 2000;
-        const dec = o.dec + ((o.pmdec ?? 0) * dt) / 3.6e6;
-        const ra = (o.ra + ((o.pmra ?? 0) * dt) / 3.6e6 / Math.cos((((dec + o.dec) / 2) * Math.PI) / 180) + 360) % 360;
-        const q = `ra=${ra.toFixed(6)}&dec=${dec.toFixed(6)}&fov=${FIELD}`;
-        const [mv, an] = await Promise.all([
-          fetch(`/api/v1/movers?${q}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null),
-          fetch(`/api/v1/anomalies?${q}`)
-            .then((r) => (r.ok ? r.json() : null))
-            .catch(() => null),
-        ]);
-        out.push({ name: o.n, ra, dec, movers: mv, anomalies: an });
-        if (stop) return;
-        setLive([...out]);
-      }
-    })();
-    return () => {
-      stop = true;
-    };
-  }, []);
-  return live;
-}
 
 function FindingsPage() {
   const live = useLive();
@@ -452,35 +392,7 @@ function MethodPage() {
 }
 
 function AboutPage() {
-  return (
-    <>
-      <div class="pg-h">
-        <h1>About</h1>
-        <p class="hint">
-          SPHEREx Sky: real SPHEREx exposures of any patch of the sky, as a video of the seasons and the spectral bands inside them. Not
-          affiliated with or endorsed by NASA.
-        </p>
-      </div>
-      <div class="pg-grid">
-        <section class="card glass">
-          <h3>Data</h3>
-          <ul>
-            <li>SPHEREx Level-2 spectral images: NASA / JPL-Caltech, served by NASA/IPAC Infrared Science Archive (IRSA).</li>
-            <li>Object catalogue: SIMBAD, CDS Strasbourg.</li>
-            <li>Globe backgrounds: DSS2, 2MASS, AllWISE and IRIS all-sky surveys (HiPS), CDS and IRSA.</li>
-          </ul>
-        </section>
-        <section class="card glass">
-          <h3>Team</h3>
-          <ul>
-            <li>Good Karma Lab · NASA Space Apps Challenge 2026, Barcelona.</li>
-            <li>Licence: Apache-2.0.</li>
-            <li>Icons: Phosphor (MIT).</li>
-          </ul>
-        </section>
-      </div>
-    </>
-  );
+  return <AboutBody />;
 }
 
 export function InfoPage({ screen, health }: { screen: Screen; health: Health | null }) {
