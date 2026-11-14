@@ -18,7 +18,11 @@
   (CADC deep references, AllWISE/Gaia cloud cross-match, ADES export, SSOIS, Gaia DR4 readiness, tracked stack, R Dra regression).
 - **Warm set:** 30 fields and films, then every test field's searches (movers, pairs, red, anomalies, target and anomaly spectra)
   in the background; progress in /health (`warm.searches`).
-- **Not merged:** branch `brown-dwarfs` (route /api/v1/browndwarfs, not validated on real fields yet).
+- **Brown dwarf candidates** (/api/v1/browndwarfs) and **searched places** (/api/v1/searched) are live; the landing page is `/`,
+  the globe `#/explore`.
+- **Overnight (VM):** `tools/planet_nine_night.py` runs the deep sum (250–800 au, bg=1: every person's job first) on the IRAS/AKARI
+  Planet Nine field and the ecliptic field of the 394 au peak; log in `/tmp/planet_nine_night.log` on the VM; results go to the
+  searched layer and Findings.
 
 ## Next
 
