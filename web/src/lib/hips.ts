@@ -285,6 +285,9 @@ function fetchTile(id: string, o: number, i: number): Promise<Got> {
   });
 }
 
+// the Allsky image is a mosaic of tiles: a blur over the whole mosaic bleeds each tile into its neighbours and draws the tile edges as
+// seams on the sphere, so it stays off until the blur is done tile by tile
+const ALLSKY_SOFT = 0;
 let decoder: HTMLCanvasElement | null = null;
 async function decode(b: Blob, soft = 0): Promise<Tile> {
   const bm = await createImageBitmap(b);
@@ -304,7 +307,7 @@ async function decode(b: Blob, soft = 0): Promise<Tile> {
 function start(key: string, q: Want): void {
   inflight.add(key);
   fetchTile(q.id, q.o, q.i)
-    .then((g) => (g === 'missing' ? null : decode(g, q.o === ALLSKY ? 0.9 : 0)))
+    .then((g) => (g === 'missing' ? null : decode(g, ALLSKY_SOFT && q.o === ALLSKY ? ALLSKY_SOFT : 0)))
     .then((t) => put(q.id, q.o, q.i, t))
     .catch(() => failed.set(key, performance.now()))
     .finally(() => {
