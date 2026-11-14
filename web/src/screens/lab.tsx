@@ -41,6 +41,8 @@ type Tab = 'ctl' | 'cand' | 'obj' | 'spec' | 'find';
 const ICON_DET =
   '<svg viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="8" aria-hidden="true"><rect x="28" y="64" width="62" height="56" rx="8"/><rect x="97" y="64" width="62" height="56" rx="8"/><rect x="166" y="64" width="62" height="56" rx="8"/><rect x="28" y="136" width="62" height="56" rx="8"/><rect x="97" y="136" width="62" height="56" rx="8"/><rect x="166" y="136" width="62" height="56" rx="8"/></svg>';
 
+/** one line on a view button; the full name is its tooltip */
+const VIEW_WORD: Record<string, string> = { picture: 'Picture', bands: 'Bands', det: 'Detectors' };
 const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
   {
     id: 'picture',
@@ -487,7 +489,7 @@ export function Lab({ route }: { route: Route }) {
   const [trackSel, setTrackSel] = useState(-1);
   const [note, setNote] = useState('');
   const [wallWait, setWallWait] = useState(false);
-  const [trayOpen, setTrayOpen] = useState(false);
+  const [trayOpen, setTrayOpen] = useState(() => typeof innerWidth === "number" && innerWidth > 860 && innerHeight > 640);
   const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
   const dwarfsRef = useRef<DwarfView | null>(null);
   dwarfsRef.current = dwarfs;
@@ -2515,7 +2517,7 @@ export function Lab({ route }: { route: Route }) {
                     <label for="raIn">RA</label>
                     <input
                       id="raIn"
-                      class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`}
+                      class={`inp coord ${raIn !== '' && parseRA(raIn) === null ? 'bad' : ''}`}
                       spellcheck={false}
                       value={raIn}
                       onInput={(e) => setRaIn((e.target as HTMLInputElement).value)}
@@ -2527,7 +2529,7 @@ export function Lab({ route }: { route: Route }) {
                     <label for="decIn">Dec</label>
                     <input
                       id="decIn"
-                      class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`}
+                      class={`inp coord ${decIn !== '' && parseDec(decIn) === null ? 'bad' : ''}`}
                       spellcheck={false}
                       value={decIn}
                       onInput={(e) => setDecIn((e.target as HTMLInputElement).value)}
@@ -2549,7 +2551,7 @@ export function Lab({ route }: { route: Route }) {
                       data-testid={`view-${v.id}`}
                     >
                       <span class="vi" dangerouslySetInnerHTML={{ __html: v.icon }} />
-                      <span>{v.name}</span>
+                      <span>{VIEW_WORD[v.id] ?? v.name}</span>
                     </button>
                   ))}
                 </div>
@@ -2588,7 +2590,6 @@ export function Lab({ route }: { route: Route }) {
                     ft.state === 'ok'
                       ? 'the asteroid search found no track in this pass'
                       : 'the asteroid search of this pass has not finished yet',
-                    ft.state === 'ok' ? 'none here' : '↓ search',
                   )}
                   {sw(
                     'anoChk',
@@ -2599,7 +2600,6 @@ export function Lab({ route }: { route: Route }) {
                     an?.result
                       ? 'the anomaly search found no anomaly in this field'
                       : 'the anomaly search of this field has not finished yet',
-                    an?.result ? 'none here' : '↓ search',
                   )}
                   {sw(
                     'maskChk',
@@ -2608,13 +2608,6 @@ export function Lab({ route }: { route: Route }) {
                     opts.artifacts,
                     wallView ? null : (v) => set({ art: v ? '1' : null }),
                     'shown on the Picture and in Days, not on the walls',
-                  )}
-                  {sw(
-                    'refChk',
-                    'Reference',
-                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
-                    opts.reference,
-                    (v) => set({ ref: v ? '1' : null }),
                   )}
                 </div>
                 <div class="psub">Image</div>
@@ -2655,6 +2648,13 @@ export function Lab({ route }: { route: Route }) {
                     opts.motion && film !== null,
                     film !== null && filmData ? (v) => set({ mot: v ? '1' : null }) : null,
                     'Days scale only',
+                  )}
+                  {sw(
+                    'refChk',
+                    'Reference',
+                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
+                    opts.reference,
+                    (v) => set({ ref: v ? '1' : null }),
                   )}
                 </div>
                 <div class="seg sm" role="group" aria-label="Blend">
