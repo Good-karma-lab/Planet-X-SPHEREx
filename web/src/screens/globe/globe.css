@@ -24,3 +24,7 @@
 .known-head { padding: 8px 14px 0; }
 .globe-wrap > .srchsw { top: auto; bottom: 150px; right: 16px; }
 @media (max-width: 860px) { .screen .globe-wrap > .srchsw { bottom: 128px; right: 10px; } }
+
+/* the frame of the sky: a soft darkening towards the edges, and the credits */
+.globe-wrap > .globe-vig { position: absolute; inset: 0; pointer-events: none; border-radius: inherit; background: radial-gradient(120% 100% at 55% 45%, transparent 52%, rgba(0, 0, 0, 0.55) 100%); }
+.map-help .globe-credit { display: block; margin-top: 3px; font: 500 10.5px var(--mono); color: rgba(233, 241, 244, 0.45); }
