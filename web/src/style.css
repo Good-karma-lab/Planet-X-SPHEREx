@@ -371,3 +371,26 @@ input[type='range']::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .vsq .vlabel { z-index: 3; }
 .film { position: absolute; inset: 0; }
 .film-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 4px; background: #02070a; image-rendering: auto; }
+
+/* phones */
+@media (max-width: 860px), (max-aspect-ratio: 1/1) {
+  .rail { overflow-x: auto; }
+  .rail .brand { display: none; }
+  .tabs { justify-content: space-between; gap: 2px; }
+  .tab { padding: 4px 4px; letter-spacing: 0.04em; min-width: 0; flex: 1 1 0; }
+  .tab span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .map-ui { left: 10px; right: 10px; top: 10px; max-width: none; }
+  .map-ui .seg.sm { overflow-x: auto; flex-wrap: nowrap; }
+  .map-ui .seg.sm button { font-size: 11px; padding: 4px 7px; }
+  .map-read { white-space: normal; font-size: 11px; }
+  .globe-wrap > .covsw { top: auto; bottom: 66px; right: 10px; font-size: 12px; }
+  .covkey { display: none; }
+  .map-help { display: none; }
+  .map-open { right: 10px; bottom: 10px; }
+  .vswitch b { font-size: 11px; }
+  .vswitch svg { width: 16px; height: 16px; }
+  .vsq .refbox, .vsq .refbox canvas { width: 96px; }
+  .vsq .refbox canvas { height: 96px; }
+  .dchecks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ipage { padding: 6px 4px 40px; }
+}
