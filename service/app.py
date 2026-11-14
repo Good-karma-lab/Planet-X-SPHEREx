@@ -352,8 +352,15 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         response: Response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-        if request.url.path.startswith("/api/"):
+        path = request.url.path
+        if path.startswith("/api/"):
             response.headers.setdefault("Cache-Control", "no-store")
+        elif path.startswith("/assets/"):
+            # the build's files carry their content hash in the name
+            response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        elif path == "/" or path.endswith(".html"):
+            # the page itself is asked again every time, so a new release shows at once (never an old look from the cache)
+            response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
     @app.get(f"{API_PREFIX}/health")
