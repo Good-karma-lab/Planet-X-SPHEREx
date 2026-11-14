@@ -69,7 +69,6 @@ export const REFERENCES: RefGroup[] = [
       { name: 'JPL Small-Body Database', note: 'orbits of asteroids and comets', url: 'https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html' },
       { name: 'JPL Horizons', note: 'positions of bodies and of the spacecraft', url: 'https://ssd.jpl.nasa.gov/horizons/' },
       { name: 'JPL Small-Body Identification API', note: 'which known bodies lie in a field', url: 'https://ssd-api.jpl.nasa.gov/doc/sb_ident.html' },
-      { name: 'IMCCE SkyBoT', note: 'known asteroids and comets in a field', url: 'https://ssp.imcce.fr/webservices/skybot/' },
       { name: 'Minor Planet Center', note: 'observatory code 288 (SPHEREx) and the ADES format', url: 'https://www.minorplanetcenter.net/' },
       { name: 'HiPS sky surveys at IRSA (DSS2, 2MASS, WISE, IRIS)', note: 'the globe backgrounds and the archive images', url: 'https://irsa.ipac.caltech.edu/data/hips/list' },
       { name: 'Canadian Astronomy Data Centre (CADC)', note: 'deep optical references, NEOSSat frames', url: 'https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/en/' },
@@ -87,9 +86,9 @@ export const REFERENCES: RefGroup[] = [
         url: 'https://ui.adsabs.harvard.edu/abs/1946ASPL....5...73T/abstract',
       },
       {
-        name: 'The discovery of Pluto, 1930 (Lowell Observatory)',
-        note: 'the plates of January 1930 and the announcement of 13 March',
-        url: 'https://collectionslowellobservatory.omeka.net/exhibits/show/pluto/the-discovery',
+        name: 'Slipher, V. M. 1930, Planet X: Lowell Observatory Observation Circular of 13 March 1930 (reprinted in JRASC 24, 282)',
+        note: 'the announcement of the discovery of Pluto',
+        url: 'https://ui.adsabs.harvard.edu/abs/1930JRASC..24..282S/abstract',
       },
       {
         name: 'Trujillo & Sheppard 2014, Nature 507, 471: a Sedna-like body with a perihelion of 80 au',
