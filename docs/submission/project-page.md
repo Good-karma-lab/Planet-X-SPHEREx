@@ -40,7 +40,7 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
 
 **What SPHEREx Sky does.**
 
-- **Globe.** The whole sky over DSS2, 2MASS, AllWISE or IRAS dust maps, the coverage of 1.63 million SPHEREx exposures, a catalogue of
+- **Globe.** The whole sky over SPHEREx's own DR1 all-sky map, DSS2, 2MASS, AllWISE or IRAS dust maps, the coverage of 1.63 million SPHEREx exposures, a catalogue of
   4,100 brown dwarfs, fast stars and variable stars, and the five test targets of the challenge. Aim anywhere and open the field.
 - **The lab: seasons as a pendulum.** For every pass (season) all exposures of the field are cleaned and stacked on a grid four times
   finer than the 6.15″ detector pixel, then played 1 → 2 → 3 → 2. Barnard's Star swings by 10″ a year; ε Indi B drifts among white stars.
@@ -51,13 +51,22 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
   added for the faintest sources.
 - **Archive images.** The same field in DSS2 (1985–1999), 2MASS (1997–2001) and AllWISE (2010), blinked before the SPHEREx seasons, with
   the test target ringed where it was then: decades of motion in one loop.
-- **The film of one season.** The visits of one pass, aligned, with the static sky removed: asteroids hop from visit to visit.
+- **The film of one season.** The visits of one pass, aligned, with the static sky removed: asteroids hop from visit to visit. JPL
+  predicts which known asteroids and comets cross the field; each is ringed on every visit, solid where the film's own motion map sees
+  it, and its visits stacked along JPL's track show how strongly it stands out (z 9 for a V 19.7 asteroid seen in only 5 of 11
+  single visits). The number of SPHEREx detector images holding each body equals IRSA's Moving Object Search Tool (119, 107, 118, 121).
+- **3I/ATLAS, seen by two space agencies.** A film centred on the interstellar comet on 14 Dec 2025, and the same day's frame from the
+  Canadian Space Agency's NEOSSat (CADC): its pointing refitted on 95 Gaia stars, the comet found 5.6″ from JPL's place at G ≈ 12.4.
 - **Spectrum on a click.** The tool fits the point-spread function of the detector in every exposure that covers the source and draws
   one point per exposure as it is measured, coloured by detector; a moving star is measured where it was on each date. Any clicked
   source is named from SIMBAD and Gaia DR3, with a distance when the parallax is good. The points download as CSV.
+- **Red sources.** The flux at 3.8–5 µm against 1.1–1.6 µm, measured season by season: the two brown dwarfs among the test targets,
+  WISE 0855−0714 and ε Indi B, stand out as red and moving.
 - **Search between seasons.** Sources of every season, a stationary test, straight tracks through three or more seasons at 3–120″ per
   year; every track checked against Gaia DR3 at the season dates ("same motion", a centroid effect that is rejected, or "no Gaia
   motion"); a chance control re-runs the search with the moving sources at random places.
+- **Light curves and catalogues.** A clicked source's ZTF and NEOWISE light curves (2014–2024) beside the SPHEREx years, and its
+  spectrum averaged under 2MASS and WISE filters against the catalogue magnitudes.
 - **Spectral anomalies.** One button measures every source of the field in every exposure, builds the field's own ordinary star, and
   flags sources whose spectrum does not fit; each anomaly gets a passport: its score against the field's threshold, the wavelengths that
   drive the misfit, its motion, and what SIMBAD and Gaia know. "Anomaly", never "discovery".
@@ -69,8 +78,8 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
 - ε Indi B: one track through four seasons, 4.6–4.7″/yr toward 122–125°, the same motion as Gaia DR3. In its 20′ field the anomaly search
   ranks it first by far (score 13.8 against a threshold of 2.6; the next source 4.6), driven by an excess at 3.9–4.3 µm (+40σ): the
   signature of a cold T dwarf.
-- An ordinary star (2MASS J17572542+0446559): 357 of 385 exposures give a point; its flux near 1.25 µm, 42 mJy, matches its 2MASS J
-  magnitude (39 mJy).
+- An ordinary star (2MASS J17572542+0446559): 357 of 385 exposures give a point; averaged under the 2MASS and WISE filters its
+  spectrum gives 0.99 (J), 1.02 (H), 1.03 (Ks) and 0.985 (W1) of the catalogue fluxes.
 - Chance: re-running the search with the moving sources at random places gives 0.0 tracks per field in 20 trials.
 - On a 60′ field near the ecliptic the anomaly search ranks a Seyfert 2 galaxy (LEDA 1266968) first among 93 spectra: galaxies do not
   look like stars.
