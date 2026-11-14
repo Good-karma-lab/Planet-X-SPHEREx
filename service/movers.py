@@ -27,7 +27,7 @@ from engine import movers
 from engine.grid import Grid
 from service.products.store import Store, product_key
 from service.products.sxp import decode
-from service.upstream import gaia
+from service.upstream import gaia, gaia_hats
 from service.upstream.breaker import Breaker, BreakerOpenError
 from service.workers import fieldjob
 
@@ -171,17 +171,21 @@ class Movers:
             f"SELECT source_id, ra, dec, pmra, pmdec, parallax, phot_g_mean_mag FROM {gaia.TABLE} "
             f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.7f}, {dec:.7f}, {radius_arcsec / 3600.0:.7f}))"
         )
-        self.gaia.before()
         try:
-            r = await self.client.post(GAIA_TAP[0], data={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "json", "QUERY": q})
-            r.raise_for_status()
-            body = r.json()
-        except Exception:
-            self.gaia.failure()
-            raise
-        self.gaia.success()
-        names = [c["name"] for c in body["metadata"]]
-        return [dict(zip(names, row, strict=True)) for row in body["data"]]
+            self.gaia.before()
+            try:
+                r = await self.client.post(GAIA_TAP[0], data={"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "json", "QUERY": q})
+                r.raise_for_status()
+                body = r.json()
+            except Exception:
+                self.gaia.failure()
+                raise
+            self.gaia.success()
+            names = [c["name"] for c in body["metadata"]]
+            return [dict(zip(names, row, strict=True)) for row in body["data"]]
+        except (BreakerOpenError, httpx.HTTPError, ValueError, KeyError):
+            # the Gaia archive did not answer: the same catalogue from the public Parquet copy on AWS
+            return await asyncio.to_thread(gaia_hats.cone, ra, dec, radius_arcsec / 3600.0)
 
     async def _check(self, t: dict[str, Any]) -> None:
         """Compare the track with Gaia stars near it: positions moved from Gaia's epoch to every pass date."""

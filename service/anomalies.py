@@ -34,7 +34,7 @@ from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.psfs import PsfProvider
 from service.spectrum import place_at
-from service.upstream import gaia
+from service.upstream import gaia, gaia_hats
 from service.upstream.breaker import Breaker, BreakerOpenError
 from service.workers import fieldjob
 
@@ -355,13 +355,18 @@ class Anomalies:
             k = gaia.EPOCH - 2000.0
             d16 = dec + pmdec * k / 3.6e6
             r16 = ra + pmra * k / 3.6e6 / math.cos(math.radians(d16))
-            rows = await self._tap(
-                "gaia",
-                GAIA_TAP,
-                "SELECT TOP 5 source_id, ra, dec, pmra, pmdec, parallax, parallax_error, ruwe, phot_g_mean_mag, bp_rp "
-                f"FROM {gaia.TABLE} "
-                f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {r16 % 360.0:.7f}, {d16:.7f}, {IDENTIFY_ARCSEC / 3600.0:.7f}))",
-            )
+            try:
+                rows = await self._tap(
+                    "gaia",
+                    GAIA_TAP,
+                    "SELECT TOP 5 source_id, ra, dec, pmra, pmdec, parallax, parallax_error, ruwe, phot_g_mean_mag, bp_rp "
+                    f"FROM {gaia.TABLE} "
+                    f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), "
+                    f"CIRCLE('ICRS', {r16 % 360.0:.7f}, {d16:.7f}, {IDENTIFY_ARCSEC / 3600.0:.7f}))",
+                )
+            except (BreakerOpenError, httpx.HTTPError, ValueError, KeyError):
+                # the Gaia archive did not answer: the same catalogue from the public Parquet copy on AWS
+                rows = await asyncio.to_thread(gaia_hats.cone, r16 % 360.0, d16, IDENTIFY_ARCSEC / 3600.0)
             if rows:
                 g = min(rows, key=lambda s: math.hypot((s["ra"] - r16) * math.cos(math.radians(d16)), s["dec"] - d16))
                 out["gaia"] = {
@@ -374,6 +379,6 @@ class Anomalies:
                 }
             else:
                 out["gaia"] = {"state": "none"}
-        except (BreakerOpenError, httpx.HTTPError, ValueError, KeyError) as e:
+        except Exception as e:  # neither the archive nor the Parquet copy answered
             out["gaia"] = {"state": "unavailable", "error": str(e)[:120]}
         return out
