@@ -86,9 +86,12 @@ def summarize(rows: list[dict[str, Any]], dirs: dict[str, str], keys: dict[str, 
             n_tracks = len([t for t in (movers or {}).get("tracks", []) if t.get("check") != "still"])
             n_pairs = len((pairs or {}).get("pairs", []))
             n_dwarfs = len((dwarfs or {}).get("candidates", []))
-            pl["found"] += n_tracks + n_pairs + n_dwarfs
+            n_known = int(((dwarfs or {}).get("counts") or {}).get("known_brown_dwarfs", 0))
+            pl["found"] += n_tracks + n_pairs + n_dwarfs + n_known
             if n_dwarfs:
                 _better(pl, {"kind": "track", "label": f"{n_dwarfs} brown dwarf candidate" + ("s" if n_dwarfs > 1 else ""), "sn": None}, 3)
+            elif n_known:
+                _better(pl, {"kind": "track", "label": f"{n_known} known brown dwarf" + ("s" if n_known > 1 else ""), "sn": None}, 2)
             if n_tracks:
                 sns = [s for t in (movers or {})["tracks"] for s in (t.get("snr") or []) if s is not None]
                 _better(

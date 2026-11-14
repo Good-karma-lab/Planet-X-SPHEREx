@@ -7,8 +7,9 @@ Evidence comes from two searches the field already has (nothing is read from the
     movers  (service.movers) the white-stack tracks between passes; one that stands where a red source stands is a second, independent
             detection of the motion (its S/N per pass and fit rms are reported).
 
-A candidate is a red source that moves. Gaia DR3 gives the verdict, as for every track of the movers search (positions of Gaia stars
-moved to the pass dates):
+A moving red source is a candidate only when the catalogues do not explain it; one they explain is listed as known (a recovered brown
+dwarf such as WISE 0855 or epsilon Indi B, or another named object). Gaia DR3 gives the verdict, as for every track of the movers search
+(positions of Gaia stars moved to the pass dates):
 
     none     no Gaia star near the track: a candidate (a cold dwarf is too faint in the optical for Gaia)
     still    a Gaia star that hardly moves stands there: a candidate (the red light may belong to a neighbour; said so)
@@ -133,13 +134,21 @@ def mover_match(c: dict[str, Any], tracks: list[dict[str, Any]]) -> dict[str, An
 
 
 def status_of(c: dict[str, Any]) -> str:
-    """What the candidate is, as far as the catalogues say: a known brown dwarf (recovered), a named other object, or unidentified."""
+    """What the source is, as far as the catalogues say: a known brown dwarf (recovered), another named object, a star Gaia explains,
+    unidentified (a candidate), or not yet known (a catalogue did not answer)."""
     sb = c.get("simbad") or {}
     if sb.get("state") == "ok":
         return "known brown dwarf" if str(sb.get("otype", "")).startswith(BROWN_DWARF_TYPES) else "known object"
+    if (c.get("gaia") or {}).get("verdict") == "same":
+        return "star with Gaia motion"
     if sb.get("state") == "none":
         return "unidentified"
     return "catalogue did not answer"
+
+
+def group_of(c: dict[str, Any]) -> str:
+    """`known`: the catalogues explain it (SIMBAD names it, or a Gaia star moves with it); `candidate`: they do not."""
+    return "candidate" if c["status"] in ("unidentified", "catalogue did not answer") else "known"
 
 
 def verdict_text(check: str) -> str:
@@ -218,10 +227,11 @@ class BrownDwarfs:
             self.runs.pop(run.key, None)
 
     async def _check_pending(self, run: DwarfRun) -> None:
-        keep: list[dict[str, Any]] = []
-        known: list[dict[str, Any]] = list(run.result.get("known", []))
+        """Gaia and SIMBAD for every moving red source of the run; when both have answered for all, the sources are sorted into new
+        candidates and known objects and the answer is kept."""
+        items: list[dict[str, Any]] = run.result.get("candidates", [])
         pending = False
-        for c in run.result.get("candidates", []):
+        for c in items:
             t = c["gaia_check"]
             if t["check"] == "pending":
                 await self.movers.check_track(t)
@@ -233,22 +243,25 @@ class BrownDwarfs:
                 if c["simbad"].get("state") == "unavailable":
                     pending = True
             c["status"] = status_of(c)
-            if t["check"] == "same":
-                known.append({k: c[k] for k in ("ra", "dec", "pm", "pa", "colour", "snr_long", "gaia", "simbad", "status")})
-            else:
-                keep.append(c)
-        run.result["candidates"] = keep
-        run.result["known"] = known
         run.result["pending"] = pending
-        if not pending:
-            for c in keep:
-                c.pop("gaia_check", None)
-            self.dir.mkdir(parents=True, exist_ok=True)
-            tmp = self.dir / f"{run.key}.part"
-            tmp.write_text(json.dumps(run.result, separators=(",", ":")))
-            tmp.replace(self.dir / f"{run.key}.json")
-        else:  # the pseudo tracks stay on the candidates so that Gaia is asked again; they are not part of the answer
-            pass
+        if pending:  # the pseudo tracks stay so that the catalogues are asked again; every source counts as a candidate for now
+            return
+        known = [c for c in items if group_of(c) == "known"]
+        cands = [c for c in items if group_of(c) == "candidate"]
+        for c in items:
+            c.pop("gaia_check", None)
+        run.result["candidates"], run.result["known"] = cands, known
+        run.result["counts"] = {
+            "red_sources": run.result.get("red_sources"),
+            "moving_red": len(items),
+            "candidates": len(cands),
+            "known_brown_dwarfs": sum(1 for c in known if c["status"] == "known brown dwarf"),
+            "known_other": sum(1 for c in known if c["status"] != "known brown dwarf"),
+        }
+        self.dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.dir / f"{run.key}.part"
+        tmp.write_text(json.dumps(run.result, separators=(",", ":")))
+        tmp.replace(self.dir / f"{run.key}.json")
 
     async def _simbad(self, c: dict[str, Any]) -> dict[str, Any]:
         """SIMBAD's answer at the candidate's place at 2025.9 (name, type, spectral type), or why there is none."""
