@@ -169,3 +169,27 @@ export function LeadReport({ lead, onBack }: { lead: Lead; onBack: () => void })
     </section>
   );
 }
+
+/** One plain sentence for a field card: what the searches found there, in words a visitor can follow. */
+export function plainLine(l: Live): string {
+  const mv = l.movers?.result;
+  const an = l.anomalies?.result;
+  const parts: string[] = [];
+  if (!mv) parts.push('This field has not been searched yet.');
+  else if (mv.passes < 3) parts.push(`SPHEREx saw this place in ${mv.passes} passes; a mover needs three.`);
+  else if (!mv.tracks.length) parts.push(`Nothing moves between the seasons beyond what chance makes (${mv.chance ? `${mv.chance.mean.toFixed(2)} false tracks per field` : 'a control run says how many'}).`);
+  else {
+    const t = mv.tracks[0]!;
+    parts.push(
+      t.check === 'same'
+        ? `One source drifts ${t.speed.toFixed(1)}″ a year, and Gaia knows a star with that motion: this is the target itself, recovered blind.`
+        : `One source drifts ${t.speed.toFixed(1)}″ a year and no Gaia star explains it: a lead to look at, not a discovery.`,
+    );
+  }
+  if (an?.anomalies.length) {
+    const a = an.anomalies[0]!;
+    const nm = a.identified?.simbad?.name ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'an uncatalogued source');
+    parts.push(`${an.anomalies.length} source${an.anomalies.length === 1 ? ' has a' : 's have'} spectrum${an.anomalies.length === 1 ? '' : 's'} unlike the ordinary stars of the field; the strongest is ${nm}.`);
+  }
+  return parts.join(' ');
+}

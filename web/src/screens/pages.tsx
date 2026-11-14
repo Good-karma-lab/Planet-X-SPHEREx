@@ -8,7 +8,7 @@ import { FindingPicture } from './findings/thumb';
 import './findings/findings.css';
 import { FIELD, useLive } from './findings/live';
 import { AboutBody } from './about/About';
-import { LeadReport, LeadsList, rankLeads, useLeadParam } from './findings/leads';
+import { LeadReport, LeadsList, plainLine, rankLeads, useLeadParam } from './findings/leads';
 import { mountTour } from '../ui/Tour';
 
 
@@ -204,6 +204,7 @@ function FindingsPage() {
                 <h3>
                   {l.name} · {FIELD}′ field
                 </h3>
+                <p class="plain">{plainLine(l)}</p>
                 <div class="fchips">
                   {chips.length ? chips.map(([k, t], i) => <span key={i} class={`badge ${k === 'good' ? 'green' : 'orange'}`}>{t}</span>) : <span class="mono-s">nothing marked: nothing above the bar</span>}
                 </div>
@@ -375,6 +376,10 @@ function MethodPage() {
     [
       'Catalogue check',
       "The spectrum averaged under the 2MASS J, H, Ks and WISE W1, W2 filters (photon counting) against the catalogue magnitudes at each survey's epoch, quality A or B only. An ordinary star gives 0.99, 1.02, 1.03 and 0.985.",
+    ],
+    [
+      'Find Planet X',
+      "Exposures of one pass are added along trial distances (30–300 au) and own motions; the visits of all passes along one orbit. On Eris, one pass finds it at 12.2σ with 9.4σ in photometry but cannot fix its distance (the knob is flat from 46 to 165 au); linking two passes gives 95.9 ± 0.6 au (JPL 95.5). The depth reached is about V 20–21 in reflected light: the search makes no claim of a Planet X, and a Planet Nine of the predicted brightness is fainter (margin 1.4–1.7× over WISE only in D4, 3 µm).",
     ],
     [
       'Other missions',

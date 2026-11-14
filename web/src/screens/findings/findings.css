@@ -12,3 +12,4 @@
 .leadrow:hover { background: rgba(95, 227, 214, 0.06); }
 .leadrow .rank { font: 700 14px var(--mono); color: var(--accent); text-align: center; }
 .leadrow .lt { display: flex; flex-direction: column; min-width: 0; }
+.fcard .plain { margin: 4px 0 8px; font-size: 13px; color: var(--ink); }
