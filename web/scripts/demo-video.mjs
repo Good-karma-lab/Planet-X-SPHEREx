@@ -70,6 +70,20 @@ await page.waitForTimeout(5600);
 mark('archive-end');
 await page.locator('.archsw input').uncheck();
 
+// 3b. the film of one pass near the ecliptic: known asteroids ringed where JPL predicts them, amber where SPHEREx sees them
+await page.goto(`${BASE}/#/lab?ra=169.89170&dec=4.35140&fov=60&film=61027`);
+await page.getByText('Known bodies', { exact: true }).waitFor({ timeout: 180000 });
+await page.waitForFunction(() => !/asking JPL/.test(document.body.innerText), null, { timeout: 120000 });
+await page.waitForTimeout(1500);
+await subtitle('One pass, visit by visit: known asteroids hop; JPL predicts, SPHEREx sees.');
+mark('film');
+await page.waitForTimeout(6000);
+mark('film-end');
+await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=10`);
+await page.getByRole('button', { name: 'Controls', exact: true }).click();
+await waitPicture();
+await page.waitForTimeout(1500);
+
 // 4. a click on a star: its spectrum, measured live
 const vsq = await page.locator('.vsq').boundingBox();
 await page.mouse.click(vsq.x + vsq.width * 0.514, vsq.y + vsq.height * 0.33);
