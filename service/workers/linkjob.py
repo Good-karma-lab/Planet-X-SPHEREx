@@ -29,6 +29,7 @@ from service.jobs.scheduler import Context
 from service.products.store import Store
 from service.products.versions import VERSIONS
 from service.workers import distantjob
+from service.workers import planetx as px
 from service.workers.planetx import honest_words
 
 KIND = "link"
@@ -66,12 +67,15 @@ def _num(v: Any) -> float | None:
     return None if v is None or (isinstance(v, float) and not math.isfinite(v)) else round(float(v), 3)
 
 
-def link_results(store: Store, params: dict[str, Any], progress: Any = None) -> dict[str, Any]:
-    """The link of the candidates of the passes named by `params` -> the result dict (status ok / missing / nothing-to-link)."""
+def link_results(
+    results: dict[str, dict[str, Any] | None], params: dict[str, Any], progress: Any = None, cancel: Any = None
+) -> dict[str, Any]:
+    """The link of the candidates of the passes named by `params`, given their one-pass results (by key; None where there is none)
+    -> the result dict (status ok / missing / nothing-to-link). Runs in a worker process."""
     res: dict[str, Any] = {"status": "running", "notes": [], "passes": [], "links": [], "params": params}
     passes = []
     for k in params["keys"]:
-        r = distant_result(store, k)
+        r = results.get(k)
         if r is None:
             res["status"] = "missing"
             res["notes"].append(f"the one-pass result {k} is not there (or has not finished): run the distance search for it first")
@@ -148,10 +152,12 @@ async def run_link(ctx: Context, store: Store, params: dict[str, Any]) -> dict[s
     store.begin(KIND, key, params)
     ctx.phase("fitting orbits through the tracks of the passes")
 
-    def prog(i: int, n: int) -> None:
+    def prog(i: float, n: float) -> None:
+        i, n = int(i), int(n)
         ctx.phase(f"fitting orbits through the tracks of the passes: pair {i} of {n}", i, max(n, 1))
 
-    res = await asyncio.to_thread(link_results, store, params, prog)
+    results = {k: await asyncio.to_thread(distant_result, store, k) for k in params["keys"]}  # the reading is here, the fits in a worker
+    res = await px.tracked(ctx, link_results, results, params, on_progress=prog)
     store.write_meta(KIND, key, res)
     store.complete(key)
     return {"status": res["status"]}
