@@ -71,17 +71,14 @@ export function projectIn(v: SkyView, ra: number, dec: number): [number, number,
     const lam = (((ra - 180 + 540) % 360) - 180) * D2R;
     return [v.W / 2 - ((lam * Math.cos(th)) / Math.PI) * (mw(v) / 2), v.H / 2 - Math.sin(th) * (mw(v) / 4), true];
   }
-  // the camera is inside the sphere: stereographic projection (shapes stay round at a wide field), east left, north up; R is pixels per radian at the centre
   const b = basis(v);
   const r = ra * D2R;
   const d = dec * D2R;
   const x = Math.cos(d) * Math.cos(r);
   const y = Math.cos(d) * Math.sin(r);
   const z = Math.sin(d);
-  const cosc = x * b.c[0] + y * b.c[1] + z * b.c[2];
-  if (cosc < -0.5) return [0, 0, false];
-  const kk = (2 * v.R) / (1 + cosc);
-  return [v.W / 2 - (x * b.e[0] + y * b.e[1]) * kk, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * kk, true];
+  if (x * b.c[0] + y * b.c[1] + z * b.c[2] < 0.02) return [0, 0, false];
+  return [v.W / 2 - (x * b.e[0] + y * b.e[1]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
 }
 
 interface Pass {
@@ -95,14 +92,31 @@ interface Pass {
   samplers: Sampler[];
 }
 
+/** The all-sky dust map: one equirectangular picture of the whole sky (RA to the right, Dec down), loaded once. */
+const DUST = { w: 0, h: 0, data: null as Uint8ClampedArray | null, loading: false, onLoad: (() => {}) as () => void };
+function loadDust(): void {
+  if (DUST.data || DUST.loading) return;
+  DUST.loading = true;
+  const im = new Image();
+  im.onload = () => {
+    const c = document.createElement('canvas');
+    c.width = DUST.w = im.width;
+    c.height = DUST.h = im.height;
+    const x = c.getContext('2d', { willReadFrequently: true })!;
+    x.drawImage(im, 0, 0);
+    DUST.data = x.getImageData(0, 0, c.width, c.height).data;
+    DUST.onLoad();
+  };
+  im.onerror = () => (DUST.loading = false);
+  im.src = '/globe/dust_allsky.jpg';
+}
+
 class SkyPainter {
   /** the picture on screen, W×H CSS pixels */
   canvas = document.createElement('canvas');
   private spare = document.createElement('canvas');
   /** the view the picture shows */
   shown: SkyView | null = null;
-  /** counts the pictures: the toned glow is made once per picture */
-  gen = 0;
   /** a full-resolution pass is needed (tiles arrived, the view came to rest) */
   stale = true;
   private pass: Pass | null = null;
@@ -137,11 +151,15 @@ class SkyPainter {
 
   private begin(view: SkyView, layer: SkyLayer[], s: number): Pass {
     tiles.frame();
+    if (layer[0]!.id === 'dust') {
+      loadDust();
+      DUST.onLoad = () => (this.stale = true);
+    }
     const sw = Math.ceil(view.W / s);
     const sh = Math.ceil(view.H / s);
     const R = view.proj === 'globe' ? view.R : mw(view) / 5;
     // the SPHEREx backdrop is three frames of the cube: one sampler per colour
-    const samplers = layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
+    const samplers = layer[0]!.id === 'dust' ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
     return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers };
   }
 
@@ -157,7 +175,8 @@ class SkyPainter {
     const one = layer.length === 1;
     const l0 = layer[0]!;
     // a survey whose tiles are in galactic coordinates (the dust map) is looked up at the galactic place of each pixel
-    const gal = layer.every((l) => HIPS[l.id]?.frame === 'galactic');
+    const dust = l0.id === 'dust';
+    const gal = !dust && layer.every((l) => HIPS[l.id]?.frame === 'galactic');
     const g0 = (l0.gain * 255) / (255 - l0.black);
     while (p.row < sh) {
       const j = p.row++;
@@ -172,17 +191,14 @@ class SkyPainter {
           z = (2 * th + Math.sin(2 * th)) / Math.PI;
           ra = 180 - ((Math.PI * X) / Math.cos(th)) / D2R;
         } else {
-          // the inverse of the stereographic projection
-          const u = (sw / 2 - i) / (2 * Rs);
-          const w = (sh / 2 - j) / (2 * Rs);
-          const rho2 = u * u + w * w;
-          const den = 1 + rho2;
-          const X = (2 * u) / den;
-          const Y = (2 * w) / den;
-          const Z = (1 - rho2) / den;
-          const vx = Z * b.c[0] + X * b.e[0] + Y * b.n[0];
-          const vy = Z * b.c[1] + X * b.e[1] + Y * b.n[1];
-          z = Z * b.c[2] + X * b.e[2] + Y * b.n[2];
+          const sx = (sw / 2 - i) / Rs;
+          const sy = (sh / 2 - j) / Rs;
+          const rr = sx * sx + sy * sy;
+          if (rr > 1) continue;
+          const zz = Math.sqrt(1 - rr);
+          const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
+          const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
+          z = zz * b.c[2] + sy * b.n[2];
           ra = Math.atan2(vy, vx) / D2R;
         }
         const zc = z > 1 ? 1 : z < -1 ? -1 : z;
@@ -191,7 +207,16 @@ class SkyPainter {
           facePt(g[0], g[1] > 1 ? 1 : g[1] < -1 ? -1 : g[1], f);
         } else facePt(ra, zc, f);
         const q = (j * sw + i) * 4;
-        if (one) {
+        if (dust) {
+          const dd = DUST.data;
+          if (!dd) continue;
+          const tx = Math.min(DUST.w - 1, Math.max(0, ((((ra % 360) + 360) % 360) / 360) * DUST.w) | 0);
+          const ty = Math.min(DUST.h - 1, Math.max(0, ((90 - Math.asin(zc) / D2R) / 180) * DUST.h) | 0);
+          const t = (ty * DUST.w + tx) * 4;
+          o[q] = dd[t]!;
+          o[q + 1] = dd[t + 1]!;
+          o[q + 2] = dd[t + 2]!;
+        } else if (one) {
           if (samplers[0]!.at(f, rgb, 0) === FROM_NOTHING) continue;
           o[q] = Math.max(0, rgb[0]! - l0.black) * g0;
           o[q + 1] = Math.max(0, rgb[1]! - l0.black) * g0;
@@ -227,7 +252,7 @@ class SkyPainter {
     if (old && old.proj === v.proj) {
       x.save();
       x.beginPath();
-      if (v.proj === 'globe') x.rect(0, 0, v.W, v.H);
+      if (v.proj === 'globe') x.arc(v.W / 2, v.H / 2, v.R, 0, 7);
       else x.ellipse(v.W / 2, v.H / 2, mw(v) / 2, mw(v) / 4, 0, 0, 7);
       x.clip();
       x.imageSmoothingEnabled = true;
@@ -243,7 +268,6 @@ class SkyPainter {
     this.spare = this.canvas;
     this.canvas = nx;
     this.shown = v;
-    this.gen++;
   }
 }
 
