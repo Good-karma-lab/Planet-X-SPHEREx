@@ -1,5 +1,33 @@
 # Progress
 
+## State (2026-11-14, evening)
+
+- **Live:** https://spherex.space on a 16 vCPU / 48 GB Oracle VM; main + standby instances behind Caddy (zero-downtime deploys with
+  `deploy/push.sh user@host`, which waits until no job runs). The page is served `no-cache`, hashed assets `immutable`.
+- **Speed:** all compute runs in a forkserver process pool behind a person-first priority gate (`service/cpu.py`); the API process
+  only serves files, small JSON and job state (/health ~1 ms; field opens 2 ms–1.7 s server side). PSF sets are loaded by the workers,
+  WCS built once per file, exposure signatures memoised.
+- **Lab (approved layout, v2.3):** title / Field / band buttons float over the picture; one time bar (play · Months | Days · Blink |
+  Difference | Co-add · timeline · speed · Copy link · Download video); panel tabs Controls · Object · Spectrum · Findings; a one-line
+  Scans tray (opens to one line per scan). Searches start by themselves: movers between passes (+ pairs), red sources, spectral
+  anomalies, the asteroid search of the middle pass (film search). One marker per object with the measured rate ± error and the Gaia
+  verdict; 2′ zoom inset; walls 3 × 2; Days draws the visits with the same renderer (Motion only is a switch); trajectory = the motion
+  2000–2050 with year ticks outside the ring; archive images on the timeline with the target's path; portrait in the picture's colours.
+- **Searches and data:** film search t4 (4 of 4 known bodies blind on the ecliptic Dec 2025 field, 0 false); pairs; Find Planet X
+  (distance search, deep sum, link, jump); catalogue context; comets/asteroids; quick-look spectrum from the DR1 cube; extras
+  (CADC deep references, AllWISE/Gaia cloud cross-match, ADES export, SSOIS, Gaia DR4 readiness, tracked stack, R Dra regression).
+- **Warm set:** 30 fields and films, then every test field's searches (movers, pairs, red, anomalies, target and anomaly spectra)
+  in the background; progress in /health (`warm.searches`).
+- **Not merged:** branch `brown-dwarfs` (route /api/v1/browndwarfs, not validated on real fields yet).
+
+## Next
+
+1. Remaining items of the user's list (PROD_CHECKLIST "U, 18:2x"): band toggles checked on every combination and target; landing
+   page routed as `/` with the globe at `#/explore` once its branch is ready; numbered track badges (search/tracks.ts).
+2. 60′ fields report too many red sources / anomalies (49 / 50 on the ecliptic field): review the thresholds at 60′.
+3. Sunday: final deploy ≤ 13:00 CET; re-record the video (`web/scripts/demo-video.mjs` then `demo-cut.mjs`; lead with stars and
+   brown dwarfs moving between passes and Find Planet X) and the slides; final texts; links from a private window; submit ≤ 15:30.
+
 ## State (2026-11-14, afternoon)
 
 - **NASA Space Apps 2026: submission closes Sun 15 Nov 23:59 CET** (team Good Karma Lab, Local Event Barcelona). Drafts in
