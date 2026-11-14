@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Health } from '../lib/api';
 import { outline } from '../lib/healpix';
-import { formatHash, type Screen } from '../lib/route';
+import type { Screen } from '../lib/route';
 import { D2R } from '../lib/sky';
-import { NeossatCard } from './neossat';
-import { FindingPicture } from './findings/thumb';
 import './findings/findings.css';
-import { FIELD, useLive } from './findings/live';
+import { useLive } from './findings/live';
 import { AboutBody } from './about/About';
-import { LeadPanel, LeadsList, rankLeads, useLeadParam } from './findings/leads';
+import { ATLAS_LEAD, LeadPanel, LeadsList, rankLeads, useLeadParam } from './findings/leads';
 import { mountTour } from '../ui/Tour';
 import { SearchedCounter, useSearched } from './search/searched';
 
@@ -22,8 +20,6 @@ const kv = (k: string, v: string) => (
     <dd>{v}</dd>
   </div>
 );
-const lab = (ra: number, dec: number, fov: number) =>
-  formatHash({ screen: 'lab', params: { ra: ra.toFixed(5), dec: dec.toFixed(5), fov: String(fov) } });
 
 interface IndexInfo {
   files?: number;
@@ -159,7 +155,7 @@ function IndexPage({ health }: { health: FullHealth | null }) {
 function FindingsPage() {
   const live = useLive();
   const searched = useSearched();
-  const leads = rankLeads(live);
+  const leads = [...rankLeads(live), ATLAS_LEAD];
   const [leadId, setLeadId] = useLeadParam();
   const open = leads.find((l) => l.id === leadId);
   return (
@@ -171,52 +167,7 @@ function FindingsPage() {
       <SearchedCounter fields={searched} />
       <LeadsList leads={leads} onOpen={setLeadId} openId={open?.id ?? null} />
       {open && <LeadPanel lead={open} onClose={() => setLeadId(null)} />}
-      <div class="fgrid">
-        {live.map((l) => {
-          const mv = l.movers?.result;
-          const an = l.anomalies?.result;
-          const chips: [string, string][] = [];
-          if (mv && mv.passes >= 3) {
-            for (const t of mv.tracks) chips.push([t.check === 'same' ? 'good' : 'warn', `${t.speed.toFixed(2)}″/yr · ${t.check === 'same' ? 'Gaia match' : t.check === 'none' ? 'no Gaia match' : 'unchecked'}`]);
-            if (mv.pairs?.length) chips.push(['warn', `${mv.pairs.length} pair${mv.pairs.length === 1 ? '' : 's'} in-place change`]);
-          }
-          const nTracks = mv?.tracks.length ?? 0;
-          const nAn = an?.anomalies.length ?? 0;
-          return (
-            <section class="card glass fc" key={l.name}>
-              <FindingPicture name={l.name} href={lab(l.ra, l.dec, FIELD)} fieldKey={mv?.field ?? null} passes={mv?.passes ?? 0} size={96} />
-              <div class="fc-body">
-                <h3 title={`${l.name} · ${FIELD}′ field`}>{l.name}</h3>
-                <div class="fc-nums">
-                  <span><b>{mv?.passes ?? '–'}</b> passes</span>
-                  <span><b>{mv && mv.passes >= 3 ? nTracks : '–'}</b> movers</span>
-                  <span><b>{an ? nAn : '–'}</b> odd spectra</span>
-                </div>
-                <div class="fchips">
-                  {chips.length ? chips.map(([k, t], i) => <span key={i} title={t} class={`badge ${k === 'good' ? 'green' : 'orange'}`}>{t}</span>) : <span class="mono-s">no movers above the bar</span>}
-                </div>
-                <a class="btn sm" href={lab(l.ra, l.dec, FIELD)}>
-                  Open in the lab
-                </a>
-              </div>
-            </section>
-          );
-        })}
-      </div>
       <div class="pg-grid">
-        <section class="card glass">
-          <h3>3I/ATLAS · interstellar comet · 14 Dec 2025</h3>
-          <p>
-            SPHEREx imaged the comet 55 times that day (IRSA's exposure table); the film of the pass rings it where JPL predicts it on every
-            visit. The same day CSA's NEOSSat took it too:
-          </p>
-          <NeossatCard />
-          <p>
-            <a href={formatHash({ screen: 'lab', params: { ra: '166.82740', dec: '5.27870', fov: '60', film: '61023.6' } })}>
-              Open the film in the lab
-            </a>
-          </p>
-        </section>
         <section class="card glass">
           <h3>Motion measured on the stacks (validation)</h3>
           <dl class="kv">
