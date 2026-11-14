@@ -33,6 +33,8 @@ const lab = async (q) => {
 
 await check('globe: catalogue and test targets', async () => {
   await page.goto(`${BASE}/#/globe`);
+  // the catalogue is a drawer, closed by default
+  if (!(await page.getByTestId('chip-bench').isVisible())) await page.getByRole('button', { name: 'Catalogue', exact: true }).click();
   await page.getByTestId('chip-bench').waitFor({ timeout: 30000 });
   return await page.getByTestId('chip-bench').innerText();
 });
