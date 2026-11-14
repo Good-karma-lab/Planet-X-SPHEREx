@@ -170,14 +170,16 @@ to the supervisor. Small commits throughout. The walking skeleton is deployed ea
 | Free-tier terms change | cost or loss of service | check on sign-up day; documented fallback |
 | Research numbers not reproduced exactly (full files vs the research's cutouts; new pipeline versions) | doubt | each mismatch investigated and explained in the validation report before moving on |
 
-## 6.2 Open questions (for the user / supervisor)
+## 6.2 Open questions and decisions
 
-1. **Q1 — cloud account.** The Oracle Cloud (and Cloudflare, R2) sign-up with the card check is the user's. Needed by M4. Domain name
-   wanted, or a Cloudflare-provided hostname?
-2. **Q2 — frontend framework.** Preact + TypeScript (proposed) or plain TypeScript without a framework?
-3. **Q3 — Sharpen.** Ship as an off-by-default switch until the production frame audit and the user's look, or not at all?
-4. **Q4 — demo fields beyond the five targets.** The ecliptic field (asteroids), Eris and Sedna fields are needed to show the films and
-   the distant-body search; they are demo fields, not test targets in the interface. Agreed?
-5. **Q5 — R Draconis 800-exposure cap.** Keep the even thinning (status says so), or raise the cap on the cloud if memory allows?
-6. **Q6 — scope of the search inside a visit.** Keep it ≤ 10′ (as researched) or extend to 20′ after the gate?
-7. **Q7 — public API.** Document the API for other developers (rate-limited), or keep it internal to the app?
+1. **Q1 — cloud account. Open (the user's).** The Oracle Cloud (and Cloudflare, R2) sign-up with the card check is the user's; a
+   domain or a Cloudflare-provided hostname is also their choice. Until it is answered, M0–M3 and the parts of M4 that need no VM are
+   built; the deployment part of M4 waits.
+2. **Q2 — frontend framework. Decided (2026-11-14):** Preact + TypeScript.
+3. **Q3 — Sharpen. Decided (2026-11-14):** kept (the user liked it and wanted its faults fixed). Off until the production frame audit
+   (5.11) passes on every frame, then **on by default** (2.3.9).
+4. **Q4 — demo fields. Decided (2026-11-14):** the ecliptic field, the Eris field and Sedna's fields are demo fields (rows of the
+   discovery test), not test targets in the interface; they are part of the warm set.
+5. **Q5 — R Draconis 800-exposure cap. Decided (2026-11-14):** even thinning with a status line; revisit after the cloud gate.
+6. **Q6 — search inside a visit. Decided (2026-11-14):** fields ≤ 10′; off by default until it finds ≥ 7 of 8 known bodies (M11 gate).
+7. **Q7 — public API. Decided (2026-11-14):** internal for now; `/api/v1` kept clean and typed so it can be documented later.
