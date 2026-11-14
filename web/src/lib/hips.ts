@@ -17,6 +17,41 @@ const KEEP_MS = 4000;
 /** a failed tile is not asked for again before this */
 const RETRY_MS = 15000;
 
+/** A layer baked into static tiles (the service's /tiles manifest): HEALPix nested, tone already applied, deeper orders read the live path. */
+export interface Baked {
+  label: string;
+  credit?: string;
+  frame: 'equatorial' | 'galactic';
+  size: number;
+  min: number;
+  max: number;
+  /** tile address with {o} (order), {d} (the 10 000-tile directory) and {i} (the tile) */
+  url: string;
+}
+const baked = new Map<string, Baked>();
+/** the baked layers of the service, once the manifest has been read (null: not read yet or none) */
+export const bakedOf = (id: string): Baked | undefined => baked.get(id);
+let manifest: Promise<boolean> | null = null;
+/** Reads the service's manifest of baked tiles once. True when the service has baked layers. */
+export function loadManifest(): Promise<boolean> {
+  manifest ??= fetch('/tiles/manifest.json', { cache: 'no-cache' })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((m: { layers?: Record<string, Partial<Baked> & { frame?: string }> } | null) => {
+      for (const [id, b] of Object.entries(m?.layers ?? {})) {
+        if (!b.url || b.max == null) continue;
+        const size = b.size ?? 512;
+        baked.set(id, { label: b.label ?? id, credit: b.credit, frame: b.frame === 'galactic' ? 'galactic' : 'equatorial', size, min: b.min ?? 0, max: b.max, url: b.url });
+        // a layer only the baked tiles have gets its own entry; the surveys read live keep theirs (the live path serves the depths below)
+        if (HIPS[id]) HIPS[id]!.frame = b.frame === 'galactic' ? 'galactic' : undefined;
+        HIPS[id] ??= { max: b.max, min: b.min ?? 0, w: size, frame: b.frame === 'galactic' ? 'galactic' : undefined, bakedOnly: true };
+      }
+      listeners.forEach((f) => f());
+      return baked.size > 0;
+    })
+    .catch(() => false);
+  return manifest;
+}
+
 interface Survey {
   /** path under IRSA's HiPS root; none: through the service only */
   path?: string;
@@ -28,6 +63,8 @@ interface Survey {
   w: number;
   /** the sky frame of the tiles when it is not equatorial (hips_frame in the survey's properties file) */
   frame?: 'galactic';
+  /** only the baked tiles have it (no live path, no Allsky image) */
+  bakedOnly?: boolean;
 }
 
 /** The surveys the globe and the lab read (the same map the service's tile cache uses). The three colour surveys start at order 3: the whole-sky view is the Allsky image (as on the research globe), not IRSA's order 0–2 tiles, which carry a different colour cast. */
@@ -113,6 +150,8 @@ interface Tile {
   h: number;
   d: Uint8ClampedArray;
   used: number;
+  /** from the baked tiles: its tone is already applied */
+  baked?: boolean;
 }
 /** null: the tile does not exist (outside the survey) */
 type Slot = Tile | null;
@@ -210,10 +249,13 @@ function pump(): void {
   }
 }
 
-function urls(id: string, o: number, i: number): { irsa?: string; service?: string } {
+function urls(id: string, o: number, i: number): { baked?: string; irsa?: string; service?: string } {
   const s = HIPS[id]!;
+  const b = baked.get(id);
+  const bk = b && o !== ALLSKY && o >= b.min && o <= b.max ? b.url.replace('{o}', String(o)).replace('{d}', String(Math.floor(i / 10000) * 10000)).replace('{i}', String(i)) : undefined;
   const rel = o === ALLSKY ? 'Norder3/Allsky' : `Norder${o}/Dir${Math.floor(i / 10000) * 10000}/Npix${i}`;
   return {
+    baked: bk,
     irsa: s.path ? `${IRSA}${s.path}/${rel}.jpg` : undefined,
     service: o === ALLSKY ? `/api/v1/hips/${id}/3/allsky` : o >= 3 ? `/api/v1/hips/${id}/${o}/${i}` : undefined,
   };
@@ -229,14 +271,24 @@ async function getBlob(url: string, signal: AbortSignal): Promise<Got> {
 
 /** The tile from IRSA, or from the service when IRSA fails or has not answered within FALLBACK_MS (whichever answers first
  *  wins). While IRSA is marked slow the service goes first and IRSA is the one asked after FALLBACK_MS. */
-function fetchTile(id: string, o: number, i: number): Promise<Got> {
+function fetchTile(id: string, o: number, i: number): Promise<{ g: Got; baked: boolean }> {
   const u = urls(id, o, i);
+  // a baked tile is one static file: it goes first, and only a failure of the network (not a missing tile) sends the request on to the live path
+  if (u.baked)
+    return getBlob(u.baked, new AbortController().signal).then(
+      (g) => ({ g, baked: true }),
+      (e) => (u.irsa || u.service ? fetchLive(u, o === ALLSKY).then((g) => ({ g, baked: false })) : Promise.reject(e)),
+    );
+  return fetchLive(u, o === ALLSKY).then((g) => ({ g, baked: false }));
+}
+
+function fetchLive(u: { irsa?: string; service?: string }, allsky: boolean): Promise<Got> {
   const irsa = u.irsa;
   const service = u.service;
   if (!irsa) return getBlob(service!, new AbortController().signal);
   if (!service) return getBlob(irsa, new AbortController().signal);
   // the Allsky image (a megabyte, the first picture of a survey) is kept by the service: it goes first for it
-  const first = irsaUp() && o !== ALLSKY ? irsa : service;
+  const first = irsaUp() && !allsky ? irsa : service;
   const second = first === irsa ? service : irsa;
   return new Promise<Got>((resolve, reject) => {
     const a1 = new AbortController();
@@ -316,7 +368,7 @@ function softenCells(d: Uint8ClampedArray, w: number, h: number): void {
 }
 
 let decoder: HTMLCanvasElement | null = null;
-async function decode(b: Blob, allsky = false): Promise<Tile> {
+async function decode(b: Blob, allsky = false, fromBaked = false): Promise<Tile> {
   const bm = await createImageBitmap(b);
   decoder ??= document.createElement('canvas');
   decoder.width = bm.width;
@@ -328,13 +380,13 @@ async function decode(b: Blob, allsky = false): Promise<Tile> {
   bm.close();
   const img = x.getImageData(0, 0, w, h);
   if (allsky) softenCells(img.data, w, h);
-  return { w, h, d: img.data, used: performance.now() };
+  return { w, h, d: img.data, used: performance.now(), baked: fromBaked };
 }
 
 function start(key: string, q: Want): void {
   inflight.add(key);
   fetchTile(q.id, q.o, q.i)
-    .then((g) => (g === 'missing' ? null : decode(g, q.o === ALLSKY)))
+    .then(({ g, baked: bk }) => (g === 'missing' ? null : decode(g, q.o === ALLSKY, bk)))
     .then((t) => put(q.id, q.o, q.i, t))
     .catch(() => failed.set(key, performance.now()))
     .finally(() => {
@@ -429,8 +481,12 @@ export class Sampler {
 
   /** shallowest tile order that can be asked for now */
   private get floor(): number {
+    const b = baked.get(this.id);
+    if (b) return b.min;
     return this.s.path && irsaUp() ? this.s.min : Math.max(3, this.s.min);
   }
+  /** the last colour came from a baked tile (its tone is applied already) */
+  lastBaked = false;
 
   at(f: FacePt, out: Float32Array | number[], k: number): number {
     const n = this.order;
@@ -468,6 +524,7 @@ export class Sampler {
 
   private read(t: Tile, n: number, f: FacePt, out: Float32Array | number[], k: number): number {
     t.used = stamp;
+    this.lastBaked = !!t.baked;
     const N = 1 << n;
     const X = f.x * N * t.w;
     const Y = f.y * N * t.w;
@@ -476,6 +533,8 @@ export class Sampler {
   }
 
   private allsky(f: FacePt, out: Float32Array | number[], k: number, ask: boolean): number {
+    this.lastBaked = false;
+    if (this.s.bakedOnly) return FROM_NOTHING; // baked only: there is no Allsky image
     const a = this.L.allsky;
     if (a === undefined) {
       if (ask) want(this.id, ALLSKY, 0, 4);
@@ -495,6 +554,9 @@ export class Sampler {
 export function orderFor(id: string, R: number, irsaShallow = true): number {
   const s = HIPS[id]!;
   const n = Math.log2((1.023 * R) / s.w) + 0.2;
+  const b = baked.get(id);
+  // baked tiles start at their own shallowest order (the whole sky is a few tiles): the Allsky image is not needed
+  if (b) return Math.min(s.max, Math.max(b.min, Math.round(n)));
   const floor = s.path && irsaShallow ? s.min : Math.max(3, s.min);
   if (floor >= 3) return n < 2.3 ? FROM_ALLSKY : Math.min(s.max, Math.max(3, Math.round(n)));
   return Math.min(s.max, Math.max(floor, Math.round(n)));

@@ -21,13 +21,16 @@ export interface CovCell {
   t: number;
 }
 
-export type SurveyId = 'dss2' | 'spherex' | '2mass' | 'wise' | 'dust';
+export type SurveyId = 'svs' | 'dss2' | 'spherex' | '2mass' | 'wise' | 'dust';
 
 export const kept = {
   /** null until the first visit sets it from the aim */
   view: null as null | { ra: number; dec: number; zoom: number },
-  survey: 'dss2' as SurveyId,
+  /** the star map (NASA SVS) is the default; until the service's baked tiles of it are known the visible-light survey stands in */
+  survey: 'svs' as SurveyId,
   proj: 'globe' as 'globe' | 'moll',
+  /** the globe seen from its centre (the default) or from outside */
+  inside: true,
   covOn: false,
   catOpen: false,
   filter: 'all',
