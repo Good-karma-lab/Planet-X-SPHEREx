@@ -2,15 +2,16 @@
 
 Pictures are screenshots of https://spherex.space on real SPHEREx data (`demo/slides.html`, exported to PDF).
 
-1. **SPHEREx Sky — see the sky change.** Good Karma Lab · Barcelona · challenge "Planet X and SPHEREx" · spherex.space. Picture: the lab on
+1. **SPHEREx Sky — see the sky move.** Good Karma Lab · Barcelona · challenge "Planet X and SPHEREx" · spherex.space. Picture: the lab on
    Barnard's Star.
-2. **The problem.** SPHEREx sees every place twice a year in 102 colours, but its raw frames show no motion: each exposure sees a star at
-   another wavelength and pixel grid. Our answer: clean, stack and colour each season, then blink the seasons.
-3. **Years in a loop.** The pendulum of seasons: Barnard's Star (10″/yr) moves, the field stands still; the search between seasons finds
-   it and Gaia DR3 confirms the motion. Archive images add 1985–2010.
-4. **Click anything.** The live spectrum of any source from every exposure, coloured by detector; SIMBAD and Gaia name it.
-5. **What does not look like a star.** The anomaly search ranks ε Indi B first by far (score 13.8, threshold 2.6): an excess at 3.9–4.3 µm,
-   where a cold brown dwarf emits most of its light. On an ecliptic field a Seyfert galaxy comes first.
-6. **Real data, honest results.** NASA SPHEREx Level-2 (IRSA, AWS) + ESA Gaia DR3 + DSS2, 2MASS, AllWISE. Measured: motions vs Gaia, a
-   spectrum vs 2MASS, chance 0.0 tracks per field. Limits: saturated stars have no spectrum; a track needs three seasons.
+2. **The problem.** SPHEREx sees every place about twice a year in 102 colours, but its raw frames show no motion: each exposure sees a
+   star at another wavelength and pixel grid. Our answer: clean, stack and colour each pass, then blink the passes and search them.
+3. **Movers between passes.** Barnard's Star moves 10.7 ± 0.8″ a year in a 20′ field; Gaia DR3 gives 10.4. Every track is checked
+   against Gaia, with a chance control (0.0 tracks per field). Archive images add 1985–2010.
+4. **Brown dwarfs.** Moving and red at 3.8–5 µm: WISE 0855−0714 and ε Indi B come out as known brown dwarfs, recovered. The anomaly
+   search ranks ε Indi B first by far (score 13.8 against 2.6).
+5. **Find Planet X.** Every orbit from 30 to 2000 au, in one pass or summed over all of them. Found blind: Eris (95.9 au), Makemake
+   (52.4 au), Sedna (82.9 au, V 20.8). Depth 0.039–0.047 mJy at 3 µm, deeper than WISE's 0.065.
+6. **Honest results.** Our best Planet Nine peak (394 au) is ruled out: NEOWISE along its orbit gives nothing where it would stand at
+   13.6σ. No new body found. Data: NASA SPHEREx Level-2 (IRSA, AWS), NEOWISE, ESA Gaia DR3, JPL, DSS2, 2MASS, AllWISE.
 7. **Try it.** spherex.space · code on GitHub (Apache-2.0) · built with AI coding assistants under the team's direction (SI statement).

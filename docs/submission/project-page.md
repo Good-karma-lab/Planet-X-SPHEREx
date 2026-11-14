@@ -17,12 +17,13 @@ Planet X and SPHEREx.
 
 ## High-level summary
 
-SPHEREx Sky is a free web tool that turns NASA SPHEREx's public infrared exposures into pictures in which you can see the sky change.
-Pick any place on a globe of the sky and the lab plays the SPHEREx seasons of that field back and forth like a blink comparator,
-coloured by SPHEREx's own spectrum, so a nearby star or a cold brown dwarf visibly moves while the background stands still. A click on
-any source measures its spectrum live from the individual exposures. Built-in searches find what moves between seasons (checked against
-Gaia afterwards, with a chance control) and which sources have a spectrum unlike the ordinary stars of the field, each with a passport
-that says why. Everything shown is computed from real SPHEREx Level-2 data.
+SPHEREx Sky is a free web tool that searches NASA SPHEREx's public infrared exposures for things that move between its passes: nearby
+stars, cold brown dwarfs, asteroids and comets, and distant bodies beyond Neptune: a Planet X. Pick any place on a globe of the sky and
+the lab plays the SPHEREx passes of that field back and forth like a blink comparator, coloured by SPHEREx's own spectrum, so a nearby
+star or a brown dwarf visibly moves while the background stands still. Searches start by themselves: tracks through the passes
+(checked against ESA Gaia, with a chance control), brown dwarf candidates, red sources and spectral anomalies. **Find Planet X**
+searches a field for slow bodies at 30–2000 au, along every orbit, in one pass or summed over all of them; it finds Eris, Makemake and
+Sedna blind, and it ruled out its own best Planet Nine peak with NEOWISE. Everything shown is computed from real SPHEREx Level-2 data.
 
 ## Link to demo **[fill: the uploaded video or slides]**
 
@@ -40,6 +41,15 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
 
 **What SPHEREx Sky does.**
 
+- **Movers between passes.** In every field the lab opens, the service finds the sources of each pass and links them into straight
+  tracks through three or more passes (3–120″ a year); each track is checked against Gaia DR3 at the pass dates and gets one ring with
+  its measured rate, its uncertainty and the Gaia verdict. A chance control re-runs the search with the moving sources at random places.
+- **Brown dwarf candidates.** Sources that move and are red (3.8–5 µm against 1.1–1.6 µm) are listed; what the catalogues explain is
+  set apart, so the known brown dwarfs among the test targets (WISE 0855−0714, ε Indi B) come out as "known, recovered".
+- **Find Planet X.** A distance search over one pass (every distance and own motion from 30 to 2000 au, each hypothesis a shift-and-add
+  of the visits), a deep sum along the orbits through all passes, a link of peaks between passes, and photometry of every peak with
+  control tracks beside it. The Planet X page shows the Solar System with the predicted Planet Nine orbit, the fields searched, the
+  candidates with their evidence (a candidate that fails is shown as ruled out, with why) and the depth reached against WISE.
 - **Globe.** The whole sky over SPHEREx's own DR1 all-sky map, DSS2, 2MASS, AllWISE or IRAS dust maps, the coverage of 1.63 million SPHEREx exposures, a catalogue of
   4,100 brown dwarfs, fast stars and variable stars, and the five test targets of the challenge. Aim anywhere and open the field.
 - **The lab: seasons as a pendulum.** For every pass (season) all exposures of the field are cleaned and stacked on a grid four times
@@ -57,7 +67,7 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
   shows it, and its visits stacked along JPL's track show how strongly it stands out (z 9 for a V 19.7 asteroid seen in only 5 of 11
   single visits). The number of SPHEREx detector images holding each body equals IRSA's Moving Object Search Tool (119, 107, 118, 121).
 - **One marker per object.** A star that the search finds moving carries one ring with its measured rate, its uncertainty and the Gaia
-  verdict ("11.4 ± 0.5″/yr · Gaia ✓"); a 2′ zoom in the corner follows the selected object.
+  verdict ("10.7 ± 0.8″/yr · Gaia ✓ 10.4"); a 2′ zoom in the corner follows the selected object.
 - **3I/ATLAS, seen by two space agencies.** A film centred on the interstellar comet on 14 Dec 2025, and the same day's frame from the
   Canadian Space Agency's NEOSSat (CADC): its pointing refitted on 95 Gaia stars, the comet found 5.6″ from JPL's place at G ≈ 12.4.
 - **Spectrum on a click.** The tool fits the point-spread function of the detector in every exposure that covers the source and draws
@@ -67,9 +77,6 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
   parallax is good. The points download as CSV.
 - **Red sources.** The flux at 3.8–5 µm against 1.1–1.6 µm, measured season by season: the two brown dwarfs among the test targets,
   WISE 0855−0714 and ε Indi B, stand out as red and moving.
-- **Search between seasons.** Sources of every season, a stationary test, straight tracks through three or more seasons at 3–120″ per
-  year; every track checked against Gaia DR3 at the season dates ("same motion", a centroid effect that is rejected, or "no Gaia
-  motion"); a chance control re-runs the search with the moving sources at random places.
 - **Light curves and catalogues.** A clicked source's ZTF and NEOWISE light curves (2014–2024) beside the SPHEREx years, and its
   spectrum averaged under 2MASS and WISE filters against the catalogue magnitudes.
 - **Spectral anomalies.** One button measures every source of the field in every exposure, builds the field's own ordinary star, and
@@ -78,8 +85,17 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
 
 **How it was checked (real data, measured by this system).**
 
-- Barnard's Star: the search between seasons finds one track in its 20′ field, 10.66″/yr toward 353°, and Gaia DR3 confirms the same
-  motion (10.39″/yr). Measured on the stacks with its parallax: 10.08″/yr toward 355°.
+- Known worlds found blind by Find Planet X: Eris at 95.89 ± 0.54 au (JPL 95.5; deep sum 20.3σ), Makemake at 52.38 ± 0.23 au (JPL
+  52.3), Sedna (V 20.8) at 82.9 au in the sum of three passes (JPL 83.0; 9.1σ in photometry; 0 of 8 control tracks reach the bar).
+- The best Planet Nine peak (394 au, 0.034 ± 0.006 mJy in detector 4) was ruled out: about 900 NEOWISE exposures (2014–2024) added
+  along its orbit give −0.0005 ± 0.0031 mJy, where a real body of that flux would stand at 13.6σ. Two more Planet Nine fields summed
+  over their passes (250–800 au) gave nothing above the bar.
+- Depth: the faintest artificial body found blind in 1° fields at 250–2000 au is 0.039–0.047 mJy at 3 µm in detector 4, deeper than
+  the 0.065 mJy of the WISE Planet Nine search.
+- Asteroids: the film search for unknown movers finds 4 of 4 known bodies blind on an ecliptic field of December 2025, with no false
+  track.
+- Barnard's Star: the search between passes finds one track in its 20′ field, 10.7 ± 0.8″/yr toward 353°, the same motion as Gaia DR3
+  (10.4″/yr). On a 5′ field its saturated core pulls the measure to 11.4 ± 0.5, and the lab says so.
 - ε Indi B: one track through four seasons, 4.6–4.7″/yr toward 122–125°, the same motion as Gaia DR3. In its 20′ field the anomaly search
   ranks it first by far (score 13.8 against a threshold of 2.6; the next source 4.6), driven by an excess at 3.9–4.3 µm (+40σ): the
   signature of a cold T dwarf.
@@ -94,7 +110,7 @@ every Level-2 exposure with its footprint; it cleans (pipeline flags, cosmic ray
 saturated cores shown white, never as holes) and stacks the exposures, and serves versioned products; the browser draws them with
 WebGL. Searches and spectra run on the server; results are kept so the next visitor sees them at once.
 
-**Limits we state.** Stars saturated in most exposures (brighter than about J = 10.5) get no SPHEREx spectrum. A track needs three
+**Limits we state.** Find Planet X has found no new body; a peak is a lead until other data confirm it. Stars saturated in most exposures (brighter than about J = 10.5) get no SPHEREx spectrum. A track needs three
 seasons; shifts smaller than about 5″ between the first and last season are not caught. A lead is not a discovery until confirmed.
 
 ## Space Agency data used (NASA and partners)
