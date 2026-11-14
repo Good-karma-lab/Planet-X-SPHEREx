@@ -18,4 +18,4 @@ Self-contained pieces for the lab and the globe. Each fetches its own data from 
 
 Gates: the distance, deep, link and jump pieces appear only when `GET /api/v1/health` lists the product (`product_versions.distant | deep | link`); nothing is asked of a search route just to find out. Jobs are asked again every 2–3 s and show the phase, "n of m", the time so far and the time left (the service's `estimate_s`, else from the rate).
 
-Status lines carry the honest numbers (blind limit about V 20–21; Planet Nine margin 1.4–1.7× only in D4); nothing is marked unless a search found it.
+Status lines carry the honest words (the depth of a search is its own measured noise bar on that field); nothing is marked unless a search found it.

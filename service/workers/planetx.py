@@ -58,40 +58,24 @@ OMEGA_SR = (6.15 / 206264.806) ** 2
 
 
 def honest_words(kind: str, det: tuple[int, ...] = (1, 2, 3)) -> dict[str, Any]:
-    """What the page must say next to a result of Find Planet X, with the numbers it rests on (measured on artificial bodies and on
-    Eris, Sedna and
-    Makemake; not re-measured by the job that carries them). kind: distant (one pass), deep (sum of passes), link, jump."""
+    """What the page must say next to a result of Find Planet X. The depth of a search is its own measured noise bar (the highest peak of
+    the negated sum on that field, given with every result), not a figure carried over from elsewhere. kind: distant (one pass), deep
+    (sum of passes), link, jump."""
     d4 = 4 in det
-    numbers = {
-        "blind_limit_mjy": {
-            "one_pass_d1_d3": [0.045, 0.065],
-            "sum_of_passes_d1_d3": 0.034,
-            "d4_clean_sky": 0.039,
-            "d4_near_ecliptic": 0.047,
-            "d4_planet_nine_prior": 0.042,
-            "wise_planet_nine_search": 0.065,
-        },
-        "blind_limit_v_reflected_light": [20.0, 21.0],
-        "sedna_v": 20.8,
-        "planet_nine_margin_over_wise": [1.4, 1.7],
-    }
     by_kind = {
-        "distant": "0.045-0.065 mJy for one pass",
-        "deep": "0.034 mJy for the sum of passes (Sedna, V 20.8, was found at 0.031 mJy)",
-        "link": "the limit of the passes that were linked",
-        "jump": "the limit of the pass that is searched",
+        "distant": "the bar of this pass",
+        "deep": "the bar of the sum of the passes",
+        "link": "the bars of the passes that were linked",
+        "jump": "the bar of the pass that is searched",
     }
     return {
-        "limit": "One blind search reaches about V 20-21 in reflected light (a flux of 0.034-0.065 mJy at 3 µm in D1-D3: "
-        f"{by_kind.get(kind, 'see the job')}). A body fainter than that is not found, and a search that finds nothing does not show that "
-        "nothing is there.",
-        "planet_nine": "The predicted Planet Nine is fainter than that limit in D1-D3. The one place SPHEREx adds to the existing "
-        "Planet Nine searches is 3 µm (D4, 2.4-3.8 µm), where the blind limit is 1.4-1.7 times deeper than the WISE search "
-        "(0.039-0.047 mJy against 0.065 mJy, measured on artificial bodies in 1 degree fields at 250-2000 au): the margin is small."
-        + ("" if d4 else " This job did not use D4."),
+        "limit": f"A blind search finds a body only above its own noise: {by_kind.get(kind, 'the bar of the job')}, measured on this field "
+        "(the highest peak of the same sum with the differences negated) and shown with the result. A body fainter than that is not "
+        "found, and a search that finds nothing does not show that nothing is there.",
+        "planet_nine": "The predicted Planet Nine is very faint in reflected light. SPHEREx's best chance is 3 µm (D4, 2.4-3.8 µm), where "
+        "a cold body is brightest; whether a field reaches it is that field's measured bar." + ("" if d4 else " This job did not use D4."),
         "lead": "A candidate is a lead, not a discovery: it needs the link of two or three passes, the check against the known bodies "
         "(JPL) and, for a body seen in D4, the archive check.",
-        "numbers": numbers,
     }
 
 

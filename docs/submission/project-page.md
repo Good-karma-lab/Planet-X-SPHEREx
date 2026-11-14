@@ -49,7 +49,7 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
 - **Find Planet X.** A distance search over one pass (every distance and own motion from 30 to 2000 au, each hypothesis a shift-and-add
   of the visits), a deep sum along the orbits through all passes, a link of peaks between passes, and photometry of every peak with
   control tracks beside it. The Planet X page shows the Solar System with the predicted Planet Nine orbit, the fields searched, the
-  candidates with their evidence (a candidate that fails is shown as ruled out, with why) and the depth reached against WISE.
+  candidates with their evidence (a candidate that fails is shown as ruled out, with why) and, for every search, its own measured noise bar.
 - **Globe.** The whole sky over SPHEREx's own DR1 all-sky map, DSS2, 2MASS, AllWISE or IRAS dust maps, the coverage of 1.63 million SPHEREx exposures, a catalogue of
   4,100 brown dwarfs, fast stars and variable stars, and the five test targets of the challenge. Aim anywhere and open the field.
 - **The lab: seasons as a pendulum.** For every pass (season) all exposures of the field are cleaned and stacked on a grid four times
@@ -90,8 +90,6 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
 - The best Planet Nine peak (394 au, 0.034 ± 0.006 mJy in detector 4) was ruled out: about 900 NEOWISE exposures (2014–2024) added
   along its orbit give −0.0005 ± 0.0031 mJy, where a real body of that flux would stand at 13.6σ. Two more Planet Nine fields summed
   over their passes (250–800 au) gave nothing above the bar.
-- Depth: the faintest artificial body found blind in 1° fields at 250–2000 au is 0.039–0.047 mJy at 3 µm in detector 4, deeper than
-  the 0.065 mJy of the WISE Planet Nine search.
 - Asteroids: the film search for unknown movers finds 4 of 4 known bodies blind on an ecliptic field of December 2025, with no false
   track.
 - Barnard's Star: the search between passes finds one track in its 20′ field, 10.7 ± 0.8″/yr toward 353°, the same motion as Gaia DR3
