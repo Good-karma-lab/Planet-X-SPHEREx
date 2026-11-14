@@ -34,3 +34,9 @@
 .lp-pair .fthumb { margin: 0; }
 .lp-neos { width: 170px; height: 170px; object-fit: cover; border-radius: 8px; border: 1px solid var(--edge-soft); background: #02070a; }
 @media (max-width: 600px) { .lp-pair figure { flex: 1; } .lp-pair .fthumb, .lp-neos { width: 100% !important; height: auto !important; aspect-ratio: 1; } }
+.leadcount { margin: 0 0 6px !important; font-size: 12px; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.leadgroup { margin: 10px 0 2px; font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.leadgroup span { color: var(--accent); margin-left: 4px; }
+.leadrow .lf { font-weight: 400; color: var(--muted); }
+.fmethod { margin: 4px 0 0; }
+@media (max-width: 600px) { .leadrow .lt .mono-s { white-space: normal; overflow-wrap: anywhere; } }

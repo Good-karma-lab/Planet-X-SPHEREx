@@ -8,7 +8,7 @@ import { FieldThumb } from './thumb';
 export interface Lead {
   id: string;
   kind: 'track' | 'anomaly';
-  /** 0 = unexplained track, 1 = anomaly, 2 = explained track (a recovery, not a lead) */
+  /** 0 = unexplained track, 1 = anomaly, 2 = known object (a recovered star, or the target of its field), 3 = comet */
   tier: 0 | 1 | 2 | 3;
   score: number;
   title: string;
@@ -19,9 +19,25 @@ export interface Lead {
   ra: number;
   dec: number;
   rows: [string, string][];
+  /** catalogue identity, the small second line of the list row */
+  ident?: string;
+  /** the target of its field (an odd spectrum that is expected) */
+  expected?: boolean;
   /** 3I/ATLAS: its panel shows the SPHEREx frame beside the partner agency's */
   atlas?: boolean;
 }
+
+const GREEK: Record<string, string> = { alf: 'α', bet: 'β', gam: 'γ', del: 'δ', eps: 'ε', zet: 'ζ', eta: 'η', tet: 'θ', iot: 'ι', kap: 'κ', lam: 'λ', mu: 'μ', nu: 'ν', ksi: 'ξ', pi: 'π', rho: 'ρ', sig: 'σ', tau: 'τ', phi: 'φ', chi: 'χ', psi: 'ψ', ome: 'ω' };
+/** A SIMBAD name read by people: no leading star mark, Greek letters spelled as letters. */
+const cleanName = (n: string) => n.replace(/^\*+\s+/, '').replace(/^([a-z]{2,3})(?=\s)/, (m) => GREEK[m] ?? m).replace(/\s+/g, ' ').trim();
+const um = (v: number) => v.toFixed(2).replace(/0$/, '');
+/** Is a SIMBAD name the field's own target ("ε Ind B" for "ε Indi B")? Token by token, the name's token is the start of the field's. */
+const sameName = (simbad: string, target: string) => {
+  const a = cleanName(simbad).toLowerCase().split(' ');
+  const b = target.toLowerCase().split(' ');
+  return a.length === b.length && a.every((t, i) => b[i]!.startsWith(t));
+};
+const BD = (t?: string) => (t === 'BD*' ? 'a brown dwarf' : t ? `type ${t}` : '');
 
 const ut = (m: number) => new Date((m - 40587) * 864e5).toISOString().slice(0, 10);
 
@@ -70,23 +86,29 @@ export function rankLeads(live: Live[]): Lead[] {
     an?.anomalies.forEach((a) => {
       const sb = a.identified?.simbad;
       const ga = a.identified?.gaia;
-      const name = sb?.state === 'ok' && sb.name ? sb.name : ga?.state === 'ok' ? `Gaia DR3 ${ga.source_id}` : 'not in SIMBAD or Gaia';
+      const ident = sb?.state === 'ok' && sb.name ? cleanName(sb.name) : ga?.state === 'ok' ? `Gaia DR3 ${ga.source_id}` : 'not in SIMBAD or Gaia';
+      const top = [...a.drivers].sort((x, y) => Math.abs(y.z) - Math.abs(x.z))[0];
+      const label = top ? `${top.z > 0 ? 'Excess' : 'Deficit'} at ${um(top.lo)}–${um(top.hi)} µm` : 'Odd spectrum';
+      const expected = sb?.state === 'ok' && !!sb.name && sameName(sb.name, l.name);
       out.push({
         id: `a:${l.name}:${a.n}`,
         kind: 'anomaly',
-        tier: 1,
+        tier: expected ? 2 : 1,
         score: an.threshold ? a.score / an.threshold : a.score,
-        title: `Odd spectrum: ${name}`,
+        title: expected ? `${l.name}: the target itself` : label,
         sub: `${l.name} field · score ${a.score.toFixed(1)}`,
+        ident: expected ? `${label} · expected` : ident,
+        expected,
         field: l.name,
         fieldKey: l.movers?.result?.field ?? null,
         passes: l.movers?.result?.passes ?? 0,
         ra: a.ra ?? l.ra,
         dec: a.dec ?? l.dec,
         rows: [
+          ...(expected ? ([['Known', `the target of this field: SIMBAD lists it as ${[BD(sb?.type), sb?.sp].filter(Boolean).join(' ')}, so its odd spectrum is expected, not a find`]] as [string, string][]) : []),
           ['Score', `${a.score.toFixed(2)} against a bar of ${an.threshold?.toFixed(2) ?? '?'} (the field's median + 6 robust σ)`],
           ['Drives it', a.drivers.map((d) => `${d.z > 0 ? 'excess' : 'deficit'} at ${d.lo.toFixed(2)}–${d.hi.toFixed(2)} µm (${d.z > 0 ? '+' : '−'}${Math.abs(d.z).toFixed(0)}σ)`).join('; ') || 'n/a'],
-          ['Catalogues', `${name}${sb?.type ? ` · ${sb.type}` : ''}`],
+          ['Catalogues', `${ident}${sb?.type ? ` · ${sb.type}` : ''}${ga?.state === 'ok' ? ` · Gaia DR3 ${ga.source_id}` : ''}`],
           ['Moves', a.moves ? 'yes, between the passes' : 'no, stationary'],
           ['Measured in', a.points != null ? `${a.points} exposures${a.snr != null ? ` · S/N ${a.snr} in the white stack` : ''}` : 'n/a'],
           ['Place', `${formatRA(a.ra ?? l.ra)} ${formatDec(a.dec ?? l.dec)}`],
@@ -104,7 +126,7 @@ export const ATLAS_LEAD: Lead = {
   tier: 3,
   score: 0,
   title: '3I/ATLAS · interstellar comet · 14 Dec 2025',
-  sub: 'comet · also seen by NEOSSat (CSA)',
+  sub: 'seen by SPHEREx on 14 Dec 2025 and the same day by NEOSSat (CSA)',
   field: '3I/ATLAS',
   fieldKey: null,
   passes: 1,
@@ -129,29 +151,58 @@ export function useLeadParam(): [string | null, (id: string | null) => void] {
   return [id, (v) => (location.hash = v ? `#/findings?lead=${encodeURIComponent(v)}` : '#/findings')];
 }
 
-const TIER = ['Unexplained', 'Odd spectrum', 'Known mover', 'Comet · also seen by NEOSSat (CSA)'];
+const TIER = ['Unexplained mover', 'Odd spectrum', 'Known object', 'Comet'];
+const SHOWN = 6;
 
-/** The ranked list of leads, one dense row each; a click opens the lead in the side panel. */
-export function LeadsList({ leads, onOpen, openId }: { leads: Lead[]; onOpen: (id: string) => void; openId: string | null }) {
+/** The ranked list of leads in groups by kind with counts, one dense row each; a click opens the lead in the side panel. `all` is the lead count of every searched field. */
+export function LeadsList({ leads, onOpen, openId, all }: { leads: Lead[]; onOpen: (id: string) => void; openId: string | null; all?: number }) {
+  const [more, setMore] = useState(false);
   if (!leads.length) return null;
+  const ranked = leads.filter((l) => !l.atlas);
+  // collapsed: every unexplained mover and known object, the first few odd spectra
+  const shown = new Set(leads.filter((l) => more || l.tier !== 1 || leads.filter((m) => m.tier === 1).indexOf(l) < SHOWN).map((l) => l.id));
+  let n = 0;
   return (
     <section class="card glass leads">
-      <h3>Leads in the test fields, ranked</h3>
-      <ol class="leadlist">
-        {[...leads.filter((l) => !l.atlas).slice(0, 12), ...leads.filter((l) => l.atlas)].map((l, i) => (
-          <li key={l.id}>
-            <button class="leadrow" aria-current={l.id === openId ? 'true' : undefined} title={`${l.title} · ${l.sub}`} onClick={() => onOpen(l.id)}>
-              <span class="rank">{i + 1}</span>
-              <span class="lt">
-                <b>{l.title}</b>
-                <span class="mono-s">{l.field}</span>
-              </span>
-              <span class={`badge ${l.tier >= 2 ? 'green' : 'orange'}`} title={TIER[l.tier]}>{l.atlas ? 'Comet · NEOSSat' : TIER[l.tier]}</span>
-            </button>
-          </li>
-        ))}
-      </ol>
-      <p class="hint leadnote">A lead is not a discovery.</p>
+      <h3>Leads, ranked</h3>
+      <p class="hint leadcount">
+        {ranked.length} in the five test fields{all != null && all > ranked.length ? ` · ${all} across all searched fields` : ''}
+        {leads.filter((l) => l.tier === 1).length > SHOWN && (
+          <button class="lnk" onClick={() => setMore(!more)}>
+            {more ? 'show fewer' : 'show all'}
+          </button>
+        )}
+      </p>
+      {TIER.map((name, t) => {
+        const group = leads.filter((l) => l.tier === t);
+        if (!group.length) return null;
+        const rows = group.filter((l) => shown.has(l.id));
+        return (
+          <div key={name}>
+            <div class="leadgroup">
+              {name} <span>{group.length}</span>
+            </div>
+            <ol class="leadlist">
+              {rows.map((l) => (
+                <li key={l.id}>
+                  <button class="leadrow" aria-current={l.id === openId ? 'true' : undefined} title={`${l.title} · ${l.field}${l.ident ? ` · ${l.ident}` : ''}`} onClick={() => onOpen(l.id)}>
+                    <span class="rank">{++n}</span>
+                    <span class="lt">
+                      <b>
+                        {l.title}
+                        {!l.expected && l.kind === 'anomaly' ? <span class="lf"> · {l.field}</span> : null}
+                      </b>
+                      <span class="mono-s">{l.atlas ? l.sub : l.ident ?? `${l.field} field · ${l.sub.split(' · ').slice(1).join(' · ')}`}</span>
+                    </span>
+                    <span class={`badge ${l.tier >= 2 ? 'green' : 'orange'}`}>{l.atlas ? 'Comet' : l.expected ? 'Expected' : l.tier === 2 ? 'Known' : l.tier === 1 ? 'Odd' : 'Mover'}</span>
+                  </button>
+                </li>
+              ))}
+            </ol>
+          </div>
+        );
+      })}
+      <p class="hint leadnote">A lead is not a discovery. Known objects are listed so a recovery is not mistaken for a find.</p>
     </section>
   );
 }
@@ -180,7 +231,7 @@ function PanelShell({ lead, rows, media, onClose }: { lead: Lead; rows: [string,
       </button>
       {media}
       <h3 class="lp-title">{lead.title}</h3>
-      <div class="mono-s">{lead.atlas ? lead.sub : `${lead.sub} · ${TIER[lead.tier]} · a lead, not a discovery`}</div>
+      <div class="mono-s">{lead.atlas ? lead.sub : `${lead.sub} · ${TIER[lead.tier]}${lead.ident ? ` · ${lead.ident}` : ''}`}</div>
       <dl class="lp-kv">
         {rows.map(([k, v]) => (
           <div class="kvr" key={k}>
