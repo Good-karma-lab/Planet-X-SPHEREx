@@ -113,7 +113,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.pairs = Pairs(st.store, cfg.store_dir, st.catalogue)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
         st.movers = Movers(st.store, cfg.store_dir)
-        st.dwarfs = BrownDwarfs(st.store, cfg.store_dir, st.movers)
+        st.dwarfs = BrownDwarfs(st.store, cfg.store_dir, st.movers, st.catalogue)
         st.bodies = KnownBodies(cfg.store_dir, st.index)
         if st.index is not None:
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)

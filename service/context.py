@@ -312,6 +312,11 @@ class CatalogueContext:
                 self.cache.popitem(last=False)
         return out
 
+    async def simbad_at(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0) -> dict[str, Any]:
+        """SIMBAD alone (the same answer, kept the same way, as inside `context`)."""
+        pos = f"{ra:.4f}_{dec:.4f}_{epoch:.1f}_{radius:.1f}"
+        return await self._kept("simbad_" + pos, lambda: self._simbad(ra, dec, epoch, radius))
+
     async def context(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0) -> dict[str, Any]:
         t0 = time.time()
         pos = f"{ra:.4f}_{dec:.4f}_{epoch:.1f}_{radius:.1f}"
