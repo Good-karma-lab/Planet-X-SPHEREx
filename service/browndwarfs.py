@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from service.context import CatalogueContext
 from service.movers import Movers, year_of
 from service.products.store import Store, product_key
 from service.products.versions import VERSIONS
@@ -40,6 +41,8 @@ EPOCH = 2025.9
 MAX_CHECKED = 40  # Gaia is asked about this many candidates at most (strongest colour first)
 WAIT_MOVERS_S = 600.0
 CHECK_AGAIN_S = 60.0
+SIMBAD_RADIUS_ARCSEC = 8.0
+BROWN_DWARF_TYPES = ("BD*", "Y*", "L*", "T*")
 
 
 @dataclass
@@ -129,6 +132,16 @@ def mover_match(c: dict[str, Any], tracks: list[dict[str, Any]]) -> dict[str, An
     }
 
 
+def status_of(c: dict[str, Any]) -> str:
+    """What the candidate is, as far as the catalogues say: a known brown dwarf (recovered), a named other object, or unidentified."""
+    sb = c.get("simbad") or {}
+    if sb.get("state") == "ok":
+        return "known brown dwarf" if str(sb.get("otype", "")).startswith(BROWN_DWARF_TYPES) else "known object"
+    if sb.get("state") == "none":
+        return "unidentified"
+    return "catalogue did not answer"
+
+
 def verdict_text(check: str) -> str:
     return {
         "none": "no Gaia star there",
@@ -141,11 +154,12 @@ def verdict_text(check: str) -> str:
 class BrownDwarfs:
     """Runs the brown dwarf search of fields, one run per field, kept on disk (as JSON) when Gaia answered for every candidate."""
 
-    def __init__(self, store: Store, store_dir: Path, movers: Movers) -> None:
+    def __init__(self, store: Store, store_dir: Path, movers: Movers, catalogue: CatalogueContext | None = None) -> None:
         self.store = store
         self.store_dir = store_dir
         self.dir = store_dir / KIND
         self.movers = movers
+        self.catalogue = catalogue
         self.runs: OrderedDict[str, DwarfRun] = OrderedDict()
 
     def key_of(self, field_key: str) -> str:
@@ -214,8 +228,13 @@ class BrownDwarfs:
             if t["check"] == "pending":
                 pending = True
             c["gaia"] = {"verdict": t["check"], "text": verdict_text(t["check"]), **(t["gaia"] or {})}
+            if "simbad" not in c or c["simbad"].get("state") == "unavailable":
+                c["simbad"] = await self._simbad(c)
+                if c["simbad"].get("state") == "unavailable":
+                    pending = True
+            c["status"] = status_of(c)
             if t["check"] == "same":
-                known.append({k: c[k] for k in ("ra", "dec", "pm", "pa", "colour", "snr_long", "gaia")})
+                known.append({k: c[k] for k in ("ra", "dec", "pm", "pa", "colour", "snr_long", "gaia", "simbad", "status")})
             else:
                 keep.append(c)
         run.result["candidates"] = keep
@@ -230,6 +249,16 @@ class BrownDwarfs:
             tmp.replace(self.dir / f"{run.key}.json")
         else:  # the pseudo tracks stay on the candidates so that Gaia is asked again; they are not part of the answer
             pass
+
+    async def _simbad(self, c: dict[str, Any]) -> dict[str, Any]:
+        """SIMBAD's answer at the candidate's place at 2025.9 (name, type, spectral type), or why there is none."""
+        if self.catalogue is None:
+            return {"state": "unavailable"}
+        try:
+            r = await self.catalogue.simbad_at(c["ra"], c["dec"], EPOCH, SIMBAD_RADIUS_ARCSEC)
+        except Exception:  # the catalogue did not answer: asked again with the next request
+            return {"state": "unavailable"}
+        return {k: r[k] for k in ("state", "name", "otype", "sptype", "sep", "link") if k in r}
 
     def view(self, run: DwarfRun) -> dict[str, Any]:
         out: dict[str, Any] = {"key": run.key, "state": run.state, "error": run.error}
