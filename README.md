@@ -13,7 +13,7 @@ time — and find moving objects nobody told them about. Entry for NASA Space Ap
 Status: building for the Space Apps deadline (15 Nov 2026). Lab and Globe work on real data; milestones M0–M2 done, M3 validated. The plan is in [`docs/plan/`](docs/plan/README.md); progress in [`docs/PROGRESS.md`](docs/PROGRESS.md).
 
 Data: SPHEREx Level-2 spectral images from NASA/IPAC IRSA (public AWS bucket `nasa-irsa-spherex`); catalogues and archive images from
-IRSA, Gaia (ESA), SIMBAD (CDS), IMCCE SkyBoT, JPL and STScI, credited where shown.
+IRSA, Gaia (ESA), SIMBAD (CDS), JPL and STScI, credited where shown.
 
 ## Development
 
