@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { getHealth, type Health } from './lib/api';
 import { parseHash, SCREENS, type Route, type Screen } from './lib/route';
+import { Globe } from './screens/globe';
 import { Lab } from './screens/lab';
 
 const TITLES: Record<Screen, string> = { globe: 'Globe', lab: 'Lab', findings: 'Findings', method: 'Method' };
@@ -53,7 +54,7 @@ export function App() {
         </nav>
       </header>
       <main class="view" data-screen={route.screen}>
-        {route.screen === 'lab' ? <Lab route={route} /> : <h1>{TITLES[route.screen]}</h1>}
+        {route.screen === 'lab' ? <Lab route={route} /> : route.screen === 'globe' ? <Globe /> : <h1>{TITLES[route.screen]}</h1>}
       </main>
       <footer class="status" data-testid="status">{statusLine(service)}</footer>
     </div>

@@ -10,6 +10,7 @@ test('the shell loads, talks to the service and switches screens by clicking', a
   for (const name of ['Lab', 'Findings', 'Method', 'Globe']) {
     await page.getByRole('link', { name, exact: true }).click();
     if (name === 'Lab') await expect(page.locator('.lab-empty')).toBeVisible();
+    else if (name === 'Globe') await expect(page.getByText('Test targets')).toBeVisible();
     else await expect(page.locator('main h1')).toHaveText(name);
     await expect(page.getByRole('link', { name, exact: true })).toHaveAttribute('aria-current', 'page');
   }
