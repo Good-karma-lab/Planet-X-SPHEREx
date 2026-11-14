@@ -146,6 +146,34 @@ export function Model({ onHover }: { onHover?: (s: string | null) => void }) {
         ctx.fillText(t, lx, y);
         return true;
       };
+      // every planet is named: its label takes the nearest free place around the dot (further out, with a thin leader line, where the inner planets crowd together)
+      const spotFor = (t: string, x: number, y: number, dx: number, font: string, k0 = 0) => {
+        ctx.font = font;
+        const tw = ctx.measureText(t).width;
+        for (let k = k0; k < 9; k++) {
+          for (const deg of [0, 180, -40, 40, -140, 140, -90, 90]) {
+            const rad = dx + k * 20;
+            const px = x + Math.cos((deg * Math.PI) / 180) * rad;
+            const py = y + Math.sin((deg * Math.PI) / 180) * rad;
+            const c = Math.cos((deg * Math.PI) / 180);
+            const lx = c > 0.3 ? px : c < -0.3 ? px - tw : px - tw / 2;
+            const r: [number, number, number, number] = [lx - 2, py - 7, lx + tw + 2, py + 6];
+            if (r[0] < 4 || r[2] > w - 4 || r[1] < 4 || r[3] > h - 4) continue;
+            if (placed.some((p) => r[0] < p[2] && r[2] > p[0] && r[1] < p[3] && r[3] > p[1])) continue;
+            placed.push(r);
+            return { t, lx, ly: py + 4, font, from: [x, y] as [number, number], to: [Math.max(r[0], Math.min(r[2], x)), Math.max(r[1] + 2, Math.min(r[3] - 2, y))] as [number, number], lead: k > 0 };
+          }
+        }
+        return null;
+      };
+      const planetSpots: NonNullable<ReturnType<typeof spotFor>>[] = [];
+      if (on.planets) {
+        for (const b of model.current!.bodies.filter((b) => b.layer === 'planets')) {
+          const q = proj(b.at);
+          const sp = spotFor(b.name, q[0], q[1], b.size + 5, '11px system-ui, sans-serif', b.a < 2 ? 2 : 0);
+          if (sp) planetSpots.push(sp);
+        }
+      }
       const line = (pts: V3[], col: string, wd: number, dash?: number[]) => {
         ctx.strokeStyle = col;
         ctx.lineWidth = wd;
@@ -217,9 +245,22 @@ export function Model({ onHover }: { onHover?: (s: string | null) => void }) {
         hits.push({ x: q[0], y: q[1], t: `${b.name} · a ${b.a < 10 ? b.a.toFixed(2) : Math.round(b.a)} au` });
       }
       ctx.fillStyle = 'rgba(225,240,245,0.85)';
-      for (const b of [...shown].filter((b) => b.layer !== 'planets' || b.a > 4).sort((p, q) => prio(p) - prio(q))) {
+      for (const b of [...shown].filter((b) => b.layer !== 'planets').sort((p, q) => prio(p) - prio(q))) {
         const q = proj(b.at);
         label(b.name, q[0], q[1] + 3, b.size + 3, '10.5px system-ui, sans-serif');
+      }
+      for (const sp of planetSpots) {
+        if (sp.lead) {
+          ctx.strokeStyle = 'rgba(225,240,245,0.28)';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(sp.from[0], sp.from[1]);
+          ctx.lineTo(sp.to[0], sp.to[1]);
+          ctx.stroke();
+        }
+        ctx.font = sp.font;
+        ctx.fillStyle = 'rgba(240,248,250,0.95)';
+        ctx.fillText(sp.t, sp.lx, sp.ly);
       }
       st.current.hit = hits;
     };
