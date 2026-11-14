@@ -90,6 +90,8 @@ interface Pass {
   img: ImageData;
   row: number;
   samplers: Sampler[];
+  /** pixels this pass painted (a pass of a new survey that has nothing yet leaves the picture on show alone) */
+  painted: number;
 }
 
 /** The all-sky dust map: one equirectangular picture of the whole sky (RA to the right, Dec down), loaded once. */
@@ -160,7 +162,7 @@ class SkyPainter {
     const R = view.proj === 'globe' ? view.R : mw(view) / 5;
     // the SPHEREx backdrop is three frames of the cube: one sampler per colour
     const samplers = layer[0]!.id === 'dust' ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
-    return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers };
+    return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0 };
   }
 
   /** Paints rows until the deadline; true when the pass is done. */
@@ -231,6 +233,7 @@ class SkyPainter {
           if (!ok) continue;
         }
         o[q + 3] = 255;
+        p.painted++;
       }
       if ((j & 7) === 7 && performance.now() > deadline) return false;
     }
@@ -238,8 +241,15 @@ class SkyPainter {
   }
 
   /** The new pixels over the previous picture, moved and scaled to the new view. */
+  /** the survey on show: a picture is carried over to a new view only while it is the same survey (no half-old, half-new picture after a switch) */
+  private shownKey = '';
+
   private finish(p: Pass): void {
     const v = p.view;
+    const key = p.layer.map((l) => l.id).join('+');
+    const same = key === this.shownKey;
+    if (!same && p.painted === 0) return; // nothing of the new survey yet: the picture on show stays
+    this.shownKey = key;
     const sc = this.scratch;
     sc.width = p.sw;
     sc.height = p.sh;
@@ -249,7 +259,7 @@ class SkyPainter {
     nx.height = Math.max(1, Math.round(v.H));
     const x = nx.getContext('2d')!;
     const old = this.shown;
-    if (old && old.proj === v.proj) {
+    if (old && same && old.proj === v.proj) {
       x.save();
       x.beginPath();
       if (v.proj === 'globe') x.arc(v.W / 2, v.H / 2, v.R, 0, 7);

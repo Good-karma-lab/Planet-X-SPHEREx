@@ -286,12 +286,14 @@ function fetchTile(id: string, o: number, i: number): Promise<Got> {
 }
 
 let decoder: HTMLCanvasElement | null = null;
-async function decode(b: Blob): Promise<Tile> {
+async function decode(b: Blob, soft = 0): Promise<Tile> {
   const bm = await createImageBitmap(b);
   decoder ??= document.createElement('canvas');
   decoder.width = bm.width;
   decoder.height = bm.height;
   const x = decoder.getContext('2d', { willReadFrequently: true })!;
+  // the Allsky image is smoothed a little (0.9 px) as on the research globe: its JPEG blocks and chroma speckle would show on the whole-sky view
+  x.filter = soft ? `blur(${soft}px)` : 'none';
   x.drawImage(bm, 0, 0);
   const w = bm.width;
   const h = bm.height;
@@ -302,7 +304,7 @@ async function decode(b: Blob): Promise<Tile> {
 function start(key: string, q: Want): void {
   inflight.add(key);
   fetchTile(q.id, q.o, q.i)
-    .then((g) => (g === 'missing' ? null : decode(g)))
+    .then((g) => (g === 'missing' ? null : decode(g, q.o === ALLSKY ? 0.9 : 0)))
     .then((t) => put(q.id, q.o, q.i, t))
     .catch(() => failed.set(key, performance.now()))
     .finally(() => {
