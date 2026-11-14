@@ -1,0 +1,23 @@
+/* Globe screen: the dates line under the readout, and the narrow-window layout */
+
+.map-ui .map-dates { white-space: normal; max-width: min(640px, 100%); line-height: 1.45; }
+
+/* a row's coordinates wrap between RA and Dec instead of running under the buttons */
+.screen .row .co { white-space: normal; min-width: 0; }
+.screen .row .co > span { white-space: nowrap; }
+.screen .row .nm { flex-wrap: wrap; row-gap: 2px; }
+
+/* narrow windows: the coverage switch leaves the top edge to the background buttons and sits above "Show area" */
+@media (max-width: 1100px) {
+  .screen .globe-wrap > .covsw { top: auto; bottom: 74px; right: 16px; }
+  .screen .map-ui { right: 16px; }
+  .screen .map-ui .seg.sm { flex-wrap: wrap; }
+  .screen .map-ui .map-read { white-space: normal; }
+  .screen .map-help { max-width: calc(100% - 230px); }
+}
+
+/* phones: the dates line keeps only the date of the picture */
+@media (max-width: 860px), (max-aspect-ratio: 1/1) {
+  .map-ui .map-dates .faint { display: none; }
+  .screen .globe-wrap > .covsw { bottom: 66px; right: 10px; }
+}
