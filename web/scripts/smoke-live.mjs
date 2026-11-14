@@ -105,7 +105,7 @@ await check('findings: ranked leads from the service', async () => {
 });
 await check('method and about', async () => {
   await page.goto(`${BASE}/#/method`);
-  await page.getByText('Known bodies', { exact: true }).waitFor({ timeout: 20000 });
+  await page.getByText('Known bodies', { exact: true }).first().waitFor({ timeout: 20000 });
   await page.goto(`${BASE}/#/about`);
   await page.locator('main h1').waitFor({ timeout: 20000 });
 });
