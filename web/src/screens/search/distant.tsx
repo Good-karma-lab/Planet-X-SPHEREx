@@ -203,6 +203,8 @@ export interface DistantPlan {
   hypotheses: number;
   estimate_s: number;
   dmin_used?: number;
+  /** the pass the search will read (0-based): the pass on show, or the one with the visits it needs */
+  pass?: number;
 }
 
 export function useDistantPlan(aim: DistantAim, enabled: boolean): DistantPlan | null {
@@ -380,8 +382,10 @@ export function DistantPanel({
           </button>
         </div>
         <div class="mono-s">
-          searches the pass on show: pass {currentPass + 1}
-          {passLabel ? ` · ${passLabel}` : ''} · distance {d.range.dmin}–{d.range.dmax} au
+          {plan?.pass != null && plan.pass !== currentPass
+            ? `searches pass ${plan.pass + 1} (the pass on show, ${currentPass + 1}, is not the one with the visits it needs)`
+            : `searches the pass on show: pass ${currentPass + 1}${passLabel ? ` · ${passLabel}` : ''}`}{' '}
+          · distance {d.range.dmin}–{d.range.dmax} au
           {d.range.det !== '123' ? ` · D${d.range.det.split('').join(', D')}` : ''} ·{' '}
           {plan
             ? `${plan.exposures} exposures in ${plan.visits} visits · ${plan.hypotheses.toLocaleString('en-US')} orbits · ${about(plan.estimate_s)} the first time`
