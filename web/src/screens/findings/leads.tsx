@@ -27,9 +27,37 @@ export interface Lead {
   atlas?: boolean;
 }
 
-const GREEK: Record<string, string> = { alf: 'α', bet: 'β', gam: 'γ', del: 'δ', eps: 'ε', zet: 'ζ', eta: 'η', tet: 'θ', iot: 'ι', kap: 'κ', lam: 'λ', mu: 'μ', nu: 'ν', ksi: 'ξ', pi: 'π', rho: 'ρ', sig: 'σ', tau: 'τ', phi: 'φ', chi: 'χ', psi: 'ψ', ome: 'ω' };
+const GREEK: Record<string, string> = {
+  alf: 'α',
+  bet: 'β',
+  gam: 'γ',
+  del: 'δ',
+  eps: 'ε',
+  zet: 'ζ',
+  eta: 'η',
+  tet: 'θ',
+  iot: 'ι',
+  kap: 'κ',
+  lam: 'λ',
+  mu: 'μ',
+  nu: 'ν',
+  ksi: 'ξ',
+  pi: 'π',
+  rho: 'ρ',
+  sig: 'σ',
+  tau: 'τ',
+  phi: 'φ',
+  chi: 'χ',
+  psi: 'ψ',
+  ome: 'ω',
+};
 /** A SIMBAD name read by people: no leading star mark, Greek letters spelled as letters. */
-const cleanName = (n: string) => n.replace(/^\*+\s+/, '').replace(/^([a-z]{2,3})(?=\s)/, (m) => GREEK[m] ?? m).replace(/\s+/g, ' ').trim();
+const cleanName = (n: string) =>
+  n
+    .replace(/^\*+\s+/, '')
+    .replace(/^([a-z]{2,3})(?=\s)/, (m) => GREEK[m] ?? m)
+    .replace(/\s+/g, ' ')
+    .trim();
 const um = (v: number) => v.toFixed(2).replace(/0$/, '');
 /** Is a SIMBAD name the field's own target ("ε Ind B" for "ε Indi B")? Token by token, the name's token is the start of the field's. */
 const sameName = (simbad: string, target: string) => {
@@ -48,7 +76,9 @@ export function rankLeads(live: Live[]): Lead[] {
     const mv = l.movers?.result;
     const an = l.anomalies?.result;
     mv?.tracks.forEach((t, i) => {
-      const explained = t.check === 'same';
+      // explained: Gaia has a star with the same motion there, or a catalogue names the source (a known brown dwarf is too faint for Gaia)
+      const named = !!t.name || /known/i.test(t.status ?? '');
+      const explained = t.check === 'same' || named;
       const ra = t.ra_2025_9 ?? l.ra;
       const dec = t.dec_2025_9 ?? l.dec;
       const sn = (t.snr ?? []).filter((v): v is number => v != null);
@@ -58,7 +88,12 @@ export function rankLeads(live: Live[]): Lead[] {
         kind: 'track',
         tier: explained ? 2 : 0,
         score: snr,
-        title: explained ? `${t.speed.toFixed(2)}″/yr mover: a known star` : `${t.speed.toFixed(2)}″/yr mover no catalogue explains`,
+        title:
+          t.check !== 'same' && named
+            ? `${t.speed.toFixed(2)}″/yr mover: ${t.name ?? 'a known object'}${t.status ? ` (${t.status})` : ''}`
+            : explained
+              ? `${t.speed.toFixed(2)}″/yr mover: a known star`
+              : `${t.speed.toFixed(2)}″/yr mover no catalogue explains`,
         sub: `${l.name} field · ${t.passes.length} passes`,
         field: l.name,
         fieldKey: mv.field ?? null,
@@ -66,16 +101,22 @@ export function rankLeads(live: Live[]): Lead[] {
         ra,
         dec,
         rows: [
-          ['Rate', `${t.speed.toFixed(2)} ″/yr toward ${t.pa.toFixed(0)}° (east ${t.v_east?.toFixed(2) ?? '?'}, north ${t.v_north?.toFixed(2) ?? '?'})`],
+          [
+            'Rate',
+            `${t.speed.toFixed(2)} ″/yr toward ${t.pa.toFixed(0)}° (east ${t.v_east?.toFixed(2) ?? '?'}, north ${t.v_north?.toFixed(2) ?? '?'})`,
+          ],
           ['Seen in', `${t.passes.length} passes${t.mjd ? `: ${t.mjd.map(ut).join(', ')}` : ''}`],
           ['Straight-line fit', t.rms_arcsec != null ? `rms ${t.rms_arcsec}″ about a straight line` : 'n/a'],
-          ['Signal', t.snr?.some((v) => v != null) ? `S/N ${t.snr.map((v) => (v == null ? '–' : v.toFixed(0))).join(' · ')} in the passes` : 'n/a'],
+          [
+            'Signal',
+            t.snr?.some((v) => v != null) ? `S/N ${t.snr.map((v) => (v == null ? '–' : v.toFixed(0))).join(' · ')} in the passes` : 'n/a',
+          ],
           [
             'Gaia check',
             t.check === 'same' && t.gaia
               ? `Gaia DR3 ${t.gaia.source_id} (G ${t.gaia.g ?? '?'}) moves ${t.gaia.pm} ″/yr toward ${t.gaia.pa}°: the same motion, ${t.gaia.offset_arcsec}″ from the track`
               : t.check === 'none'
-                ? 'no Gaia star with this motion near the track'
+                ? `no Gaia star with this motion near the track${named ? `; SIMBAD: ${t.name ?? ''}${t.status ? ` (${t.status})` : ''}` : ''}`
                 : 'not checked yet',
           ],
           ['Chance', mv.chance ? `${mv.chance.mean.toFixed(2)} tracks per field from chance alone (${mv.chance.trials} trials)` : 'n/a'],
@@ -86,7 +127,8 @@ export function rankLeads(live: Live[]): Lead[] {
     an?.anomalies.forEach((a) => {
       const sb = a.identified?.simbad;
       const ga = a.identified?.gaia;
-      const ident = sb?.state === 'ok' && sb.name ? cleanName(sb.name) : ga?.state === 'ok' ? `Gaia DR3 ${ga.source_id}` : 'not in SIMBAD or Gaia';
+      const ident =
+        sb?.state === 'ok' && sb.name ? cleanName(sb.name) : ga?.state === 'ok' ? `Gaia DR3 ${ga.source_id}` : 'not in SIMBAD or Gaia';
       const top = [...a.drivers].sort((x, y) => Math.abs(y.z) - Math.abs(x.z))[0];
       const label = top ? `${top.z > 0 ? 'Excess' : 'Deficit'} at ${um(top.lo)}–${um(top.hi)} µm` : 'Odd spectrum';
       const expected = sb?.state === 'ok' && !!sb.name && sameName(sb.name, l.name);
@@ -105,9 +147,24 @@ export function rankLeads(live: Live[]): Lead[] {
         ra: a.ra ?? l.ra,
         dec: a.dec ?? l.dec,
         rows: [
-          ...(expected ? ([['Known', `the target of this field: SIMBAD lists it as ${[BD(sb?.type), sb?.sp].filter(Boolean).join(' ')}, so its odd spectrum is expected, not a find`]] as [string, string][]) : []),
+          ...(expected
+            ? ([
+                [
+                  'Known',
+                  `the target of this field: SIMBAD lists it as ${[BD(sb?.type), sb?.sp].filter(Boolean).join(' ')}, so its odd spectrum is expected, not a find`,
+                ],
+              ] as [string, string][])
+            : []),
           ['Score', `${a.score.toFixed(2)} against a bar of ${an.threshold?.toFixed(2) ?? '?'} (the field's median + 6 robust σ)`],
-          ['Drives it', a.drivers.map((d) => `${d.z > 0 ? 'excess' : 'deficit'} at ${d.lo.toFixed(2)}–${d.hi.toFixed(2)} µm (${d.z > 0 ? '+' : '−'}${Math.abs(d.z).toFixed(0)}σ)`).join('; ') || 'n/a'],
+          [
+            'Drives it',
+            a.drivers
+              .map(
+                (d) =>
+                  `${d.z > 0 ? 'excess' : 'deficit'} at ${d.lo.toFixed(2)}–${d.hi.toFixed(2)} µm (${d.z > 0 ? '+' : '−'}${Math.abs(d.z).toFixed(0)}σ)`,
+              )
+              .join('; ') || 'n/a',
+          ],
           ['Catalogues', `${ident}${sb?.type ? ` · ${sb.type}` : ''}${ga?.state === 'ok' ? ` · Gaia DR3 ${ga.source_id}` : ''}`],
           ['Moves', a.moves ? 'yes, between the passes' : 'no, stationary'],
           ['Measured in', a.points != null ? `${a.points} exposures${a.snr != null ? ` · S/N ${a.snr} in the white stack` : ''}` : 'n/a'],
@@ -137,7 +194,7 @@ export const ATLAS_LEAD: Lead = {
 };
 const ATLAS_FILM = formatHash({ screen: 'lab', params: { ra: '166.82740', dec: '5.27870', fov: '60', film: '61023.6' } });
 
-const labHref = (l: Lead) => l.atlas ? ATLAS_FILM : `#/lab?ra=${l.ra.toFixed(5)}&dec=${l.dec.toFixed(5)}&fov=${FIELD}`;
+const labHref = (l: Lead) => (l.atlas ? ATLAS_FILM : `#/lab?ra=${l.ra.toFixed(5)}&dec=${l.dec.toFixed(5)}&fov=${FIELD}`);
 
 /** The lead id in the address (#/findings?lead=...), kept in step with the address bar. */
 export function useLeadParam(): [string | null, (id: string | null) => void] {
@@ -155,7 +212,17 @@ const TIER = ['Unexplained mover', 'Odd spectrum', 'Known object', 'Comet'];
 const SHOWN = 6;
 
 /** The ranked list of leads in groups by kind with counts, one dense row each; a click opens the lead in the side panel. `all` is the lead count of every searched field. */
-export function LeadsList({ leads, onOpen, openId, all }: { leads: Lead[]; onOpen: (id: string) => void; openId: string | null; all?: number }) {
+export function LeadsList({
+  leads,
+  onOpen,
+  openId,
+  all,
+}: {
+  leads: Lead[];
+  onOpen: (id: string) => void;
+  openId: string | null;
+  all?: number;
+}) {
   const [more, setMore] = useState(false);
   if (!leads.length) return null;
   const ranked = leads.filter((l) => !l.atlas);
@@ -185,16 +252,25 @@ export function LeadsList({ leads, onOpen, openId, all }: { leads: Lead[]; onOpe
             <ol class="leadlist">
               {rows.map((l) => (
                 <li key={l.id}>
-                  <button class="leadrow" aria-current={l.id === openId ? 'true' : undefined} title={`${l.title} · ${l.field}${l.ident ? ` · ${l.ident}` : ''}`} onClick={() => onOpen(l.id)}>
+                  <button
+                    class="leadrow"
+                    aria-current={l.id === openId ? 'true' : undefined}
+                    title={`${l.title} · ${l.field}${l.ident ? ` · ${l.ident}` : ''}`}
+                    onClick={() => onOpen(l.id)}
+                  >
                     <span class="rank">{++n}</span>
                     <span class="lt">
                       <b>
                         {l.title}
                         {!l.expected && l.kind === 'anomaly' ? <span class="lf"> · {l.field}</span> : null}
                       </b>
-                      <span class="mono-s">{l.atlas ? l.sub : l.ident ?? `${l.field} field · ${l.sub.split(' · ').slice(1).join(' · ')}`}</span>
+                      <span class="mono-s">
+                        {l.atlas ? l.sub : (l.ident ?? `${l.field} field · ${l.sub.split(' · ').slice(1).join(' · ')}`)}
+                      </span>
                     </span>
-                    <span class={`badge ${l.tier >= 2 ? 'green' : 'orange'}`}>{l.atlas ? 'Comet' : l.expected ? 'Expected' : l.tier === 2 ? 'Known' : l.tier === 1 ? 'Odd' : 'Mover'}</span>
+                    <span class={`badge ${l.tier >= 2 ? 'green' : 'orange'}`}>
+                      {l.atlas ? 'Comet' : l.expected ? 'Expected' : l.tier === 2 ? 'Known' : l.tier === 1 ? 'Odd' : 'Mover'}
+                    </span>
                   </button>
                 </li>
               ))}
@@ -217,14 +293,40 @@ interface NeosCard {
   snr: number | null;
 }
 
-function PanelShell({ lead, rows, media, onClose, inline }: { lead: Lead; rows: [string, string][]; media: preact.ComponentChildren; onClose: () => void; inline?: boolean }) {
+function PanelShell({
+  lead,
+  rows,
+  media,
+  onClose,
+  inline,
+}: {
+  lead: Lead;
+  rows: [string, string][];
+  media: preact.ComponentChildren;
+  onClose: () => void;
+  inline?: boolean;
+}) {
   useEffect(() => {
     if (inline) return;
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [onClose, inline]);
-  const json = () => JSON.stringify({ title: lead.title, field: lead.field, ra: lead.ra, dec: lead.dec, kind: lead.kind, rows: Object.fromEntries(rows), note: lead.atlas ? 'SPHEREx and NEOSSat observations of 3I/ATLAS' : 'a lead, not a discovery', generated: new Date().toISOString() }, null, 2);
+  const json = () =>
+    JSON.stringify(
+      {
+        title: lead.title,
+        field: lead.field,
+        ra: lead.ra,
+        dec: lead.dec,
+        kind: lead.kind,
+        rows: Object.fromEntries(rows),
+        note: lead.atlas ? 'SPHEREx and NEOSSat observations of 3I/ATLAS' : 'a lead, not a discovery',
+        generated: new Date().toISOString(),
+      },
+      null,
+      2,
+    );
   return (
     <aside class={`leadpanel glass${inline ? ' inline' : ''}`} role={inline ? 'region' : 'dialog'} aria-label="Lead report">
       <button class="leadpanel-x" aria-label="Close" onClick={onClose}>
@@ -245,7 +347,11 @@ function PanelShell({ lead, rows, media, onClose, inline }: { lead: Lead; rows: 
         <a class="btn sm primary" href={labHref(lead)}>
           {lead.atlas ? 'Open the film in the lab' : 'Open in the lab'}
         </a>
-        <a class="btn sm" download={`lead-${lead.id.replace(/[^a-z0-9]+/gi, '_')}.json`} href={`data:application/json;charset=utf-8,${encodeURIComponent(json())}`}>
+        <a
+          class="btn sm"
+          download={`lead-${lead.id.replace(/[^a-z0-9]+/gi, '_')}.json`}
+          href={`data:application/json;charset=utf-8,${encodeURIComponent(json())}`}
+        >
           Download JSON
         </a>
       </div>
@@ -258,7 +364,10 @@ function AtlasPanel({ lead, onClose, inline }: { lead: Lead; onClose: () => void
   const [c, setC] = useState<NeosCard | null>(null);
   const [fld, setFld] = useState<{ key: string | null; passes: number }>({ key: null, passes: 1 });
   useEffect(() => {
-    void fetch('/neossat/3i-2025-12-14.json').then((r) => (r.ok ? r.json() : null)).then(setC).catch(() => {});
+    void fetch('/neossat/3i-2025-12-14.json')
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setC)
+      .catch(() => {});
     // the pass of the 60′ field that contains 14 Dec 2025 (MJD 61023.6)
     void fetch(`/api/v1/fields?ra=${lead.ra.toFixed(5)}&dec=${lead.dec.toFixed(5)}&fov=60`)
       .then((r) => (r.ok ? r.json() : null))
@@ -274,7 +383,10 @@ function AtlasPanel({ lead, onClose, inline }: { lead: Lead; onClose: () => void
     ...(c
       ? ([
           ['NEOSSat (CSA)', `${c.date_obs.replace('T', ' ').slice(0, 16)} UT, ${c.exposure_s.toFixed(0)} s exposure`],
-          ['Found', `${c.offset_from_prediction_arcsec.toFixed(0)}″ from JPL's predicted place, G ≈ ${c.g_mag?.toFixed(1)}, S/N ${c.snr?.toFixed(0)}`],
+          [
+            'Found',
+            `${c.offset_from_prediction_arcsec.toFixed(0)}″ from JPL's predicted place, G ≈ ${c.g_mag?.toFixed(1)}, S/N ${c.snr?.toFixed(0)}`,
+          ],
           ['Pointing', `refitted on ${c.gaia_matches} Gaia DR3 stars (the header was ${c.wcs_offset_arcsec.toFixed(0)}″ off)`],
         ] as [string, string][])
       : []),
@@ -298,7 +410,15 @@ function AtlasPanel({ lead, onClose, inline }: { lead: Lead; onClose: () => void
 /** The lead slid in from the right: the picture of the field, every number and check, the link into the lab, and the report as JSON. Closes with × or Esc. */
 export function LeadPanel({ lead, onClose, inline }: { lead: Lead; onClose: () => void; inline?: boolean }) {
   if (lead.atlas) return <AtlasPanel lead={lead} onClose={onClose} inline={inline} />;
-  return <PanelShell lead={lead} rows={lead.rows} media={<FieldThumb fieldKey={lead.fieldKey} passes={lead.passes} size={200} />} onClose={onClose} inline={inline} />;
+  return (
+    <PanelShell
+      lead={lead}
+      rows={lead.rows}
+      media={<FieldThumb fieldKey={lead.fieldKey} passes={lead.passes} size={200} />}
+      onClose={onClose}
+      inline={inline}
+    />
+  );
 }
 
 /** One plain sentence for a field card: what the searches found there, in words a visitor can follow. */
@@ -308,7 +428,10 @@ export function plainLine(l: Live): string {
   const parts: string[] = [];
   if (!mv) parts.push('This field has not been searched yet.');
   else if (mv.passes < 3) parts.push(`SPHEREx saw this place in ${mv.passes} passes; a mover needs three.`);
-  else if (!mv.tracks.length) parts.push(`Nothing moves between the seasons beyond what chance makes (${mv.chance ? `${mv.chance.mean.toFixed(2)} false tracks per field` : 'a control run says how many'}).`);
+  else if (!mv.tracks.length)
+    parts.push(
+      `Nothing moves between the seasons beyond what chance makes (${mv.chance ? `${mv.chance.mean.toFixed(2)} false tracks per field` : 'a control run says how many'}).`,
+    );
   else {
     const t = mv.tracks[0]!;
     parts.push(
@@ -319,8 +442,12 @@ export function plainLine(l: Live): string {
   }
   if (an?.anomalies.length) {
     const a = an.anomalies[0]!;
-    const nm = a.identified?.simbad?.name ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'an uncatalogued source');
-    parts.push(`${an.anomalies.length} source${an.anomalies.length === 1 ? ' has a' : 's have'} spectrum${an.anomalies.length === 1 ? '' : 's'} unlike the ordinary stars of the field; the strongest is ${nm}.`);
+    const nm =
+      a.identified?.simbad?.name ??
+      (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'an uncatalogued source');
+    parts.push(
+      `${an.anomalies.length} source${an.anomalies.length === 1 ? ' has a' : 's have'} spectrum${an.anomalies.length === 1 ? '' : 's'} unlike the ordinary stars of the field; the strongest is ${nm}.`,
+    );
   }
   return parts.join(' ');
 }

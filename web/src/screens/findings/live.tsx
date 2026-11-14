@@ -25,6 +25,11 @@ export interface TrackLite {
   dec_2025_9?: number;
   check: string;
   gaia: { source_id: string; pm: number; pa?: number; g?: number | null; offset_arcsec?: number } | null;
+  /** 'red': found in the red bands by the brown dwarf scan; 'saturated': a bright star's saturated core */
+  source?: string;
+  /** the catalogue name and what it is, when a catalogue knows the source (SIMBAD) */
+  name?: string;
+  status?: string;
 }
 export interface AnomalyLite {
   n: number;
@@ -35,19 +40,31 @@ export interface AnomalyLite {
   points?: number;
   score: number;
   drivers: { lo: number; hi: number; z: number; share: number }[];
-  identified?: { simbad?: { state: string; name?: string; type?: string; sp?: string | null }; gaia?: { state: string; source_id?: string } };
+  identified?: {
+    simbad?: { state: string; name?: string; type?: string; sp?: string | null };
+    gaia?: { state: string; source_id?: string };
+  };
 }
 export interface Live {
   name: string;
   ra: number;
   dec: number;
-  movers: { state: string; result?: { field?: string; passes: number; sources_per_pass: number[]; tracks: TrackLite[]; pairs?: unknown[]; chance?: { trials: number; mean: number; any: number } } } | null;
+  movers: {
+    state: string;
+    result?: {
+      field?: string;
+      passes: number;
+      sources_per_pass: number[];
+      tracks: TrackLite[];
+      pairs?: unknown[];
+      chance?: { trials: number; mean: number; any: number };
+    };
+  } | null;
   anomalies: {
     state: string;
     result?: { with_spectrum: number; threshold: number | null; anomalies: AnomalyLite[]; reason: string } | null;
   } | null;
 }
-
 
 /** What the searches found in the 20′ fields of the five test targets, read live from the service (nothing is started here). */
 export function useLive(): Live[] {
@@ -82,4 +99,3 @@ export function useLive(): Live[] {
   }, []);
   return live;
 }
-
