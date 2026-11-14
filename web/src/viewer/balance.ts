@@ -83,3 +83,27 @@ export function starBalance(rgb: Uint16Array, n: number, sat?: Uint8Array): { kr
   if (rg.length < MIN_STARS) return null;
   return { kr: median(rg), kb: median(bgr), stars: rg.length };
 }
+
+/** Background (median) and noise (1.4826 × MAD) of the white light of one pass: the mean of its `planes` n×n float16 planes.
+ *  Also the white-light levels at the 99.5th and 99.9th percentile (the trims of the bright end). */
+export function passLevels(data: Uint16Array, n: number, planes: number): { bg: number; sigma: number; p995: number; p999: number } | null {
+  const N = n * n;
+  const v: number[] = [];
+  for (let i = 0; i < N; i += 3) {
+    let s = 0;
+    let k = 0;
+    for (let c = 0; c < planes; c++) {
+      const x = halfToFloat(data[c * N + i]!);
+      if (Number.isFinite(x)) {
+        s += x;
+        k++;
+      }
+    }
+    if (k) v.push(s / k);
+  }
+  if (v.length < 100) return null;
+  v.sort((a, b) => a - b);
+  const bg = v[v.length >> 1]!;
+  const dev = v.map((x) => Math.abs(x - bg)).sort((a, b) => a - b);
+  return { bg, sigma: 1.4826 * dev[dev.length >> 1]!, p995: v[Math.floor(0.995 * (v.length - 1))]!, p999: v[Math.floor(0.999 * (v.length - 1))]! };
+}

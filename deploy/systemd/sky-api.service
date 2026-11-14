@@ -14,7 +14,7 @@ Restart=always
 RestartSec=5
 LimitNOFILE=65536
 # memory: the scheduler admits jobs within its budget; this is the outer fence
-MemoryMax=11G
+MemoryMax=13G
 
 [Install]
 WantedBy=multi-user.target

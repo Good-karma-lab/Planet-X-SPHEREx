@@ -334,3 +334,4 @@ input[type='range']::-moz-range-thumb { width: 12px; height: 12px; border-radius
   .panel-foot { padding: 6px 14px 7px; gap: 3px; }
   .panel-foot .status { min-height: 0; max-height: none; -webkit-line-clamp: 1; }
 }
+.stretch select { flex: none; width: auto; font-size: 12.5px; padding: 4px 8px; }

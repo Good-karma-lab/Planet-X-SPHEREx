@@ -5,9 +5,10 @@ import { formatHash, type Route } from '../lib/route';
 import { formatDec, formatRA, parseDec, parseRA } from '../lib/sky';
 import type { SxpPart } from '../lib/sxp';
 import { icon } from '../ui/icons';
-import { starBalance } from '../viewer/balance';
+import { passLevels, starBalance } from '../viewer/balance';
 import { FADE_MS, HOLD_MS, order } from '../viewer/pendulum';
-import { Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
+import { PER_PASS, Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
+import { atEpoch } from '../lib/sky';
 import { FilmView } from './film';
 
 const SIZES = [2, 5, 10, 20, 60];
@@ -61,6 +62,9 @@ const season = (mjd: number) => {
 };
 
 interface Opts {
+  marker: boolean;
+  sharp: boolean;
+  trim: 'fixed' | 'p999' | 'p995';
   boost: boolean;
   sat: boolean;
   rings: boolean;
@@ -80,7 +84,7 @@ export function Lab({ route }: { route: Route }) {
   const allBands = BANDS.map((b) => b.key);
   const bands = p['bands'] ? p['bands'].split(',').filter((k) => allBands.includes(k)) : allBands;
   const dets = p['dets'] ? p['dets'].split(',').map(Number).filter((d) => d >= 1 && d <= 6) : [1, 2, 3, 4, 5, 6];
-  const opts: Opts = { boost: p['boost'] === '1', sat: p['sat'] !== '0', rings: p['rings'] === '1', morph: p['morph'] !== '0', mono: p['blend'] === 'mono' };
+  const opts: Opts = { marker: p['marker'] !== '0', sharp: p['sharp'] !== '0', trim: p['trim'] === 'p999' || p['trim'] === 'p995' ? p['trim'] : 'fixed', boost: p['boost'] === '1', sat: p['sat'] !== '0', rings: p['rings'] === '1', morph: p['morph'] !== '0', mono: p['blend'] === 'mono' };
 
   const set = (params: Record<string, string | null>) => {
     const next: Record<string, string> = { ...p };
@@ -91,6 +95,15 @@ export function Lab({ route }: { route: Route }) {
     location.hash = formatHash({ screen: 'lab', params: next });
   };
 
+  const targets = useRef<{ n: string; ra: number; dec: number; pmra: number | null; pmdec: number | null }[]>([]);
+  useEffect(() => {
+    void fetch('/catalog.json')
+      .then((r) => r.json())
+      .then((d: { catalog: { n: string; ra: number; dec: number; pmra: number | null; pmdec: number | null; b?: number }[] }) => {
+        targets.current = d.catalog.filter((o) => o.b);
+      })
+      .catch(() => {});
+  }, []);
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
@@ -135,6 +148,9 @@ export function Lab({ route }: { route: Route }) {
     const pending: { name: string; part: SxpPart }[] = [];
     let diffPart: SxpPart | null = null;
     const balanced = new Set<number>();
+    const noised = new Set<number>();
+    let trims: { p995: number; p999: number } | null = null;
+    let shownPass = 0;
     const uploadDiff = () => {
       if (!diffPart || !r.size || !state.current.meta) return;
       const names = ['white', ...state.current.meta.bands.map((b) => b.key)];
@@ -156,6 +172,14 @@ export function Lab({ route }: { route: Route }) {
       const arr = part.arrays[stack === 'picture' ? 'rgb' : stack === 'quick' ? 'white' : stack]!;
       r.upload(stack, k, arr.data as Uint16Array);
       if (part.arrays['sat']) r.uploadSat(k, part.arrays['sat'].data as Uint8Array);
+      if (stack === 'picture' || !noised.has(k)) {
+        const lv = passLevels(arr.data as Uint16Array, n, PER_PASS[stack]);
+        if (lv) {
+          noised.add(k);
+          r.setNoise(k, lv.bg, lv.sigma);
+          if (stack === 'picture' && k === 0) trims = { p995: lv.p995, p999: lv.p999 };
+        }
+      }
       if (stack === 'picture') {
         const wb = starBalance(arr.data as Uint16Array, n, part.arrays['sat']?.data as Uint8Array | undefined);
         if (wb) {
@@ -170,6 +194,7 @@ export function Lab({ route }: { route: Route }) {
       onMeta: (m) => {
         setMeta(m);
         state.current.meta = m;
+        r.setDetectorPixel(6.15 / m.grid.step_arcsec);
         for (const q of m.passes) if (!balanced.has(q.index)) r.setWhiteBalance(q.index, q.white_balance.kr, q.white_balance.kb);
         while (pending.length) {
           const x = pending.shift()!;
@@ -200,7 +225,8 @@ export function Lab({ route }: { route: Route }) {
       last = now;
       r.boost = 2.4;
       r.whiteCores = st.opts.sat;
-      r.hi = st.opts.boost ? 40 : 400;
+      r.sharp = st.opts.sharp ? 16 : 0;
+      r.hi = st.opts.boost ? 40 : st.opts.trim !== 'fixed' && trims ? Math.min(400, Math.max(0.8, st.opts.trim === 'p999' ? trims.p999 : trims.p995)) : 400;
       r.soft = st.stretch;
       const { w, h } = r.begin();
       const allOn = st.bands.length === BANDS.length;
@@ -252,6 +278,7 @@ export function Lab({ route }: { route: Route }) {
             return { x: c.x, y: c.y + 22, w: c.size, h: c.size - 22, stack, mode: 'layer', layer: d, noData: [0, 0, 0], time: timeMode, diffLayer: 0, label: `D${d + 1} ${DETECTORS[d]!.name}`, sub: DETECTORS[d]!.range, hue: DETECTORS[d]!.hue };
           });
         }
+        shownPass = t < 0.5 ? a : b;
         for (const q of panels) {
           r.panel(q, a, b, t);
           if (q.label) out.push({ x: q.x, y: q.y - 20, w: q.w, text: q.label, sub: q.sub ?? '', hue: q.hue ?? 0 });
@@ -281,6 +308,44 @@ export function Lab({ route }: { route: Route }) {
       ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
       ctx.clearRect(0, 0, wcss, hcss);
       const m = st.meta;
+      if (m && st.opts.marker && st.view === 'picture' && targets.current.length) {
+        // the marker: a ring and the name of a test target at its place on the date of the season shown
+        const q = m.passes[shownPass] ?? m.passes[0]!;
+        const year = 2000 + (q.mjd_mid - 51544.5) / 365.25;
+        const scale = wcss / m.grid.n;
+        for (const o of targets.current) {
+          const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, year);
+          const dx = -(((tra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600 / m.grid.step_arcsec;
+          const dy = -(tdec - m.grid.dec0) * 3600 / m.grid.step_arcsec;
+          const x = (m.grid.n / 2 + dx) * scale;
+          const y = (m.grid.n / 2 + dy) * scale;
+          if (x < 0 || y < 0 || x > wcss || y > hcss) continue;
+          const rr = 18;
+          ctx.save();
+          ctx.lineWidth = 3.5;
+          ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+          const ring = () => {
+            ctx.beginPath();
+            ctx.arc(x, y, rr, 0, 2 * Math.PI);
+            for (const [ax, ay] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+              ctx.moveTo(x + ax * (rr - 4), y + ay * (rr - 4));
+              ctx.lineTo(x + ax * (rr + 6), y + ay * (rr + 6));
+            }
+            ctx.stroke();
+          };
+          ring();
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = '#7ff0e4';
+          ring();
+          ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#000';
+          ctx.fillStyle = '#fff';
+          ctx.strokeText(o.n, x + rr + 8, y - rr * 0.35);
+          ctx.fillText(o.n, x + rr + 8, y - rr * 0.35);
+          ctx.restore();
+        }
+      }
       if (!st.opts.rings || !m || st.view !== 'picture' || m.passes.length < 2) return;
       // speed rings: how far a body of that speed moves between the first and the last pass, centred on the field
       const dt = (m.passes[m.passes.length - 1]!.mjd_mid - m.passes[0]!.mjd_mid) / 365.25;
@@ -574,7 +639,7 @@ export function Lab({ route }: { route: Route }) {
                 <div class="dchecks">
                   {dchk('boostChk', 'sun', 'Brighten', 'Brighten: a lower white point, so faint sources stand out (bright stars saturate)', opts.boost, (v) => set({ boost: v ? '1' : null }))}
                   {dchk('satChk', 'sparkle', 'White cores', 'Saturated cores white: pixels saturated in most exposures are drawn white, never as missing data', opts.sat, (v) => set({ sat: v ? null : '0' }))}
-                  {dchk('ringChk', 'target', 'Marker', 'Marker ring on the selected source', false, null)}
+                  {dchk('ringChk', 'target', 'Marker', 'Marker: a ring and the name of the test target in the field, at its place on the date of the season shown', opts.marker, (v) => set({ marker: v ? null : '0' }))}
                   {dchk('ringsChk', 'target', 'Speed rings', 'Speed rings: 1, 3, 10, 30, 100 and 300 ″/yr: how far a body of that speed moves between the first and the last season', opts.rings, (v) => set({ rings: v ? '1' : null }))}
                   {dchk('trailChk', 'path', 'Trajectory', 'Trajectory of the selected source over the seasons', false, null)}
                   {dchk('movChk', 'binoculars', 'Mover rings', 'Mover rings: a ring and a path for every track the searches found', false, null)}
@@ -582,7 +647,7 @@ export function Lab({ route }: { route: Route }) {
                   {dchk('maskChk', 'warning', 'Artifacts', 'Artifact mask: red where the pipeline flagged the pixel in many exposures', false, null)}
                   {dchk('morphChk', 'waveform', 'Interpolate', 'Interpolate: cross-fade between seasons instead of stepping', opts.morph, (v) => set({ morph: v ? null : '0' }))}
                   {dchk('refChk', 'scan', 'Reference', 'Reference: an archive picture of the same place for comparison', false, null)}
-                  {dchk('sharpChk', 'sparkle', 'Sharpen', 'Sharpen: faint stars crisper on screen (off until its check on every frame passes)', false, null)}
+                  {dchk('sharpChk', 'sparkle', 'Sharpen', 'Sharpen: faint stars crisper on screen; boost only, the same gain in every channel (colours never change), never near saturated cores', opts.sharp, (v) => set({ sharp: v ? null : '0' }))}
                 </div>
                 <div class="seg" role="group" aria-label="Blend">
                   <button class={opts.mono ? '' : 'on'} onClick={() => set({ blend: null })} title="Each band keeps its colour; bands are screen-blended">
@@ -597,7 +662,12 @@ export function Lab({ route }: { route: Route }) {
                 <div class="stretch">
                   <span>Stretch</span>
                   <input type="range" min={-3} max={1.5} step={0.05} value={Math.log(stretch)} aria-label="Stretch" onInput={(e) => setStretch(Math.exp(Number((e.target as HTMLInputElement).value)))} onDblClick={() => setStretch(0.4)} title="Softness of the display law: left shows faint light, right keeps bright stars apart (double-click resets)" />
-                  <span class="mono-s">asinh {stretch.toFixed(2)}</span>
+                  <span class="mono-s">lin {stretch.toFixed(2)}</span>
+                  <select class="inp" value={opts.trim} onChange={(e) => set({ trim: (e.target as HTMLSelectElement).value === 'fixed' ? null : (e.target as HTMLSelectElement).value })} title="Trim of the bright end: a fixed white point, or the field's own 99.9th / 99.5th percentile">
+                    <option value="fixed">Trim fixed</option>
+                    <option value="p999">Trim 99.9 %</option>
+                    <option value="p995">Trim 99.5 %</option>
+                  </select>
                 </div>
                 <div class="dacts">
                   <select class="inp" value={String(speed)} onChange={(e) => setSpeed(Number((e.target as HTMLSelectElement).value))} title="Playback speed">

@@ -36,14 +36,50 @@ uniform int uBandMask;         // mode 2: bit k = band k on
 uniform vec3 uHues[8];         // mode 2: colour of each band
 uniform int uMono;             // mode 2: sum the chosen bands in grey instead of blending their colours
 uniform int uWhiteCores;       // a saturated core is drawn white (1) or as no data (0)
+uniform float uSharp;          // Sharpen amount (0 = off)
+uniform vec2 uSN[16];          // per pass: background and noise of the pass's white light (mean of its layers)
+uniform float uDP;             // one detector pixel in uv units
 
 float law(float x) { return clamp(asinh((x - uLo) / uSoft) / asinh((uHi - uLo) / uSoft), 0.0, 1.0); }
 
-float val(int pass, int ch) { return texture(uVal, vec3(uv, float(pass * uPerPass + ch))).r; }
+float G = 1.0;                 // Sharpen gain of the place, the same for every layer and channel (so it never changes a colour)
+float raw(int pass, int ch, vec2 q) { return texture(uVal, vec3(q, float(pass * uPerPass + ch))).r; }
+float val(int pass, int ch) { return raw(pass, ch, uv) * G; }
+
+// white light at a place: the mean of the pass's layers (colour channels, bands or detectors)
+float white(int k, vec2 q) {
+  float s = 0.0; int n = 0;
+  for (int j = 0; j < 8; j++) { if (j >= uPerPass) break; float v = raw(k, j, q); if (!isnan(v)) { s += v; n++; } }
+  return n > 0 ? s / float(n) : -1e9;
+}
+
+// Sharpen: boost only (gain >= 1), where the white light stands 3-8 sigma above the pass's noise, fading to nothing near saturated
+// pixels and towards the bright end; the gain grows with the local contrast against a ring at half and one detector pixel.
+float sharpGain(int k) {
+  if (uSharp <= 0.0) return 1.0;
+  float L0 = white(k, uv);
+  float ws = smoothstep(3.0, 8.0, (L0 - uSN[k].x) / max(uSN[k].y, 1e-9));
+  if (ws <= 0.0 || L0 <= 0.0) return 1.0;
+  float sb = 0.2 * L0, wt = 0.2, near = 0.0;
+  for (int j = 0; j < 6; j++) {
+    float an = float(j) * 1.0471976;
+    vec2 d = vec2(cos(an), sin(an)) * uDP;
+    vec2 q1 = uv + 0.5 * d, q2 = uv + d;
+    near = max(near, max(texture(uSat, vec3(q1, float(k))).r, texture(uSat, vec3(q2, float(k))).r));
+    float a1 = white(k, q1), a2 = white(k, q2);
+    if (a1 > -1e8) { sb += 0.4 / 6.0 * a1; wt += 0.4 / 6.0; }
+    if (a2 > -1e8) { sb += 0.4 / 6.0 * a2; wt += 0.4 / 6.0; }
+  }
+  float fd = 1.0 - smoothstep(0.2, 0.6, near);
+  float head = 1.0 - smoothstep(0.12, 0.4, law(L0));
+  float t = max(L0 - sb / wt, 0.0) / L0;
+  return 1.0 + ws * fd * head * uSharp * t * t / (t + 0.1);
+}
 
 vec3 passColour(int k) {
   float sat = texture(uSat, vec3(uv, float(k))).r;
   if (sat > 0.5) return uWhiteCores == 1 ? vec3(1.0) : uNoData;  // a saturated core is white, never a hole
+  G = sharpGain(k);
   if (uMode == 0) {
     float r = val(k, 0), g = val(k, 1), b = val(k, 2);
     if (isnan(r) || isnan(g) || isnan(b)) return uNoData;
@@ -149,6 +185,9 @@ export class Renderer {
   boost = 2.4;
   whiteCores = true;
   hi = HI;
+  sharp = 16;
+  private sn = new Float32Array(32);
+  private dp = 0.01;
   soft = SOFT;
 
   constructor(private canvas: HTMLCanvasElement) {
@@ -211,6 +250,7 @@ export class Renderer {
     this.sat = this.newArray(gl.R8, passes);
     this.satLoaded.clear();
     this.wb.fill(1);
+    this.dp = this.dpGrid / n;
   }
 
   get size(): number {
@@ -271,6 +311,19 @@ export class Renderer {
     return this.diff !== null;
   }
 
+  /** Background and noise of a pass's white light (for Sharpen), and the size of one detector pixel in grid pixels. */
+  setNoise(pass: number, background: number, sigma: number): void {
+    this.sn[2 * pass] = background;
+    this.sn[2 * pass + 1] = sigma;
+  }
+
+  setDetectorPixel(gridPixels: number): void {
+    this.dp = this.n ? gridPixels / this.n : 0.01;
+    this.dpGrid = gridPixels;
+  }
+
+  private dpGrid = 4;
+
   setWhiteBalance(pass: number, kr: number, kb: number): void {
     this.wb[2 * pass] = kr;
     this.wb[2 * pass + 1] = kb;
@@ -320,6 +373,9 @@ export class Renderer {
     gl.uniform3fv(this.u('uHues'), hues);
     gl.uniform1i(this.u('uMono'), p.mono ? 1 : 0);
     gl.uniform1i(this.u('uWhiteCores'), this.whiteCores ? 1 : 0);
+    gl.uniform1f(this.u('uSharp'), this.sharp);
+    gl.uniform2fv(this.u('uSN'), this.sn);
+    gl.uniform1f(this.u('uDP'), this.dp);
     gl.uniform1i(this.u('uLayer'), p.layer ?? 0);
     gl.uniform3fv(this.u('uTint'), new Float32Array(p.tint ?? [1, 1, 1]));
     gl.uniform3fv(this.u('uNoData'), new Float32Array(p.noData ?? [0.36, 0.4, 0.44]));
