@@ -16,6 +16,10 @@ export interface SkyView {
   proj: 'globe' | 'moll';
   W: number;
   H: number;
+  /** the Mollweide map's zoom and the shift of its centre from the middle of the picture, CSS pixels */
+  mz?: number;
+  mx?: number;
+  my?: number;
 }
 
 export interface SkyLayer {
@@ -42,7 +46,9 @@ export function toGalactic(ra: number, z: number): [number, number] {
   return [Math.atan2(gy, gx) / D2R, gz];
 }
 
-const mw = (v: SkyView) => Math.min(v.W - 20, (v.H - 20) * 2);
+const mw = (v: SkyView) => Math.min(v.W - 20, (v.H - 20) * 2) * (v.mz ?? 1);
+const mcx = (v: SkyView) => v.W / 2 + (v.mx ?? 0);
+const mcy = (v: SkyView) => v.H / 2 + (v.my ?? 0);
 
 function mollweideTheta(phi: number): number {
   let th = phi;
@@ -69,7 +75,7 @@ export function projectIn(v: SkyView, ra: number, dec: number): [number, number,
   if (v.proj === 'moll') {
     const th = mollweideTheta(dec * D2R);
     const lam = (((ra - 180 + 540) % 360) - 180) * D2R;
-    return [v.W / 2 - ((lam * Math.cos(th)) / Math.PI) * (mw(v) / 2), v.H / 2 - Math.sin(th) * (mw(v) / 4), true];
+    return [mcx(v) - ((lam * Math.cos(th)) / Math.PI) * (mw(v) / 2), mcy(v) - Math.sin(th) * (mw(v) / 4), true];
   }
   const b = basis(v);
   const r = ra * D2R;
@@ -186,8 +192,8 @@ class SkyPainter {
         let ra: number;
         let z: number;
         if (v.proj === 'moll') {
-          const X = (i * s - v.W / 2) / (M / 2);
-          const Y = -(j * s - v.H / 2) / (M / 4);
+          const X = (i * s - mcx(v)) / (M / 2);
+          const Y = -(j * s - mcy(v)) / (M / 4);
           if (X * X + Y * Y > 1) continue;
           const th = Math.asin(Y);
           z = (2 * th + Math.sin(2 * th)) / Math.PI;
@@ -263,14 +269,18 @@ class SkyPainter {
       x.save();
       x.beginPath();
       if (v.proj === 'globe') x.arc(v.W / 2, v.H / 2, v.R, 0, 7);
-      else x.ellipse(v.W / 2, v.H / 2, mw(v) / 2, mw(v) / 4, 0, 0, 7);
+      else x.ellipse(mcx(v), mcy(v), mw(v) / 2, mw(v) / 4, 0, 0, 7);
       x.clip();
       x.imageSmoothingEnabled = true;
       if (v.proj === 'globe') {
         const c = projectIn(v, old.ra, old.dec);
         const k = v.R / old.R;
         if (c[2]) x.drawImage(this.canvas, c[0] - (k * old.W) / 2, c[1] - (k * old.H) / 2, k * old.W, k * old.H);
-      } else x.drawImage(this.canvas, (v.W - old.W) / 2, (v.H - old.H) / 2, old.W, old.H);
+      } else {
+        // the map picture on show, moved and scaled to the new zoom and shift
+        const k = mw(v) / mw(old);
+        x.drawImage(this.canvas, mcx(v) - k * mcx(old), mcy(v) - k * mcy(old), k * old.W, k * old.H);
+      }
       x.restore();
     }
     x.imageSmoothingEnabled = true;

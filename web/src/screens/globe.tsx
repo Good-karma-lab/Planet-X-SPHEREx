@@ -5,11 +5,9 @@ import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVE
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, type SkyLayer } from './globe/sky';
-import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
+import { catalogNow, kept, loadCatalog, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
 import { KnownList } from './search/known';
-import { useProduct } from './search/jobs';
-import { SearchedCard, SearchedLegend, drawSearched, hitSearched, useSearched, type SearchedField } from './search/searched';
 import { drawBodyPath, drawMovingPath, placeAt, type BodyPath, type MovingObject } from './search/path';
 import './globe/globe.css';
 
@@ -66,6 +64,8 @@ const SURVEYS: { id: SurveyId; name: string; layer: SkyLayer[]; note: string }[]
   },
 ];
 const SIZES = [2, 5, 10, 20, 60];
+/** the plain word on a layer button (the survey's own name is its tooltip) */
+const LAYER_WORD: Record<string, string> = { dss2: 'Visible', spherex: 'SPHEREx', '2mass': 'Near-infrared', wise: 'Infrared', dust: 'Dust map' };
 /** the globe zoom limits; above ZOOM_NEAR a pin is an open ring so that the star under it shows */
 const ZOOM_MIN = 0.8;
 const ZOOM_MAX = 400;
@@ -162,7 +162,6 @@ export function Globe() {
   const [a, setA] = useState<AimState>(aim.get());
   const [survey, setSurvey] = useState<SurveyId>(kept.survey);
   const [proj, setProj] = useState<'globe' | 'moll'>(kept.proj);
-  const [covOn, setCovOn] = useState(kept.covOn);
   const [catOpen, setCatOpen] = useState(kept.catOpen);
   const [filter, setFilter] = useState(kept.filter);
   const [query, setQuery] = useState(kept.query);
@@ -180,14 +179,8 @@ export function Globe() {
   const cv = useRef<HTMLCanvasElement>(null);
   // a comet or asteroid chosen in the list: its path since April 2025 and where it is today
   const [bodyPath, setBodyPath] = useState<BodyPath | null>(null);
-  // «Where we've searched»: every searched field coloured by its result (the list exists only when the service makes it)
-  const searched = useSearched(true);
-  // the switch is there as soon as the service makes the list; the list itself can take a while to arrive
-  const hasSearched = useProduct('searched') === true;
-  const [searchedOn, setSearchedOn] = useState(false);
-  const [searchedSel, setSearchedSel] = useState<SearchedField | null>(null);
-  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel });
-  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel };
+  const live = useRef({ survey, proj, a, sel, catalog, bodyPath });
+  live.current = { survey, proj, a, sel, catalog, bodyPath };
   const dirty = useRef(true);
   const view = useRef(kept.view ?? { ra: a.ra, dec: a.dec, zoom: 1.6 });
   kept.view = view.current;
@@ -195,12 +188,11 @@ export function Globe() {
 
   // the choices survive a visit to another screen
   useEffect(() => {
-    Object.assign(kept, { survey, proj, covOn, catOpen, filter, query, page, per, sel: sel?.n ?? null });
-  }, [survey, proj, covOn, catOpen, filter, query, page, per, sel]);
+    Object.assign(kept, { survey, proj, catOpen, filter, query, page, per, sel: sel?.n ?? null });
+  }, [survey, proj, catOpen, filter, query, page, per, sel]);
 
   useEffect(() => {
     void loadCatalog().then((c) => setCatalog((old) => (old === c ? old : c)));
-    void loadCoverage().then(() => (dirty.current = true));
     const offDates = onImageDates(() => {
       dirty.current = true;
       setDatesTick((t) => t + 1);
@@ -244,7 +236,7 @@ export function Globe() {
 
   useEffect(() => {
     dirty.current = true;
-  }, [survey, proj, covOn, sel, catalog, bodyPath, searched, searchedOn, searchedSel]);
+  }, [survey, proj, sel, catalog, bodyPath]);
 
   // the sky canvas
   useEffect(() => {
@@ -274,7 +266,11 @@ export function Globe() {
     const offTile = tiles.onTile(() => (sky.stale = true));
 
     const R = () => (Math.min(W, H) / 2) * 0.9 * view.current.zoom;
-    const mw = () => Math.min(W - 20, (H - 20) * 2);
+    // the Mollweide map: zoom and the shift of its centre (it zooms and pans like the globe turns)
+    const mv = { z: 1, x: 0, y: 0 };
+    const mw = () => Math.min(W - 20, (H - 20) * 2) * mv.z;
+    const mcx = () => W / 2 + mv.x;
+    const mcy = () => H / 2 + mv.y;
     const basis = () => {
       const ra = view.current.ra * D2R;
       const de = view.current.dec * D2R;
@@ -289,7 +285,7 @@ export function Globe() {
       if (live.current.proj === 'moll') {
         const th = mollweideTheta(dec * D2R);
         const lam = (((ra - 180 + 540) % 360) - 180) * D2R;
-        return [W / 2 - ((lam * Math.cos(th)) / Math.PI) * (mw() / 2), H / 2 - Math.sin(th) * (mw() / 4), true];
+        return [mcx() - ((lam * Math.cos(th)) / Math.PI) * (mw() / 2), mcy() - Math.sin(th) * (mw() / 4), true];
       }
       const r = ra * D2R;
       const d = dec * D2R;
@@ -304,8 +300,8 @@ export function Globe() {
     };
     const unproject = (px: number, py: number): [number, number] | null => {
       if (live.current.proj === 'moll') {
-        const X = (px - W / 2) / (mw() / 2);
-        const Y = -(py - H / 2) / (mw() / 4);
+        const X = (px - mcx()) / (mw() / 2);
+        const Y = -(py - mcy()) / (mw() / 4);
         if (X * X + Y * Y > 1) return null;
         const th = Math.asin(Y);
         const phi = Math.asin((2 * th + Math.sin(2 * th)) / Math.PI);
@@ -376,28 +372,10 @@ export function Globe() {
       ctx.lineWidth = 1.5;
       ctx.beginPath();
       if (st.proj === 'globe') ctx.arc(W / 2, H / 2, R(), 0, 7);
-      else ctx.ellipse(W / 2, H / 2, mw() / 2, mw() / 4, 0, 0, 7);
+      else ctx.ellipse(mcx(), mcy(), mw() / 2, mw() / 4, 0, 0, 7);
       ctx.stroke();
-      // coverage
-      const cov = coverageNow();
-      if (st.covOn && cov) {
-        for (const cell of cov) {
-          const pts = cell.pts.map(([ra, de]) => project(ra, de, b));
-          if (st.proj === 'globe' && pts.some((q) => !q[2])) continue;
-          if (st.proj === 'moll') {
-            const xs = pts.map((q) => q[0]);
-            if (Math.max(...xs) - Math.min(...xs) > W / 3) continue;
-          }
-          ctx.fillStyle = `hsla(${cell.dr1 ? 175 : 205},80%,60%,${0.08 + 0.3 * cell.t})`;
-          ctx.beginPath();
-          pts.forEach((q, i) => (i ? ctx.lineTo(q[0], q[1]) : ctx.moveTo(q[0], q[1])));
-          ctx.closePath();
-          ctx.fill();
-        }
-      }
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
       pins = [];
-      if (st.searchedOn && st.searched) drawSearched(ctx, (ra, dec) => project(ra, dec, b), st.searched, st.searchedSel?.key ?? null);
       if (st.bodyPath) drawBodyPath(ctx, (ra, dec) => project(ra, dec, b), st.bodyPath, W / 2, font);
       // the selected object's path: from its earliest archive image to 2050, a dot at every image date, the SPHEREx stretch, and its
       // pin at its place on the date of the backdrop shown (the path is drawn larger than true when it would be under 60 px)
@@ -518,8 +496,8 @@ export function Globe() {
       }
       // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
       const st = live.current;
-      const sv = { ra: view.current.ra, dec: view.current.dec, R: R(), proj: st.proj, W, H };
-      const sig = [sv.ra, sv.dec, sv.R, sv.proj, W, H].join();
+      const sv = { ra: view.current.ra, dec: view.current.dec, R: R(), proj: st.proj, W, H, mz: mv.z, mx: mv.x, my: mv.y };
+      const sig = [sv.ra, sv.dec, sv.R, sv.proj, W, H, mv.z, mv.x, mv.y].join();
       const layer = SURVEYS.find((x) => x.id === st.survey)!.layer;
       if (st.survey !== lastLayer) {
         lastLayer = st.survey;
@@ -553,7 +531,7 @@ export function Globe() {
       const k = sky.shown;
       const v = view.current;
       if (k && k.proj === live.current.proj && k.W === W && k.H === H && k.ra === v.ra && k.dec === v.dec && k.R === R()) {
-        lastSig = [k.ra, k.dec, k.R, k.proj, W, H].join();
+        lastSig = [k.ra, k.dec, k.R, k.proj, W, H, mv.z, mv.x, mv.y].join();
         sky.stale = true;
       }
     }
@@ -586,10 +564,17 @@ export function Globe() {
     };
     flyRef.current = flyTo;
 
-    let drag: { x: number; y: number; ra: number; dec: number; moved: boolean } | null = null;
+    // the map keeps its centre within the picture, so that it cannot be dragged away
+    const clampMap = () => {
+      const lx = Math.max(0, (mw() - W) / 2 + 40);
+      const ly = Math.max(0, (mw() / 2 - H) / 2 + 40);
+      mv.x = Math.max(-lx, Math.min(lx, mv.x));
+      mv.y = Math.max(-ly, Math.min(ly, mv.y));
+    };
+    let drag: { x: number; y: number; ra: number; dec: number; moved: boolean; mx: number; my: number } | null = null;
     c.onpointerdown = (e) => {
       c.setPointerCapture(e.pointerId);
-      drag = { x: e.clientX, y: e.clientY, ra: view.current.ra, dec: view.current.dec, moved: false };
+      drag = { x: e.clientX, y: e.clientY, ra: view.current.ra, dec: view.current.dec, moved: false, mx: mv.x, my: mv.y };
       anim = null;
     };
     c.onpointermove = (e) => {
@@ -597,7 +582,12 @@ export function Globe() {
       const dx = e.clientX - drag.x;
       const dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
-      if (drag.moved && live.current.proj === 'globe') {
+      if (drag.moved && live.current.proj === 'moll' && mv.z > 1) {
+        mv.x = drag.mx + dx;
+        mv.y = drag.my + dy;
+        clampMap();
+        dirty.current = true;
+      } else if (drag.moved && live.current.proj === 'globe') {
         const k = (90 / R()) * 0.9;
         view.current.ra = (((drag.ra + ((dx * k) / Math.max(0.2, Math.cos(view.current.dec * D2R))) * 0.6) % 360) + 360) % 360;
         view.current.dec = Math.max(-89, Math.min(89, drag.dec + dy * k));
@@ -610,16 +600,6 @@ export function Globe() {
       const py = e.clientY - r.top;
       if (drag && !drag.moved) {
         // the pins where they were drawn (the place on the backdrop's date), then the catalogue dots the same way
-        const st = live.current;
-        if (st.searchedOn && st.searched) {
-          const hb = basis();
-          const hit = hitSearched((ra, dec) => project(ra, dec, hb), st.searched, px, py);
-          if (hit) {
-            setSearchedSel(hit);
-            drag = null;
-            return;
-          }
-        }
         let near: Obj | null = null;
         let bd = 12;
         for (const q of pins) {
@@ -650,7 +630,25 @@ export function Globe() {
     };
     c.onwheel = (e) => {
       e.preventDefault();
-      if (live.current.proj !== 'globe') return;
+      if (live.current.proj === 'moll') {
+        // the map zooms about the cursor
+        const r = c.getBoundingClientRect();
+        const qx = e.clientX - r.left;
+        const qy = e.clientY - r.top;
+        const dpx = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1);
+        const z1 = Math.max(1, Math.min(40, mv.z * Math.max(0.5, Math.min(2, Math.exp(-dpx * 0.0022)))));
+        const kz = z1 / mv.z;
+        mv.x = qx - W / 2 - (qx - mcx()) * kz;
+        mv.y = qy - H / 2 - (qy - mcy()) * kz;
+        mv.z = z1;
+        if (mv.z <= 1.0001) {
+          mv.x = 0;
+          mv.y = 0;
+        }
+        clampMap();
+        dirty.current = true;
+        return;
+      }
       anim = null;
       // a mouse-wheel notch (100 px) zooms ×1.25: twenty notches about ×90; a trackpad's small steps zoom in proportion
       const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1);
@@ -764,49 +762,44 @@ export function Globe() {
     <div class="screen">
       <div class="globe-wrap">
         <canvas ref={cv} aria-label="Sky globe" data-testid="sky" />
-        <div class="map-ui map-tl">
-    <section class="aim aimchip dark-glass" aria-label="Aim">
-      <div class="coords">
-        <div class="field">
-          <label for="gRa">RA</label>
-          <input
-            id="gRa"
-            class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`}
-            spellcheck={false}
-            value={raIn}
-            onInput={(e) => setRaIn((e.target as HTMLInputElement).value)}
-            onKeyDown={(e) => e.key === 'Enter' && goAim()}
-            onBlur={goAim}
-          />
-        </div>
-        <div class="field">
-          <label for="gDec">Dec</label>
-          <input
-            id="gDec"
-            class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`}
-            spellcheck={false}
-            value={decIn}
-            onInput={(e) => setDecIn((e.target as HTMLInputElement).value)}
-            onKeyDown={(e) => e.key === 'Enter' && goAim()}
-            onBlur={goAim}
-          />
-        </div>
-      </div>
-      <div class="field">
-        <label>FOV</label>
-        <div class="seg fov">
-          {SIZES.map((s) => (
-            <button key={s} class={s === a.fov ? 'on' : ''} onClick={() => aim.set({ fov: s }, 'fov')} title={`${s}′ field`}>
-              {s}′
-            </button>
-          ))}
-        </div>
-      </div>
-    </section>
-        </div>
-        <div class="map-ui map-tr">
-          <div class="maprow">
-            <div class="seg" role="group" aria-label="Projection">
+        <div class="map-ui map-bar" data-testid="map-bar">
+          <div class="aimrow dark-glass" role="group" aria-label="Aim">
+            <label class="fld" for="gRa">
+              <span>RA</span>
+              <input
+                id="gRa"
+                class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`}
+                spellcheck={false}
+                value={raIn}
+                onInput={(e) => setRaIn((e.target as HTMLInputElement).value)}
+                onKeyDown={(e) => e.key === 'Enter' && goAim()}
+                onBlur={goAim}
+              />
+            </label>
+            <label class="fld" for="gDec">
+              <span>Dec</span>
+              <input
+                id="gDec"
+                class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`}
+                spellcheck={false}
+                value={decIn}
+                onInput={(e) => setDecIn((e.target as HTMLInputElement).value)}
+                onKeyDown={(e) => e.key === 'Enter' && goAim()}
+                onBlur={goAim}
+              />
+            </label>
+            <label class="fld" for="gFov">
+              <span>FOV</span>
+              <select id="gFov" class="inp fovsel" value={String(a.fov)} onChange={(e) => aim.set({ fov: Number((e.target as HTMLSelectElement).value) }, 'fov')} title="Field of view of the frame">
+                {SIZES.map((s) => (
+                  <option key={s} value={String(s)}>
+                    {s}′
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div class="seg" role="group" aria-label="Projection">
             <button class={proj === 'globe' ? 'on' : ''} onClick={() => setProj('globe')}>
               <span dangerouslySetInnerHTML={{ __html: icon('globe', 16) }} style={{ display: 'contents' }} />
               3D globe
@@ -816,59 +809,13 @@ export function Globe() {
               Mollweide map
             </button>
           </div>
-            <button class={`btn sm dark-glass catbtn ${catOpen ? 'on' : ''}`} onClick={() => setCatOpen(!catOpen)} aria-pressed={catOpen} title="Show or hide the catalogue of objects">
-              Catalogue
-            </button>
-          </div>
-          <div class="maprow wrap">
-            <div class="seg sm" role="group" aria-label="Sky background">
+          <div class="seg sm" role="group" aria-label="Sky background">
             {SURVEYS.map((s) => (
-              <button key={s.id} class={s.id === survey ? 'on' : ''} aria-pressed={s.id === survey} title={s.note} onClick={() => setSurvey(s.id)}>
-                {s.name}
+              <button key={s.id} class={s.id === survey ? 'on' : ''} aria-pressed={s.id === survey} title={`${s.name}: ${s.note}`} onClick={() => setSurvey(s.id)}>
+                {LAYER_WORD[s.id] ?? s.name}
               </button>
             ))}
           </div>
-            <button
-              class={`btn sm dark-glass tgl ${covOn ? 'on' : ''}`}
-              aria-pressed={covOn}
-              onClick={() => setCovOn(!covOn)}
-              title="Where SPHEREx exposures exist, from the exposure index. Teal: DR1 exposures; blue: QR3 only; more opaque = more exposures (log scale)"
-            >
-              Coverage
-            </button>
-            {hasSearched && (
-              <button
-                class={`btn sm dark-glass tgl ${searchedOn ? 'on' : ''}`}
-                aria-pressed={searchedOn}
-                data-testid="searched-toggle"
-                onClick={() => {
-                  setSearchedOn(!searchedOn);
-                  setSearchedSel(null);
-                }}
-                title="Every field a search ran on: amber = something found, teal = nothing found, violet = Find Planet X depth reached. Click a zone for its result."
-              >
-                Searched zones
-              </button>
-            )}
-          </div>
-          {hasSearched && searchedOn && (
-            <div class="searched-float dark-glass">
-              {!searched && <span class="mono-s faint">reading the searched fields…</span>}
-              {searched && !searchedSel && <SearchedLegend fields={searched} />}
-      {searchedSel && (
-        <SearchedCard
-          f={searchedSel}
-          onClose={() => setSearchedSel(null)}
-          onOpen={(o) => {
-            location.hash = formatHash({
-              screen: 'lab',
-              params: { ra: o.ra.toFixed(5), dec: o.dec.toFixed(5), fov: String(o.fov), ...(o.film ? { film: String(o.film) } : {}) },
-            });
-          }}
-        />
-      )}
-            </div>
-          )}
         </div>
         <div class="map-bl">
           {(count || sel) && (
@@ -914,12 +861,13 @@ export function Globe() {
           Show area
         </button>
       </div>
-      {catOpen && (
+      <div class={`cat-drawer${catOpen ? ' open' : ''}`} data-testid="cat-drawer">
+        <button class="cat-handle" onClick={() => setCatOpen(!catOpen)} aria-expanded={catOpen} title={catOpen ? 'Slide the catalogue away' : 'Slide the catalogue out'}>
+          <span class="cat-arrow">{catOpen ? '›' : '‹'}</span>
+          <span class="cat-word">Catalogue</span>
+        </button>
       <aside class="catalog glass">
         <div class="cat-top">
-          <button class="btn sm catclose" onClick={() => setCatOpen(false)} title="Hide the catalogue">
-            Hide catalogue
-          </button>
           <input
             class="inp search"
             placeholder="Search a name or coordinates"
@@ -1111,7 +1059,7 @@ export function Globe() {
           <span class="cnt">Total: {list.length.toLocaleString('en-US')}</span>
         </div>
       </aside>
-      )}
+      </div>
     </div>
   );
 }
