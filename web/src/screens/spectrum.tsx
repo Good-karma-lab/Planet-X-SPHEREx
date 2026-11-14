@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { formatDec, formatRA } from '../lib/sky';
 import { binNote, binSpectrum, type Bin } from './spectrum/bins';
+import { CatalogueCheck } from './spectrum/catalogue';
+import { StampPanels, useStamps } from './spectrum/stamps';
 import type { Source, SpecPoint } from './spectrum/types';
 import './spectrum/extra.css';
 
@@ -279,6 +281,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const [cleared, setCleared] = useState<Source | null>(null);
   const shown = src && src !== cleared ? src : null;
   const { view, points, error } = useSpectrum(shown);
+  const { stamps } = useStamps(shown, view?.state === 'running' || !view);
   const [at, setAt] = useState<number | null>(null); // null: the newest exposure
   const [playing, setPlaying] = useState(false);
   const rows = useMemo(() => [...points].sort((a, b) => a.i - b.i), [points]);
@@ -353,12 +356,19 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           }}
         />
       )}
+      {cur && (
+        <StampPanels
+          stamp={stamps.get(cur.i)}
+          note={!cur.ok ? `no fit: ${cur.why || 'no usable measurement'}` : undefined}
+        />
+      )}
       {why.size > 0 && <div class="mono-s">Not used: {[...why.entries()].map(([k2, n]) => `${n} ${k2}`).join(' · ')}</div>}
       {error && (
         <div class="mono-s" style={{ color: 'var(--amber)' }}>
           {error}
         </div>
       )}
+      <CatalogueCheck src={shown} ready={view?.state === 'done' && points.length > 0} />
       {view?.state === 'done' && points.length > 0 && (
         <a
           class="lnk"
