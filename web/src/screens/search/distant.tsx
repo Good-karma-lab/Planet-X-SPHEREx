@@ -56,7 +56,7 @@ export type DistantState =
   | { state: 'loading'; text: string; frac: number | null }
   | { state: 'none'; text: string }
   | { state: 'error'; text: string }
-  | { state: 'ok'; r: DistantResult; bin: Uint8Array; di: number; mu: [number, number]; neg: boolean; sel: number | null };
+  | { state: 'ok'; key: string; r: DistantResult; bin: Uint8Array; di: number; mu: [number, number]; neg: boolean; sel: number | null };
 
 export interface DistantAim {
   ra: number;
@@ -86,6 +86,8 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
   const available = useProduct('distant');
   const [ds, setDs] = useState<DistantState>({ state: 'idle' });
   const [peak, setPeak] = useState<number | null>(null);
+  /** the finished one-pass results of this field by pass index: the keys the link of the passes asks for */
+  const [keys, setKeys] = useState<Record<number, string>>({});
   const tok = useRef(0);
   const keep = useRef(restore);
   keep.current = restore;
@@ -93,6 +95,7 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
   useEffect(() => {
     tok.current++;
     setDs({ state: 'idle' });
+    setKeys({});
   }, [aim.ra, aim.dec, aim.fov]);
   const start = async (pass: number | null) => {
     const my = ++tok.current;
@@ -122,8 +125,11 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
       const bin = new Uint8Array(await (await fetch(r.bin_url)).arrayBuffer());
       const a = keep.current;
       const nd = r.slider.distances.length;
+      const key = String(j.key ?? '');
+      if (key) setKeys((k) => ({ ...k, [r.pass]: key }));
       setDs({
         state: 'ok',
+        key,
         r,
         bin,
         di: a ? Math.max(0, Math.min(nd - 1, a.di)) : Math.min(nd - 1, 24),
@@ -144,6 +150,7 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
     /** the brightest point of the shifted sum on show (set by DistantCanvas) */
     peak,
     setPeak,
+    keys,
     start,
     close: () => {
       tok.current++;

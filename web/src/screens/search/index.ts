@@ -6,3 +6,5 @@ export { drawBlink, drawTracks, trackName, type FilmControl, type FilmTrack, typ
 export { PairButton, PairCard, type Pair } from './pair';
 export { DistantCanvas, DistantLines, DistantPanel, peakRows, useDistant, type Distant, type DistantCandidate, type DistantResult, type DistantSliders } from './distant';
 export { about, progressText, runJob, useProduct } from './jobs';
+export { DeepSumPanel, type DeepCandidate, type DeepResult } from './deep';
+export { JumpView, LinkCard, LinkPanel, type Jump, type LinkEntry, type LinkResult } from './link';
