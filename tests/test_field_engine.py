@@ -62,3 +62,14 @@ def test_quick_subset_takes_a_few_per_detector() -> None:
     assert len(idx) == 4 * 6 and sig == 0.5
     idx, sig = quick_subset(ex, 60.0)
     assert len(idx) == 2 * 6 and sig == 1.0
+
+
+def test_moffat_centre_from_the_wings_of_a_saturated_star() -> None:
+    from engine.centroid import moffat_centre
+
+    rng = np.random.default_rng(3)
+    e = render([(60.3, 59.6, 400.0)], 34, STEP, N, rng)
+    core = np.hypot(e.u - 60.3, e.v - 59.6) < 1.5 * 6.15 / STEP  # the saturated core has no values
+    got = moffat_centre(e.u[~core], e.v[~core], e.val[~core], 61.0, 59.0, STEP)
+    assert got is not None
+    assert got[0] == pytest.approx(60.3, abs=0.3) and got[1] == pytest.approx(59.6, abs=0.3)

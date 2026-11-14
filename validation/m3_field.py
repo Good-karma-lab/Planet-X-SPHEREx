@@ -21,9 +21,10 @@ from pathlib import Path
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+from engine.centroid import moffat_centre
 from engine.colour import STAR_THRESHOLD, white_balance
 from engine.halo import saturated_zones
-from engine.register import STAR_FWHM_ARCSEC, centroid, stars
+from engine.register import STAR_FWHM_ARCSEC, stars
 from indexer.store import Index
 from service.reader.files import FileReader
 from service.reader.s3 import S3
@@ -99,21 +100,33 @@ def lattice(b: FieldBuild) -> float:
 
 
 def target_track(b: FieldBuild, saturated: bool) -> list[tuple[float, float, float]]:
-    """(mjd_mid, ra, dec) of the target per pass."""
+    """(mjd_mid, ra, dec) of the target per pass: a Moffat fit to the usable pixels of every exposure (the wings of a saturated core),
+    in registered grid coordinates, median over the pass. First guess: the saturated zone (or brightest source) near the centre."""
     out = []
     c = b.grid.centre_px
+    step = b.grid.step_arcsec
     for p in b.passes:
         if saturated:
-            z = saturated_zones(p.sat_share(b.cdet), b.grid.step_arcsec)
+            z = saturated_zones(p.sat_share(b.cdet), step)
             if not z:
                 continue
-            x, y, _ = min(z, key=lambda t: math.hypot(t[0] - c, t[1] - c))
+            gx, gy, _ = min(z, key=lambda t: math.hypot(t[0] - c, t[1] - c))
         else:
             w = np.nan_to_num(p.white(b.cdet))
-            r = int(30 / b.grid.step_arcsec)
+            r = int(30 / step)
             sub = gaussian_filter(w, 2)[int(c) - r : int(c) + r, int(c) - r : int(c) + r]
             j, i = np.unravel_index(np.argmax(sub), sub.shape)
-            x, y = centroid(w, i + int(c) - r, j + int(c) - r, STAR_FWHM_ARCSEC / b.grid.step_arcsec / 2.3548)
+            gx, gy = float(i + int(c) - r), float(j + int(c) - r)
+        reg = p.registration
+        dx, dy = (reg.dx, reg.dy) if reg else (0.0, 0.0)
+        fits = []
+        for e in b.natives.get(p.index, []):
+            got = moffat_centre(e.u, e.v, e.val, gx - dx, gy - dy, step)
+            if got is not None:
+                fits.append((got[0] + dx, got[1] + dy))
+        if not fits:
+            continue
+        x, y = np.median(np.asarray(fits), axis=0)
         ra, dec = b.grid.grid_to_sky([x], [y])
         out.append((0.5 * (p.mjd0 + p.mjd1), float(ra[0]), float(dec[0])))
     return out
@@ -137,7 +150,7 @@ async def run_field(name: str, index: Index, store: Path, png: Path, workers: in
     fr = FileReader(s3, store)
     with ProcessPoolExecutor(workers) as ex:
         t = time.time()
-        b = await build_field(index, fr, ra, dec, fov, executor=ex)
+        b = await build_field(index, fr, ra, dec, fov, executor=ex, keep_natives=True)
         cold = time.time() - t
         t = time.time()
         await build_field(index, FileReader(s3, store), ra, dec, fov, executor=ex)

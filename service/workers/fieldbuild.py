@@ -36,6 +36,7 @@ class FieldBuild:
     thinned_from: int
     missing: list[str] = field(default_factory=list)
     timings: dict[str, float] = field(default_factory=dict)
+    natives: dict[int, list[NativeExposure]] = field(default_factory=dict)  # per pass, only with keep_natives
 
 
 def thin(exps: list[Exposure], limit: int = MAX_EXPOSURES) -> list[Exposure]:
@@ -64,6 +65,7 @@ async def build_field(
     executor: Executor | None = None,
     bands: list[Band] | None = None,
     progress: Callable[[str], None] | None = None,
+    keep_natives: bool = False,
 ) -> FieldBuild:
     t0 = time.time()
     grid = grid_for_fov(ra, dec, fov_arcmin)
@@ -128,4 +130,5 @@ async def build_field(
         thinned_from=len(found),
         missing=missing,
         timings={"read_s": t_read, "compute_s": time.time() - tc, "total_s": time.time() - t0},
+        natives={k: [natives[i] for i in m] for k, m in enumerate(member_lists)} if keep_natives else {},
     )
