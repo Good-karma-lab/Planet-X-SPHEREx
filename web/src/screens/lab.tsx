@@ -69,6 +69,8 @@ const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
 
 /** the detectors whose range holds a band (D1 0.75–1.11, D2 1.11–1.64, D3 1.64–2.42, D4 2.42–3.82, D5 3.82–4.42, D6 4.42–5.00 µm) */
 const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2, 4], ice: [4], pah: [4], co2: [5], co: [6] };
+/** a band's name on a tile too small for the full one */
+const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
 const BANDS = [
   { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
   {
@@ -464,6 +466,8 @@ export function Lab({ route }: { route: Route }) {
       w: number;
       text: string;
       sub: string;
+      /** the label of a tile too small for the full one */
+      short?: string;
       hue: number;
       /** the tile's own box and what it says when its detector or band has no exposure in the season shown */
       empty?: { x: number; y: number; w: number; h: number; text: string };
@@ -853,7 +857,7 @@ export function Lab({ route }: { route: Route }) {
             }
           }
           const timeMode = st.time === 'diff' ? 'difference' : st.time === 'sum' ? 'coadd' : 'pendulum';
-          let panels: (Panel & { label?: string; sub?: string; hue?: number; empty?: string })[] = [];
+          let panels: (Panel & { label?: string; short?: string; sub?: string; hue?: number; empty?: string })[] = [];
           const passMeta0 = st.meta?.passes.find((q) => q.index === a);
           const lacks = (dets: number[]) => (passMeta0 && dets.length > 0 && dets.every((d) => !((passMeta0.detectors?.[`D${d}`] ?? 0) > 0)) ? dets : null);
           if (st.view === 'picture') {
@@ -893,8 +897,10 @@ export function Lab({ route }: { route: Route }) {
               panels.push({ ...panels[0]!, ...inset });
             }
           } else if (st.view === 'bands') {
+            // on a phone the status line sits over the bottom of the picture: the tiles leave room for it
+            const wallRes = w < 560 ? 156 : 96;
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
-            panels = wallLayout(shownBands.length, w, h - 96).map((c0, j) => {
+            panels = wallLayout(shownBands.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the band buttons below
               const { bd, i } = shownBands[j]!;
               return {
@@ -910,14 +916,16 @@ export function Lab({ route }: { route: Route }) {
                 time: timeMode,
                 diffLayer: i + 1,
                 label: bd.name,
+                short: BAND_SHORT[bd.key],
                 sub: bd.band,
                 hue: bd.hue,
                 empty: lacks(BAND_DETS[bd.key] ?? []) ? `no exposure in ${(BAND_DETS[bd.key] ?? []).map((d) => `D${d}`).join(', ')} in this season` : undefined,
               };
             });
           } else {
+            const wallRes = w < 560 ? 156 : 96;
             const shownDets = st.dets.slice().sort();
-            panels = wallLayout(shownDets.length, w, h - 96).map((c0, j) => {
+            panels = wallLayout(shownDets.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the detector buttons below
               const d = shownDets[j]! - 1;
               return {
@@ -932,6 +940,7 @@ export function Lab({ route }: { route: Route }) {
                 time: timeMode,
                 diffLayer: 0,
                 label: `D${d + 1} ${DETECTORS[d]!.name}`,
+                short: `D${d + 1}`,
                 sub: DETECTORS[d]!.range,
                 hue: DETECTORS[d]!.hue,
                 empty: lacks([d + 1]) ? `no exposure in D${d + 1} in this season` : undefined,
@@ -943,7 +952,7 @@ export function Lab({ route }: { route: Route }) {
             r.panel(q, a, b, t);
             if (!q.zoom) rects.push({ x: q.x, y: q.y, w: q.w, h: q.h });
             if (q.label)
-              out.push({ x: q.x, y: q.y + q.h - 20, w: q.w, text: q.label, sub: q.sub ?? '', hue: q.hue ?? 0, empty: q.empty ? { x: q.x, y: q.y, w: q.w, h: q.h, text: q.empty } : undefined });
+              out.push({ x: q.x, y: q.y + q.h - 20, w: q.w, text: q.label, short: q.short, sub: q.sub ?? '', hue: q.hue ?? 0, empty: q.empty ? { x: q.x, y: q.y, w: q.w, h: q.h, text: q.empty } : undefined });
           }
           setShown((s) => (s && s.pass === a && s.stack === stack ? s : { pass: a, stack }));
         }
@@ -1315,11 +1324,14 @@ export function Lab({ route }: { route: Route }) {
         // a label never leaves the picture, on either side (a phone's picture is narrower than a long name)
         lx = Math.max(box.x + 4, Math.min(lx, box.x + box.w - 4 - tw));
         let ly = y - rr * 0.35 - 9;
+        const ly0 = ly;
         for (let tries = 0; tries < 8; tries++) {
           const hit = placed.find((p) => lx < p.x1 && lx + tw > p.x0 && ly < p.y1 && ly + th > p.y0);
           if (!hit) break;
           ly = hit.y1 + 2;
         }
+        // a narrow picture: a name pushed away from its own ring would point at the wrong thing, so it is left out (the ring and the list keep it)
+        if (box.w < 520 && !mk.selected && mk.kind !== 'target' && Math.abs(ly - ly0) > 6) return;
         ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2, ly));
         placed.push({ x0: lx, y0: ly, x1: lx + tw, y1: ly + th });
         lines.forEach((l, i) => {
@@ -1439,6 +1451,8 @@ export function Lab({ route }: { route: Route }) {
             if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y) || mk.ghost) continue;
             // a crowded field: names for the first dozen marks (targets, movers, known bodies first), rings only for the rest
             if (++labelled > 14 && (mk.kind === 'anomaly' || mk.kind === 'red') && !mk.selected) continue;
+            // a phone: names for the first six marks only (the selected one and the test target always)
+            if (box.w < 520 && labelled > 6 && !mk.selected && mk.kind !== 'target') continue;
             label(x, y, mk.rr, mk, box);
           }
         ctx.restore();
@@ -2339,18 +2353,22 @@ export function Lab({ route }: { route: Route }) {
               <canvas ref={overlay} class="ov" />
               {labels.map((l) =>
                 l.empty ? (
-                  <div class="panel-empty" style={{ left: `${l.empty.x}px`, top: `${l.empty.y}px`, width: `${l.empty.w}px`, height: `${l.empty.h}px` }}>
+                  <div class={`panel-empty${l.w < 200 ? ' small' : ''}`} style={{ left: `${l.empty.x}px`, top: `${l.empty.y}px`, width: `${l.empty.w}px`, height: `${l.empty.h}px` }}>
                     <span>{l.empty.text}</span>
                   </div>
                 ) : null,
               )}
-              {labels.map((l) => (
-                <div class="panel-label" style={{ left: `${l.x + 6}px`, top: `${l.y + 2}px`, maxWidth: `${l.w - 10}px` }}>
-                  <span class="sw" style={{ background: `hsl(${l.hue},80%,60%)`, boxShadow: `0 0 8px hsl(${l.hue},80%,60%)` }} />
-                  <b>{l.text}</b>
-                  <em>{l.sub}</em>
-                </div>
-              ))}
+              {labels.map((l) => {
+                // a tile under 200 px has room for the short name only (D1, CO₂), not for the wavelength range
+                const small = l.w < 200;
+                return (
+                  <div class="panel-label" style={{ left: `${l.x + 6}px`, top: `${l.y + 2}px`, maxWidth: `${l.w - 10}px` }}>
+                    <span class="sw" style={{ background: `hsl(${l.hue},80%,60%)`, boxShadow: `0 0 8px hsl(${l.hue},80%,60%)` }} />
+                    <b>{small && l.short ? l.short : l.text}</b>
+                    {!small && <em>{l.sub}</em>}
+                  </div>
+                );
+              })}
               {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length && (
                 <canvas ref={archBig} class="archive-big" />
               )}
