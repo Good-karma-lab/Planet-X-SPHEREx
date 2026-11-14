@@ -14,6 +14,10 @@ VERSIONS: dict[str, str] = {
     "movers": "m3",  # the search between passes of a field and its Gaia check; m2 chance control, m3 corner passes sit out
     "anomalies": "a2",  # the spectral anomaly map of a field and the identification of its anomalies; a2: the same passes as the movers
     "red": "r1",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm
+    "distant": "d1",  # Find Planet X, one pass: distance search, candidates, photometry, slider arrays
+    "deep": "m1",  # Find Planet X, the sum of passes along one orbit
+    "link": "l1",  # Find Planet X, the link of passes by one orbit
+    "filmsearch": "t2",  # the unknown movers of a film: candidates, straight-line tracks, chance control
 }
 
 DEPENDS: dict[str, tuple[str, ...]] = {
@@ -23,6 +27,10 @@ DEPENDS: dict[str, tuple[str, ...]] = {
     "movers": ("field",),
     "anomalies": ("field",),
     "red": ("field",),
+    "distant": (),
+    "deep": (),
+    "link": ("distant",),
+    "filmsearch": ("film",),
 }
 
 

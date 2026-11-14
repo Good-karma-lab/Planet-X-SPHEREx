@@ -26,11 +26,14 @@ from service.anomalies import Anomalies
 from service.bodies import KnownBodies
 from service.catalogue_check import check as catalogue_check
 from service.config import Config, load
+from service.context import CatalogueContext
 from service.coverage import coverage_map
 from service.jobs.scheduler import Priority, Scheduler
+from service.known import Known
 from service.lightcurves import neowise as lc_neowise
 from service.lightcurves import ztf as lc_ztf
 from service.movers import Movers
+from service.pairs import Pairs
 from service.products.store import Store, product_key
 from service.products.versions import VERSIONS
 from service.quicklook import QuickLook
@@ -39,6 +42,10 @@ from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
+from service.routes_known import make_known_router
+from service.routes_pairs import make_pairs_router
+from service.routes_planetx import make_planetx_router
+from service.routes_search import make_router
 from service.spectrum import Spectra, place_at, spectrum_params
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
@@ -67,6 +74,9 @@ class State:
         self.index_health: dict[str, Any] | None = None
         self.quicklook: QuickLook | None = None
         self.warm_searches: dict[str, Any] = {}
+        self.catalogue: CatalogueContext | None = None
+        self.known: Known | None = None
+        self.pairs: Pairs | None = None
         self.warm: WarmRunner | None = None
         self.hips: HipsTiles | None = None
         self.coverage: dict[str, Any] | None = None
@@ -94,6 +104,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.s3 = s3 or S3()
         st.files = FileReader(st.s3, cfg.store_dir)
         st.quicklook = QuickLook(st.s3, cfg.store_dir)
+        st.catalogue = CatalogueContext()
+        st.known = Known(cfg.store_dir, st.index)
+        st.pairs = Pairs(st.store, cfg.store_dir, st.catalogue)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
         st.movers = Movers(st.store, cfg.store_dir)
         st.bodies = KnownBodies(cfg.store_dir, st.index)
@@ -127,6 +140,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         await st.scheduler.stop()
         await st.s3.close()
         await st.hips.close()
+        await st.catalogue.close()
         if st.executor is not None:
             # do not wait for a field still being computed in a worker: its job is recomputed (or attached) after the restart
             procs = list(getattr(st.executor, "_processes", {}).values())
@@ -231,8 +245,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             await asyncio.sleep(2.0)
 
     async def warm_field_searches(f: WarmField) -> None:
-        """Everything a visitor of a test field asks for, kept on disk: movers, red sources, the anomaly search (every size), the
-        spectra of the test target and of every anomaly, and the anomalies' passports (asked of SIMBAD and Gaia by the search)."""
+        """Everything a visitor of a test field asks for, kept on disk: movers, pairs that change in place, red sources, the anomaly
+        search (every size), the spectra of the test target and of every anomaly, and the anomalies' passports."""
         assert st.store is not None and st.index is not None
         k = await asyncio.to_thread(warm_key, f)
         if k is None or not st.store.is_complete(k[0]):
@@ -242,6 +256,11 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if st.movers is not None:
             mrun = st.movers.get_or_start(key)
             while mrun.state == "running":
+                await asyncio.sleep(2.0)
+        await give_way()
+        if st.pairs is not None:
+            prun = st.pairs.get_or_start(key)
+            while prun.state == "running":
                 await asyncio.sleep(2.0)
         await give_way()
         with contextlib.suppress(Exception):  # a field without enough passes: the visitor's button says why
@@ -311,6 +330,11 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         lifespan=lifespan,
     )
     app.state.sky = st
+    # the searches' own routes: what else is known at a place, comets and asteroids, the movers route with pairs, Find Planet X
+    app.include_router(make_router(st))
+    app.include_router(make_known_router(st))
+    app.include_router(make_pairs_router(st))
+    app.include_router(make_planetx_router(st))
 
     @app.middleware("http")
     async def headers_and_people(request: Request, call_next: Any) -> Response:
@@ -550,19 +574,6 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         except ValueError as e:
             return {"state": "failed", "error": str(e), "result": None}
         return {"state": "done", "result": result}
-
-    @app.get(f"{API_PREFIX}/movers")
-    async def movers_of(
-        ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90), fov: float = Query(5, gt=0, le=60)
-    ) -> Any:
-        """The search between passes of a field (once the field is finished) and the Gaia check of its tracks."""
-        if st.index is None or st.store is None or st.movers is None:
-            raise HTTPException(503, "the exposure index is not loaded")
-        params = fieldjob.canonical(ra, dec, fov)
-        key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
-        if not st.store.is_complete(key):
-            return {"state": "waiting", "error": "", "field": key}
-        return st.movers.view(st.movers.get_or_start(key))
 
     @app.get(f"{API_PREFIX}/spectrum/catalogue")
     async def spectrum_catalogue(
