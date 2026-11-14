@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import Executor
 from dataclasses import dataclass, field
 
@@ -66,6 +66,8 @@ async def build_field(
     bands: list[Band] | None = None,
     progress: Callable[[str], None] | None = None,
     keep_natives: bool = False,
+    checkpoint: Callable[[], Awaitable[None]] | None = None,
+    on_pass: Callable[[PassProducts, tuple[int, ...]], Awaitable[None]] | None = None,
 ) -> FieldBuild:
     t0 = time.time()
     grid = grid_for_fov(ra, dec, fov_arcmin)
@@ -101,6 +103,8 @@ async def build_field(
             groups[exps[i].det].append(i)
         parts = []
         for det, members in sorted(groups.items()):
+            if checkpoint is not None:
+                await checkpoint()
             ts = time.time()
             await asyncio.gather(*(one(i) for i in members))
             t_read += time.time() - ts
@@ -119,11 +123,13 @@ async def build_field(
             if progress:
                 progress(f"pass {p.index + 1} of {len(passes)}: D{det} stacked")
         if parts:
-            built.append(reduce_pass(p.index, parts, grid, cdet))
-    if built:
-        ref = stars(built[0].white(cdet), built[0].sat_share(cdet), grid.step_arcsec)
-        for pp in built[1:]:
-            pp.register(register(ref, stars(pp.white(cdet), pp.sat_share(cdet), grid.step_arcsec), grid.step_arcsec))
+            pp = reduce_pass(p.index, parts, grid, cdet)
+            if built:  # register on pass 0 as soon as the pass exists, so it can be published at once
+                ref = stars(built[0].white(cdet), built[0].sat_share(cdet), grid.step_arcsec)
+                pp.register(register(ref, stars(pp.white(cdet), pp.sat_share(cdet), grid.step_arcsec), grid.step_arcsec))
+            built.append(pp)
+            if on_pass is not None:
+                await on_pass(pp, cdet)
     return FieldBuild(
         grid=grid,
         exposures=exps,

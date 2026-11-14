@@ -6,6 +6,8 @@ pixels, is dropped from that visit. Source cores are not checked; in a star's wi
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from numpy.typing import NDArray
 from scipy.ndimage import binary_dilation, gaussian_filter, label
@@ -46,9 +48,13 @@ def visit_test(exposures: list[Exposure], visits: list[list[int]], n: int, step_
             imgs.append(np.where(den > 0.05, num / np.maximum(den, 1e-12), np.nan))
         covs.append(den > 0.05)
     stack = np.stack(imgs)
-    ref = np.nanpercentile(stack, REF_PERCENTILE, axis=0)
+    with warnings.catch_warnings():  # places no visit covers are all-NaN: they stay NaN
+        warnings.simplefilter("ignore", RuntimeWarning)
+        ref = np.nanpercentile(stack, REF_PERCENTILE, axis=0)
     ref_ok = np.isfinite(ref)
-    r = gaussian_filter(np.nan_to_num(ref), px) - np.nanmedian(ref)
+    if not ref_ok.any():
+        return 0
+    r = gaussian_filter(np.nan_to_num(ref), px) - float(np.median(ref[ref_ok]))
     core = binary_dilation(r > CORE_NSIG * _noise(r, ref_ok), iterations=max(1, round(px)))
     min_area = MIN_AREA_NATIVE_PX * px * px
     dropped = 0
