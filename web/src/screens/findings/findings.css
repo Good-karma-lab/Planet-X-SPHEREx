@@ -40,3 +40,12 @@
 .leadrow .lf { font-weight: 400; color: var(--muted); }
 .fmethod { margin: 4px 0 0; }
 @media (max-width: 600px) { .leadrow .lt .mono-s { white-space: normal; overflow-wrap: anywhere; } }
+.fsplit { display: grid; grid-template-columns: minmax(380px, 540px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.fsplit .leads { max-width: none; }
+.leadpanel.inline { position: sticky; top: 8px; right: auto; bottom: auto; z-index: auto; width: auto; max-height: calc(100vh - 24px); border: 1px solid var(--edge); border-radius: 16px; box-shadow: none; animation: none; background: var(--glass); padding: 18px 22px 24px; }
+.leadpanel.inline .leadpanel-x { display: none; }
+.leadpanel.inline .lp-title { margin-right: 0; font-size: 17px; }
+.leadpanel.inline .lp-pair .fthumb, .leadpanel.inline .lp-neos { width: 220px !important; height: 220px !important; }
+@media (max-width: 600px) {
+  .leadrow .lt b { white-space: normal; overflow: visible; text-overflow: clip; }
+}
