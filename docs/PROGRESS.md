@@ -75,6 +75,13 @@ preload after the page's load; first picture in 0.8 s headless) and the phone le
 in the Allsky data itself; QA to compare). Then: lab-ui's survey switch without a half-old picture, with the Allsky blur switched off
 (over the whole mosaic it drew tile seams) — a7c91e8, 48400f3; H1's moving red sources as tracks: WISE 0855 5′ now lists one
 mover, 7.9 ± 0.6″/yr toward 281°, "found in the red bands, 3.8–5 µm" — f98705a, 5e6912d.
+Audit of prod-build's checklist lines (22:xx, live, headless; captures in the shared notes folder, pb-audit/): almost every line
+passes as deployed. Fixed during the audit: one Gaia wording in the movers list — 77fd7ef; time left says finishing after the
+service's own countdown, plan estimate from the measured core time — 5f0ad97, 3f5700c; archive timeline years — b8a518e; Motion only
+draws amber only on real candidates (clean sky without movers) — 3869ef0; 2MASS/AllWISE rows from the AllWISE copy on AWS when
+IRSA's TAP does not answer — 085672b; /api/v1/searched served at once, refreshed in the background — bae5deb. Open: SKY_WORKERS=3 on
+the 16-vCPU VM (/etc/sky/env; raising it needs the user's OK), WISE 0855 20′ finds no red track (H1), the Method page has no
+images/videos and the spectrum status steps back once (lab-ui), the demo video (Sunday).
 
 Open, with owner (the app pauses this session's messages to the other sessions, so these are the hand-over notes):
 - sky-service: WISE 0855 5′ movers find no track (blend); WISE 0855 5′ Find Planet X has fewer than four usable visits per pass
