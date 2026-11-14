@@ -22,12 +22,24 @@
   against 2.6, excess at 3.9–4.3 µm; ecliptic 60′: a Seyfert 2 galaxy first).
 - **M6 (built, deployed):** Globe (DSS2 / 2MASS / AllWISE / IRIS tiles through the service, coverage layer, exposure count under the aim,
   catalogue of 4,100 SIMBAD objects); Findings read live from the service; Index, Method and About pages; phone layout.
-- **Warm set:** the 5′, 10′ and 20′ fields of every target first, each with its movers search (and anomalies from 10′); visitors who only
-  look do not pause it.
+- **Warm set:** 30 products (the five targets at five sizes, three demo fields, the ecliptic and 3I/ATLAS films); on start every
+  product already built is counted before anything is built, so a restart resumes where it was; background work gives way only
+  while a person's job waits; deploys wait until no job runs (`deploy/push.sh`, `--now` for a fix).
+- **Service robustness:** a standby instance answers while the main one restarts (Caddy prefers the main one, health-checks both);
+  the exposure index opens one read connection per thread and the product store locks its queries (shared SQLite connections had
+  mixed cursors up: 500s).
+- **More searches and checks (built, validated):** known bodies in a film (JPL Small-Body Identification + Horizons; plane counts
+  equal to IRSA MOST: 119/107/118/121; visits stacked along the track, chance level beside them); 3I/ATLAS demo film and the CSA
+  NEOSSat card (G 12.37, S/N 154 after a 43″ WCS refit on Gaia); red sources (3.8–5 µm against 1.1–1.6 µm; WISE 0855 and ε Indi B
+  light up); spectrum stamps and the catalogue check (J 0.99, H 1.02, Ks 1.03, W1 0.985); ZTF and NEOWISE light curves; the
+  SPHEREx DR1 all-sky cube on the globe; Gaia DR3 from the public Parquet copy on AWS when the archive does not answer (Gaia release
+  switchable for DR4); recall of the movers search by injection (validation note); WiseView-style controls (every setting in the
+  address, [ and ] for speed, a dragged box opens a new field, SIMBAD / VizieR / Legacy Survey / IRSA links).
 - **Submission:** texts in `docs/submission/` match the deployed tool; 29.6 s demo video and 7-slide deck in `docs/submission/demo/`,
   reproducible with `web/scripts/demo-video.mjs`, `demo-cut.mjs`, `demo-shots.mjs`, `slides-pdf.mjs`.
-- **Not built:** the distance slider and searches beyond Neptune, the in-pass (film) search for asteroids, pairs changing in place,
-  catalogue synthetic photometry of spectra, the small-body list of the globe.
+- **Not built:** the distance slider and searches beyond Neptune, a blind in-pass (film) search for asteroids (known bodies are
+  ringed and measured instead), pairs changing in place, the quick-look spectrum from the HiPS cube (a FITS tile is 320 MB), deep
+  static references from CADC (1′ cutouts do not fit 5–60′ fields), synthetic injection in the Lab (the service-side test exists).
 
 ## M0 — Foundations (done)
 
