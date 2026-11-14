@@ -1,6 +1,9 @@
+import '../planetx/planetx.css';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import filmDates from './film-dates.json';
+import { Model } from '../planetx/model';
+import { DEPTH } from '../planetx/data';
 
 /** The figures of the Method page, by the name a text gives them in `[figure: name | caption]`. Every picture is a real product of the service. */
 
@@ -197,6 +200,40 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
             <img src={M('eris_deep_sum_97au.jpg')} alt="Eris, the deep sum of three passes" loading="lazy" />
             <span class="tagc">deep sum</span>
           </div>
+        </div>
+      </Fig>
+    ),
+  },
+  'p9-orbits': {
+    cap: 'The Solar System with the predicted Planet Nine orbit and the fields searched for it',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <div class="p9model">
+          <Model />
+        </div>
+        <a class="p9link" href="#/planetx">
+          Open the Planet X page →
+        </a>
+      </Fig>
+    ),
+  },
+  'depth-vs-wise': {
+    cap: 'The faintest body found blind at 3 µm: SPHEREx D4 against the WISE Planet Nine search (mJy, lower is deeper)',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <div class="depthbars">
+          {DEPTH.map((d) => (
+            <div key={d.name} class="db">
+              <span class="dn">
+                {d.name}
+                <em>{d.note}</em>
+              </span>
+              <span class="dt">
+                <i style={{ width: `${(d.mjy / 0.07) * 100}%`, background: d.colour }} />
+              </span>
+              <b>{d.mjy.toFixed(3)}</b>
+            </div>
+          ))}
         </div>
       </Fig>
     ),

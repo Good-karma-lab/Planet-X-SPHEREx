@@ -30,11 +30,14 @@ export interface Rendered {
 }
 
 /** Renders one Markdown text; `prefix` keeps the ids of several texts apart. */
-export function render(md: string, prefix: string): Rendered {
+export function render(md: string, prefix: string, leadOn = true): Rendered {
   const lines = md.split('\n');
   const out: string[] = [];
   const headings: Heading[] = [];
   let i = 0;
+  let figures = 0;
+  let sawLead = !leadOn;
+  let sawSection = false;
   const isTable = (l: string) => l.trim().startsWith('|');
   while (i < lines.length) {
     const l = lines[i]!;
@@ -54,6 +57,7 @@ export function render(md: string, prefix: string): Rendered {
     if (h) {
       const level = h[1]!.length;
       const id = `${prefix}-${slug(h[2]!)}`;
+      if (level >= 2) sawSection = true;
       headings.push({ id, title: h[2]!, level });
       out.push(`<h${level + 1} id="${id}">${inline(h[2]!)}</h${level + 1}>`);
       i++;
@@ -89,9 +93,25 @@ export function render(md: string, prefix: string): Rendered {
       out.push(`<${ordered ? 'ol' : 'ul'}>${items.join('')}</${ordered ? 'ol' : 'ul'}>`);
       continue;
     }
+    const fig = /^\[figure:\s*([a-z0-9-]+)\s*(?:\|\s*(.*?))?\s*\]\s*$/.exec(l.trim());
+    if (fig) {
+      figures++;
+      out.push(
+        `<figure class="mf-fig" data-fig="${fig[1]}" id="${prefix}-fig-${figures}"><div class="mf-figslot" data-fig="${fig[1]}"></div>${fig[2] ? `<figcaption>${inline(fig[2])}</figcaption>` : ''}</figure>`,
+      );
+      i++;
+      continue;
+    }
     const buf: string[] = [];
-    while (i < lines.length && lines[i]!.trim() && !isTable(lines[i]!) && !/^(#{1,4} |```)/.test(lines[i]!) && !/^([-*]|\d+\.) /.test(lines[i]!)) buf.push(lines[i++]!.trim());
-    out.push(`<p>${inline(buf.join(' '))}</p>`);
+    while (i < lines.length && lines[i]!.trim() && !isTable(lines[i]!) && !/^(#{1,4} |```)/.test(lines[i]!) && !/^([-*]|\d+\.) /.test(lines[i]!) && !/^\[figure:/.test(lines[i]!.trim())) buf.push(lines[i++]!.trim());
+    const text = buf.join(' ');
+    const res = /^(?:\*\*Result:\*\*|Result:)\s*(.*)$/.exec(text);
+    if (res) out.push(`<p class="mf-result"><span class="mf-result-k">Result</span> ${inline(res[1]!)}</p>`);
+    else if (!sawSection && !sawLead) {
+      // the first paragraph after the part's title, before any section, is its lead
+      sawLead = true;
+      out.push(`<p class="mf-lead">${inline(text)}</p>`);
+    } else out.push(`<p>${inline(text)}</p>`);
   }
   return { html: out.join('\n'), headings };
 }
@@ -103,13 +123,11 @@ export interface FigureBlock {
   name: string;
   caption: string;
 }
-/** A callout for the margin: `Result: headline | text | source` (an optional tone in brackets: `Result [amber]:` or `Result [red]:`). */
+/** A callout for the margin: a paragraph that starts `**Result:**` (or `Result:`), with its source taken from the end of it. */
 export interface ResultBlock {
   kind: 'result';
-  headline: string;
   text: string;
   source: string;
-  tone: '' | 'am' | 'rd';
 }
 export interface HtmlBlock {
   kind: 'html';
@@ -117,31 +135,64 @@ export interface HtmlBlock {
 }
 export type Block = HtmlBlock | FigureBlock | ResultBlock;
 
-export interface Blocks {
+/** One part: its title (the `# ` line), its lead (the first paragraph after it), and the rest as blocks. */
+export interface PartText {
+  title: string;
+  lead: string;
   blocks: Block[];
   headings: Heading[];
 }
 
-const FIG = /^\[figure:\s*([a-z0-9_-]+)\s*(?:\|\s*(.*?))?\s*\]\s*$/i;
-const RES = /^Result\s*(?:\[(amber|red|am|rd)\])?\s*:\s*(.+)$/i;
+const FIG = /^\[figure:\s*([a-z0-9-]+)\s*(?:\|\s*(.*?))?\s*\]\s*$/i;
+const RES = /^(?:\*\*Result:\*\*|Result:)\s*(.*)$/;
+/** the source at the end of a Result: "(Source: x)", "Source: x." or "; source: x" */
+const SRC = /(?:\(\s*|;\s+|\.\s+|\s+)[Ss]ource:?\s*([^)]*?)\s*\)?\.?\s*$/;
 
-/** Renders a text into blocks: runs of Markdown as HTML, figures and Result callouts as their own blocks. */
-export function renderBlocks(md: string, prefix: string): Blocks {
+/** Splits a Result paragraph into its sentence and its source. */
+function result(raw: string): ResultBlock {
+  let text = raw.trim();
+  let source = '';
+  const m = SRC.exec(text);
+  if (m) {
+    source = m[1]!.trim();
+    text = text.slice(0, m.index).replace(/[\s;(]+$/, '').trim();
+    if (text && !/[.!?]$/.test(text)) text += '.';
+  }
+  return { kind: 'result', text, source };
+}
+
+/** Renders a part: a run of Markdown as HTML, figures and Result paragraphs as their own blocks; the title and the lead are taken out. */
+export function renderPart(md: string, prefix: string): PartText {
+  const lines = md.split('\n');
+  let title = '';
+  let lead = '';
+  let i = 0;
+  while (i < lines.length && !lines[i]!.trim()) i++;
+  if (i < lines.length && /^# /.test(lines[i]!)) title = lines[i++]!.slice(2).trim();
+  while (i < lines.length && !lines[i]!.trim()) i++;
+  const lb: string[] = [];
+  while (i < lines.length && lines[i]!.trim() && !/^(#{1,4} |```|\||\[figure:|[-*] |\d+\. )/.test(lines[i]!) && !RES.test(lines[i]!.trim())) lb.push(lines[i++]!.trim());
+  lead = lb.join(' ');
   const blocks: Block[] = [];
+  // a Result written at the end of the lead is a callout of its own
+  const inLead = /\s+Result:\s+(.*)$/.exec(lead);
+  if (inLead) {
+    lead = lead.slice(0, inLead.index).trim();
+    blocks.push(result(inLead[1]!));
+  }
   const headings: Heading[] = [];
   let buf: string[] = [];
-  let inCode = false;
   const flush = () => {
-    if (!buf.some((l) => l.trim())) {
-      buf = [];
-      return;
+    if (buf.some((l) => l.trim())) {
+      const r = render(buf.join('\n'), prefix, false);
+      headings.push(...r.headings);
+      blocks.push({ kind: 'html', html: r.html });
     }
-    const r = render(buf.join('\n'), prefix);
-    headings.push(...r.headings);
-    blocks.push({ kind: 'html', html: r.html });
     buf = [];
   };
-  for (const line of md.split('\n')) {
+  let inCode = false;
+  for (; i < lines.length; i++) {
+    const line = lines[i]!;
     if (line.startsWith('```')) inCode = !inCode;
     if (!inCode) {
       const f = FIG.exec(line.trim());
@@ -150,17 +201,16 @@ export function renderBlocks(md: string, prefix: string): Blocks {
         blocks.push({ kind: 'figure', name: f[1]!.toLowerCase(), caption: (f[2] ?? '').trim() });
         continue;
       }
-      const r = RES.exec(line.trim());
-      if (r) {
+      if (RES.test(line.trim())) {
         flush();
-        const [headline = '', text = '', source = ''] = r[2]!.split(/\s+\|\s+/).map((x) => x.trim());
-        const t = (r[1] ?? '').toLowerCase();
-        blocks.push({ kind: 'result', headline, text, source, tone: t.startsWith('a') ? 'am' : t.startsWith('r') ? 'rd' : '' });
+        const para = [line.trim()];
+        while (i + 1 < lines.length && lines[i + 1]!.trim() && !FIG.test(lines[i + 1]!.trim()) && !/^(#{1,4} |```|\|)/.test(lines[i + 1]!)) para.push(lines[++i]!.trim());
+        blocks.push(result(RES.exec(para.join(' '))![1]!));
         continue;
       }
     }
     buf.push(line);
   }
   flush();
-  return { blocks, headings };
+  return { title, lead, blocks, headings };
 }

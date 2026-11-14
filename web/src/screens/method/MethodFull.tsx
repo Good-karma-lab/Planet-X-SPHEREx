@@ -1,42 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import './method.css';
-import { renderBlocks, type Block, type Heading } from './md';
-import { PART_META, type PartMeta } from './parts';
+import { renderPart, type Block, type Heading } from './md';
 import { Figure } from './figures';
 
-// The texts of the parts: ./text/NN-*.md (one per part). Where a part has no text of its own yet, the earlier account of that step fills it.
+// The texts of the parts: ./text/NN-*.md, one per part (the title is the first line, the lead the first paragraph).
 const NUMBERED = import.meta.glob('./text/[0-9][0-9]-*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
-import legacyOverview from './text/overview.md?raw';
-import legacyData from './text/data.md?raw';
-import legacyStacks from './text/stacks.md?raw';
-import legacyViews from './text/views.md?raw';
-import legacySpectra from './text/spectra.md?raw';
-import legacySearches from './text/searches.md?raw';
-import legacyChecks from './text/checks.md?raw';
-import legacyValidation from './text/validation.md?raw';
-import legacyInjection from './text/report-injection.md?raw';
-import legacyMost from './text/report-most.md?raw';
-import legacyWavelength from './text/report-wavelength.md?raw';
 
-const LEGACY: Record<string, string> = {
-  '06': legacyOverview,
-  '07': legacyData,
-  '08': legacyStacks,
-  '09': legacyViews,
-  '10': legacySpectra,
-  '11': legacySearches,
-  '12': legacyChecks,
-  '14': [legacyValidation, legacyInjection, legacyMost, legacyWavelength].join('\n\n'),
-};
-
-/** The text of a part: its own file, else the earlier account of that step. */
-function textOf(id: string): string {
-  const own = Object.entries(NUMBERED).find(([path]) => path.includes(`/${id}-`));
-  return own ? own[1] : (LEGACY[id] ?? '');
-}
+const groupOf = (id: string): 'Story' | 'Methods' | 'Results' => (+id <= 6 ? 'Story' : +id <= 14 ? 'Methods' : 'Results');
 
 /** Old addresses (#/method?sec=searches) and part numbers (#/method?sec=11). */
-const ALIAS: Record<string, string> = { overview: '06', data: '07', stacks: '08', views: '09', spectra: '10', searches: '11', checks: '12', validation: '14', dated: '14' };
+const ALIAS: Record<string, string> = { overview: '06', data: '07', stacks: '08', views: '09', spectra: '10', searches: '11', checks: '13', validation: '15', dated: '15' };
 const wanted = (): string | null => {
   const w = new URLSearchParams(location.hash.split('?')[1] ?? '').get('sec');
   if (!w) return null;
@@ -52,7 +25,7 @@ const NUM = {
 };
 
 interface PartView {
-  meta: PartMeta;
+  meta: { id: string; group: 'Story' | 'Methods' | 'Results'; title: string; lead: string };
   blocks: Block[];
   headings: Heading[];
 }
@@ -61,7 +34,7 @@ type ResultBlock = Extract<Block, { kind: 'result' }>;
 type FigureBlock = Extract<Block, { kind: 'figure' }>;
 type Row = { kind: 'row'; html: string[]; results: ResultBlock[] };
 
-/** The blocks of a part grouped into rows: a run of text with its callouts in the margin, and figures between them at the full width. */
+/** The blocks of a part grouped into rows: text with the Result that follows it in the margin, and figures between them at the full width. */
 function layoutRows(blocks: Block[]): (Row | FigureBlock)[] {
   const out: (Row | FigureBlock)[] = [];
   let cur: Row | null = null;
@@ -75,7 +48,10 @@ function layoutRows(blocks: Block[]): (Row | FigureBlock)[] {
         out.push(cur);
       }
       if (b.kind === 'html') cur.html.push(b.html);
-      else cur.results.push(b);
+      else {
+        cur.results.push(b);
+        cur = null; // a Result closes its row: the callout stands beside the text it follows
+      }
     }
   }
   return out;
@@ -83,10 +59,9 @@ function layoutRows(blocks: Block[]): (Row | FigureBlock)[] {
 
 function Result({ r }: { r: ResultBlock }) {
   return (
-    <div class={`res ${r.tone}`}>
+    <div class="res">
       <div class="rk">Result</div>
-      <b>{r.headline}</b>
-      {r.text && <p>{r.text}</p>}
+      <p>{r.text}</p>
       {r.source && <div class="s">{r.source}</div>}
     </div>
   );
@@ -191,12 +166,12 @@ function Hero({ go }: { go: (id: string) => void }) {
           <p>The challenge, SPHEREx, how Pluto was found, the hunt for Planet Nine, and what a video from raw data is.</p>
         </a>
         <a class="path" href="#m-07" onClick={link('07')}>
-          <div class="pk">Methods · parts 7–13</div>
+          <div class="pk">Methods · parts 7–14</div>
           <h3>Every step, with formulas</h3>
           <p>Reading, cleaning, stacks, views, spectra, the six searches, anomalies, chance controls, exports.</p>
         </a>
-        <a class="path" href="#m-14" onClick={link('14')}>
-          <div class="pk">Results · parts 14–15</div>
+        <a class="path" href="#m-15" onClick={link('15')}>
+          <div class="pk">Results · parts 15–16</div>
           <h3>How we know it works</h3>
           <p>Each check against Gaia, JPL, SIMBAD, 2MASS, WISE and NEOWISE, and the limits we state.</p>
           <div class="big">
@@ -219,7 +194,7 @@ function Hero({ go }: { go: (id: string) => void }) {
           ['09', 'named bands', 'barnard_wall_of_bands.jpg'],
           ['09', 'difference of passes', 'barnard_difference.jpg'],
           ['11', 'film and searches', 'film/sky_06.jpg'],
-          ['14', 'checked', 'spectrum-crop.jpg'],
+          ['15', 'checked', 'spectrum-crop.jpg'],
         ].map(([n, s, f]) => (
           <a key={s} href={`#m-${n}`} onClick={link(n!)} style={`background-image:url('/method/${f}')`}>
             <span>
@@ -241,12 +216,16 @@ export function MethodFull() {
   const root = useRef<HTMLDivElement>(null);
   const parts: PartView[] = useMemo(
     () =>
-      PART_META.map((meta) => {
-        const r = renderBlocks(textOf(meta.id), `p${meta.id}`);
-        return { meta, blocks: r.blocks, headings: r.headings };
-      }),
+      Object.entries(NUMBERED)
+        .map(([path, text]) => ({ id: /\/(\d\d)-/.exec(path)![1]!, text }))
+        .sort((x, y) => x.id.localeCompare(y.id))
+        .map(({ id, text }) => {
+          const r = renderPart(text, `p${id}`);
+          return { meta: { id, group: groupOf(id), title: r.title, lead: r.lead }, blocks: r.blocks, headings: r.headings };
+        }),
     [],
   );
+  const partsRef = useRef(parts);
   const [cur, setCur] = useState('01');
   const [prog, setProg] = useState(0);
   const scroller = () => (root.current?.closest('.screen') as HTMLElement | null) ?? null;
@@ -271,9 +250,9 @@ export function MethodFull() {
       const top = sc.getBoundingClientRect().top;
       const y = top + sc.clientHeight * 0.3;
       let c = '01';
-      for (const p of PART_META) {
-        const el = root.current?.querySelector(`#m-${p.id}`);
-        if (el && el.getBoundingClientRect().top < y) c = p.id;
+      for (const p of partsRef.current) {
+        const el = root.current?.querySelector(`#m-${p.meta.id}`);
+        if (el && el.getBoundingClientRect().top < y) c = p.meta.id;
       }
       setCur(c);
       setProg((100 * sc.scrollTop) / Math.max(1, sc.scrollHeight - sc.clientHeight));
@@ -310,7 +289,7 @@ export function MethodFull() {
       <nav class="mv2-toc" aria-label="Contents of the Method">
         {parts.map(({ meta, headings }) => {
           const heads = headings.filter((h) => h.level === 2);
-          const subs = heads.length >= 2 ? heads.map((h) => ({ t: h.title, id: h.id })) : meta.subs.map((t) => ({ t, id: '' }));
+          const subs = heads.map((h) => ({ t: h.title, id: h.id }));
           const group = meta.group !== lastGroup ? meta.group : '';
           lastGroup = meta.group;
           return (
@@ -354,7 +333,7 @@ export function MethodFull() {
         <div class="mtoc">
           <span>Method</span>
           <select aria-label="Jump to part" value={cur} onChange={(e) => go((e.target as HTMLSelectElement).value)}>
-            {PART_META.map((p) => (
+            {parts.map(({ meta: p }) => (
               <option key={p.id} value={p.id}>
                 {p.id} · {p.title}
               </option>
@@ -370,8 +349,8 @@ export function MethodFull() {
               </div>
               <h2>{meta.title}</h2>
               <p class="lead">{meta.lead}</p>
-              {meta.id === '14' && <Validation />}
-              {meta.id === '15' && <Limits />}
+              {meta.id === '15' && <Validation />}
+              {meta.id === '16' && <Limits />}
               {layoutRows(blocks).map((row, i) =>
                 row.kind === 'figure' ? (
                   <Figure key={i} name={row.name} caption={row.caption} />
