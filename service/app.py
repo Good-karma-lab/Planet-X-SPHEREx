@@ -28,7 +28,7 @@ from service.browndwarfs import BrownDwarfs
 from service.catalogue_check import check as catalogue_check
 from service.config import Config, load
 from service.context import CatalogueContext
-from service.coverage import coverage_map
+from service.coverage import coverage_payload, index_key
 from service.jobs.scheduler import Priority, Scheduler
 from service.known import Known
 from service.lightcurves import neowise as lc_neowise
@@ -87,7 +87,7 @@ class State:
         self.searched: Searched | None = None
         self.warm: WarmRunner | None = None
         self.hips: HipsTiles | None = None
-        self.coverage: dict[str, Any] | None = None
+        self.coverage: tuple[bytes, str, str] | None = None
         self.spectra: Spectra | None = None
         self.movers: Movers | None = None
         self.anomalies: Anomalies | None = None
@@ -95,6 +95,7 @@ class State:
         self.lightcurves: dict[tuple[float, float, int, int], dict[str, Any]] = {}
         self.identified: dict[tuple[float, float, int, int], dict[str, Any]] = {}
         self.coverage_lock = asyncio.Lock()
+        self.coverage_task: asyncio.Task[None] | None = None
 
 
 def create_app(config: Config | None = None, scheduler: Scheduler | None = None, s3: S3 | None = None) -> FastAPI:
@@ -142,6 +143,13 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.searched.prime()
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
+        if st.index is not None:
+            # the coverage map is ready before the first visitor asks for it (from the disk copy, or computed once)
+            async def prime_coverage() -> None:
+                with contextlib.suppress(Exception):
+                    st.coverage = await asyncio.to_thread(coverage_payload, index_path)
+
+            st.coverage_task = asyncio.get_running_loop().create_task(prime_coverage())
         warm_task = None
         if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None:
             st.warm = WarmRunner(warm_set())
@@ -756,15 +764,21 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         return {"ra": ra, "dec": dec, "fov": fov, "n_exposures": len(found), "by_release": by}
 
     @app.get(f"{API_PREFIX}/coverage/map")
-    async def coverage_all() -> Response:
-        """Exposure centres per HEALPix cell (nested, order 3) and release: the globe's coverage layer."""
+    async def coverage_all(request: Request) -> Response:
+        """Exposure centres per HEALPix cell (nested, order 3) and release: the globe's and the Index page's coverage layer.
+        Kept in memory and on disk for the current state of the index, served with an ETag (304 when the browser has it)."""
         index_path = cfg.store_dir / "index" / "exposures.sqlite"
         if not index_path.is_file():
             raise HTTPException(503, "no exposure index")
-        async with st.coverage_lock:
-            if st.coverage is None:
-                st.coverage = await asyncio.to_thread(coverage_map, index_path)
-        return JSONResponse(st.coverage, headers={"Cache-Control": "public, max-age=3600"})
+        if st.coverage is None or st.coverage[2] != index_key(index_path):
+            async with st.coverage_lock:
+                if st.coverage is None or st.coverage[2] != index_key(index_path):
+                    st.coverage = await asyncio.to_thread(coverage_payload, index_path)
+        body, etag, _ = st.coverage
+        headers = {"Cache-Control": "public, max-age=300, must-revalidate", "ETag": etag}
+        if request.headers.get("if-none-match") == etag:
+            return Response(status_code=304, headers=headers)
+        return Response(body, media_type="application/json", headers=headers)
 
     @app.get(f"{API_PREFIX}/hips/{{survey}}/{{order}}/{{tile}}")
     async def hips(survey: str, order: int, tile: str) -> Response:
