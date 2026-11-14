@@ -225,17 +225,22 @@ async function getBlob(url: string, signal: AbortSignal): Promise<Got> {
   return r.blob();
 }
 
-/** The tile from IRSA, or from the service when IRSA fails or has not answered within FALLBACK_MS (whichever answers first wins). */
+/** The tile from IRSA, or from the service when IRSA fails or has not answered within FALLBACK_MS (whichever answers first
+ *  wins). While IRSA is marked slow the service goes first and IRSA is the one asked after FALLBACK_MS. */
 function fetchTile(id: string, o: number, i: number): Promise<Got> {
   const u = urls(id, o, i);
   const irsa = u.irsa;
-  if (!irsa || (!irsaUp() && u.service)) return getBlob(u.service!, new AbortController().signal);
+  const service = u.service;
+  if (!irsa) return getBlob(service!, new AbortController().signal);
+  if (!service) return getBlob(irsa, new AbortController().signal);
+  const first = irsaUp() ? irsa : service;
+  const second = first === irsa ? service : irsa;
   return new Promise<Got>((resolve, reject) => {
     const a1 = new AbortController();
     const a2 = new AbortController();
     let done = false;
     let running = 1;
-    let viaService = false;
+    let asked2 = false;
     const ok = (g: Got) => {
       if (done) return;
       done = true;
@@ -247,24 +252,30 @@ function fetchTile(id: string, o: number, i: number): Promise<Got> {
     const bad = (e: unknown) => {
       if (--running === 0 && !done) reject(e);
     };
-    const service = () => {
-      if (viaService || done || !u.service) return;
-      viaService = true;
+    const ask2 = () => {
+      if (asked2 || done) return;
+      asked2 = true;
       running++;
-      getBlob(u.service, a2.signal).then(ok, bad);
+      getBlob(second, a2.signal).then(
+        (g) => {
+          if (!done && second === irsa) irsaResult(true);
+          ok(g);
+        },
+        bad,
+      );
     };
     const timer = window.setTimeout(() => {
-      irsaResult(false);
-      service();
+      if (first === irsa) irsaResult(false);
+      ask2();
     }, FALLBACK_MS);
-    getBlob(irsa, a1.signal).then(
+    getBlob(first, a1.signal).then(
       (g) => {
-        if (!done) irsaResult(true);
+        if (!done && first === irsa) irsaResult(true);
         ok(g);
       },
       (e) => {
-        if (!done && !a1.signal.aborted) irsaResult(false);
-        service();
+        if (!done && first === irsa && !a1.signal.aborted) irsaResult(false);
+        ask2();
         bad(e);
       },
     );
