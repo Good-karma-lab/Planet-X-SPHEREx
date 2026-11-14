@@ -71,14 +71,17 @@ export function projectIn(v: SkyView, ra: number, dec: number): [number, number,
     const lam = (((ra - 180 + 540) % 360) - 180) * D2R;
     return [v.W / 2 - ((lam * Math.cos(th)) / Math.PI) * (mw(v) / 2), v.H / 2 - Math.sin(th) * (mw(v) / 4), true];
   }
+  // the camera is inside the sphere: stereographic projection (shapes stay round at a wide field), east left, north up; R is pixels per radian at the centre
   const b = basis(v);
   const r = ra * D2R;
   const d = dec * D2R;
   const x = Math.cos(d) * Math.cos(r);
   const y = Math.cos(d) * Math.sin(r);
   const z = Math.sin(d);
-  if (x * b.c[0] + y * b.c[1] + z * b.c[2] < 0.02) return [0, 0, false];
-  return [v.W / 2 - (x * b.e[0] + y * b.e[1]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
+  const cosc = x * b.c[0] + y * b.c[1] + z * b.c[2];
+  if (cosc < -0.5) return [0, 0, false];
+  const kk = (2 * v.R) / (1 + cosc);
+  return [v.W / 2 - (x * b.e[0] + y * b.e[1]) * kk, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * kk, true];
 }
 
 interface Pass {
@@ -169,14 +172,17 @@ class SkyPainter {
           z = (2 * th + Math.sin(2 * th)) / Math.PI;
           ra = 180 - ((Math.PI * X) / Math.cos(th)) / D2R;
         } else {
-          const sx = (sw / 2 - i) / Rs;
-          const sy = (sh / 2 - j) / Rs;
-          const rr = sx * sx + sy * sy;
-          if (rr > 1) continue;
-          const zz = Math.sqrt(1 - rr);
-          const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
-          const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
-          z = zz * b.c[2] + sy * b.n[2];
+          // the inverse of the stereographic projection
+          const u = (sw / 2 - i) / (2 * Rs);
+          const w = (sh / 2 - j) / (2 * Rs);
+          const rho2 = u * u + w * w;
+          const den = 1 + rho2;
+          const X = (2 * u) / den;
+          const Y = (2 * w) / den;
+          const Z = (1 - rho2) / den;
+          const vx = Z * b.c[0] + X * b.e[0] + Y * b.n[0];
+          const vy = Z * b.c[1] + X * b.e[1] + Y * b.n[1];
+          z = Z * b.c[2] + X * b.e[2] + Y * b.n[2];
           ra = Math.atan2(vy, vx) / D2R;
         }
         const zc = z > 1 ? 1 : z < -1 ? -1 : z;
@@ -221,7 +227,7 @@ class SkyPainter {
     if (old && old.proj === v.proj) {
       x.save();
       x.beginPath();
-      if (v.proj === 'globe') x.arc(v.W / 2, v.H / 2, v.R, 0, 7);
+      if (v.proj === 'globe') x.rect(0, 0, v.W, v.H);
       else x.ellipse(v.W / 2, v.H / 2, mw(v) / 2, mw(v) / 4, 0, 0, 7);
       x.clip();
       x.imageSmoothingEnabled = true;

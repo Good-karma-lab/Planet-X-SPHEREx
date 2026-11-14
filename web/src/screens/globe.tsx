@@ -68,7 +68,7 @@ const SURVEYS: { id: SurveyId; name: string; layer: SkyLayer[]; note: string }[]
 ];
 const SIZES = [2, 5, 10, 20, 60];
 /** the globe zoom limits; above ZOOM_NEAR a pin is an open ring so that the star under it shows */
-const ZOOM_MIN = 0.8;
+const ZOOM_MIN = 1.11; // the widest view of the camera inside the sphere is 108°
 const ZOOM_MAX = 400;
 const ZOOM_NEAR = 30;
 /** a catalogue object faster than this (mas/yr) gets its path drawn when selected */
@@ -272,7 +272,9 @@ export function Globe() {
     resize();
     const offTile = tiles.onTile(() => (sky.stale = true));
 
-    const R = () => (Math.min(W, H) / 2) * 0.9 * view.current.zoom;
+    // pixels per radian at the centre: at zoom 1.6 the camera inside the sphere sees 78° across the width (stereographic: k = W / (4 tan(fov/4)))
+    const R0 = () => W / (4 * Math.tan((78 * D2R) / 4)) / 1.6;
+    const R = () => R0() * view.current.zoom;
     const mw = () => Math.min(W - 20, (H - 20) * 2);
     const basis = () => {
       const ra = view.current.ra * D2R;
@@ -294,10 +296,11 @@ export function Globe() {
       const d = dec * D2R;
       const v = [Math.cos(d) * Math.cos(r), Math.cos(d) * Math.sin(r), Math.sin(d)];
       const z = v[0]! * b.c[0]! + v[1]! * b.c[1]! + v[2]! * b.c[2]!;
-      if (z < 0.02) return [0, 0, false];
+      if (z < -0.5) return [0, 0, false];
+      const kk = (2 * R()) / (1 + z);
       return [
-        W / 2 - (v[0]! * b.e[0]! + v[1]! * b.e[1]! + v[2]! * b.e[2]!) * R(),
-        H / 2 - (v[0]! * b.n[0]! + v[1]! * b.n[1]! + v[2]! * b.n[2]!) * R(),
+        W / 2 - (v[0]! * b.e[0]! + v[1]! * b.e[1]! + v[2]! * b.e[2]!) * kk,
+        H / 2 - (v[0]! * b.n[0]! + v[1]! * b.n[1]! + v[2]! * b.n[2]!) * kk,
         true,
       ];
     };
@@ -311,11 +314,13 @@ export function Globe() {
         const lam = (Math.PI * X) / Math.cos(th);
         return [(((180 - lam / D2R) % 360) + 360) % 360, phi / D2R];
       }
-      const sx = (W / 2 - px) / R();
-      const sy = (H / 2 - py) / R();
-      const rr = sx * sx + sy * sy;
-      if (rr > 1) return null;
-      const z = Math.sqrt(1 - rr);
+      const u = (W / 2 - px) / (2 * R());
+      const w = (H / 2 - py) / (2 * R());
+      const rho2 = u * u + w * w;
+      const den = 1 + rho2;
+      const z = (1 - rho2) / den;
+      const sx = (2 * u) / den;
+      const sy = (2 * w) / den;
       const b = basis();
       const v = [0, 1, 2].map((i) => z * b.c[i]! + sx * b.e[i]! + sy * b.n[i]!);
       return [(((Math.atan2(v[1]!, v[0]!) / D2R) % 360) + 360) % 360, Math.asin(Math.max(-1, Math.min(1, v[2]!))) / D2R];
@@ -323,8 +328,15 @@ export function Globe() {
 
     // where each test target's pin and the selected object's pin were drawn: the click finds them there
     let pins: { o: Obj; x: number; y: number }[] = [];
+    let drag: { x: number; y: number; ra: number; dec: number; moved: boolean } | null = null;
     let starTier = 0;
     let glowMix = 1;
+    let lastBreath = 0;
+    let lastLoop = performance.now();
+    let lastTouch = 0;
+    let driftGain = 0;
+    let driftClock = 0;
+    const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     let glowT = performance.now();
     const font = getComputedStyle(document.body).fontFamily;
     const draw = () => {
@@ -365,12 +377,13 @@ export function Globe() {
       const dt = performance.now() - t0;
       if (dt > 20) starTier = 1;
       else if (dt < 8) starTier = 0;
-      ctx.strokeStyle = 'rgba(255,255,255,.22)';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      if (st.proj === 'globe') ctx.arc(W / 2, H / 2, R(), 0, 7);
-      else ctx.ellipse(W / 2, H / 2, mw() / 2, mw() / 4, 0, 0, 7);
-      ctx.stroke();
+      if (st.proj !== 'globe') {
+        ctx.strokeStyle = 'rgba(255,255,255,.14)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(W / 2, H / 2, mw() / 2, mw() / 4, 0, 0, 7);
+        ctx.stroke();
+      }
       // coverage
       const cov = coverageNow();
       if (st.covOn && cov) {
@@ -430,38 +443,72 @@ export function Globe() {
           }
         }
       }
-      // test targets (and a selected object without a path): a pin at the place on the date of the backdrop; zoomed in, an open ring
-      ctx.font = `600 12.5px ${font}`;
+      // test targets (and a selected object without a path): a thin ring at the place on the date of the backdrop and a name with a dark halo, no box;
+      // the selected one is a larger teal ring with finder ticks, a soft glow and a slow breath
+      let breathing = false;
+      ctx.textBaseline = 'middle';
       for (const o of st.catalog) {
         if (!(o.b || o === st.sel) || (o === st.sel && pathPin)) continue;
         const p = project(...shownPlace(o, st.survey, datesOf(o, st.sel)), b);
         if (!p[2]) continue;
         pins.push({ o, x: p[0], y: p[1] });
-        const lx = near ? 14 : 9;
-        ctx.strokeStyle = '#000';
-        ctx.fillStyle = '#ffb454';
-        if (near) {
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.arc(p[0], p[1], 9, 0, 7);
-          ctx.stroke();
-          ctx.strokeStyle = '#ffb454';
-          ctx.lineWidth = 2;
-          ctx.stroke();
-          ctx.strokeStyle = '#000';
-        } else {
-          ctx.lineWidth = 3;
-          ctx.beginPath();
-          ctx.arc(p[0], p[1], 5, 0, 7);
-          ctx.fill();
-          ctx.stroke();
+        const isSel = o === st.sel;
+        const r = isSel ? 20 : 9;
+        const breath = isSel ? 0.5 + 0.5 * Math.sin(((tNow / 1000) * 2 * Math.PI) / 3.6) : 0;
+        if (isSel) {
+          breathing = true;
+          const gl = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], r * 0.7);
+          gl.addColorStop(0, `rgba(95,227,214,${0.22 + 0.08 * breath})`);
+          gl.addColorStop(1, 'rgba(95,227,214,0)');
+          ctx.save();
+          ctx.globalCompositeOperation = 'lighter';
+          ctx.fillStyle = gl;
+          ctx.fillRect(p[0] - r, p[1] - r, r * 2, r * 2);
+          ctx.restore();
         }
-        if (view.current.zoom > 1.5 || st.proj === 'moll' || o === st.sel) {
+        const ring = (w: number, col: string, a: number) => {
+          ctx.lineWidth = w;
+          ctx.strokeStyle = col;
+          ctx.globalAlpha = a;
+          ctx.beginPath();
+          ctx.arc(p[0], p[1], r, 0, 7);
+          ctx.stroke();
+          if (isSel) {
+            ctx.beginPath();
+            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+              ctx.moveTo(p[0] + dx * (r + 4), p[1] + dy * (r + 4));
+              ctx.lineTo(p[0] + dx * (r + 12), p[1] + dy * (r + 12));
+            }
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+        };
+        ring(3, '#03080f', 0.35);
+        ring(1.5, isSel ? '#5fe3d6' : '#e9f1f4', isSel ? 0.88 + 0.12 * breath : 0.8);
+        // no labels while the globe is turning
+        if (!anim && !(drag && drag.moved)) {
+          const lx = p[0] + r + (isSel ? 16 : 7);
+          ctx.font = `600 ${isSel ? 14 : 12.5}px ${font}`;
           ctx.lineWidth = 3;
-          ctx.strokeText(o.n, p[0] + lx, p[1] + 4);
-          ctx.fillStyle = '#fff';
-          ctx.fillText(o.n, p[0] + lx, p[1] + 4);
+          ctx.lineJoin = 'round';
+          ctx.strokeStyle = 'rgba(3,8,15,.75)';
+          ctx.strokeText(o.n, lx, p[1]);
+          ctx.fillStyle = isSel ? '#ffffff' : 'rgba(233,241,244,.9)';
+          ctx.fillText(o.n, lx, p[1]);
+          if (isSel) {
+            const pm = Math.hypot(o.pmra ?? 0, o.pmdec ?? 0) / 1000;
+            const sub = `${o.c.toLowerCase()}${pm >= 0.05 ? ` · ${pm.toFixed(1)}″/yr` : ''}`;
+            ctx.font = '500 11.5px ui-monospace, SFMono-Regular, Menlo, monospace';
+            ctx.strokeText(sub, lx, p[1] + 16);
+            ctx.fillStyle = 'rgba(163,188,197,.95)';
+            ctx.fillText(sub, lx, p[1] + 16);
+          }
         }
+      }
+      ctx.textBaseline = 'alphabetic';
+      if (breathing && tNow - lastBreath > 40) {
+        lastBreath = tNow;
+        dirty.current = true;
       }
       // aim frame
       const p = project(st.a.ra, st.a.dec, b);
@@ -501,13 +548,28 @@ export function Globe() {
       const now = performance.now();
       if (anim) {
         const t = Math.min(1, (now - anim.t0) / anim.dur);
-        const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+        const e = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2; // cubic ease-in-out
         view.current.ra = (((anim.ra0 + anim.dra * e) % 360) + 360) % 360;
         view.current.dec = anim.de0 + anim.dde * e;
         // the scale follows a curve in log zoom through zm: out while the globe turns far, in at the end
         view.current.zoom = Math.exp((1 - e) * (1 - e) * anim.z0 + 2 * e * (1 - e) * anim.zm + e * e * anim.z1);
         if (t >= 1) anim = null;
         dirty.current = true;
+      }
+      // idle drift: 0.5°/s of yaw and a ±3° nod over 60 s; it eases out over 0.8 s while the user drags, a target or a card is open, or a move is under way
+      const dtDrift = Math.min(0.1, (now - lastLoop) / 1000);
+      lastLoop = now;
+      {
+        const w = live.current;
+        const calm = !anim && !drag && w.proj === 'globe' && !w.sel && !w.bodyPath && !w.searchedSel && now - lastTouch > 1500 && !reducedMotion && fovOfGlobe(W, R()) > 20;
+        driftGain = Math.max(0, Math.min(1, driftGain + (calm ? 1 : -1) * (dtDrift / 0.8)));
+        if (driftGain > 0) {
+          const t1 = driftClock + dtDrift;
+          view.current.ra = (((view.current.ra - 0.5 * driftGain * dtDrift) % 360) + 360) % 360;
+          view.current.dec = Math.max(-80, Math.min(80, view.current.dec + 3 * driftGain * (Math.sin((2 * Math.PI * t1) / 60) - Math.sin((2 * Math.PI * driftClock) / 60))));
+          driftClock = t1;
+          dirty.current = true;
+        }
       }
       // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
       const st = live.current;
@@ -550,6 +612,7 @@ export function Globe() {
         sky.stale = true;
       }
     }
+    view.current.zoom = Math.max(ZOOM_MIN, view.current.zoom);
     loop();
     const flyTo = (ra: number, dec: number, spanDeg?: number) => {
       if (live.current.proj === 'moll') return;
@@ -557,7 +620,7 @@ export function Globe() {
       const z0 = view.current.zoom;
       const minWH = Math.min(W, H);
       const z1 = spanDeg
-        ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, (0.42 * minWH) / (spanDeg * D2R) / ((minWH / 2) * 0.9)))
+        ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, (0.42 * minWH) / (spanDeg * D2R) / R0()))
         : z0;
       if (!spanDeg && th < (Math.PI / 2) * 0.9 && R() * Math.sin(th) < minWH * 0.3) return;
       // the widest view on the way: the whole move fits in it
@@ -567,7 +630,7 @@ export function Globe() {
       const lzm = zm < Math.min(z0, z1) ? 2 * Math.log(zm) - (lz0 + lz1) / 2 : (lz0 + lz1) / 2;
       anim = {
         t0: performance.now(),
-        dur: th > 0.3 || Math.abs(lz1 - lz0) > 3 ? 1400 : 900,
+        dur: 1600,
         ra0: view.current.ra,
         dra: ((ra - view.current.ra + 540) % 360) - 180,
         de0: view.current.dec,
@@ -579,9 +642,9 @@ export function Globe() {
     };
     flyRef.current = flyTo;
 
-    let drag: { x: number; y: number; ra: number; dec: number; moved: boolean } | null = null;
     c.onpointerdown = (e) => {
       c.setPointerCapture(e.pointerId);
+      lastTouch = performance.now();
       drag = { x: e.clientX, y: e.clientY, ra: view.current.ra, dec: view.current.dec, moved: false };
       anim = null;
     };
@@ -591,13 +654,14 @@ export function Globe() {
       const dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
       if (drag.moved && live.current.proj === 'globe') {
-        const k = (90 / R()) * 0.9;
-        view.current.ra = (((drag.ra + ((dx * k) / Math.max(0.2, Math.cos(view.current.dec * D2R))) * 0.6) % 360) + 360) % 360;
+        const k = 1 / (R() * D2R);
+        view.current.ra = (((drag.ra + (dx * k) / Math.max(0.2, Math.cos(view.current.dec * D2R))) % 360) + 360) % 360;
         view.current.dec = Math.max(-89, Math.min(89, drag.dec + dy * k));
         dirty.current = true;
       }
     };
     c.onpointerup = (e) => {
+      lastTouch = performance.now();
       const r = c.getBoundingClientRect();
       const px = e.clientX - r.left;
       const py = e.clientY - r.top;
@@ -643,6 +707,7 @@ export function Globe() {
     };
     c.onwheel = (e) => {
       e.preventDefault();
+      lastTouch = performance.now();
       if (live.current.proj !== 'globe') return;
       anim = null;
       // a mouse-wheel notch (100 px) zooms ×1.25: twenty notches about ×90; a trackpad's small steps zoom in proportion
@@ -743,6 +808,7 @@ export function Globe() {
     <div class="screen">
       <div class="globe-wrap">
         <canvas ref={cv} aria-label="Sky globe" data-testid="sky" />
+        <div class="globe-vig" aria-hidden="true" />
         <div class="map-ui">
           <div class="seg sm" role="group" aria-label="Sky background">
             {SURVEYS.map((s) => (
@@ -820,6 +886,9 @@ export function Globe() {
         <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
           ★ are test targets.
+          <span class="globe-credit">
+            {survey === 'spherex' ? 'Backdrop: SPHEREx DR1 (IRSA)' : `Backdrop: ${sv.name} (IRSA / CDS HiPS)`} · Stars: Hipparcos (ESA)
+          </span>
         </div>
         <button class="btn primary big map-open" onClick={showArea} title="Open the field under the frame in the spectral lab">
           <span dangerouslySetInnerHTML={{ __html: icon('scan', 18) }} style={{ display: 'contents' }} />

@@ -151,5 +151,5 @@ export function drawStars(
   ctx.restore();
 }
 
-/** Screen field of view in degrees of a view of radius R pixels on a canvas W wide (the globe seen from outside: the whole disc is 180°). */
-export const fovOfGlobe = (W: number, R: number) => Math.min(180, (2 * Math.atan(W / 2 / Math.max(1, R)) * 180) / Math.PI);
+/** Screen field of view in degrees across a canvas W wide of the camera inside the sphere (stereographic, R pixels per radian at the centre). */
+export const fovOfGlobe = (W: number, R: number) => Math.min(180, (4 * Math.atan(W / (4 * Math.max(1, R))) * 180) / Math.PI);
