@@ -1,5 +1,5 @@
 {
-  "about": "The warm set: fields computed before anyone asks, kept warm across restarts and version bumps (docs/plan/05-architecture.md 5.6). Test targets are placed at epoch 2025.9 from data/targets.json (proper motion applied), as the globe opens them.",
+  "about": "The warm set: fields computed before anyone asks, kept warm across restarts and version bumps (docs/plan/05-architecture.md 5.6). Test targets are placed at epoch 2025.9 from data/targets.json (proper motion applied), as the globe opens them. Every field a page links to (landing, Planet X, Findings, About) is in the set, so a link never opens a cold field.",
   "epoch": 2025.9,
   "sizes": [
     2,
@@ -29,6 +29,47 @@
       "label": "Eris field",
       "ra": 27.378,
       "dec": -0.12,
+      "sizes": [
+        20
+      ]
+    },
+    {
+      "label": "brown dwarf link of the landing (ε Indi B)",
+      "ra": 331.077,
+      "dec": -56.794,
+      "sizes": [
+        5
+      ]
+    },
+    {
+      "label": "Planet X: ecliptic D4 field",
+      "ra": 60.7116,
+      "dec": 8.617,
+      "sizes": [
+        60
+      ]
+    },
+    {
+      "label": "Planet X: IRAS/AKARI field",
+      "ra": 34.72,
+      "dec": -49.79,
+      "sizes": [
+        20,
+        60
+      ]
+    },
+    {
+      "label": "Planet X: ecliptic field of the deep sum",
+      "ra": 60.94,
+      "dec": 8.39,
+      "sizes": [
+        20
+      ]
+    },
+    {
+      "label": "Planet X: Sedna",
+      "ra": 61.7725,
+      "dec": 8.8408,
       "sizes": [
         20
       ]
