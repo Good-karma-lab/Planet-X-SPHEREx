@@ -1,22 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { aim, type AimState } from '../lib/aim';
-import { outline } from '../lib/healpix';
-import { tiles } from '../lib/hips';
 import { formatHash } from '../lib/route';
 import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVEY_EPOCH } from '../lib/sky';
 import { icon } from '../ui/icons';
-
-interface Obj {
-  n: string;
-  ra: number;
-  dec: number;
-  k: 'bd' | 'fast' | 'mira' | 'young' | 'var';
-  pmra: number | null;
-  pmdec: number | null;
-  sp: string;
-  c: string;
-  b?: number;
-}
+import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
+import { sky, type SkyLayer } from './globe/sky';
+import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
+import { tiles } from '../lib/hips';
+import { drawMovingPath, placeAt, type MovingObject } from './search/path';
+import './globe/globe.css';
 
 const KIND: Record<string, { cls: string; dot: string }> = {
   bd: { cls: 'orange', dot: '#ff9a5a' },
@@ -33,36 +25,50 @@ const TARGET_CLASS: Record<string, string> = {
   'R Draconis': 'Mira variable',
 };
 
-const SURVEYS = [
+const SURVEYS: { id: SurveyId; name: string; layer: SkyLayer[]; note: string }[] = [
   {
     id: 'dss2',
     name: 'Visible — DSS2',
-    max: 9,
-    gain: 2.4,
-    black: 16,
+    layer: [{ id: 'dss2', gain: 2.4, black: 16 }],
     note: 'Digitized Sky Survey: red, blue and infrared photographic plates, colour',
   },
   {
     id: 'spherex',
     name: 'SPHEREx — DR1',
-    max: 5,
-    gain: 1.25,
-    black: 0,
+    // three frames of the cube as the three colours
+    layer: [
+      { id: 'spx88', gain: 1.25, black: 0 },
+      { id: 'spx40', gain: 1.25, black: 0 },
+      { id: 'spx8', gain: 1.25, black: 0 },
+    ],
     note: 'SPHEREx DR1 all-sky cube (IRSA, a visualisation product): 0.91 µm blue, 1.86 µm green, 4.50 µm red',
   },
-  { id: '2mass', name: 'Near-infrared — 2MASS', max: 9, gain: 2.2, black: 0, note: '2MASS J, H and Ks (1.2, 1.7, 2.2 µm), colour' },
-  { id: 'wise', name: 'Infrared — WISE', max: 8, gain: 2.4, black: 0, note: 'AllWISE W1, W2 and W4 (3.4, 4.6, 22 µm), colour' },
+  {
+    id: '2mass',
+    name: 'Near-infrared — 2MASS',
+    layer: [{ id: '2mass', gain: 2.2, black: 0 }],
+    note: '2MASS J, H and Ks (1.2, 1.7, 2.2 µm), colour',
+  },
+  {
+    id: 'wise',
+    name: 'Infrared — WISE',
+    layer: [{ id: 'wise', gain: 2.4, black: 0 }],
+    note: 'AllWISE W1, W2 and W4 (3.4, 4.6, 22 µm), colour',
+  },
   {
     id: 'dust',
     name: 'Dust map',
-    max: 3,
-    gain: 1.6,
-    black: 0,
+    layer: [{ id: 'dust', gain: 1.6, black: 0 }],
     note: 'IRAS far infrared (IRIS: 12, 60, 100 µm): the dust of the Galaxy, colour',
   },
-] as const;
-type SurveyId = (typeof SURVEYS)[number]['id'];
+];
 const SIZES = [2, 5, 10, 20, 60];
+/** the globe zoom limits; above ZOOM_NEAR a pin is an open ring so that the star under it shows */
+const ZOOM_MIN = 0.8;
+const ZOOM_MAX = 400;
+const ZOOM_NEAR = 30;
+/** a catalogue object faster than this (mas/yr) gets its path drawn when selected */
+const PATH_PM = 20;
 
 /** Demo fields: places where the tool shows something worth seeing, with the view they open in. */
 const DEMOS: { n: string; what: string; ra: number; dec: number; fov: number; film?: number }[] = [
@@ -129,58 +135,65 @@ function openLab(ra: number, dec: number, fov: number) {
   location.hash = formatHash({ screen: 'lab', params: { ra: ra.toFixed(5), dec: dec.toFixed(5), fov: String(fov) } });
 }
 
+/** Where a catalogue object is during the SPHEREx survey: the place the lab opens (and the warm set is built for). */
 const epochPlace = (o: Obj): [number, number] =>
   o.pmra != null && o.pmdec != null ? atEpoch(o.ra, o.dec, o.pmra, o.pmdec, SURVEY_EPOCH) : [o.ra, o.dec];
 
+const moving = (o: Obj): MovingObject | null =>
+  o.pmra != null && o.pmdec != null && Math.hypot(o.pmra, o.pmdec) > PATH_PM ? { name: o.n, ra: o.ra, dec: o.dec, pmra: o.pmra, pmdec: o.pmdec } : null;
+
+/** The archive images of a test target or the selected object (asked for once); other objects use the surveys' middle years. */
+const datesOf = (o: Obj, sel: Obj | null): ArchiveImage[] | null | undefined => (o.b || o === sel ? imageDates(o.n, o.ra, o.dec) : undefined);
+
+/** Sky span (degrees) the view should show for an object: its path from the earliest image to 2050, or a few field widths. */
+function spanOf(o: Obj, fov: number): number {
+  const mo = moving(o);
+  if (!mo) return (fov / 60) * 3;
+  const imgs = imageDates(o.n, o.ra, o.dec);
+  const y0 = Math.min(1950, ...(imgs ?? []).map((x) => x.year));
+  return Math.max((fov / 60) * 1.2, (Math.hypot(mo.pmra, mo.pmdec) * (2050 - y0)) / 3.6e6);
+}
+
 export function Globe() {
-  const [catalog, setCatalog] = useState<Obj[]>([]);
+  const [catalog, setCatalog] = useState<Obj[]>(catalogNow);
   const [a, setA] = useState<AimState>(aim.get());
-  const [survey, setSurvey] = useState<SurveyId>('dss2');
-  const [proj, setProj] = useState<'globe' | 'moll'>('globe');
-  const [covOn, setCovOn] = useState(false);
-  const [filter, setFilter] = useState('all');
-  const [query, setQuery] = useState('');
-  const [page, setPage] = useState(1);
-  const [per, setPer] = useState(25);
-  const [sel, setSel] = useState<Obj | null>(null);
+  const [survey, setSurvey] = useState<SurveyId>(kept.survey);
+  const [proj, setProj] = useState<'globe' | 'moll'>(kept.proj);
+  const [covOn, setCovOn] = useState(kept.covOn);
+  const [filter, setFilter] = useState(kept.filter);
+  const [query, setQuery] = useState(kept.query);
+  const [page, setPage] = useState(kept.page);
+  const [per, setPer] = useState(kept.per);
+  const [sel, setSel] = useState<Obj | null>(() => {
+    const o = catalogNow().find((x) => x.n === kept.sel) ?? null;
+    // the lab may have moved the aim while the globe was not on screen: the selection then no longer applies
+    return o && separation(...epochPlace(o), aim.get().ra, aim.get().dec) < 0.05 ? o : null;
+  });
   const [count, setCount] = useState<{ n: number; by: Record<string, number> } | null>(null);
   const [raIn, setRaIn] = useState(formatRA(a.ra));
   const [decIn, setDecIn] = useState(formatDec(a.dec));
+  const [, setDatesTick] = useState(0);
   const cv = useRef<HTMLCanvasElement>(null);
-  const live = useRef({ survey, proj, covOn, a, sel, catalog, cov: null as null | { pts: [number, number][]; dr1: boolean; t: number }[] });
-  live.current = { ...live.current, survey, proj, covOn, a, sel, catalog };
+  const live = useRef({ survey, proj, covOn, a, sel, catalog });
+  live.current = { survey, proj, covOn, a, sel, catalog };
   const dirty = useRef(true);
-  const view = useRef({ ra: a.ra, dec: a.dec, zoom: 1.6 });
+  const view = useRef(kept.view ?? { ra: a.ra, dec: a.dec, zoom: 1.6 });
+  kept.view = view.current;
+  const flyRef = useRef<(ra: number, dec: number, spanDeg?: number) => void>(() => {});
+
+  // the choices survive a visit to another screen
+  useEffect(() => {
+    Object.assign(kept, { survey, proj, covOn, filter, query, page, per, sel: sel?.n ?? null });
+  }, [survey, proj, covOn, filter, query, page, per, sel]);
 
   useEffect(() => {
-    void fetch('/catalog.json')
-      .then((r) => r.json())
-      .then((d: { catalog: Obj[] }) => {
-        // the test targets first, nearest to the coldest last
-        const first = ["Barnard's Star", 'WISE 0855−0714', 'ε Indi B', 'RW Aurigae', 'R Draconis'];
-        const rank = (o: Obj) => (o.b ? first.indexOf(o.n) : first.length);
-        setCatalog([...d.catalog].sort((x, y) => rank(x) - rank(y)));
-      });
-    void fetch('/api/v1/coverage/map')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((m: { order: number; releases: string[]; cells: Record<string, number[]> } | null) => {
-        if (!m) return;
-        let max = 1;
-        for (const v of Object.values(m.cells))
-          max = Math.max(
-            max,
-            v.reduce((s, x) => s + x, 0),
-          );
-        const di = m.releases.indexOf('dr1');
-        live.current.cov = Object.entries(m.cells).map(([k, v]) => ({
-          pts: outline(m.order, Number(k), 4),
-          dr1: di >= 0 && v[di]! > 0,
-          t: Math.log(1 + v.reduce((s, x) => s + x, 0)) / Math.log(1 + max),
-        }));
-        dirty.current = true;
-      })
-      .catch(() => {});
-    return aim.on((next, source) => {
+    void loadCatalog().then((c) => setCatalog((old) => (old === c ? old : c)));
+    void loadCoverage().then(() => (dirty.current = true));
+    const offDates = onImageDates(() => {
+      dirty.current = true;
+      setDatesTick((t) => t + 1);
+    });
+    const offAim = aim.on((next, source) => {
       setA(next);
       if (source !== 'input') {
         setRaIn(formatRA(next.ra));
@@ -188,7 +201,16 @@ export function Globe() {
       }
       dirty.current = true;
     });
+    return () => {
+      offDates();
+      offAim();
+    };
   }, []);
+
+  // the dates of the test targets' archive images, so that their pins stand on the right picture
+  useEffect(() => {
+    for (const o of catalog) if (o.b) imageDates(o.n, o.ra, o.dec);
+  }, [catalog]);
 
   // exposures under the aim frame, from the index
   useEffect(() => {
@@ -221,8 +243,10 @@ export function Globe() {
     let H = 10;
     let dpr = 1;
     let raf = 0;
-    let rest = 0;
     let lastSig = '';
+    let lastLayer = '';
+    let settleAt = 0;
+    let settling = false;
     const resize = () => {
       const r = c.getBoundingClientRect();
       dpr = Math.min(2, devicePixelRatio || 1);
@@ -235,7 +259,7 @@ export function Globe() {
     const ro = new ResizeObserver(resize);
     ro.observe(c.parentElement!);
     resize();
-    const offTile = tiles.onTile(() => (dirty.current = true));
+    const offTile = tiles.onTile(() => (sky.stale = true));
 
     const R = () => (Math.min(W, H) / 2) * 0.9 * view.current.zoom;
     const mw = () => Math.min(W - 20, (H - 20) * 2);
@@ -286,87 +310,17 @@ export function Globe() {
       return [(((Math.atan2(v[1]!, v[0]!) / D2R) % 360) + 360) % 360, Math.asin(Math.max(-1, Math.min(1, v[2]!))) / D2R];
     };
 
-    const drawSky = () => {
-      const st = live.current;
-      const sig = [view.current.ra, view.current.dec, view.current.zoom, st.proj, W, H].join();
-      const moving = sig !== lastSig;
-      lastSig = sig;
-      if (moving) {
-        clearTimeout(rest);
-        rest = window.setTimeout(() => (dirty.current = true), 220);
-      }
-      const s = moving ? 2 : 1;
-      const sw = Math.ceil(W / s);
-      const sh = Math.ceil(H / s);
-      const img = ctx.createImageData(sw, sh);
-      const o = img.data;
-      const sv = SURVEYS.find((x) => x.id === st.survey)!;
-      const order = st.proj === 'globe' && R() > 500 ? Math.max(3, Math.min(sv.max, Math.ceil(Math.log2(R() / 500)))) : 0;
-      const b = basis();
-      const Rs = R() / s;
-      const g = (sv.gain * 255) / (255 - sv.black);
-      for (let j = 0; j < sh; j++)
-        for (let i = 0; i < sw; i++) {
-          let ra = 0;
-          let dec = 0;
-          let ok = false;
-          if (st.proj === 'moll') {
-            const X = (i * s - W / 2) / (mw() / 2);
-            const Y = -(j * s - H / 2) / (mw() / 4);
-            if (X * X + Y * Y <= 1) {
-              const th = Math.asin(Y);
-              const phi = Math.asin((2 * th + Math.sin(2 * th)) / Math.PI);
-              const lam = (Math.PI * X) / Math.cos(th);
-              ra = (((180 - lam / D2R) % 360) + 360) % 360;
-              dec = phi / D2R;
-              ok = true;
-            }
-          } else {
-            const sx = (sw / 2 - i) / Rs;
-            const sy = (sh / 2 - j) / Rs;
-            const rr = sx * sx + sy * sy;
-            if (rr <= 1) {
-              const z = Math.sqrt(1 - rr);
-              const vx = z * b.c[0]! + sx * b.e[0]! + sy * b.n[0]!;
-              const vy = z * b.c[1]! + sx * b.e[1]! + sy * b.n[1]!;
-              const vz = z * b.c[2]! + sx * b.e[2]! + sy * b.n[2]!;
-              ra = Math.atan2(vy, vx) / D2R;
-              if (ra < 0) ra += 360;
-              dec = Math.asin(Math.max(-1, Math.min(1, vz))) / D2R;
-              ok = true;
-            }
-          }
-          const p = (j * sw + i) * 4;
-          if (!ok) continue;
-          let col: [number, number, number] | null;
-          if (sv.id === 'spherex') {
-            // three frames of the cube as the three colours
-            const r = tiles.sample('spx88', ra, dec, order);
-            const gg = tiles.sample('spx40', ra, dec, order);
-            const bl = tiles.sample('spx8', ra, dec, order);
-            col = r && gg && bl ? [r[0], gg[0], bl[0]] : null;
-          } else col = tiles.sample(sv.id, ra, dec, order);
-          o[p + 3] = 255;
-          if (col) {
-            o[p] = Math.max(0, col[0] - sv.black) * g;
-            o[p + 1] = Math.max(0, col[1] - sv.black) * g;
-            o[p + 2] = Math.max(0, col[2] - sv.black) * g;
-          }
-        }
-      const tc = document.createElement('canvas');
-      tc.width = sw;
-      tc.height = sh;
-      tc.getContext('2d')!.putImageData(img, 0, 0);
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(tc, 0, 0, W, H);
-    };
-
+    // where each test target's pin and the selected object's pin were drawn: the click finds them there
+    let pins: { o: Obj; x: number; y: number }[] = [];
     const font = getComputedStyle(document.body).fontFamily;
     const draw = () => {
       const st = live.current;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      drawSky();
+      if (sky.shown) {
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(sky.canvas, 0, 0, W, H);
+      }
       const b = basis();
       // grid
       ctx.save();
@@ -413,8 +367,9 @@ export function Globe() {
       else ctx.ellipse(W / 2, H / 2, mw() / 2, mw() / 4, 0, 0, 7);
       ctx.stroke();
       // coverage
-      if (st.covOn && st.cov) {
-        for (const cell of st.cov) {
+      const cov = coverageNow();
+      if (st.covOn && cov) {
+        for (const cell of cov) {
           const pts = cell.pts.map(([ra, de]) => project(ra, de, b));
           if (st.proj === 'globe' && pts.some((q) => !q[2])) continue;
           if (st.proj === 'moll') {
@@ -428,24 +383,63 @@ export function Globe() {
           ctx.fill();
         }
       }
-      // catalogue dots
+      // catalogue dots, at their place on the date of the backdrop
       ctx.globalAlpha = 0.75;
       for (const o of st.catalog) {
         if (o.b) continue;
-        const p = project(o.ra, o.dec, b);
+        const p = project(...shownPlace(o, st.survey), b);
         if (!p[2]) continue;
         ctx.fillStyle = KIND[o.k]?.dot ?? '#fff';
         ctx.fillRect(p[0] - 1, p[1] - 1, 2.2, 2.2);
       }
       ctx.globalAlpha = 1;
-      // test targets
+      const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
+      pins = [];
+      // the selected object's path: from its earliest archive image to 2050, a dot at every image date, the SPHEREx stretch, and its
+      // pin at its place on the date of the backdrop shown (the path is drawn larger than true when it would be under 60 px)
+      let pathPin = false;
+      const mo = st.sel && moving(st.sel);
+      if (st.sel && mo) {
+        const imgs = imageDates(st.sel.n, st.sel.ra, st.sel.dec) ?? [];
+        const by = backdropYear(st.survey, imgs);
+        // a dot at the middle of the calendar year of each image, so that its label reads the year the image was taken
+        const years = imgs.map((x) => Math.floor(x.year) + 0.499);
+        const y0 = Math.min(by, ...years);
+        const P = (y: number) => project(...placeAt(mo, y), b);
+        const p25 = P(2025.5);
+        if (p25[2]) {
+          const a0 = P(y0);
+          const a1 = P(2050);
+          const len = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]);
+          const m = len < 60 && len > 0 ? 60 / len : 1;
+          const pm = (ra: number, dec: number): [number, number, boolean] => {
+            const q = project(ra, dec, b);
+            return q[2] ? [p25[0] + m * (q[0] - p25[0]), p25[1] + m * (q[1] - p25[1]), true] : q;
+          };
+          drawMovingPath(ctx, pm, mo, { imageYears: years, backdropYear: by, zoomedIn: near, maxJump: W / 2, font });
+          const q = pm(...placeAt(mo, by));
+          pins.push({ o: st.sel, x: q[0], y: q[1] });
+          pathPin = true;
+          if (m > 1) {
+            ctx.save();
+            ctx.font = `600 11px ${font}`;
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#000';
+            ctx.fillStyle = '#9fb6c0';
+            const t = `path ${Math.floor(y0)}→2050, drawn ×${m.toFixed(0)} larger than true`;
+            ctx.strokeText(t, p25[0] + 8, p25[1] + 30);
+            ctx.fillText(t, p25[0] + 8, p25[1] + 30);
+            ctx.restore();
+          }
+        }
+      }
+      // test targets (and a selected object without a path): a pin at the place on the date of the backdrop; zoomed in, an open ring
       ctx.font = `600 12.5px ${font}`;
       for (const o of st.catalog) {
-        if (!o.b) continue;
-        const [ra, dec] = epochPlace(o);
-        const p = project(ra, dec, b);
+        if (!(o.b || o === st.sel) || (o === st.sel && pathPin)) continue;
+        const p = project(...shownPlace(o, st.survey, datesOf(o, st.sel)), b);
         if (!p[2]) continue;
-        const near = st.proj === 'globe' && view.current.zoom > 30;
+        pins.push({ o, x: p[0], y: p[1] });
         const lx = near ? 14 : 9;
         ctx.strokeStyle = '#000';
         ctx.fillStyle = '#ffb454';
@@ -472,80 +466,11 @@ export function Globe() {
           ctx.fillText(o.n, p[0] + lx, p[1] + 4);
         }
       }
-      // the selected object's path: J2000 place moved by its proper motion, 2000 → 2050, SPHEREx years in green
-      if (st.sel && st.sel.pmra != null && st.sel.pmdec != null && Math.hypot(st.sel.pmra, st.sel.pmdec) > 20) {
-        const o = st.sel;
-        const P = (y: number) => project(...atEpoch(o.ra, o.dec, o.pmra!, o.pmdec!, y), b);
-        const p25 = P(2025.5);
-        if (p25[2]) {
-          const a0 = P(2000);
-          const a1 = P(2050);
-          const len = Math.hypot(a1[0] - a0[0], a1[1] - a0[1]);
-          const m = len < 60 && len > 0 ? 60 / len : 1;
-          const at = (y: number) => {
-            const q = P(y);
-            return [p25[0] + m * (q[0] - p25[0]), p25[1] + m * (q[1] - p25[1])] as const;
-          };
-          ctx.save();
-          ctx.strokeStyle = '#ffb454';
-          ctx.lineWidth = 3;
-          ctx.setLineDash([5, 4]);
-          ctx.beginPath();
-          for (let y = 2000; y <= 2050; y += 2.5) {
-            const q = at(y);
-            if (y === 2000) ctx.moveTo(q[0], q[1]);
-            else ctx.lineTo(q[0], q[1]);
-          }
-          ctx.stroke();
-          ctx.setLineDash([]);
-          ctx.strokeStyle = '#6aff9e';
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          const s0 = at(2025.3);
-          const s1 = at(2026.7);
-          ctx.moveTo(s0[0], s0[1]);
-          ctx.lineTo(s1[0], s1[1]);
-          ctx.stroke();
-          ctx.font = `600 11px ${font}`;
-          ctx.lineWidth = 3;
-          for (const [y, t, right] of [
-            [2000, '2000', false],
-            [2050, '2050', true],
-          ] as const) {
-            const q = at(y);
-            ctx.fillStyle = '#ffb454';
-            ctx.beginPath();
-            ctx.arc(q[0], q[1], 3, 0, 7);
-            ctx.fill();
-            ctx.textAlign = right ? 'left' : 'right';
-            ctx.strokeStyle = '#000';
-            ctx.fillStyle = '#fff';
-            ctx.strokeText(t, q[0] + (right ? 7 : -8), q[1] + 4);
-            ctx.fillText(t, q[0] + (right ? 7 : -8), q[1] + 4);
-          }
-          ctx.textAlign = 'left';
-          ctx.fillStyle = '#6aff9e';
-          ctx.strokeText('SPHEREx 2025–26', p25[0] + 8, p25[1] + 16);
-          ctx.fillText('SPHEREx 2025–26', p25[0] + 8, p25[1] + 16);
-          if (m > 1) {
-            ctx.fillStyle = '#9fb6c0';
-            const t = `path 2000→2050, drawn ×${m.toFixed(0)} larger than true`;
-            ctx.strokeText(t, p25[0] + 8, p25[1] + 30);
-            ctx.fillText(t, p25[0] + 8, p25[1] + 30);
-          }
-          ctx.strokeStyle = '#6aff9e';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(p25[0], p25[1], 9, 0, 7);
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
       // aim frame
       const p = project(st.a.ra, st.a.dec, b);
       if (p[2]) {
-        const sky = st.a.fov / 60;
-        const truePx = st.proj === 'globe' ? R() * sky * D2R : (mw() / 360) * sky;
+        const skyDeg = st.a.fov / 60;
+        const truePx = st.proj === 'globe' ? R() * skyDeg * D2R : (mw() / 360) * skyDeg;
         const s = Math.max(truePx, 26);
         ctx.save();
         ctx.translate(p[0], p[1]);
@@ -573,33 +498,86 @@ export function Globe() {
       } else frame = null;
     };
     let frame: { x: number; y: number; s: number } | null = null;
-    let anim: { t0: number; ra0: number; dra: number; de0: number; dde: number } | null = null;
+    let anim: { t0: number; dur: number; ra0: number; dra: number; de0: number; dde: number; z0: number; zm: number; z1: number } | null = null;
     const loop = () => {
       raf = requestAnimationFrame(loop);
+      const now = performance.now();
       if (anim) {
-        const t = Math.min(1, (performance.now() - anim.t0) / 900);
+        const t = Math.min(1, (now - anim.t0) / anim.dur);
         const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
         view.current.ra = (((anim.ra0 + anim.dra * e) % 360) + 360) % 360;
         view.current.dec = anim.de0 + anim.dde * e;
+        // the scale follows a curve in log zoom through zm: out while the globe turns far, in at the end
+        view.current.zoom = Math.exp((1 - e) * (1 - e) * anim.z0 + 2 * e * (1 - e) * anim.zm + e * e * anim.z1);
         if (t >= 1) anim = null;
         dirty.current = true;
       }
-      if (dirty.current) {
+      // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
+      const st = live.current;
+      const sv = { ra: view.current.ra, dec: view.current.dec, R: R(), proj: st.proj, W, H };
+      const sig = [sv.ra, sv.dec, sv.R, sv.proj, W, H].join();
+      const layer = SURVEYS.find((x) => x.id === st.survey)!.layer;
+      if (st.survey !== lastLayer) {
+        lastLayer = st.survey;
+        sky.stale = true;
+      }
+      let changed = false;
+      if (sig !== lastSig) {
+        lastSig = sig;
+        settling = true;
+        settleAt = now + 200;
+        changed = sky.frame(sv, layer, true);
+      } else if (settling) {
+        if (now >= settleAt) settling = false;
+      } else changed = sky.frame(sv, layer, false);
+      if (changed || dirty.current) {
         dirty.current = false;
         draw();
       }
     };
+    // a view kept from an earlier visit that no longer shows the aim (the lab moved it) turns to it
+    {
+      const p = project(aim.get().ra, aim.get().dec, basis());
+      if (!p[2] || p[0] < 0 || p[0] > W || p[1] < 0 || p[1] > H) {
+        view.current.ra = aim.get().ra;
+        view.current.dec = aim.get().dec;
+      }
+    }
+
+    // back from another screen with the same view: the kept picture stays sharp while a full pass refreshes it
+    {
+      const k = sky.shown;
+      const v = view.current;
+      if (k && k.proj === live.current.proj && k.W === W && k.H === H && k.ra === v.ra && k.dec === v.dec && k.R === R()) {
+        lastSig = [k.ra, k.dec, k.R, k.proj, W, H].join();
+        sky.stale = true;
+      }
+    }
     loop();
-    const flyTo = (ra: number, dec: number) => {
+    const flyTo = (ra: number, dec: number, spanDeg?: number) => {
       if (live.current.proj === 'moll') return;
       const th = separation(ra, dec, view.current.ra, view.current.dec) * D2R;
-      if (th < (Math.PI / 2) * 0.9 && R() * Math.sin(th) < Math.min(W, H) * 0.3) return;
+      const z0 = view.current.zoom;
+      const minWH = Math.min(W, H);
+      const z1 = spanDeg
+        ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, (0.42 * minWH) / (spanDeg * D2R) / ((minWH / 2) * 0.9)))
+        : z0;
+      if (!spanDeg && th < (Math.PI / 2) * 0.9 && R() * Math.sin(th) < minWH * 0.3) return;
+      // the widest view on the way: the whole move fits in it
+      const zm = Math.min(z0, z1, Math.max(1.2, 1 / Math.max(1e-6, th)));
+      const lz0 = Math.log(z0);
+      const lz1 = Math.log(z1);
+      const lzm = zm < Math.min(z0, z1) ? 2 * Math.log(zm) - (lz0 + lz1) / 2 : (lz0 + lz1) / 2;
       anim = {
         t0: performance.now(),
+        dur: th > 0.3 || Math.abs(lz1 - lz0) > 3 ? 1400 : 900,
         ra0: view.current.ra,
         dra: ((ra - view.current.ra + 540) % 360) - 180,
         de0: view.current.dec,
         dde: dec - view.current.dec,
+        z0: lz0,
+        zm: lzm,
+        z1: lz1,
       };
     };
     flyRef.current = flyTo;
@@ -627,16 +605,28 @@ export function Globe() {
       const px = e.clientX - r.left;
       const py = e.clientY - r.top;
       if (drag && !drag.moved) {
-        const b = basis();
+        // the pins where they were drawn (the place on the backdrop's date), then the catalogue dots the same way
+        const st = live.current;
         let near: Obj | null = null;
         let bd = 12;
-        for (const o of live.current.catalog) {
-          const p = o.b ? project(...epochPlace(o), b) : project(o.ra, o.dec, b);
-          if (!p[2]) continue;
-          const d = Math.hypot(p[0] - px, p[1] - py);
-          if (d < bd && (o.b || view.current.zoom > 3)) {
+        for (const q of pins) {
+          const d = Math.hypot(q.x - px, q.y - py);
+          if (d < bd) {
             bd = d;
-            near = o;
+            near = q.o;
+          }
+        }
+        if (!near && view.current.zoom > 3) {
+          const b = basis();
+          for (const o of st.catalog) {
+            if (o.b) continue;
+            const p = project(...shownPlace(o, st.survey), b);
+            if (!p[2]) continue;
+            const d = Math.hypot(p[0] - px, p[1] - py);
+            if (d < bd) {
+              bd = d;
+              near = o;
+            }
           }
         }
         if (near) {
@@ -656,23 +646,25 @@ export function Globe() {
     c.ondblclick = (e) => {
       const r = c.getBoundingClientRect();
       const f = frame;
-      if (f && Math.abs(e.clientX - r.left - f.x) < f.s && Math.abs(e.clientY - r.top - f.y) < f.s)
-        openLab(live.current.a.ra, live.current.a.dec, live.current.a.fov);
+      if (f && Math.abs(e.clientX - r.left - f.x) < f.s && Math.abs(e.clientY - r.top - f.y) < f.s) showAreaRef.current();
     };
     c.onwheel = (e) => {
       e.preventDefault();
       if (live.current.proj !== 'globe') return;
-      view.current.zoom = Math.max(0.8, Math.min(400, view.current.zoom * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+      anim = null;
+      // a mouse-wheel notch (100 px) zooms ×1.25: twenty notches about ×90; a trackpad's small steps zoom in proportion
+      const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1);
+      const k = Math.max(0.5, Math.min(2, Math.exp(-px * 0.0022)));
+      view.current.zoom = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, view.current.zoom * k));
       dirty.current = true;
     };
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
-      clearTimeout(rest);
       offTile();
     };
   }, []);
-  const flyRef = useRef<(ra: number, dec: number) => void>(() => {});
+  const showAreaRef = useRef<() => void>(() => {});
 
   const list = useMemo(() => {
     let L = catalog;
@@ -697,21 +689,46 @@ export function Globe() {
   const slice = list.slice((pg - 1) * per, pg * per);
   const nBench = catalog.filter((o) => o.b).length;
 
-  const select = (o: Obj) => {
+  /** Selects an object and turns the globe to it; `zoom`: also scale the view to the object's path (Show on map). */
+  const select = (o: Obj, zoom = false) => {
     setSel(o);
     const [ra, dec] = epochPlace(o);
     aim.set({ ra, dec }, 'catalog');
-    flyRef.current(ra, dec);
+    if (zoom && proj === 'moll') {
+      // a map has no zoom: the globe shows the object
+      live.current.proj = 'globe';
+      setProj('globe');
+    }
+    flyRef.current(ra, dec, zoom ? spanOf(o, a.fov) : undefined);
   };
+  /** The lab at the object's place during the SPHEREx survey (where it is in the pictures the lab shows). */
   const openObj = (o: Obj) => {
     const [ra, dec] = epochPlace(o);
     aim.set({ ra, dec }, 'catalog');
     openLab(ra, dec, a.fov);
   };
+  /** Show area: the field under the aim frame. When the aim is on a catalogue object (its J2000 place, its place on the backdrop,
+   *  or its survey-epoch place) the field opens where the object is during the survey, as "Open in lab" does. */
+  const showArea = () => {
+    const cur = aim.get();
+    const on = (o: Obj) => {
+      const tol = 3 / 3600;
+      return (
+        separation(...epochPlace(o), cur.ra, cur.dec) < 2 / 3600 ||
+        separation(o.ra, o.dec, cur.ra, cur.dec) < tol ||
+        separation(...shownPlace(o, survey, datesOf(o, sel)), cur.ra, cur.dec) < tol
+      );
+    };
+    const hit = sel && on(sel) ? sel : catalog.find((o) => o.pmra != null && on(o));
+    if (hit) openObj(hit);
+    else openLab(cur.ra, cur.dec, cur.fov);
+  };
+  showAreaRef.current = showArea;
   const goAim = () => {
     const ra = parseRA(raIn);
     const dec = parseDec(decIn);
     if (ra === null || dec === null) return;
+    if (Math.abs(ra - a.ra) < 1e-6 && Math.abs(dec - a.dec) < 1e-6) return;
     setSel(null);
     aim.set({ ra, dec }, 'input');
     flyRef.current(ra, dec);
@@ -724,6 +741,10 @@ export function Globe() {
   };
   const pagerNums = [...new Set([1, 2, 3, pg - 1, pg, pg + 1, pages])].filter((p) => p >= 1 && p <= pages).sort((x, y) => x - y);
   const sv = SURVEYS.find((x) => x.id === survey)!;
+  // the selected object on the backdrop shown: the date its pin stands at, and the dates of the archive images of its place
+  const selDates = sel && moving(sel) ? imageDates(sel.n, sel.ra, sel.dec) : undefined;
+  const selYear = sel ? backdropYear(survey, selDates) : 0;
+  const selImage = selDates?.find((x) => x.backdrop === survey);
 
   return (
     <div class="screen">
@@ -732,7 +753,7 @@ export function Globe() {
         <div class="map-ui">
           <div class="seg sm" role="group" aria-label="Sky background">
             {SURVEYS.map((s) => (
-              <button key={s.id} class={s.id === survey ? 'on' : ''} title={s.note} onClick={() => setSurvey(s.id)}>
+              <button key={s.id} class={s.id === survey ? 'on' : ''} aria-pressed={s.id === survey} title={s.note} onClick={() => setSurvey(s.id)}>
                 {s.name}
               </button>
             ))}
@@ -767,6 +788,19 @@ export function Globe() {
               </>
             )}
           </div>
+          {sel && moving(sel) && (
+            <div class="map-read map-dates" data-testid="globe-dates">
+              On this picture: <b>{sel.n.length > 26 ? `${sel.n.slice(0, 24)}…` : sel.n}</b> in {selYear.toFixed(1)}
+              {selImage ? ` (${selImage.name} image)` : survey === 'spherex' ? ' (SPHEREx survey)' : survey === 'dust' ? ' (SPHEREx survey; no stars on the dust map)' : ' (middle of the survey)'}
+              {selDates === undefined ? (
+                <span class="faint"> · asking IRSA for the dates of the archive images…</span>
+              ) : selDates ? (
+                <span class="faint"> · images: {selDates.map((x) => `${Math.floor(x.year)} ${x.name}`).join(' · ')}</span>
+              ) : (
+                <span class="faint"> · IRSA gave no image dates; survey middles used</span>
+              )}
+            </div>
+          )}
         </div>
         <label
           class="chk covsw dark-glass"
@@ -780,7 +814,7 @@ export function Globe() {
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
           ★ are test targets.
         </div>
-        <button class="btn primary big map-open" onClick={() => (sel ? openObj(sel) : openLab(a.ra, a.dec, a.fov))}>
+        <button class="btn primary big map-open" onClick={showArea} title="Open the field under the frame in the spectral lab">
           <span dangerouslySetInnerHTML={{ __html: icon('scan', 18) }} style={{ display: 'contents' }} />
           Show area
         </button>
@@ -873,7 +907,7 @@ export function Globe() {
                   <span class="badge orange">{d.film ? 'film' : 'field'}</span>
                 </div>
                 <div class="co">
-                  {formatRA(d.ra)} {formatDec(d.dec)} · {d.fov}′
+                  <span>{formatRA(d.ra)}</span> <span>{formatDec(d.dec)}</span> <span>· {d.fov}′</span>
                 </div>
                 <div class="mv">
                   <span>{d.what}</span>
@@ -884,7 +918,7 @@ export function Globe() {
                     onClick={(e) => {
                       e.stopPropagation();
                       aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
-                      flyRef.current(d.ra, d.dec);
+                      flyRef.current(d.ra, d.dec, (d.fov / 60) * 1.5);
                     }}
                   >
                     <span dangerouslySetInnerHTML={{ __html: icon('target', 16) }} style={{ display: 'contents' }} />
@@ -931,7 +965,7 @@ export function Globe() {
                     <span class={`badge ${KIND[o.k]?.cls ?? ''}`}>{o.b ? (TARGET_CLASS[o.n] ?? o.c) : o.c}</span>
                   </div>
                   <div class="co">
-                    {formatRA(ra)} {formatDec(dec)}
+                    <span>{formatRA(ra)}</span> <span>{formatDec(dec)}</span>
                   </div>
                   <div class="mv">
                     <span>{motion(o)}</span>
@@ -939,10 +973,10 @@ export function Globe() {
                   <div class="gobtns">
                     <button
                       class="btn sm primary go"
-                      title="Fly to the object on the map and draw its path"
+                      title="Fly to the object on the map, zoom to it and draw its path"
                       onClick={(e) => {
                         e.stopPropagation();
-                        select(o);
+                        select(o, true);
                       }}
                     >
                       <span dangerouslySetInnerHTML={{ __html: icon('target', 16) }} style={{ display: 'contents' }} />
