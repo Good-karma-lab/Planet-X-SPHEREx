@@ -67,12 +67,13 @@ async def build_field(
     fov_arcmin: float,
     executor: Executor | None = None,
     bands: list[Band] | None = None,
-    progress: Callable[[str], None] | None = None,
+    progress: Callable[..., None] | None = None,
     keep_natives: bool = False,
     checkpoint: Callable[[], Awaitable[None]] | None = None,
     on_pass: Callable[[PassProducts, tuple[int, ...]], Awaitable[None]] | None = None,
     on_quick: Callable[[PassProducts, tuple[int, ...]], Awaitable[None]] | None = None,
     wavelengths: WavelengthMaps | None = None,
+    reading: Callable[[int, int, float], None] | None = None,
 ) -> FieldBuild:
     t0 = time.time()
     grid = grid_for_fov(ra, dec, fov_arcmin)
@@ -81,6 +82,10 @@ async def build_field(
     exps = thin(found)
     bands = bands if bands is not None else load_bands()
     passes = seasons_with_common_detectors(split_passes([e.mjd0 for e in exps]), [e.det for e in exps])
+    if progress:
+        progress(f"{len(exps)} exposures found in {len(passes)} passes (of {len(found)} over the field)")
+    bytes0 = fr.s3.stats.bytes
+    n_read = 0
     visits_all = split_visits([e.mjd0 for e in exps], [e.det for e in exps])
     visit_of = {i: k for k, v in enumerate(visits_all) for i in v}
     natives: dict[int, NativeExposure] = {}
@@ -88,11 +93,16 @@ async def build_field(
     t_read = 0.0
 
     async def one(i: int) -> None:
+        nonlocal n_read
         try:
             ne = await read_native(fr, exps[i].key, grid, visit_of[i], wavelengths=wavelengths)
         except Exception as err:  # a file that cannot be read is counted and said, never hidden
             missing.append(f"{exps[i].key}: {err}")
             return
+        finally:
+            n_read += 1
+            if reading is not None:
+                reading(n_read, len(exps), (fr.s3.stats.bytes - bytes0) / 1e6)
         if ne is not None and ne.val.size > 0:
             natives[i] = ne
 
@@ -125,8 +135,10 @@ async def build_field(
             if parts_q:
                 await on_quick(await cpu.run(reduce_pass, p.index, parts_q, grid, cdet), cdet)
             if progress:
-                progress(f"quick picture of pass {p.index + 1} of {len(passes)}")
+                progress(f"quick picture of pass {p.index + 1} of {len(passes)}", p.index + 1, len(passes))
     ref_stars: Any = None
+    total_stacks = sum(len({exps[i].det for i in p.members}) for p in passes)
+    stacked = 0
     for p in passes:
         groups: dict[int, list[int]] = defaultdict(list)
         for i in p.members:
@@ -162,8 +174,13 @@ async def build_field(
                 parts.append(build_detector(group, grid, bands))
             tc_total += time.time() - tc
             del group
+            stacked += 1
             if progress:
-                progress(f"pass {p.index + 1} of {len(passes)}: D{det} stacked")
+                progress(
+                    f"pass {p.index + 1} of {len(passes)}: D{det} stacked ({stacked} of {total_stacks} detector stacks)",
+                    stacked,
+                    total_stacks,
+                )
         if parts:
             if built and ref_stars is None:
                 ref_stars = await cpu.run(_stars_of, built[0], cdet, grid.step_arcsec)
