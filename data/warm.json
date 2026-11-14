@@ -1,0 +1,10 @@
+{
+  "about": "The warm set: fields computed before anyone asks, kept warm across restarts and version bumps (docs/plan/05-architecture.md 5.6). Test targets are placed at epoch 2025.9 from data/targets.json (proper motion applied), as the globe opens them.",
+  "epoch": 2025.9,
+  "sizes": [2, 5, 10, 20, 60],
+  "targets": ["Barnard's Star", "ε Indi B", "WISE 0855−0714", "RW Aurigae", "R Draconis"],
+  "demo_fields": [
+    {"label": "ecliptic field (asteroids)", "ra": 169.8917, "dec": 4.3514, "sizes": [20, 60]},
+    {"label": "Eris field", "ra": 27.378, "dec": -0.120, "sizes": [20]}
+  ]
+}

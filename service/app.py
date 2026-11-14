@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import secrets
 import time
@@ -24,6 +25,7 @@ from service.products.versions import VERSIONS
 from service.ratelimit import Buckets, client_id
 from service.reader.files import FileReader
 from service.reader.s3 import S3
+from service.warm import WarmField, WarmRunner, warm_set
 from service.workers import fieldjob
 
 SERVICE_NAME = "spherex-sky"
@@ -43,6 +45,7 @@ class State:
         self.s3: S3 | None = None
         self.scheduler: Scheduler | None = None
         self.executor: ProcessPoolExecutor | None = None
+        self.warm: WarmRunner | None = None
 
 
 def create_app(config: Config | None = None, scheduler: Scheduler | None = None, s3: S3 | None = None) -> FastAPI:
@@ -64,7 +67,13 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         else:
             st.scheduler = scheduler
         st.scheduler.start()
+        warm_task = None
+        if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None:
+            st.warm = WarmRunner(warm_set())
+            warm_task = asyncio.get_running_loop().create_task(warm_loop())
         yield
+        if warm_task is not None:
+            warm_task.cancel()
         await st.scheduler.stop()
         await st.s3.close()
         if st.executor is not None:
@@ -72,6 +81,37 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.store.close()
         if st.index is not None:
             st.index.close()
+
+    def submit_field(params: dict[str, Any], priority: Priority) -> tuple[str, Any]:
+        assert st.index is not None and st.store is not None and st.scheduler is not None and st.files is not None
+        key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
+        if st.store.is_complete(key):
+            return key, None
+        index, files, store = st.index, st.files, st.store
+
+        async def fn(ctx: Any) -> dict[str, Any]:
+            return await fieldjob.run_field(ctx, index, files, store, params)
+
+        return key, st.scheduler.submit(fieldjob.KIND, key, params, fn, priority, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
+
+    async def ensure_warm(f: WarmField) -> bool:
+        params = fieldjob.canonical(f.ra, f.dec, f.fov)
+        key, job = submit_field(params, Priority.P2)
+        while job is not None and job.state not in ("done", "error", "cancelled"):
+            await asyncio.sleep(2.0)
+        assert st.store is not None
+        if st.store.is_complete(key):
+            st.store.pin(key)
+            return True
+        if job is not None and job.error:
+            raise RuntimeError(job.error)
+        return False
+
+    async def warm_loop() -> None:
+        assert st.warm is not None
+        while True:
+            await st.warm.run(ensure_warm)
+            await asyncio.sleep(60.0 if st.warm.state != "done" else 600.0)
 
     app = FastAPI(
         title="SPHEREx Sky API",
@@ -106,6 +146,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "product_versions": dict(VERSIONS),
             "index": None if st.index is None else {"files": st.index.count(), **st.index.meta()},
             "jobs": st.scheduler.snapshot() if st.scheduler else None,
+            "warm": st.warm.snapshot() if st.warm else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
         }
 
@@ -126,12 +167,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 return JSONResponse(
                     {"error": "too many new fields from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
                 )
-        index, files, store = st.index, st.files, st.store
-
-        async def fn(ctx: Any) -> dict[str, Any]:
-            return await fieldjob.run_field(ctx, index, files, store, params)
-
-        job = st.scheduler.submit(fieldjob.KIND, key, params, fn, Priority.P0, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
+        _, job = submit_field(params, Priority.P0)
+        if job is None:
+            return {"key": key, "state": "done", "params": params, "meta": st.store.read_meta(fieldjob.KIND, key)}
         return {"key": key, "params": params, "job": job.view()}
 
     @app.get(f"{API_PREFIX}/jobs/{{job_id}}")

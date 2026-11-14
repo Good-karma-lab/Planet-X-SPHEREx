@@ -4,6 +4,8 @@ import os
 
 import pytest
 
+os.environ.setdefault("SKY_WARM", "0")  # the warm runner is tested on its own; services built in tests do not warm
+
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     if os.environ.get("SKY_NET") == "1":
