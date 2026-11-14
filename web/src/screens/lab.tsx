@@ -1566,7 +1566,7 @@ export function Lab({ route }: { route: Route }) {
     const dec0 = t.dec_2025_9 - (t.v_north * years) / 3600;
     const ra0 = t.ra_2025_9 - (t.v_east * years) / 3600 / Math.cos((t.dec_2025_9 * Math.PI) / 180);
     setSel({ ra: (ra0 + 360) % 360, dec: dec0, name: name || undefined, pmra: t.v_east * 1000, pmdec: t.v_north * 1000 });
-    setTab('spec');
+    setTab('obj');
   };
 
   // the spectral anomaly map: its state when the field opens (a finished map is shown at once); started by the button
@@ -1620,13 +1620,31 @@ export function Lab({ route }: { route: Route }) {
         ? { ra: x.ra_j2000, dec: x.dec_j2000, pmra: x.pmra, pmdec: x.pmdec, name: `Red source ${k + 1}` }
         : { ra: x.ra, dec: x.dec, name: `Red source ${k + 1}` },
     );
-    setTab('spec');
+    setTab('obj');
   };
   const pickAnomaly = (n: number) => {
     const a = an?.result?.anomalies.find((x) => x.n === n);
     if (!a) return;
     setSel({ ra: a.ra, dec: a.dec, name: `Anomaly ${n}`, pmra: a.pmra || undefined, pmdec: a.pmdec || undefined });
     setSelAn(n);
+    setTab('obj');
+  };
+
+  /** a track found inside a pass: selected as an object (at its middle place in the film's grid) and its passport opened */
+  const selectTrack = (i: number) => {
+    setTrackSel(i);
+    const t = ft.state === 'ok' ? ft.tracks[i] : undefined;
+    const g = filmData?.meta.grid;
+    if (t && g && t.pts.length) {
+      const p = t.pts[Math.floor(t.pts.length / 2)]!;
+      const cd = Math.cos((g.dec0 * Math.PI) / 180);
+      setSelAn(null);
+      setSel({
+        ra: g.ra0 - ((p.x + 0.5 - g.n / 2) * g.step_arcsec) / 3600 / cd,
+        dec: g.dec0 - ((p.y + 0.5 - g.n / 2) * g.step_arcsec) / 3600,
+        name: t.known?.name ?? `Track ${i + 1}`,
+      });
+    }
     setTab('obj');
   };
 
@@ -1873,7 +1891,7 @@ export function Lab({ route }: { route: Route }) {
           pmra: o.pmra ?? 0,
           pmdec: o.pmdec ?? 0,
         });
-        setTab('spec');
+        setTab('obj');
         return;
       }
     }
@@ -1910,7 +1928,7 @@ export function Lab({ route }: { route: Route }) {
     const [ra2, dec2] = toSky(gx, gy);
     setSelAn(null);
     setSel({ ra: ra2, dec: dec2 });
-    setTab('spec');
+    setTab('obj');
   };
   const goAim = () => {
     const a = parseRA(raIn);
@@ -2110,8 +2128,7 @@ export function Lab({ route }: { route: Route }) {
                     filmData.meta.frames.map((f) => f.mjd),
                   );
                   if (hit >= 0) {
-                    setTrackSel(hit);
-                    setTab('cand');
+                    selectTrack(hit);
                     return;
                   }
                 }
@@ -2930,7 +2947,7 @@ export function Lab({ route }: { route: Route }) {
                       key={i}
                       class="mvrow"
                       onClick={() => {
-                        setTrackSel(i);
+                        selectTrack(i);
                         if (film === null) toDays();
                         setFrame(t.pts[0]?.f ?? 0);
                         setPlaying(false);
