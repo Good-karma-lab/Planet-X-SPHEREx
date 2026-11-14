@@ -98,6 +98,8 @@ class SkyPainter {
   private spare = document.createElement('canvas');
   /** the view the picture shows */
   shown: SkyView | null = null;
+  /** counts the pictures: the toned glow is made once per picture */
+  gen = 0;
   /** a full-resolution pass is needed (tiles arrived, the view came to rest) */
   stale = true;
   private pass: Pass | null = null;
@@ -235,6 +237,7 @@ class SkyPainter {
     this.spare = this.canvas;
     this.canvas = nx;
     this.shown = v;
+    this.gen++;
   }
 }
 

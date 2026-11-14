@@ -5,6 +5,7 @@ import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVE
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, type SkyLayer } from './globe/sky';
+import { glowOf, paintGround } from './globe/glow';
 import { drawStars, fovOfGlobe, loadStars } from './globe/stars';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
@@ -323,14 +324,34 @@ export function Globe() {
     // where each test target's pin and the selected object's pin were drawn: the click finds them there
     let pins: { o: Obj; x: number; y: number }[] = [];
     let starTier = 0;
+    let glowMix = 1;
+    let glowT = performance.now();
     const font = getComputedStyle(document.body).fontFamily;
     const draw = () => {
       const st = live.current;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
+      paintGround(ctx, W, H);
+      // wide view: the survey as a soft glow (toned, real); below 12° across: the raw survey, crossfaded over 400 ms
+      const wideNow = st.proj !== 'globe' || fovOfGlobe(W, R()) > 12;
+      const tNow = performance.now();
+      glowMix = Math.max(0, Math.min(1, glowMix + ((tNow - glowT) / 400) * (wideNow ? 1 : -1)));
+      glowT = tNow;
+      if (glowMix > 0 && glowMix < 1) dirty.current = true;
       if (sky.shown) {
         ctx.imageSmoothingEnabled = true;
-        ctx.drawImage(sky.canvas, 0, 0, W, H);
+        ctx.imageSmoothingQuality = 'high';
+        if (glowMix < 1) {
+          ctx.globalAlpha = 1 - glowMix;
+          ctx.drawImage(sky.canvas, 0, 0, W, H);
+        }
+        if (glowMix > 0) {
+          ctx.globalAlpha = glowMix;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.drawImage(glowOf(sky.canvas, sky.gen, st.survey === 'dss2' ? 0.45 : 0.3), 0, 0, W, H);
+          ctx.globalCompositeOperation = 'source-over';
+        }
+        ctx.globalAlpha = 1;
       }
       const b = basis();
       // the stars: the real Hipparcos catalogue as points of light (no grid, no catalogue dots); a slow frame drops to a lower tier
