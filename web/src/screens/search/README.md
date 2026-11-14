@@ -11,6 +11,7 @@ Self-contained pieces for the lab and the globe. Each fetches its own data from 
 | Find Planet X · deep sum | `DeepSumPanel` | `GET /api/v1/deep?…&plan=1` (plan), `…&fields=…` (job) | side panel |
 | Find Planet X · link and jump | `LinkPanel`, `LinkCard`, `JumpView` | `GET /api/v1/link?keys=a,b[,c]`, `GET /api/v1/jump?key&i&mjd&corridor` | side panel |
 | globe: comets/asteroids | `KnownList`, `fetchBodyPath`, `drawBodyPath` |
+| globe: where we've searched | `useSearched`, `drawSearched`, `hitSearched`, `SearchedLegend`, `SearchedCard` | `GET /api/v1/searched` → `{fields[{key,ra,dec,fov,state,kinds,found,nothing,best,searched_at,open}]}` (product `searched`) | globe/map draw loop + click |
 | globe: moving catalogue objects | `drawMovingPath`, `placeAt`, `BACKDROP_YEAR` | none (proper motion from the catalogue row; `imageYears` from the archive image dates) | globe/map draw loop | `GET /api/v1/known`, `/api/v1/ephem`, `/api/v1/known/crossings` | globe side panel + draw loop |
 
 Gates: the distance, deep, link and jump pieces appear only when `GET /api/v1/health` lists the product (`product_versions.distant | deep | link`); nothing is asked of a search route just to find out. Jobs are asked again every 2–3 s and show the phase, "n of m", the time so far and the time left (the service's `estimate_s`, else from the rate).
