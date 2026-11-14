@@ -12,9 +12,11 @@ from collections import OrderedDict
 from collections.abc import Callable
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Query
+from fastapi.responses import Response
 
-from engine.extras import allwise
+from engine.extras import allwise, cadc_ref
 from engine.extras.cloudcat import Reader, separation_arcsec
 from engine.extras.cube import PIXEL_SR, CubeSource, RangeReader
 from service.reader.s3 import S3, ReadError
@@ -42,6 +44,7 @@ class Extras:
         cube_root: str = CUBE_ROOT,
         allwise_reader: Reader | None = None,
         gaia_cone: Callable[[float, float, float], list[dict[str, Any]]] | None = None,
+        cadc_client: httpx.AsyncClient | None = None,
     ) -> None:
         self._s3 = cube_reader if cube_reader is not None else S3(max_in_flight=32)
         self.cube = CubeSource(self._s3, cube_root)
@@ -49,10 +52,57 @@ class Extras:
         self._allwise_reader = allwise_reader
         self._gaia_cone = gaia_cone or gaia_hats.cone
         self.xmatch_cache: OrderedDict[tuple[float, float, int, int, float, str], dict[str, Any]] = OrderedDict()
+        self._cadc = cadc_client
+        self.reference_cache: OrderedDict[tuple[float, float], dict[str, Any]] = OrderedDict()
+        self.cutout_cache: OrderedDict[tuple[str, float, float, float], bytes] = OrderedDict()
+        self.artifacts: dict[str, str] = {}
+
+    def cadc(self) -> httpx.AsyncClient:
+        if self._cadc is None:
+            self._cadc = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0), headers={"User-Agent": cadc_ref.USER_AGENT})
+        return self._cadc
+
+    async def deep_references(self, ra: float, dec: float) -> dict[str, Any]:
+        key = (round(ra, 4), round(dec, 4))
+        hit = self.reference_cache.get(key)
+        if hit is not None:
+            return hit
+        try:
+            refs = await cadc_ref.find(self.cadc(), ra, dec)
+        except Exception as e:  # said, never cached
+            return {"state": "unavailable", "error": f"{type(e).__name__}: {str(e)[:120]}", "references": []}
+        out: dict[str, Any] = {
+            "state": "ok" if refs else "none",
+            "min_level": cadc_ref.MIN_LEVEL,
+            "min_exposure_s": cadc_ref.MIN_EXPOSURE_S,
+            "references": [r.as_dict() for r in refs[:MAX_ROWS]],
+        }
+        self.reference_cache[key] = out
+        if len(self.reference_cache) > 2000:
+            self.reference_cache.popitem(last=False)
+        return out
+
+    async def deep_cutout(self, publisher_id: str, ra: float, dec: float, size: float) -> bytes:
+        key = (publisher_id, round(ra, 5), round(dec, 5), round(size, 1))
+        hit = self.cutout_cache.get(key)
+        if hit is not None:
+            self.cutout_cache.move_to_end(key)
+            return hit
+        art = self.artifacts.get(publisher_id)
+        if art is None:
+            art = self.artifacts[publisher_id] = await cadc_ref.artifact(self.cadc(), publisher_id)
+        data = await cadc_ref.cutout(self.cadc(), art, ra, dec, size)
+        self.cutout_cache[key] = data
+        if len(self.cutout_cache) > 60:
+            self.cutout_cache.popitem(last=False)
+        return data
 
     async def close(self) -> None:
         if isinstance(self._s3, S3):
             await self._s3.close()
+        if self._cadc is not None:
+            await self._cadc.aclose()
+            self._cadc = None
 
     async def cube_spectrum(self, ra: float, dec: float, flags: str) -> dict[str, Any]:
         key = (round(ra, 5), round(dec, 5), flags)
@@ -168,6 +218,43 @@ def build_router(extras: Extras) -> APIRouter:
     ) -> Any:
         """Catalogue sources at a place from cloud Parquet (AllWISE + 2MASS magnitudes, Gaia DR3): no TAP service in the path."""
         return await extras.xmatch(ra, dec, pmra, pmdec, radius, cats)
+
+    @router.get(f"{API_PREFIX}/reference/deep")
+    async def reference_deep(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90)) -> Any:
+        """Deep (level 3, 300 s or more) optical stacks of CADC that cover a place: CFHT MegaPipe and HST where they exist."""
+        return await extras.deep_references(ra, dec)
+
+    async def _cutout(ra: float, dec: float, size: float, pid: str) -> bytes:
+        try:
+            return await extras.deep_cutout(pid, ra, dec, size)
+        except (cadc_ref.CadcError, httpx.HTTPError, ValueError) as e:
+            raise HTTPException(502, f"CADC did not give the cutout: {type(e).__name__}") from e
+
+    @router.get(f"{API_PREFIX}/reference/deep/cutout.fits")
+    async def reference_cutout_fits(
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        size: float = Query(60.0, ge=1, le=cadc_ref.MAX_CUTOUT_ARCSEC),
+        id: str = Query(..., pattern=r"^ivo://cadc\.nrc\.ca/[A-Za-z0-9_./?+-]+$"),
+    ) -> Response:
+        data = await _cutout(ra, dec, size, id)
+        return Response(data, media_type="application/fits", headers={"Cache-Control": "public, max-age=86400"})
+
+    @router.get(f"{API_PREFIX}/reference/deep/cutout.png")
+    async def reference_cutout_png(
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        size: float = Query(60.0, ge=1, le=cadc_ref.MAX_CUTOUT_ARCSEC),
+        id: str = Query(..., pattern=r"^ivo://cadc\.nrc\.ca/[A-Za-z0-9_./?+-]+$"),
+    ) -> Response:
+        data = await _cutout(ra, dec, size, id)
+        try:
+            png, facts = await asyncio.to_thread(cadc_ref.to_png, data)
+        except cadc_ref.CadcError as e:
+            raise HTTPException(502, str(e)) from e
+        return Response(
+            png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400", "X-Image-Facts": str(facts).replace("\n", " ")}
+        )
 
     return router
 
