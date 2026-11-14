@@ -79,11 +79,13 @@ def pixel_mask(
     bad_far = spxflags.mask_of(table, spxflags.BAD_FAR)
     overflow = spxflags.mask_of(table, spxflags.SATURATION)
     finite = np.isfinite(values)
-    sat = ((f & overflow) != 0) | ~finite
+    flagged_bad = (f & bad_always) != 0
+    # saturated: the overflow flag, or no value where no bad-pixel flag explains it (a dead or missing pixel is not a star)
+    sat = ((f & overflow) != 0) | (~finite & ~flagged_bad)
     if r_target_px is not None:
         sat &= r_target_px < SAT_CORE_RADIUS_PX
         far = r_target_px > BAD_FAR_RADIUS_PX
     else:
         far = np.ones(f.shape, bool)
-    usable = finite & ~sat & ((f & bad_always) == 0) & ~(((f & bad_far) != 0) & far)
-    return usable, sat & ~(((f & bad_always) != 0) & finite)
+    usable = finite & ~sat & ~flagged_bad & ~(((f & bad_far) != 0) & far)
+    return usable, sat

@@ -131,10 +131,20 @@ class FileReader:
         return {b: arr[(b - b0) * BAND_ROWS : (b - b0 + 1) * BAND_ROWS] for b in range(b0, b1)}
 
     async def table_bytes(self, key: str, which: Literal["psf", "wave"]) -> tuple[fits.Header, bytes]:
+        """The data of the PSF or WCS-WAVE extension. The small WCS-WAVE table is cached in the store; PSF sets are shared by
+        service.reader.psfs instead."""
         lay = await self.layout(key)
         t = lay.psf if which == "psf" else lay.wave
         if t is None:
             raise ReadError(f"{key}: no {which} extension")
+        if which == "wave":
+            path = sharded(self.store / "raw" / "tables", digest("wave-v1", key), ".npz")
+            z = load_npz(path)
+            if z is not None:
+                return t.header, z["data"].tobytes()
+            data = await self.s3.get_range(key, t.data_offset, t.data_offset + t.data_size)
+            save_npz(path, data=np.frombuffer(data, np.uint8))
+            return t.header, data
         return t.header, await self.s3.get_range(key, t.data_offset, t.data_offset + t.data_size)
 
 
