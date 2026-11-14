@@ -10,7 +10,7 @@ import { FADE_MS, HOLD_MS, order } from '../viewer/pendulum';
 import { PER_PASS, Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
 import { atEpoch } from '../lib/sky';
 import { FilmView } from './film';
-import { ObjectTab, SpectrumTab, type Source } from './spectrum';
+import { ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
 import { halfToFloat } from '../lib/sxp';
 
 const SIZES = [2, 5, 10, 20, 60];
@@ -103,6 +103,7 @@ const season = (mjd: number) => {
 };
 
 interface Opts {
+  anomalies: boolean;
   movers: boolean;
   marker: boolean;
   sharp: boolean;
@@ -129,6 +130,14 @@ interface Track {
   saturated: boolean;
   check: 'same' | 'none' | 'pending' | 'still';
   gaia: { source_id: string; pm: number; pa?: number; g?: number | null; offset_arcsec: number } | null;
+}
+interface AnomalyView {
+  state: 'waiting' | 'idle' | 'running' | 'done' | 'failed';
+  phase?: string;
+  done: number;
+  total: number;
+  error: string;
+  result: AnomalyField | null;
 }
 interface MoversView {
   state: 'waiting' | 'running' | 'done' | 'failed';
@@ -201,6 +210,7 @@ export function Lab({ route }: { route: Route }) {
         .filter((d) => d >= 1 && d <= 6)
     : [1, 2, 3, 4, 5, 6];
   const opts: Opts = {
+    anomalies: p['ano'] !== '0',
     movers: p['movers'] !== '0',
     marker: p['marker'] !== '0',
     sharp: p['sharp'] !== '0',
@@ -262,6 +272,10 @@ export function Lab({ route }: { route: Route }) {
   const [mv, setMv] = useState<MoversView | null>(null);
   const mvRef = useRef<MoversView | null>(null);
   mvRef.current = mv;
+  const [an, setAn] = useState<AnomalyView | null>(null);
+  const anRef = useRef<AnomalyView | null>(null);
+  anRef.current = an;
+  const [selAn, setSelAn] = useState<number | null>(null);
   const [phase, setPhase] = useState('');
   const [meta, setMeta] = useState<FieldMeta | null>(null);
   const [shown, setShown] = useState<{ pass: number; stack: StackName } | null>(null);
@@ -666,6 +680,36 @@ export function Lab({ route }: { route: Route }) {
           ctx.restore();
         }
       }
+      const anv = anRef.current;
+      if (m && st.opts.anomalies && st.view === 'picture' && anv?.result) {
+        const scale = wcss / m.grid.n;
+        const q = m.passes[shownPass] ?? m.passes[0]!;
+        const year = 2000 + (q.mjd_mid - 51544.5) / 365.25;
+        for (const a of anv.result.anomalies) {
+          const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
+          const x =
+            (m.grid.n / 2 -
+              ((((ara - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec) *
+            scale;
+          const y = (m.grid.n / 2 - ((adec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale;
+          ctx.save();
+          ctx.lineWidth = 3.5;
+          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+          ctx.beginPath();
+          ctx.arc(x, y, 16, 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.lineWidth = 1.6;
+          ctx.strokeStyle = '#ff7ac8';
+          ctx.stroke();
+          ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = '#000';
+          ctx.fillStyle = '#ffb0dc';
+          ctx.strokeText(String(a.n), x + 15, y - 12);
+          ctx.fillText(String(a.n), x + 15, y - 12);
+          ctx.restore();
+        }
+      }
       if (!st.opts.rings || !m || st.view !== 'picture' || m.passes.length < 2) return;
       // speed rings: how far a body of that speed moves between the first and the last pass, centred on the field
       const dt = (m.passes[m.passes.length - 1]!.mjd_mid - m.passes[0]!.mjd_mid) / 365.25;
@@ -743,6 +787,45 @@ export function Lab({ route }: { route: Route }) {
     const ra0 = t.ra_2025_9 - (t.v_east * years) / 3600 / Math.cos((t.dec_2025_9 * Math.PI) / 180);
     setSel({ ra: (ra0 + 360) % 360, dec: dec0, name: name || undefined, pmra: t.v_east * 1000, pmdec: t.v_north * 1000 });
     setTab('spec');
+  };
+
+  // the spectral anomaly map: its state when the field opens (a finished map is shown at once); started by the button
+  const anPoll = useRef(0);
+  const followAnomalies = async (startIt: boolean) => {
+    const my = ++anPoll.current;
+    let first = startIt;
+    for (let i = 0; i < 2000 && my === anPoll.current; i++) {
+      try {
+        const r = await fetch(`/api/v1/anomalies?ra=${ra}&dec=${dec}&fov=${fov}${first ? '&start=1' : ''}`, { cache: 'no-store' });
+        first = false;
+        if (r.ok) {
+          const v = (await r.json()) as AnomalyView;
+          if (my !== anPoll.current) return;
+          setAn(v);
+          if (v.state !== 'running' && v.state !== 'waiting') return;
+        }
+      } catch {
+        /* asked again on the next round */
+      }
+      await new Promise((res) => setTimeout(res, 2000));
+    }
+  };
+  useEffect(() => {
+    setAn(null);
+    setSelAn(null);
+    if (!valid || !meta) return;
+    void followAnomalies(false);
+    return () => {
+      anPoll.current++;
+    };
+  }, [ra, dec, fov, valid, meta]);
+  const startAnomalies = () => followAnomalies(true);
+  const pickAnomaly = (n: number) => {
+    const a = an?.result?.anomalies.find((x) => x.n === n);
+    if (!a) return;
+    setSel({ ra: a.ra, dec: a.dec, name: `Anomaly ${n}`, pmra: a.pmra || undefined, pmdec: a.pmdec || undefined });
+    setSelAn(n);
+    setTab('obj');
   };
 
   // keyboard: space plays / pauses, arrows step through the passes
@@ -863,6 +946,7 @@ export function Lab({ route }: { route: Route }) {
       gy = by;
     }
     const [ra2, dec2] = toSky(gx, gy);
+    setSelAn(null);
     setSel({ ra: ra2, dec: dec2 });
     setTab('spec');
   };
@@ -1245,8 +1329,8 @@ export function Lab({ route }: { route: Route }) {
                     'sparkle',
                     'Anomalies',
                     'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
-                    false,
-                    null,
+                    opts.anomalies,
+                    an?.result ? (v) => set({ ano: v ? null : '0' }) : null,
                   )}
                   {dchk(
                     'maskChk',
@@ -1367,12 +1451,47 @@ export function Lab({ route }: { route: Route }) {
                 </div>
                 <button
                   class="btn primary wide"
-                  disabled
-                  title="Find spectral anomalies here: sources whose spectrum differs from an ordinary star of the field (available once the anomaly search is built)"
+                  disabled={!an || an.state === 'waiting' || an.state === 'running' || an.state === 'done'}
+                  onClick={() => void startAnomalies()}
+                  title={
+                    an?.state === 'waiting'
+                      ? 'Starts once the field is finished'
+                      : 'Find spectral anomalies here: sources whose spectrum differs from an ordinary star of the field. Every exposure of the field is measured; a 20′ field takes a few minutes'
+                  }
+                  data-testid="anomalies"
                 >
                   <span dangerouslySetInnerHTML={{ __html: icon('sparkle', 16) }} style={{ display: 'contents' }} />
-                  Find spectral anomalies here
+                  {an?.state === 'running'
+                    ? `Finding anomalies · ${an.done} of ${an.total || '…'} exposures`
+                    : 'Find spectral anomalies here'}
                 </button>
+                {an?.state === 'running' && (
+                  <div class="prog thin">
+                    <i style={{ width: `${an.total ? (100 * an.done) / an.total : 3}%` }} />
+                  </div>
+                )}
+                {an?.state === 'failed' && <div class="mono-s">Anomaly search failed: {an.error}</div>}
+                {an?.result && (
+                  <>
+                    <div class="srow" title="Spectral anomaly map: every source's spectrum against the ordinary star of this field">
+                      <b>Anomalies</b>
+                      <span class="st">
+                        {an.result.reason ||
+                          `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)} (median ${an.result.median?.toFixed(2)})`}
+                      </span>
+                    </div>
+                    {an.result.anomalies.map((a) => (
+                      <button key={a.n} class="anrow" onClick={() => pickAnomaly(a.n)} title={driverWords(a).join('; ')}>
+                        <b>Anomaly {a.n}</b>
+                        <span class="t">
+                          {a.identified?.simbad?.name ??
+                            (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')}
+                        </span>
+                        <span class="faint">score {a.score.toFixed(1)}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
                 <MoversRows mv={mv} names={trackNames} onPick={pickTrack} />
                 <div class="srow">
                   <b>Film</b>
@@ -1386,7 +1505,11 @@ export function Lab({ route }: { route: Route }) {
           )}
           {tab === 'obj' && (
             <div class="pbody">
-              <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
+              {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
+                <Passport a={an.result.anomalies.find((a) => a.n === selAn)!} f={an.result} />
+              ) : (
+                <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
+              )}
             </div>
           )}
           {tab === 'spec' && (

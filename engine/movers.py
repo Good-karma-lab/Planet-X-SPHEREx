@@ -76,6 +76,7 @@ class Result:
     stationary: int
     tracks: list[Track] = field(default_factory=list)
     weak: int = 0
+    still_sources: list[Source] = field(default_factory=list)  # the stationary sources of the first pass (the anomaly search's input)
 
 
 def _smooth(img: NDArray[np.floating], sigma: float) -> NDArray[np.float64]:
@@ -244,4 +245,5 @@ def search(whites: list[NDArray[np.floating]], sats: list[NDArray[np.floating]],
         used |= ids
         kept.append(cand)
     weak = sum(1 for t in kept if t.weak)
-    return Result([len(s) for s in srcs], int(sum(int(s.sum()) for s in stationary[:1])), [t for t in kept if not t.weak], weak)
+    still = [q for q, st in zip(srcs[0], stationary[0], strict=True) if st]
+    return Result([len(s) for s in srcs], len(still), [t for t in kept if not t.weak], weak, still)

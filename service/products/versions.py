@@ -12,6 +12,7 @@ VERSIONS: dict[str, str] = {
     "film": "v2",  # the frames of the visits of one pass. v2: no motion at coverage edges
     "spectrum": "s1",  # PSF photometry of a place in every exposure that covers it
     "movers": "m1",  # the search between passes of a field and the Gaia check of its tracks
+    "anomalies": "a1",  # the spectral anomaly map of a field and the identification of its anomalies
 }
 
 DEPENDS: dict[str, tuple[str, ...]] = {
@@ -19,6 +20,7 @@ DEPENDS: dict[str, tuple[str, ...]] = {
     "film": (),
     "spectrum": (),
     "movers": ("field",),
+    "anomalies": ("field",),
 }
 
 

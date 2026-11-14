@@ -351,3 +351,13 @@ input[type='range']::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .mvrow:hover, .mvrow:focus-visible { background: rgba(255, 180, 84, 0.09); border-color: rgba(255, 180, 84, 0.45); outline: none; }
 .mvrow b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
 .mvrow .faint { margin-left: auto; font: 500 11px var(--mono); white-space: nowrap; }
+.spec-chart.small { height: 170px; }
+.passport { display: flex; flex-direction: column; gap: 8px; }
+.drivers { margin: 0 0 0 18px; padding: 0; font-size: 12.5px; color: #c4d8df; line-height: 1.5; }
+.anrow { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 6px 9px; color: inherit; font: inherit; font-size: 12.5px; cursor: pointer; }
+.anrow:hover, .anrow:focus-visible { background: rgba(255, 90, 168, 0.09); border-color: rgba(255, 90, 168, 0.45); outline: none; }
+.anrow b { font-weight: 600; white-space: nowrap; }
+.anrow .t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+.anrow .faint { font: 500 11px var(--mono); white-space: nowrap; }
+.prog.thin { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.prog.thin i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #b6f56a); transition: width 0.4s ease; }

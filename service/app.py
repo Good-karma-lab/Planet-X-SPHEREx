@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
 from service import __version__
+from service.anomalies import Anomalies
 from service.config import Config, load
 from service.coverage import coverage_map
 from service.jobs.scheduler import Priority, Scheduler
@@ -56,6 +57,7 @@ class State:
         self.coverage: dict[str, Any] | None = None
         self.spectra: Spectra | None = None
         self.movers: Movers | None = None
+        self.anomalies: Anomalies | None = None
         self.coverage_lock = asyncio.Lock()
 
 
@@ -77,6 +79,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.movers = Movers(st.store, cfg.store_dir)
         if st.index is not None:
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
+            st.anomalies = Anomalies(st.index, st.files, st.wavelengths, st.store, cfg.store_dir)
         if scheduler is None:
             st.executor = ProcessPoolExecutor(max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2))))
             st.scheduler = Scheduler(executor=st.executor)
@@ -255,6 +258,33 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             media_type="application/json" if name.endswith(".json") else "application/octet-stream",
             headers={"Cache-Control": "public, max-age=31536000, immutable" if immutable else "no-store"},
         )
+
+    @app.get(f"{API_PREFIX}/anomalies")
+    async def anomalies_of(
+        request: Request,
+        ra: float = Query(..., ge=0, lt=360),
+        dec: float = Query(..., ge=-90, le=90),
+        fov: float = Query(5, gt=0, le=60),
+        start: int = Query(0, ge=0, le=1),
+    ) -> Any:
+        """The spectral anomaly map of a finished field: its state, or (start=1) the search started."""
+        if st.index is None or st.store is None or st.anomalies is None:
+            raise HTTPException(503, "the exposure index is not loaded")
+        params = fieldjob.canonical(ra, dec, fov)
+        key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
+        if not st.store.is_complete(key):
+            return {"state": "waiting", "error": "", "result": None}
+        run = st.anomalies.get(key)
+        if run is None:
+            if not start:
+                return {"state": "idle", "error": "", "result": None}
+            wait = st.new_work.take(client_id(request, st.salt))
+            if wait > 0:
+                return JSONResponse(
+                    {"error": "too many new searches from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
+                )
+            run = st.anomalies.start(key)
+        return st.anomalies.view(run)
 
     @app.get(f"{API_PREFIX}/movers")
     async def movers_of(
