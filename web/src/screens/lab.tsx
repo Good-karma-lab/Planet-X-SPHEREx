@@ -973,26 +973,66 @@ export function Lab({ route }: { route: Route }) {
       if (!grid) return;
       const { rects, inset } = layoutRef.current;
       if (days && F && st.opts.motion) {
-        // Motion only: the visit's motion map (masked = black, changes above 4σ amber) instead of its sky
+        // Motion only: the visit's motion map (masked = black) instead of its sky, with amber only on real candidates: the change around a
+        // track the search found on this visit, or around a known body JPL predicts there and the visit shows; elsewhere the sky stays
+        // clean (the raw map's specks and a bright star's halo are not motion)
         const n = F.meta.grid.n;
+        const cands: [number, number][] = [];
+        for (const t of ftRef.current ?? []) for (const q of t.pts) if (q.f === shownVisit) cands.push([q.x, q.y]);
+        for (const bd of bodiesRef.current?.bodies ?? []) {
+          const fr = bd.frames[shownVisit];
+          if (fr?.inside && bd.seen.includes(shownVisit)) cands.push([fr.x, fr.y]);
+        }
         let mc = motionCache.current;
-        if (!mc || mc.key !== `${F.key}:${shownVisit}`) {
+        const mkey = `${F.key}:${shownVisit}:${cands.length}`;
+        if (!mc || mc.key !== mkey) {
           const c = document.createElement('canvas');
           c.width = c.height = n;
           const g = c.getContext('2d')!;
           const img = g.createImageData(n, n);
           const off = shownVisit * n * n;
+          const zs = new Float32Array(n * n);
           for (let i = 0; i < n * n; i++) {
             const m = F.motion[off + i]!;
-            const z = m ? ((m - 1) / 254) * 20 - 5 : 0;
-            const a = m ? Math.min(1, Math.max(0, (z - 4) / 4)) : 0;
+            zs[i] = m ? ((m - 1) / 254) * 20 - 5 : 0;
+          }
+          // the change connected to a candidate's place (within 6 grid pixels), above 3σ
+          const keep = new Uint8Array(n * n);
+          const stack: number[] = [];
+          for (const [cx, cy] of cands) {
+            for (let dy = -6; dy <= 6; dy++)
+              for (let dx = -6; dx <= 6; dx++) {
+                const x = Math.round(cx) + dx;
+                const y = Math.round(cy) + dy;
+                if (x < 0 || y < 0 || x >= n || y >= n || dx * dx + dy * dy > 36) continue;
+                const i = y * n + x;
+                if (!keep[i] && zs[i]! >= 3) {
+                  keep[i] = 1;
+                  stack.push(i);
+                }
+              }
+          }
+          while (stack.length) {
+            const i = stack.pop()!;
+            const x = i % n;
+            for (const j of [x > 0 ? i - 1 : -1, x < n - 1 ? i + 1 : -1, i - n, i + n]) {
+              if (j >= 0 && j < n * n && !keep[j] && zs[j]! >= 3) {
+                keep[j] = 1;
+                stack.push(j);
+              }
+            }
+          }
+          for (let i = 0; i < n * n; i++) {
+            const m = F.motion[off + i]!;
+            const z = zs[i]!;
+            const a = m && keep[i] ? Math.min(1, Math.max(0.45, (z - 3) / 5)) : 0;
             img.data[4 * i] = m ? 16 + 239 * a : 0;
             img.data[4 * i + 1] = m ? 20 + 157 * a : 0;
             img.data[4 * i + 2] = m ? 26 + 33 * a : 0;
             img.data[4 * i + 3] = 255;
           }
           g.putImageData(img, 0, 0);
-          mc = motionCache.current = { key: `${F.key}:${shownVisit}`, canvas: c };
+          mc = motionCache.current = { key: mkey, canvas: c };
         }
         ctx.imageSmoothingEnabled = false;
         for (const box of rects) ctx.drawImage(mc.canvas, box.x, box.y, box.w, box.h);
