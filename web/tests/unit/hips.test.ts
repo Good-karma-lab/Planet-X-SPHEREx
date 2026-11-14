@@ -38,9 +38,9 @@ describe('HiPS face coordinates', () => {
 });
 
 describe('tile order for a globe', () => {
-  it('uses the shallow IRSA tiles for the whole globe and deeper tiles as it grows', () => {
-    expect(orderFor('dss2', 400)).toBe(0);
-    expect(orderFor('dss2', 1000)).toBe(1);
+  it('reads the Allsky image for the whole globe and deeper tiles as it grows', () => {
+    expect(orderFor('dss2', 400)).toBe(-1);
+    expect(orderFor('dss2', 1000)).toBe(-1);
     expect(orderFor('dss2', 64000)).toBe(7);
     expect(orderFor('dss2', 1e6)).toBe(9);
   });
