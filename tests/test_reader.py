@@ -81,3 +81,26 @@ def test_breaker_opens_and_probes() -> None:
     b.before()
     b.success()
     assert b.state == "closed"
+
+
+def test_psf_is_read_once_per_detector_and_layout(tmp_path: Path) -> None:
+    from service.reader.psfs import PsfProvider
+
+    a, _ = make_file("v27", n=128, seed=1)
+    b, _ = make_file("v27", n=128, seed=2, mjd=61200.0)
+    bucket = FakeBucket({"a.fits": a, "b.fits": b})
+
+    async def run() -> None:
+        s3 = bucket.s3()
+        fr = FileReader(s3, tmp_path)
+        prov = PsfProvider(fr, tmp_path)
+        pa = await prov.for_file("a.fits")
+        pb = await prov.for_file("b.fits")
+        assert pa is pb and prov.reads == 1
+        prov2 = PsfProvider(FileReader(s3, tmp_path), tmp_path)  # from the store, no read
+        pc = await prov2.for_file("a.fits")
+        assert prov2.reads == 0 and pc.checksum == pa.checksum
+        np.testing.assert_allclose(pc.zones, pa.zones, rtol=1e-6)
+        await s3.close()
+
+    asyncio.run(run())
