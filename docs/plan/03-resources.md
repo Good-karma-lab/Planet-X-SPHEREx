@@ -61,7 +61,7 @@ truth for reading).
 
 | Service | Endpoint | Used for | Notes |
 |---|---|---|---|
-| TAP (sync) | `https://irsa.ipac.caltech.edu/TAP/sync` | ObsCore reconciliation; 2MASS `fp_psc`, AllWISE `allwise_p3as_psd`, CatWISE | can take 45 s; down on 2026-11-13/14 (502, timeouts); 1 concurrent query per kind, 20 s timeout for interactive parts |
+| TAP (sync) | `https://irsa.ipac.caltech.edu/TAP/sync` | ObsCore reconciliation (on 2026-11-14 ObsCore lists `spherex_dr1` 945,725, `spherex_dr1_deep` 233,681, `spherex_dr1_cube` 12,288 HiPS-cube tiles, `spherex_qr3` 362,124, `spherex_qr3_deep` 86,700; QR2 is no longer listed: DR1 supersedes it; footprints are 4-corner polygons); 2MASS `fp_psc`, AllWISE `allwise_p3as_psd`, CatWISE | can take 45 s; down on 2026-11-13/14 (502, timeouts); 1 concurrent query per kind, 20 s timeout for interactive parts |
 | SIA2 | `https://irsa.ipac.caltech.edu/SIA?COLLECTION=spherex_…` | exposure list for unindexed periods | lags the bucket |
 | Finder Chart | `https://irsa.ipac.caltech.edu/applications/finderchart/servlet/api` | 2MASS, WISE images with links | about a minute per field cold |
 | IBE / cutouts | `https://irsa.ipac.caltech.edu/ibe/…` | NEOWISE single exposures | ~1 min per cutout; 900 per candidate; on request only, 2 concurrent |
