@@ -497,7 +497,7 @@ export function Lab({ route }: { route: Route }) {
     ? {
         dmin: Number(p['dmin']) > 0 ? Number(p['dmin']) : undefined,
         dmax: Number(p['dmax']) > 0 ? Number(p['dmax']) : undefined,
-        det: /^[1-6]{1,6}$/.test(p['det'] ?? '') ? p['det'] : undefined,
+        det: /^[1-6]{1,6}$/.test((p['det'] ?? '').replace(/\D/g, '')) ? (p['det'] ?? '').replace(/\D/g, '') : undefined,
       }
     : {};
   const distRef = useDistant({
@@ -1316,6 +1316,7 @@ export function Lab({ route }: { route: Route }) {
           ctx.font = '600 10px ui-monospace, Menlo, monospace';
           for (const [yr, px, py] of pts) {
             if (Math.hypot(px - x, py - y) < rr + 8) continue;
+            if (px > x && Math.abs(py - y) < 30) continue; // where the object's own label stands
             ctx.fillStyle = mk.colour;
             ctx.beginPath();
             ctx.arc(px, py, 2.4, 0, 2 * Math.PI);

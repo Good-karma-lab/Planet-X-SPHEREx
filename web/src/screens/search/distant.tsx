@@ -158,6 +158,8 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
   return {
     available,
     ds,
+    /** the distance range the search asks for (the defaults, or the one a link set) */
+    range: { dmin: aim.dmin ?? DMIN, dmax: aim.dmax ?? DMAX, det: aim.det ?? '123' },
     /** the brightest point of the shifted sum on show (set by DistantCanvas) */
     peak,
     setPeak,
@@ -209,10 +211,11 @@ export function useDistantPlan(aim: DistantAim, enabled: boolean): DistantPlan |
       ra: String(aim.ra),
       dec: String(aim.dec),
       fov: String(aim.fov >= 20 ? 18 : aim.fov),
-      dmin: String(DMIN),
-      dmax: String(DMAX),
+      dmin: String(aim.dmin ?? DMIN),
+      dmax: String(aim.dmax ?? DMAX),
       plan: '1',
     });
+    if (aim.det) q.set('det', aim.det);
     if (aim.pass != null) q.set('pass', String(aim.pass));
     else if (aim.mjd != null) q.set('mjd', String(aim.mjd));
     fetch(`/api/v1/distant?${q}`, { signal: ctl.signal })
@@ -374,7 +377,8 @@ export function DistantPanel({
         </div>
         <div class="mono-s">
           searches the pass on show: pass {currentPass + 1}
-          {passLabel ? ` · ${passLabel}` : ''} · distance {DMIN}–{DMAX} au ·{' '}
+          {passLabel ? ` · ${passLabel}` : ''} · distance {d.range.dmin}–{d.range.dmax} au
+          {d.range.det !== '123' ? ` · D${d.range.det.split('').join(', D')}` : ''} ·{' '}
           {plan
             ? `${plan.exposures} exposures in ${plan.visits} visits · ${plan.hypotheses.toLocaleString('en-US')} orbits · ${about(plan.estimate_s)} the first time`
             : 'a few minutes the first time'}
