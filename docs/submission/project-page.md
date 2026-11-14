@@ -51,15 +51,20 @@ stepping through them shows the flicker of the spectrum, not a star's shift of a
   added for the faintest sources.
 - **Archive images.** The same field in DSS2 (1985–1999), 2MASS (1997–2001) and AllWISE (2010), blinked before the SPHEREx seasons, with
   the test target ringed where it was then: decades of motion in one loop.
-- **The film of one season.** The visits of one pass, aligned, with the static sky removed: asteroids hop from visit to visit. JPL
-  predicts which known asteroids and comets cross the field; each is ringed on every visit, solid where the film's own motion map sees
-  it, and its visits stacked along JPL's track show how strongly it stands out (z 9 for a V 19.7 asteroid seen in only 5 of 11
+- **Months and Days.** The timeline switches between two scales without reloading: Months plays the passes (seasons) of the field;
+  Days plays the visits inside the pass shown, hours to days apart, drawn with the same colour law and sharpening. Asteroids hop from
+  visit to visit. JPL predicts which known asteroids and comets cross the field; each is ringed on every visit, solid where the visit
+  shows it, and its visits stacked along JPL's track show how strongly it stands out (z 9 for a V 19.7 asteroid seen in only 5 of 11
   single visits). The number of SPHEREx detector images holding each body equals IRSA's Moving Object Search Tool (119, 107, 118, 121).
+- **One marker per object.** A star that the search finds moving carries one ring with its measured rate, its uncertainty and the Gaia
+  verdict ("11.4 ± 0.5″/yr · Gaia ✓"); a 2′ zoom in the corner follows the selected object.
 - **3I/ATLAS, seen by two space agencies.** A film centred on the interstellar comet on 14 Dec 2025, and the same day's frame from the
   Canadian Space Agency's NEOSSat (CADC): its pointing refitted on 95 Gaia stars, the comet found 5.6″ from JPL's place at G ≈ 12.4.
 - **Spectrum on a click.** The tool fits the point-spread function of the detector in every exposure that covers the source and draws
-  one point per exposure as it is measured, coloured by detector; a moving star is measured where it was on each date. Any clicked
-  source is named from SIMBAD and Gaia DR3, with a distance when the parallax is good. The points download as CSV.
+  one point per exposure as it is measured (377 exposures in about 3 s), coloured by detector; a moving star is measured where it was
+  on each date. Until it is done, a quick look comes from SPHEREx's DR1 all-sky spectral cube, read by byte ranges from the public
+  bucket. Any clicked source gets a portrait built from its own spectrum and is named from SIMBAD and Gaia DR3, with a distance when the
+  parallax is good. The points download as CSV.
 - **Red sources.** The flux at 3.8–5 µm against 1.1–1.6 µm, measured season by season: the two brown dwarfs among the test targets,
   WISE 0855−0714 and ε Indi B, stand out as red and moving.
 - **Search between seasons.** Sources of every season, a stationary test, straight tracks through three or more seasons at 3–120″ per
