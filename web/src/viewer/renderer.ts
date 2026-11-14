@@ -49,7 +49,8 @@ float law(float x) { return clamp(asinh((x - uLo) / uSoft) / asinh((uHi - uLo) /
 int satK(int k) { return uFilm == 1 ? 0 : k; }
 float G = 1.0;                 // Sharpen gain of the place, the same for every layer and channel (so it never changes a colour)
 float raw(int pass, int ch, vec2 q) { return texture(uVal, vec3(q, float(pass * uPerPass + ch))).r; }
-float val(int pass, int ch) { return raw(pass, ch, uv) * G; }
+vec2 cq;                       // the place the colour is taken at (the pixel, or a neighbour of a saturated core)
+float val(int pass, int ch) { return raw(pass, ch, cq) * G; }
 
 // white light at a place: the mean of the pass's layers (colour channels, bands or detectors)
 float white(int k, vec2 q) {
@@ -82,18 +83,16 @@ float sharpGain(int k) {
   return 1.0 + ws * fd * head * uSharp * t * t / (t + 0.1);
 }
 
-vec3 passColour(int k) {
-  float sat = texture(uSat, vec3(uv, float(satK(k)))).r;
-  if (sat > 0.5) return uWhiteCores == 1 ? vec3(1.0) : uNoData;  // a saturated core is white, never a hole
-  G = sharpGain(k);
+// the colour of the pass at the place cq (the rgb and 1.0, or 0.0 where the pass has no data there)
+vec4 colourOf(int k) {
   if (uMode == 0) {
     float r = val(k, 0), g = val(k, 1), b = val(k, 2);
-    if (isnan(r) || isnan(g) || isnan(b)) return uNoData;
+    if (isnan(r) || isnan(g) || isnan(b)) return vec4(0.0);
     vec3 s = vec3(law(r * uWB[k].x), law(g), law(b * uWB[k].y));
     float l = dot(s, vec3(0.3333));
     float fade = 1.0 - smoothstep(0.55, 0.9, l);          // no colour boost on very bright pixels (wings of saturated cores)
     float faint = smoothstep(0.04, 0.16, l);               // nor at the noise level: noise keeps its natural (weak) colour
-    return clamp(mix(vec3(l), s, 1.0 + (uBoost - 1.0) * fade * faint), 0.0, 1.0);
+    return vec4(clamp(mix(vec3(l), s, 1.0 + (uBoost - 1.0) * fade * faint), 0.0, 1.0), 1.0);
   }
   if (uMode == 2) {
     vec3 acc = vec3(0.0);
@@ -107,14 +106,48 @@ vec3 passColour(int k) {
       acc = 1.0 - (1.0 - acc) * (1.0 - l * uHues[j]);   // screen blend of the bands' colours
       sum += v; n++;
     }
-    if (n == 0) return uNoData;
-    if (uMono == 1) return vec3(law(sum / float(n)));
-    return clamp(acc, 0.0, 1.0);
+    if (n == 0) return vec4(0.0);
+    if (uMono == 1) return vec4(vec3(law(sum / float(n))), 1.0);
+    return vec4(clamp(acc, 0.0, 1.0), 1.0);
   }
   float w = val(k, uLayer);
-  if (isnan(w)) return uNoData;
+  if (isnan(w)) return vec4(0.0);
   float l = law(w);
-  return clamp(l * mix(vec3(1.0), uTint, 0.35 * (1.0 - smoothstep(0.6, 0.95, l))), 0.0, 1.0);
+  return vec4(clamp(l * mix(vec3(1.0), uTint, 0.35 * (1.0 - smoothstep(0.6, 0.95, l))), 0.0, 1.0), 1.0);
+}
+
+// a saturated core with White cores off: never a hole. The colour of the star around it, taken from the unsaturated pixels in rings of 3, 6, 9 and 12
+// detector pixels, brought to full scale (its brightest channel at 1), so the core is the brightest value of the star's own colour
+vec3 satCore(int k) {
+  vec3 acc = vec3(0.0);
+  float w = 0.0;
+  G = 1.0;
+  for (int r = 1; r <= 4; r++) {
+    for (int j = 0; j < 12; j++) {
+      float an = float(j) * 0.5235988;
+      vec2 q = uv + vec2(cos(an), sin(an)) * uDP * float(r) * 3.0;
+      if (texture(uSat, vec3(q, float(satK(k)))).r > 0.5) continue;
+      cq = q;
+      vec4 c = colourOf(k);
+      if (c.a > 0.5) { acc += c.rgb; w += 1.0; }
+    }
+  }
+  cq = uv;
+  if (w > 0.0) {
+    vec3 c = acc / w;
+    float m = max(c.r, max(c.g, c.b));
+    if (m > 1e-4) return c / m;
+  }
+  return vec3(0.9);
+}
+
+vec3 passColour(int k) {
+  cq = uv;
+  float sat = texture(uSat, vec3(uv, float(satK(k)))).r;
+  if (sat > 0.5) return uWhiteCores == 1 ? vec3(1.0) : satCore(k);  // a saturated core is white or the star's colour at full scale, never a hole
+  G = sharpGain(k);
+  vec4 c = colourOf(k);
+  return c.a > 0.5 ? c.rgb : uNoData;
 }
 
 vec3 diffColour(int k) {
