@@ -391,16 +391,6 @@ export function Globe() {
           ctx.fill();
         }
       }
-      // catalogue dots, at their place on the date of the backdrop
-      ctx.globalAlpha = 0.75;
-      for (const o of st.catalog) {
-        if (o.b) continue;
-        const p = project(...shownPlace(o, st.survey), b);
-        if (!p[2]) continue;
-        ctx.fillStyle = KIND[o.k]?.dot ?? '#fff';
-        ctx.fillRect(p[0] - 1, p[1] - 1, 2.2, 2.2);
-      }
-      ctx.globalAlpha = 1;
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
       pins = [];
       if (st.searchedOn && st.searched) drawSearched(ctx, (ra, dec) => project(ra, dec, b), st.searched, st.searchedSel?.key ?? null);
@@ -633,19 +623,6 @@ export function Globe() {
           if (d < bd) {
             bd = d;
             near = q.o;
-          }
-        }
-        if (!near && view.current.zoom > 3) {
-          const b = basis();
-          for (const o of st.catalog) {
-            if (o.b) continue;
-            const p = project(...shownPlace(o, st.survey), b);
-            if (!p[2]) continue;
-            const d = Math.hypot(p[0] - px, p[1] - py);
-            if (d < bd) {
-              bd = d;
-              near = o;
-            }
           }
         }
         if (near) {
