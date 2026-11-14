@@ -33,6 +33,8 @@ VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 NED_URL = "https://ned.ipac.caltech.edu/cgi-bin/objsearch"
 SIMBAD_EPOCH, GAIA_EPOCH = 2000.0, 2016.0
 IDENT_FAST_MAS = 1000.0  # above this proper motion (mas/yr) a star can have left the small cone: SIMBAD is asked for those in a wide cone
+BRIGHT_MAG = 9.0  # a star brighter than this saturates SPHEREx: the centre of its core is uncertain by several arcseconds
+BRIGHT_RADIUS = 15.0
 IDENT_MAX_MAS = 11000.0  # the fastest star known (Barnard's Star) moves 10.4 arcsec/yr
 DEADLINE_S = 12.0
 TTL_S = 7 * 86400.0
@@ -79,74 +81,98 @@ def mag_shown(v: float | None, g: float | None, j: float | None) -> dict[str, An
     return None
 
 
-def _fnum(row: dict[str, str], key: str) -> float | None:
+def _fnum(row: dict[str, Any], key: str) -> float | None:
     v = row.get(key)
     if v in (None, "", "null"):
         return None
     try:
-        return float(v)
-    except ValueError:
+        x = float(v)
+    except (TypeError, ValueError):
         return None
+    return None if math.isnan(x) else x
 
 
 def parse_simbad(rows: list[list[Any]], ra: float, dec: float, epoch: float, radius: float) -> dict[str, Any]:
-    """The nearest SIMBAD object at `epoch` (its proper motion applied), preferring one with a magnitude."""
+    """The nearest SIMBAD object at `epoch` (its proper motion applied), preferring one with a magnitude; when none is inside `radius`, a
+    bright star (brighter than BRIGHT_MAG: saturated, its core's centre uncertain) inside BRIGHT_RADIUS."""
     best: tuple[float, dict[str, Any]] | None = None
+    bright: tuple[float, dict[str, Any]] | None = None
     for r in rows:
         a, d = moved(r[1], r[2], r[3], r[4], epoch - SIMBAD_EPOCH)
         sep = sep_arcsec(a, d, ra, dec)
         mag = mag_shown(r[9], r[10], r[11])
         score = sep + (0.0 if mag else 2.0)
+        found = {
+            "state": "ok",
+            "name": r[0],
+            "otype": r[6],
+            "sptype": r[7] or None,
+            "bibcount": r[8],
+            "link": "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=" + quote(r[0]),
+            "sep": round(sep, 2),
+            "pmra": r[3],
+            "pmdec": r[4],
+            "plx": r[5],
+            "mag": mag,
+        }
         if sep <= radius and (best is None or score < best[0]):
-            best = (
-                score,
-                {
-                    "state": "ok",
-                    "name": r[0],
-                    "otype": r[6],
-                    "sptype": r[7] or None,
-                    "bibcount": r[8],
-                    "link": "https://simbad.cds.unistra.fr/simbad/sim-id?Ident=" + quote(r[0]),
-                    "sep": round(sep, 2),
-                    "pmra": r[3],
-                    "pmdec": r[4],
-                    "plx": r[5],
-                    "mag": mag,
-                },
-            )
-    return best[1] if best else {"state": "none"}
+            best = (score, found)
+        elif sep <= BRIGHT_RADIUS and mag is not None and mag["value"] < BRIGHT_MAG and (bright is None or sep < bright[0]):
+            bright = (sep, {**found, "note": "a bright star: its core is saturated, so the place is only good to several arcseconds"})
+    if best:
+        return best[1]
+    return bright[1] if bright else {"state": "none"}
+
+
+def gaia_rows(body: str) -> list[dict[str, Any]]:
+    """The rows of a Gaia TAP answer (CSV)."""
+    return list(csv.DictReader(io.StringIO(body)))
 
 
 def parse_gaia(body: str, ra: float, dec: float, epoch: float, radius: float, label: str) -> dict[str, Any]:
+    return parse_gaia_rows(gaia_rows(body), ra, dec, epoch, radius, label)
+
+
+def parse_gaia_rows(rows: list[dict[str, Any]], ra: float, dec: float, epoch: float, radius: float, label: str) -> dict[str, Any]:
+    """The Gaia star nearest to (ra, dec) at `epoch` (its proper motion applied to its 2016 place); when none is inside `radius`, a bright
+    star (G < BRIGHT_MAG: saturated in SPHEREx) inside BRIGHT_RADIUS."""
     best: tuple[float, dict[str, Any]] | None = None
-    for row in csv.DictReader(io.StringIO(body)):
+    bright: tuple[float, dict[str, Any]] | None = None
+    for row in rows:
         a0, d0 = _fnum(row, "ra"), _fnum(row, "dec")
         if a0 is None or d0 is None:
             continue
         pa, pd = _fnum(row, "pmra") or 0.0, _fnum(row, "pmdec") or 0.0
         a, d = moved(a0, d0, pa, pd, epoch - GAIA_EPOCH)
         sep = sep_arcsec(a, d, ra, dec)
-        if sep <= radius and (best is None or sep < best[0]):
-            bp, rp = _fnum(row, "phot_bp_mean_mag"), _fnum(row, "phot_rp_mean_mag")
-            bprp = _fnum(row, "bp_rp") if "bp_rp" in row else (bp - rp if bp is not None and rp is not None else None)
-            best = (
-                sep,
-                {
-                    "state": "ok",
-                    "source_id": row["source_id"],
-                    "g": _fnum(row, "phot_g_mean_mag"),
-                    "bp_rp": None if bprp is None else round(bprp, 3),
-                    "parallax": _fnum(row, "parallax"),
-                    "parallax_err": _fnum(row, "parallax_error"),
-                    "ruwe": _fnum(row, "ruwe"),
-                    "pmra": pa,
-                    "pmdec": pd,
-                    "variable": row.get("phot_variable_flag") if "phot_variable_flag" in row else None,
-                    "sep": round(sep, 2),
-                    "source": label,
-                },
-            )
-    return best[1] if best else {"state": "none", "source": label}
+        g = _fnum(row, "phot_g_mean_mag")
+        is_bright = g is not None and g < BRIGHT_MAG
+        if sep > radius and not (is_bright and sep <= BRIGHT_RADIUS):
+            continue
+        bp, rp = _fnum(row, "phot_bp_mean_mag"), _fnum(row, "phot_rp_mean_mag")
+        bprp = _fnum(row, "bp_rp") if "bp_rp" in row else (bp - rp if bp is not None and rp is not None else None)
+        found = {
+            "state": "ok",
+            "source_id": str(row["source_id"]),
+            "g": g,
+            "bp_rp": None if bprp is None else round(bprp, 3),
+            "parallax": _fnum(row, "parallax"),
+            "parallax_err": _fnum(row, "parallax_error"),
+            "ruwe": _fnum(row, "ruwe"),
+            "pmra": pa,
+            "pmdec": pd,
+            "variable": row.get("phot_variable_flag") if "phot_variable_flag" in row else None,
+            "sep": round(sep, 2),
+            "source": label,
+        }
+        if sep <= radius:
+            if best is None or sep < best[0]:
+                best = (sep, found)
+        elif bright is None or sep < bright[0]:
+            bright = (sep, {**found, "note": "a bright star: its core is saturated, so the place is only good to several arcseconds"})
+    if best:
+        return best[1]
+    return bright[1] if bright else {"state": "none", "source": label}
 
 
 def parse_irsa(body: str, ra: float, dec: float, radius: float, labels: dict[str, str]) -> dict[str, Any]:
@@ -242,6 +268,13 @@ def from_allwise(part: str, rows: list[dict[str, Any]], radius: float) -> dict[s
     return {"state": "none", "via": via}
 
 
+def gaia_cloud_rows(ra: float, dec: float, radius_arcsec: float) -> list[dict[str, Any]]:
+    """Gaia DR3 rows around a place from the Parquet copy in AWS (a worker process)."""
+    from service.upstream import gaia_hats
+
+    return gaia_hats.cone(ra, dec, radius_arcsec / 3600.0)
+
+
 class CatalogueContext:
     """The seven catalogues for a place, asked together, each behind its own breaker, cached for a week (answers 'ok' and 'none' only)."""
 
@@ -286,7 +319,12 @@ class CatalogueContext:
         raise err or RuntimeError("no SIMBAD mirror")
 
     async def _gaia(self, ra: float, dec: float, epoch: float, radius: float) -> dict[str, Any]:
-        cone = (radius + IDENT_MAX_MAS / 1000.0 * abs(epoch - GAIA_EPOCH) + 1.0) / 3600.0
+        """Gaia DR3 at `epoch`: the stars in a small cone (every star that moves less than a few arcseconds a year) and, in a wide cone, the
+        fast ones (above IDENT_FAST_MAS), each moved from 2016 to the epoch. The archives are asked in turn; when none answers, the same
+        catalogue is read from the Parquet copy in AWS, so the answer is never "nothing" just because a server was down."""
+        yrs = abs(epoch - GAIA_EPOCH)
+        small = (radius + BRIGHT_RADIUS + IDENT_FAST_MAS / 1000.0 * yrs + 1.0) / 3600.0
+        big = (radius + BRIGHT_RADIUS + IDENT_MAX_MAS / 1000.0 * yrs + 1.0) / 3600.0
         cols = {
             "gaiadr3.gaia_source": (
                 "source_id, ra, dec, pmra, pmdec, parallax, parallax_error, phot_g_mean_mag, bp_rp, ruwe, phot_variable_flag"
@@ -297,15 +335,55 @@ class CatalogueContext:
         }
         err: Exception | None = None
         for url, table, label in GAIA_TAPS:
-            adql = (
-                f"SELECT TOP 300 {cols[table]} FROM {table} "
-                f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {cone:.6f}))"
+            where = (
+                f"(1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {small:.6f}))) OR "
+                f"(1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {big:.6f})) "
+                f"AND (pmra*pmra + pmdec*pmdec) > {IDENT_FAST_MAS**2:.0f})"
             )
+            adql = f"SELECT TOP 1500 {cols[table]} FROM {table} WHERE {where}"
             try:
                 return parse_gaia(await self._tap("gaia", url, adql), ra, dec, epoch, radius, label)
             except (httpx.HTTPError, BreakerOpenError) as e:
                 err = e
-        raise err or RuntimeError("no Gaia archive")
+        try:  # no archive answered: the Parquet copy in AWS (a worker process: it reads files over the network)
+            rows = await cpu.run(gaia_cloud_rows, ra, dec, big * 3600.0)
+        except Exception:
+            raise err or RuntimeError("no Gaia archive") from None
+        return parse_gaia_rows(rows, ra, dec, epoch, radius, "Gaia DR3 on AWS (the archives did not answer)")
+
+    async def gaia_at(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0) -> dict[str, Any]:
+        """Gaia alone, kept the same way as inside `context`."""
+        pos = f"{ra:.4f}_{dec:.4f}_{epoch:.1f}_{radius:.1f}"
+        return await self._kept("gaia2_" + pos, lambda: self._gaia(ra, dec, epoch, radius))
+
+    async def identify(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0) -> dict[str, Any]:
+        """What SIMBAD and Gaia DR3 call the place where a source stands at `epoch`, in the shape of the `identify` route. Positions of the
+        catalogues are carried to that epoch with their proper motions, whatever the star's motion; a catalogue that does not answer is
+        `unavailable`, never `none`."""
+        sm, gm = await asyncio.gather(self.simbad_at(ra, dec, epoch, radius), self.gaia_at(ra, dec, epoch, radius))
+        out: dict[str, Any] = {}
+        if sm.get("state") == "ok":
+            out["simbad"] = {
+                "state": "ok",
+                "name": sm["name"],
+                "type": sm.get("otype"),
+                "sp": sm.get("sptype"),
+                "sep": sm.get("sep"),
+                "pmra": sm.get("pmra"),
+                "pmdec": sm.get("pmdec"),
+                **({"note": sm["note"]} if "note" in sm else {}),
+            }
+        else:
+            out["simbad"] = {k: sm[k] for k in ("state", "error") if k in sm}
+        if gm.get("state") == "ok":
+            out["gaia"] = {
+                k: gm.get(k)
+                for k in ("state", "source_id", "g", "bp_rp", "parallax", "ruwe", "pmra", "pmdec", "sep", "source", "note")
+                if gm.get(k) is not None or k in ("state", "source_id")
+            }
+        else:
+            out["gaia"] = {k: gm[k] for k in ("state", "error") if k in gm}
+        return out
 
     async def _irsa(self, part: str, ra: float, dec: float, radius: float, alt: tuple[float, float] | None = None) -> dict[str, Any]:
         """One IRSA catalogue at the place `ra, dec` (at that catalogue's epoch). When IRSA's TAP does not answer, 2MASS and AllWISE are

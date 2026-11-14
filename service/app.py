@@ -122,6 +122,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if st.index is not None:
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
             st.anomalies = Anomalies(st.index, st.files, st.wavelengths, st.store, cfg.store_dir)
+            st.anomalies.catalogue = st.catalogue
         if scheduler is None:
             workers = max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2)))
             # fresh worker processes (forkserver), not copies of the API process: small, and the memory cap counts only their own work
@@ -595,7 +596,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         hit = st.identified.get(key)
         if hit is not None:
             return hit
-        out = await st.anomalies.identify(ra, dec, pmra, pmdec)
+        # the place is where the source stands at the passes' epoch: the catalogues' places are carried to it with their own motions
+        # (the old query looked at the clicked place in the catalogues' epochs, 2000 and 2016, and lost every star that moves)
+        out = await (st.catalogue.identify(ra, dec) if st.catalogue is not None else st.anomalies.identify(ra, dec, pmra, pmdec))
         if all(v.get("state") != "unavailable" for v in out.values()):
             st.identified[key] = out
             if len(st.identified) > 5000:
