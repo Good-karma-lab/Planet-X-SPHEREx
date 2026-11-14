@@ -20,8 +20,7 @@ const wanted = (): string | null => {
 const NUM = {
   checks: '8',
   chance: '0.0',
-  eris: '95.9 au',
-  erisLong: '95.9 ± 0.6 au',
+  asteroids: '6 of 8',
 };
 
 interface PartView {
@@ -73,7 +72,7 @@ const CHECKS: [string, string, string, string, string][] = [
   ['Coldest brown dwarf · SIMBAD', 'WISE 0855−0714', '7.9 ± 0.6″/yr', 'SIMBAD 8.15 · −0.4σ', ''],
   ['Asteroids · JPL', 'Found blind, Dec 2025', '6 of 8', 'to V 19.1 · 0 false tracks', 'film/sky_06.jpg'],
   ['Chance control', 'Shuffled data', NUM.chance, 'chance tracks per field', 'barnard_difference.jpg'],
-  ['Beyond Neptune · JPL', 'Eris and Makemake', NUM.erisLong, 'JPL 95.5 · Makemake 52.4 (52.3)', 'eris_deep_sum_97au.jpg'],
+  ['Nearby star · Gaia, 20′ field', "Barnard's Star", '10.7 ± 0.8″/yr', 'Gaia DR3 10.4 · live /movers', 'barnard_5arcmin_aug25.jpg'],
   ['Planet X candidate · NEOWISE', '394 au candidate', 'ruled out', 'NEOWISE would show it at 13.6σ', ''],
   ['Spectra · 2MASS, WISE', 'A field star', 'within 3 %', 'J 0.99 · H 1.02 · Ks 1.03 · W1 0.985', 'spectrum-crop.jpg'],
 ];
@@ -110,7 +109,7 @@ function Validation() {
               ['WISE 0855−0714 motion', '7.93 ± 0.61″/yr', 'SIMBAD 8.15″/yr · /browndwarfs'],
               ['Known asteroids, blind', '6 of 8', 'JPL sb_ident + Horizons · /film, 60′, 24 visits'],
               ['Chance tracks', `${NUM.chance} / field`, '20 shuffled trials · film: 0.0 at ≥ 4 visits, 12 trials'],
-              ['Eris distance', NUM.erisLong, 'JPL 95.5 · production link of two passes'],
+              ["Barnard's Star motion, 20′", '10.7 ± 0.8″/yr', 'Gaia DR3 10.4″/yr · /movers, 20′'],
               ['394 au candidate', 'ruled out', 'NEOWISE −0.0005 ± 0.0031 mJy where 13.6σ expected'],
               ['Spectrum vs catalogues', 'within 3 %', '2MASS and AllWISE · 357 of 385 exposures'],
             ].map(([a, b, c]) => (
@@ -182,7 +181,7 @@ function Hero({ go }: { go: (id: string) => void }) {
               <b>{NUM.chance}</b>chance tracks
             </span>
             <span>
-              <b>{NUM.eris}</b>Eris
+              <b>{NUM.asteroids}</b>asteroids
             </span>
           </div>
         </a>
