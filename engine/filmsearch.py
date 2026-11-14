@@ -25,7 +25,7 @@ east = (c − x)·step, north = (c − y)·step, c = (n − 1)/2.
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -247,46 +247,91 @@ ORBIT_TRIALS = 12
 VERIFY_MAX = 5000
 
 
-def orbit_tracks(
+def _zm(z: Any) -> NDArray[np.float32]:
+    """The motion maps: an array, or the path of the .npy file that holds them (read in place, shared by the worker processes)."""
+    return np.load(z, mmap_mode="r") if isinstance(z, str) else z  # type: ignore[no-any-return]
+
+
+def save_zmaps(frames: Sequence[Frame], n: int, path: str) -> F64:
+    """Write the motion maps of the frames to `path` (.npy) so that the stages can read them without carrying them around.
+    -> frame times."""
+    z = np.stack([f.motion if f.motion is not None else np.full((n, n), np.nan, np.float32) for f in frames])
+    np.save(path, z)
+    return np.array([f.mjd for f in frames])
+
+
+def orbit_inputs(
+    cands: Sequence[Candidate], verified: dict[int, dict[str, Any]], obs: dict[int, tuple[float, F64]], ra0: float, dec0: float
+) -> dict[str, Any]:
+    """The candidates the orbit linking works on: those that on − off photometry found positive in every exposure of their visit (at least
+    PRE_NSIG sigma), with their place, time and the observer's place."""
+    from engine import onoff
+
+    ok = [c for c, v in verified.items() if v["allpos"] and v["sig"] >= onoff.PRE_NSIG and cands[c].frame in obs]
+    inp: dict[str, Any] = {"ok": ok, "ra0": ra0, "dec0": dec0}
+    if len(ok) >= 3:
+        sel = [cands[c] for c in ok]
+        inp["vis"] = np.array([q.frame for q in sel])
+        inp["t"] = np.array([obs[q.frame][0] for q in sel])
+        inp["rr"] = np.array([obs[q.frame][1] for q in sel])
+        inp["u"] = -np.array([q.east for q in sel])  # the orbit module counts u to the west
+        inp["v"] = np.array([q.north for q in sel])
+    return inp
+
+
+def orbit_link(inp: dict[str, Any]) -> list[dict[str, Any]]:
+    """Orbit tracks through the linked candidates (one stage; the model's own numbers, see engine/orbit.py)."""
+    from engine import orbit as _orbit
+
+    eorbit: Any = _orbit  # the orbit model is numeric code without annotations
+    if len(inp["ok"]) < 3:
+        return []
+    plane = eorbit.Plane(inp["ra0"], inp["dec0"])
+    out: list[dict[str, Any]] = eorbit.link(inp["u"], inp["v"], inp["vis"], inp["t"], inp["rr"], plane)
+    return out
+
+
+def orbit_trial(inp: dict[str, Any], k: int) -> list[int]:
+    """One trial of the control: the same candidates at chance places, linked the same way. -> how many chance tracks of at least n visits
+    (n = 0 .. 10)."""
+    from engine import orbit as _orbit
+
+    eorbit: Any = _orbit
+    ch = [0] * 11
+    for r in eorbit.control_trial(inp["u"], inp["v"], inp["vis"], inp["t"], inp["rr"], inp["ra0"], inp["dec0"], 1000 + k):
+        for j in range(min(r["nvis"], 10) + 1):
+            ch[j] += 1
+    return ch
+
+
+def orbit_assemble(
+    inp: dict[str, Any],
+    tr: list[dict[str, Any]],
+    counts: Sequence[Sequence[int]],
     cands: Sequence[Candidate],
     verified: dict[int, dict[str, Any]],
     obs: dict[int, tuple[float, F64]],
     frame_t: F64,
-    zmaps: NDArray[np.float32],
-    ra0: float,
-    dec0: float,
+    zmaps: Any,
     step: float,
-    trials: int = ORBIT_TRIALS,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Link the candidates that on − off photometry found positive in every exposure of their visit (at least PRE_NSIG sigma) with the orbit
-    model (the observer is the Earth plus the spacecraft at the frame), follow each track into the visits where the orbit predicts it,
-    and keep the tracks that chance does not make: the same linking on the same candidates at chance places, `trials` times.
-    -> (tracks, control)."""
+    """The tracks that chance does not make: the raw orbit tracks followed into the visits where the orbit predicts them (read on the
+    motion maps), kept when they reach what the control (`counts`: one list per trial) shows chance does not. -> (tracks, control)."""
     from engine import onoff
     from engine import orbit as _orbit
 
-    eorbit: Any = _orbit  # the orbit model is numeric code without annotations
-
-    ok = [c for c, v in verified.items() if v["allpos"] and v["sig"] >= onoff.PRE_NSIG and cands[c].frame in obs]
+    eorbit: Any = _orbit
+    ok = inp["ok"]
+    trials = len(counts)
     ctl: dict[str, Any] = {"trials": trials, "min_visits_drawn": None, "chance": {}, "verified_candidates": len(ok)}
     if len(ok) < 3:
         return [], ctl
-    sel = [cands[c] for c in ok]
-    vis = np.array([q.frame for q in sel])
-    t = np.array([obs[q.frame][0] for q in sel])
-    rr = np.array([obs[q.frame][1] for q in sel])
-    u = -np.array([q.east for q in sel])  # the orbit module counts u to the west
-    v = np.array([q.north for q in sel])
-    plane = eorbit.Plane(ra0, dec0)
-    tr = eorbit.link(u, v, vis, t, rr, plane)
-    ch = np.zeros(11)
-    for k in range(trials):
-        for r in eorbit.control_trial(u, v, vis, t, rr, ra0, dec0, 1000 + k):
-            ch[: min(r["nvis"], 10) + 1] += 1
-    ch = ch / max(trials, 1)
+    ch = np.sum(np.array(counts, float), axis=0) / max(trials, 1) if trials else np.zeros(11)
     okn = [k for k in range(3, len(ch)) if ch[k] < CHANCE_MAX]
     nv_min = max(okn[0] if okn else len(ch), NMIN_FOUND)
     ctl.update(min_visits_drawn=nv_min, chance={str(k): round(float(ch[k]), 3) for k in range(3, len(ch)) if ch[k] > 0 or k == nv_min})
+    zmaps = _zm(zmaps)
+    plane = eorbit.Plane(inp["ra0"], inp["dec0"])
     n = zmaps.shape[1]
     cc = (n - 1) / 2.0
     out: list[dict[str, Any]] = []
@@ -339,41 +384,57 @@ def orbit_tracks(
     return out, ctl
 
 
-def search(
-    frames: Sequence[Frame],
-    cands: Sequence[Candidate],
-    step_arcsec: float,
-    n: int,
-    verified: dict[int, dict[str, Any]] | None = None,
-    obs: dict[int, tuple[float, F64]] | None = None,
-    ra0: float = 0.0,
-    dec0: float = 0.0,
-    trials: int = CONTROL_TRIALS,
-) -> dict[str, Any]:
-    """The whole search of a film: orbit tracks through the verified candidates when the verification and the observers are given, and the
-    straight-line tracks through the strongest candidates that no orbit track took over (not verified). Track points are in the film's grid
-    (x column, y row, row 0 north)."""
-    out: dict[str, Any] = {"candidates": len(cands), "tracks": [], "control": {"trials": trials, "min_visits_drawn": None, "chance": {}}}
-    if len(cands) < 3:
-        return out
-    frame_t = np.array([f.mjd for f in frames])
-    zmaps = np.stack([f.motion if f.motion is not None else np.full((n, n), np.nan, np.float32) for f in frames])
-    tracks: list[dict[str, Any]] = []
-    if verified is not None and obs is not None:
-        tracks, ctl = orbit_tracks(cands, verified, obs, frame_t, zmaps, ra0, dec0, step_arcsec)
-        out["control"] = ctl
-        out["verification"] = {
-            "measured": len(verified),
-            "verified_alone": sum(1 for v in verified.values() if v["ok"]),
-            "linked": ctl["verified_candidates"],
-        }
+def line_inputs(cands: Sequence[Candidate]) -> dict[str, Any]:
+    """The strongest candidates for the straight-line linking: place, time and visit."""
     top = list(cands[:LINK_MAX])
-    t = np.array([q.t for q in top])
-    u = np.array([q.east for q in top])
-    v = np.array([q.north for q in top])
-    vis = np.array([q.frame for q in top], float)
-    lines = tracks_with_recovery(t, u, v, vis, frame_t, zmaps, step_arcsec)
-    ch = chance_by_visits(t, u, v, vis, n * step_arcsec / 2.0, frame_t, zmaps, step_arcsec, trials)
+    return {
+        "t": np.array([q.t for q in top]),
+        "u": np.array([q.east for q in top]),
+        "v": np.array([q.north for q in top]),
+        "vis": np.array([q.frame for q in top], float),
+    }
+
+
+def line_link(lin: dict[str, Any], frame_t: F64, zmaps: Any, step: float) -> list[dict[str, Any]]:
+    """Straight-line tracks through the candidates, recovered on the motion maps."""
+    return tracks_with_recovery(lin["t"], lin["u"], lin["v"], lin["vis"], frame_t, _zm(zmaps), step)
+
+
+def line_trial(lin: dict[str, Any], half: float, frame_t: F64, zmaps: Any, step: float, k: int) -> list[int]:
+    """One trial of the straight-line control: the candidates at chance places, linked and recovered like the real tracks.
+    -> how many chance
+    tracks of at least n visits (n = 0 .. 10)."""
+    rng = np.random.default_rng(1 + k)
+    uu, vv = rng.uniform(-half, half, len(lin["t"])), rng.uniform(-half, half, len(lin["t"]))
+    c = [0] * 11
+    for r in tracks_with_recovery(lin["t"], uu, vv, lin["vis"], frame_t, _zm(zmaps), step):
+        if r["nvis"] >= NMIN_FOUND and r["rms"] <= RMS_MAX:
+            for j in range(min(r["score"], 10) + 1):
+                c[j] += 1
+    return c
+
+
+def assemble_search(
+    cands: Sequence[Candidate],
+    lines: list[dict[str, Any]],
+    line_counts: Sequence[Sequence[int]],
+    tracks: list[dict[str, Any]],
+    ctl: dict[str, Any] | None,
+    frame_t: F64,
+    verification: dict[str, Any] | None,
+    trials: int,
+) -> dict[str, Any]:
+    """The result of a film search: the orbit tracks, then the straight-line tracks that no orbit track took over (not verified), with the
+    two controls."""
+    out: dict[str, Any] = {
+        "candidates": len(cands),
+        "tracks": [],
+        "control": ctl or {"trials": trials, "min_visits_drawn": None, "chance": {}},
+    }
+    if verification is not None:
+        out["verification"] = verification
+    top = list(cands[:LINK_MAX])
+    ch = np.sum(np.array(line_counts, float), axis=0) / max(len(line_counts), 1) if line_counts else np.zeros(11)
     okn = [k for k in range(NMIN_FOUND, len(ch)) if ch[k] < CHANCE_MAX]
     nv_line = okn[0] if okn else len(ch)
     line_chance = {str(k): round(float(ch[k]), 3) for k in range(NMIN_FOUND, len(ch)) if ch[k] > 0 or k == nv_line}
@@ -410,6 +471,106 @@ def search(
         )
     out["tracks"] = tracks
     return out
+
+
+async def search_staged(
+    run: Callable[..., Awaitable[Any]],
+    frames: Sequence[Frame],
+    cands: Sequence[Candidate],
+    step_arcsec: float,
+    n: int,
+    verified: dict[int, dict[str, Any]] | None = None,
+    obs: dict[int, tuple[float, F64]] | None = None,
+    ra0: float = 0.0,
+    dec0: float = 0.0,
+    trials: int = CONTROL_TRIALS,
+    progress: Callable[[str, int, int], None] | None = None,
+) -> dict[str, Any]:
+    """The whole search of a film in stages, each a call `run(fn, *args)` of a module-level function (in the service a worker process: the
+    stages are a few seconds each and the control trials run side by side). `run` may also just call fn."""
+    import asyncio
+    import shutil
+    import tempfile
+
+    out: dict[str, Any] = {"candidates": len(cands), "tracks": [], "control": {"trials": trials, "min_visits_drawn": None, "chance": {}}}
+    if len(cands) < 3:
+        return out
+
+    def say(msg: str, i: int = 0, total: int = 0) -> None:
+        if progress is not None:
+            progress(msg, i, total)
+
+    work = tempfile.mkdtemp(prefix="filmsearch_")
+    try:
+        zpath = f"{work}/zmaps.npy"
+        say("keeping the motion maps")
+        frame_t = await run(save_zmaps, frames, n, zpath)
+        tracks: list[dict[str, Any]] = []
+        ctl: dict[str, Any] | None = None
+        verification: dict[str, Any] | None = None
+        if verified is not None and obs is not None:
+            inp = await run(orbit_inputs, cands, verified, obs, ra0, dec0)
+            say("linking the verified candidates by an orbit")
+            raw = await run(orbit_link, inp)
+            counts: list[list[int]] = []
+            if len(inp["ok"]) >= 3:
+                done = 0
+
+                async def one(k: int) -> list[int]:
+                    nonlocal done
+                    r: list[int] = await run(orbit_trial, inp, k)
+                    done += 1
+                    say("control: the same candidates at chance places", done, ORBIT_TRIALS)
+                    return r
+
+                counts = list(await asyncio.gather(*(one(k) for k in range(ORBIT_TRIALS))))
+            say("following the tracks into the other visits")
+            tracks, ctl = await run(orbit_assemble, inp, raw, counts, cands, verified, obs, frame_t, zpath, step_arcsec)
+            verification = {
+                "measured": len(verified),
+                "verified_alone": sum(1 for v in verified.values() if v["ok"]),
+                "linked": ctl["verified_candidates"],
+            }
+        lin = await run(line_inputs, cands)
+        say("straight-line tracks through the strongest candidates")
+        lines = await run(line_link, lin, frame_t, zpath, step_arcsec)
+        half = n * step_arcsec / 2.0
+        done_l = 0
+
+        async def one_line(k: int) -> list[int]:
+            nonlocal done_l
+            r: list[int] = await run(line_trial, lin, half, frame_t, zpath, step_arcsec, k)
+            done_l += 1
+            say("control: straight lines at chance places", done_l, trials)
+            return r
+
+        line_counts = list(await asyncio.gather(*(one_line(k) for k in range(trials))))
+        final: dict[str, Any] = await run(assemble_search, cands, lines, line_counts, tracks, ctl, frame_t, verification, trials)
+        return final
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+def search(
+    frames: Sequence[Frame],
+    cands: Sequence[Candidate],
+    step_arcsec: float,
+    n: int,
+    verified: dict[int, dict[str, Any]] | None = None,
+    obs: dict[int, tuple[float, F64]] | None = None,
+    ra0: float = 0.0,
+    dec0: float = 0.0,
+    trials: int = CONTROL_TRIALS,
+) -> dict[str, Any]:
+    """The whole search of a film in this process (tools and tests; the service runs `search_staged` in worker processes). Track points are
+    in the film's grid (x column, y row, row 0 north)."""
+    import asyncio
+
+    async def inline(fn: Callable[..., Any], *args: Any) -> Any:
+        return fn(*args)
+
+    result: dict[str, Any] = asyncio.run(search_staged(inline, frames, cands, step_arcsec, n, verified, obs, ra0, dec0, trials))
+    return result
 
 
 def match_known(

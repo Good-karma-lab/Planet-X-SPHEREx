@@ -15,7 +15,7 @@ from typing import Any
 import numpy as np
 
 from engine.film import FILM_DETECTORS, build_film, film_grid
-from engine.filmsearch import VERIFY_MAX, find_candidates, search
+from engine.filmsearch import VERIFY_MAX, find_candidates, search_staged
 from engine.passes import split_visits
 from indexer.store import Index
 from service.jobs.scheduler import Context
@@ -100,7 +100,11 @@ async def run_filmsearch(
     control = [v for v in ver[len(top) :] if v is not None]
     obs = await observers(fr, exps, visit_of, frames)
     ctx.phase("linking the verified candidates")
-    result = await ctx.compute(search, frames, cands, grid.step_arcsec, grid.n, verified, obs, grid.ra0, grid.dec0)
+
+    def stage(msg: str, i: int = 0, total: int = 0) -> None:
+        ctx.phase(f"linking the verified candidates: {msg}" + (f" {i} of {total}" if total else ""), i, total)
+
+    result = await search_staged(ctx.compute, frames, cands, grid.step_arcsec, grid.n, verified, obs, grid.ra0, grid.dec0, progress=stage)
     result["verification"] = {
         **result.get("verification", {}),
         "control_measured": len(control),
