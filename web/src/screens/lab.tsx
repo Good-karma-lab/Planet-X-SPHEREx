@@ -427,6 +427,7 @@ export function Lab({ route }: { route: Route }) {
     stretch,
     film,
     meta: null as FieldMeta | null,
+    prov: { ra0: ra, dec0: dec, step_arcsec: 1.5375, n: 4 },
   });
   state.current = {
     view,
@@ -440,6 +441,11 @@ export function Lab({ route }: { route: Route }) {
     stretch,
     film,
     meta,
+    // the grid the service builds for this field (engine/grid.py), known before the field is finished: marks during a cold load
+    prov: (() => {
+      const step = fov <= 20 ? 1.5375 : 3.075;
+      return { ra0: ra, dec0: dec, step_arcsec: step, n: Math.ceil((fov * 60) / step / 4) * 4 };
+    })(),
   };
 
   useEffect(() => {
@@ -781,6 +787,7 @@ export function Lab({ route }: { route: Route }) {
           setShown((s) => (s && s.pass === a && s.stack === stack ? s : { pass: a, stack }));
         }
       }
+      if (!rects.length && !days && st.view === 'picture') rects.push({ x: 0, y: 0, w, h }); // a cold field: the marks already
       layoutRef.current = { rects, inset };
       drawRings();
       const key = JSON.stringify(out) + (inset ? `${inset.w}` : '');
@@ -823,7 +830,7 @@ export function Lab({ route }: { route: Route }) {
       const m = st.meta;
       const F = filmRef.current;
       const days = st.film !== null;
-      const grid = days && F ? F.meta.grid : m?.grid;
+      const grid = days && F ? F.meta.grid : (m?.grid ?? (!days && st.view === 'picture' ? st.prov : undefined));
       if (!grid) return;
       const { rects, inset } = layoutRef.current;
       // artifacts: where the pipeline flagged the pixel in many exposures of the season shown
@@ -841,11 +848,11 @@ export function Lab({ route }: { route: Route }) {
         0.5 - ((dec - grid.dec0) * 3600) / fovArc,
       ];
       // the date of what is shown: the season's middle, or the visit's time in the Days scale
-      const shownMjd = days && F ? (F.meta.frames[shownVisit]?.mjd ?? F.meta.pass.mjd0) : (m?.passes[shownPass] ?? m?.passes[0])?.mjd_mid;
-      if (shownMjd === undefined) return;
+      const shownMjd =
+        days && F ? (F.meta.frames[shownVisit]?.mjd ?? F.meta.pass.mjd0) : ((m?.passes[shownPass] ?? m?.passes[0])?.mjd_mid ?? 60994.5);
       const year = 2000 + (shownMjd - 51544.5) / 365.25;
       const marks: Mark[] = [];
-      if (st.opts.marker && m) {
+      if (st.opts.marker) {
         for (const o of targets.current) {
           const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, year);
           const [u, v] = uvOf(tra, tdec);
@@ -859,7 +866,7 @@ export function Lab({ route }: { route: Route }) {
             colour: '#7ff0e4',
             fill: '#d8fffa',
             rr: 18,
-            path: m.passes.map((pp) => atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2000 + (pp.mjd_mid - 51544.5) / 365.25)),
+            path: m?.passes.map((pp) => atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2000 + (pp.mjd_mid - 51544.5) / 365.25)),
             motion: (o.pmra ?? 0) || (o.pmdec ?? 0) ? [o.pmra ?? 0, o.pmdec ?? 0] : undefined,
           });
         }
