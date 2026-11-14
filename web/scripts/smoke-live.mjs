@@ -46,7 +46,9 @@ await check('lab: Barnard 5′ opens (warm)', async () => {
 });
 await check('lab: movers find Barnard with Gaia', async () => {
   await page.getByTestId('tab-find').click();
-  await page.getByText('Gaia: same motion').first().waitFor({ timeout: 60000 });
+  // the Gaia check: the same motion, or the measured rate's tension with Gaia in σ (a saturated core at 5′)
+  await page.getByText(/Gaia: same motion|σ apart/).first().waitFor({ timeout: 60000 });
+  return (await page.locator('.mvrow').first().innerText()).replace(/\n/g, ' ');
 });
 await check('lab: spectrum of a clicked star', async () => {
   const v = await page.locator('.vsq').boundingBox();
