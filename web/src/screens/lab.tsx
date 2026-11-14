@@ -101,7 +101,7 @@ function hslRgb(h: number): [number, number, number] {
 }
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-/** A season by the month it starts: "Aug ’25". */
+/** A season by its middle month: "Aug ’25". */
 const season = (mjd: number) => {
   const d = mjdToDate(mjd);
   return `${MONTHS[d.getUTCMonth()]} ’${String(d.getUTCFullYear()).slice(2)}`;
@@ -1603,7 +1603,7 @@ export function Lab({ route }: { route: Route }) {
       : archStep !== null && archStep < ARCHIVE.length
         ? `Archive · ${ARCHIVE[archStep]!.name} · ${ARCHIVE[archStep]!.years} · then the SPHEREx seasons`
         : shown && meta
-          ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd0) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}${phase ? ` · ${phase}` : ''}${Math.abs(eclipticLat(ra, dec)) < 10 ? ' · near the ecliptic: asteroids likely here, switch to Days' : ''}`
+          ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd_mid) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${meta.overlapping > meta.exposures ? ` (an even sample of the ${meta.overlapping} that cover the field)` : ''}${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}${phase ? ` · ${phase}` : ''}${Math.abs(eclipticLat(ra, dec)) < 10 ? ' · near the ecliptic: asteroids likely here, switch to Days' : ''}`
           : phase;
   const frameIndex = frame ?? shown?.pass ?? 0;
   const wallView = view !== 'picture' && film === null;
@@ -1638,7 +1638,7 @@ export function Lab({ route }: { route: Route }) {
       ? ''
       : !filmData
         ? filmNote || 'asking for the visits of the pass…'
-        : `Days · pass of ${season(filmData.meta.pass.mjd0)} · ${nVisits} visits · visit ${visit + 1} · ${utc(filmData.meta.frames[visit]?.mjd ?? 0)} · ` +
+        : `Days · pass of ${season((filmData.meta.pass.mjd0 + filmData.meta.pass.mjd1) / 2)} · ${nVisits} visits · visit ${visit + 1} · ${utc(filmData.meta.frames[visit]?.mjd ?? 0)} · ` +
           (filmBodies?.state === 'running'
             ? 'asking JPL which known asteroids cross the field…'
             : filmBodies
@@ -1812,7 +1812,7 @@ export function Lab({ route }: { route: Route }) {
                 )
               ) : (
                 view === 'picture' &&
-                passMeta && <div class="vlabel">{time === 'sum' ? 'all seasons' : `SPHEREx · ${season(passMeta.mjd0)}`}</div>
+                passMeta && <div class="vlabel">{time === 'sum' ? 'all seasons' : `SPHEREx · ${season(passMeta.mjd_mid)}`}</div>
               )}
               {film !== null && !filmData && <div class="vwait">{filmNote || 'asking for the visits of the pass…'}</div>}
             </div>
@@ -2447,7 +2447,7 @@ export function Lab({ route }: { route: Route }) {
                       {passes.map((q, i) => (
                         <span
                           key={q.index}
-                          class={frameIndex === q.index ? 'on' : ''}
+                          class={frameIndex === q.index && time !== 'sum' ? 'on' : ''}
                           style={{
                             left: passes.length > 1 ? `${(i / (passes.length - 1)) * 100}%` : '0%',
                             transform: `translateX(${i === 0 ? 0 : i === passes.length - 1 ? -100 : -50}%)`,
@@ -2457,7 +2457,7 @@ export function Lab({ route }: { route: Route }) {
                             setFrame(q.index);
                           }}
                         >
-                          {season(q.mjd0)}
+                          {season(q.mjd_mid)}
                         </span>
                       ))}
                     </div>
