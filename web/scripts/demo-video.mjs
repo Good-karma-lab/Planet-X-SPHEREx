@@ -1,4 +1,4 @@
-// Records the demo video of the live tool: a scripted browser visits https://spherex.space and the scenes are cut to 30 s.
+// Records the demo video of the live tool: a scripted browser visits https://spherex.space and the scenes are cut to 30 s (demo-cut.mjs).
 // Every picture is a screen recording of the tool on real SPHEREx data; the subtitles are drawn on the page during the recording.
 //   cd web && node scripts/demo-video.mjs [base-url] [out-dir]
 import { chromium } from '@playwright/test';
@@ -38,70 +38,49 @@ async function waitPicture() {
   await page.waitForFunction(() => /Season \d of \d/.test(document.querySelector('[data-testid=lab-status]')?.textContent ?? ''), null, { timeout: 120000 });
 }
 
-// 1. globe
-await page.goto(`${BASE}/#/globe`);
-await page.waitForTimeout(7000);
-await subtitle("NASA's SPHEREx maps the whole sky in 102 infrared colours.");
-mark('globe');
-const sky = page.getByTestId('sky');
-const box = await sky.boundingBox();
-for (let i = 0; i < 12; i++) {
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -120);
-  await page.waitForTimeout(250);
-}
-await page.waitForTimeout(800);
-mark('globe-end');
+// one idea per shot, played slowly (half speed, no cross-fade), the caption saying what to look at
 
-// 2. Barnard's Star, 10′: the seasons as a pendulum, the mover ring and its Gaia check
-await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=10`);
-await waitPicture();
-await page.waitForTimeout(4000);
-await subtitle('SPHEREx Sky plays the seasons back and forth: what moves, jumps.');
-mark('pendulum');
-await page.waitForTimeout(6000);
-mark('pendulum-end');
-
-// 3. archive images, then SPHEREx
-await page.locator('.archsw input').check();
-await subtitle('Decades of motion: archive surveys from 1985, then SPHEREx 2025–26.');
-mark('archive');
-await page.waitForTimeout(5600);
-mark('archive-end');
-await page.locator('.archsw input').uncheck();
-
-// 3b. the film of one pass near the ecliptic: known asteroids ringed where JPL predicts them, amber where SPHEREx sees them
-await page.goto(`${BASE}/#/lab?ra=169.89170&dec=4.35140&fov=60&film=61027`);
-await page.getByText('Known bodies', { exact: true }).waitFor({ timeout: 180000 });
-await page.waitForFunction(() => !/asking JPL/.test(document.body.innerText), null, { timeout: 120000 });
-await page.waitForTimeout(1500);
-await subtitle('One pass, visit by visit: known asteroids hop; JPL predicts, SPHEREx sees.');
-mark('film');
-await page.waitForTimeout(6000);
-mark('film-end');
-await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=10`);
+// 1. Barnard's Star, 5′: the seasons as a pendulum, the star ringed with its measured rate
+await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=5&spd=0.5`);
 await page.getByRole('button', { name: 'Controls', exact: true }).click();
 await waitPicture();
-await page.waitForTimeout(1500);
+await page.waitForTimeout(3000);
+await subtitle("Barnard's Star, season by season: watch the ringed star step north.");
+mark('pendulum');
+await page.waitForTimeout(8000);
+mark('pendulum-end');
 
-// 4. a click on a star: its spectrum, measured live
+// 2. Days: the visits inside one pass, an asteroid hopping between visits hours apart
+await page.goto(`${BASE}/#/lab?ra=169.71871&dec=4.68556&fov=20&film=61023.3&spd=0.5`);
+await page.waitForFunction(() => /Days · pass/.test(document.querySelector('[data-testid=lab-status]')?.textContent ?? ''), null, { timeout: 240000 });
+await page.waitForFunction(() => !/asking JPL/.test(document.querySelector('[data-testid=lab-status]')?.textContent ?? ''), null, { timeout: 120000 });
+await page.waitForTimeout(1500);
+await subtitle('Days inside one pass: the ringed asteroid hops from visit to visit.');
+mark('days');
+await page.waitForTimeout(8000);
+mark('days-end');
+
+// 3. a click on a star: its spectrum, measured live in every exposure
+await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=5`);
+await waitPicture();
+await page.waitForTimeout(1500);
 const vsq = await page.locator('.vsq').boundingBox();
-await page.mouse.click(vsq.x + vsq.width * 0.514, vsq.y + vsq.height * 0.33);
-await subtitle('Click any source: its spectrum, measured live in every exposure.');
+await page.mouse.click(vsq.x + vsq.width * 0.514, vsq.y + vsq.height * 0.165);
+await subtitle('Click a star: its spectrum is measured in every exposure, point by point.');
 mark('spectrum');
 await page.waitForTimeout(7000);
 mark('spectrum-end');
 
-// 5. ε Indi B, 20′: the anomaly search ranks the brown dwarf first
-await page.goto(`${BASE}/#/lab?ra=331.09645&dec=-56.80059&fov=20&ref=0`);
+// 4. ε Indi B, 20′: the anomaly search ranks the brown dwarf first; its passport
+await page.goto(`${BASE}/#/lab?ra=331.09645&dec=-56.80059&fov=20`);
 await page.getByRole('button', { name: 'Controls', exact: true }).click();
 await waitPicture();
-await page.getByText('Anomaly 1', { exact: true }).first().waitFor({ timeout: 60000 });
+await page.getByText('Anomaly 1', { exact: true }).first().waitFor({ timeout: 120000 });
 await page.waitForTimeout(1500);
 await page.getByText('Anomaly 1', { exact: true }).first().click();
-await subtitle('Anomaly search: a cold brown dwarf stands out by its spectrum.');
+await subtitle("Anomaly 1 is ε Indi B: a cold brown dwarf, unlike the field's stars.");
 mark('anomaly');
-await page.waitForTimeout(6000);
+await page.waitForTimeout(7000);
 mark('anomaly-end');
 
 // 6. title card
