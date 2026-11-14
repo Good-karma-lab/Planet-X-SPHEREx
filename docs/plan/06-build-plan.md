@@ -24,7 +24,7 @@ to the supervisor. Small commits throughout. The walking skeleton is deployed ea
 
 ## M2 — Exposure index
 
-- **Build:** `indexer/`: list periods, read headers, footprints (12 vertices), HEALPix shards (columnar, immutable per period), query by
+- **Build:** `indexer/`: list periods of QR2, QR3 and DR1, read headers, link the same exposure across releases (DR1 preferred), footprints (12 vertices), HEALPix shards (columnar, immutable per period), query by
   polygon overlap, coverage map, daily follow, IRSA ObsCore reconciliation, SIA2 fallback for unindexed periods, snapshot/restore to R2.
 - **Test:** unit tests (footprint geometry, shard read/write, overlap at poles and RA 0/360); a partial build of a few periods; V3.
 - **Done:** a full index built (≈ 9 h first crawl, run in the background on the VM or a laptop and published to R2); queries < 50 ms

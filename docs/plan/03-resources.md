@@ -32,7 +32,7 @@ timeouts, retries, concurrency limits and a circuit breaker, and a generic User-
 
 ## 3.2 SPHEREx Level-2 in the public bucket
 
-- **Where:** `https://nasa-irsa-spherex.s3.us-east-1.amazonaws.com/<release>/<period>/…` (QR2, QR3, deep collections), part of the AWS
+- **Where:** `https://nasa-irsa-spherex.s3.us-east-1.amazonaws.com/<release>/<period>/…` (QR2, QR3, deep collections, and DR1 since 2026-11-11 — preferred for the periods it covers), part of the AWS
   Open Data program: no account, no charge to read. The nearer to us-east-1 the compute, the faster cold reads (the reason
   for choosing Ashburn).
 - **How:** HTTPS GET with `Range: bytes=a-b`; one request per contiguous row band per plane; header chain walked once per file and
