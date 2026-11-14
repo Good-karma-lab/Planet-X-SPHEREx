@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { formatDec, formatRA } from '../lib/sky';
+import { atEpoch, formatDec, formatRA } from '../lib/sky';
 import { binNote, binSpectrum, type Bin } from './spectrum/bins';
 import { CatalogueCheck, REF_LAM, useCatalogue, useReferencePhotometry } from './spectrum/catalogue';
 import { quickPoints, useQuicklook, type QuickPoint } from './spectrum/quicklook';
@@ -32,13 +32,29 @@ export function useSpectrum(src: Source | null): {
   const [view, setView] = useState<SpecView | null>(null);
   const [points, setPoints] = useState<SpecPoint[]>([]);
   const [error, setError] = useState('');
+  // the object last followed, at the date of the passes: the same object picked again (at its J2000 or its present place) keeps what is on show while its
+  // spectrum is asked for again, so the state does not fall back to "Finding the exposures…" and a count that was 54 does not restart at 0
+  const last = useRef<{ ra: number; dec: number; key: string } | null>(null);
   useEffect(() => {
-    setView(null);
-    setPoints([]);
+    if (!src) {
+      last.current = null;
+      setView(null);
+      setPoints([]);
+      setError('');
+      return;
+    }
+    const at = src.pmra || src.pmdec ? atEpoch(src.ra, src.dec, src.pmra ?? 0, src.pmdec ?? 0, 2025.9) : ([src.ra, src.dec] as [number, number]);
+    const prev = last.current;
+    const same = !!prev && Math.hypot((prev.ra - at[0]) * Math.cos((at[1] * Math.PI) / 180), prev.dec - at[1]) * 3600 < 4;
+    last.current = { ra: at[0], dec: at[1], key: '' };
+    if (!same) {
+      setView(null);
+      setPoints([]);
+    }
     setError('');
-    if (!src) return;
     let stop = false;
     let held: SpecPoint[] = [];
+    let first = true;
     const q = new URLSearchParams({
       ra: src.ra.toFixed(6),
       dec: src.dec.toFixed(6),
@@ -62,8 +78,10 @@ export function useSpectrum(src: Source | null): {
           const v = (await r.json()) as SpecView;
           if (stop) return;
           held = [...held, ...v.points];
-          setView(v);
-          setPoints(held);
+          // a measurement that starts again for the same object never shows a smaller count than the one on show
+          setView((old) => (same && first && old && old.state === 'running' && v.state === 'running' && v.measured < old.measured ? old : v));
+          first = false;
+          setPoints((old) => (held.length >= old.length || !same ? held : old));
           setError(v.state === 'failed' ? v.error : '');
           if (v.state !== 'running') {
             // the finished spectrum once more in full: points that deviate from their neighbours are flagged only at the end
