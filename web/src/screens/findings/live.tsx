@@ -14,11 +14,25 @@ export interface TrackLite {
   speed: number;
   pa: number;
   passes: number[];
+  mjd?: number[];
+  ra?: number[];
+  dec?: number[];
+  snr?: number[];
+  v_east?: number;
+  v_north?: number;
+  rms_arcsec?: number;
+  ra_2025_9?: number;
+  dec_2025_9?: number;
   check: string;
-  gaia: { source_id: string; pm: number; g?: number | null } | null;
+  gaia: { source_id: string; pm: number; pa?: number; g?: number | null; offset_arcsec?: number } | null;
 }
 export interface AnomalyLite {
   n: number;
+  ra?: number;
+  dec?: number;
+  moves?: boolean;
+  snr?: number | null;
+  points?: number;
   score: number;
   drivers: { lo: number; hi: number; z: number; share: number }[];
   identified?: { simbad?: { state: string; name?: string; type?: string }; gaia?: { state: string; source_id?: string } };

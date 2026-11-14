@@ -8,6 +8,7 @@ import { FindingPicture } from './findings/thumb';
 import './findings/findings.css';
 import { FIELD, useLive } from './findings/live';
 import { AboutBody } from './about/About';
+import { LeadReport, LeadsList, rankLeads, useLeadParam } from './findings/leads';
 
 const fmtN = (n: number | undefined | null) => (n ?? 0).toLocaleString('en-US');
 const kv = (k: string, v: string) => (
@@ -154,6 +155,18 @@ const CHECK: Record<string, string> = { same: 'Gaia: same motion', none: 'no Gai
 
 function FindingsPage() {
   const live = useLive();
+  const leads = rankLeads(live);
+  const [leadId, setLeadId] = useLeadParam();
+  const open = leads.find((l) => l.id === leadId);
+  if (leadId && open)
+    return (
+      <>
+        <div class="pg-h">
+          <h1>Findings</h1>
+        </div>
+        <LeadReport lead={open} onBack={() => setLeadId(null)} />
+      </>
+    );
   return (
     <>
       <div class="pg-h">
@@ -169,6 +182,7 @@ function FindingsPage() {
         <div><b>{live.reduce((a, l) => a + (l.movers?.result?.tracks.filter((t) => t.check === 'same').length ?? 0), 0)}</b><span>of them a Gaia star with the same motion</span></div>
         <div><b>{live.reduce((a, l) => a + (l.anomalies?.result?.anomalies.length ?? 0), 0)}</b><span>spectral anomalies</span></div>
       </div>
+      <LeadsList leads={leads} onOpen={setLeadId} />
       <div class="pg-grid">
         {live.map((l) => {
           const mv = l.movers?.result;
