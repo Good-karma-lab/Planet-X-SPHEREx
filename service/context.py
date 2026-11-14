@@ -20,6 +20,7 @@ from urllib.parse import quote
 
 import httpx
 
+from service import cpu
 from service.upstream.breaker import Breaker, BreakerOpenError
 
 SIMBAD_BASES = ("https://simbad.harvard.edu/simbad/sim-tap/sync", "https://simbad.cds.unistra.fr/simbad/sim-tap/sync")
@@ -199,6 +200,48 @@ def parse_ned(body: str) -> dict[str, Any]:
     return best[1] if best else {"state": "none"}
 
 
+def allwise_cone(ra: float, dec: float, radius: float) -> list[dict[str, Any]]:
+    """The AllWISE sources around a place from the Parquet copy in AWS (a worker process: it reads files over the network)."""
+    from engine.extras import allwise
+
+    return allwise.sources(ra, dec, radius)
+
+
+def from_allwise(part: str, rows: list[dict[str, Any]], radius: float) -> dict[str, Any] | None:
+    """The answer of `parse_irsa` for 2MASS or AllWISE built from rows of the AllWISE Parquet copy (marked `via`); None when the copy cannot
+    say (2MASS: a source stands there but AllWISE has no 2MASS match for it, which does not mean 2MASS has none)."""
+    via = "AllWISE copy in AWS (IRSA's TAP did not answer)"
+    for r in rows:
+        if r["sep_arcsec"] > radius + 1.0:
+            continue
+        if part == "allwise":
+            return {
+                "state": "ok",
+                "sep": r["sep_arcsec"],
+                "designation": r.get("designation"),
+                "W1": r.get("w1mpro"),
+                "W2": r.get("w2mpro"),
+                "W3": r.get("w3mpro"),
+                "W4": r.get("w4mpro"),
+                "cc_flags": r.get("cc_flags"),
+                "via": via,
+            }
+        if r.get("j_m_2mass") is not None or r.get("k_m_2mass") is not None:
+            return {
+                "state": "ok",
+                "sep": r["sep_arcsec"],
+                "designation": None,
+                "J": r.get("j_m_2mass"),
+                "H": r.get("h_m_2mass"),
+                "Ks": r.get("k_m_2mass"),
+                "qual": None,
+                "via": via + ", the 2MASS magnitudes of AllWISE's own association",
+            }
+    if part == "twomass" and any(r["sep_arcsec"] <= radius + 1.0 for r in rows):
+        return None
+    return {"state": "none", "via": via}
+
+
 class CatalogueContext:
     """The seven catalogues for a place, asked together, each behind its own breaker, cached for a week (answers 'ok' and 'none' only)."""
 
@@ -264,13 +307,28 @@ class CatalogueContext:
                 err = e
         raise err or RuntimeError("no Gaia archive")
 
-    async def _irsa(self, part: str, ra: float, dec: float, radius: float) -> dict[str, Any]:
+    async def _irsa(self, part: str, ra: float, dec: float, radius: float, alt: tuple[float, float] | None = None) -> dict[str, Any]:
+        """One IRSA catalogue at the place `ra, dec` (at that catalogue's epoch). When IRSA's TAP does not answer, 2MASS and AllWISE are
+        read from IRSA's Parquet copy of AllWISE in AWS (it carries AllWISE's 2MASS magnitudes): `alt` is the place at AllWISE's epoch."""
         table, cols, _, labels = IRSA_PARTS[part]
         cone = (radius + 1.0) / 3600.0
         adql = (
             f"SELECT TOP 10 {cols} FROM {table} WHERE CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {cone:.6f})) = 1"
         )
-        return parse_irsa(await self._tap("irsa", IRSA_TAP, adql), ra, dec, radius, labels)
+        try:
+            return parse_irsa(await self._tap("irsa", IRSA_TAP, adql), ra, dec, radius, labels)
+        except (httpx.HTTPError, BreakerOpenError, ValueError) as first:
+            if part not in ("twomass", "allwise"):
+                raise
+            a, d = (ra, dec) if part == "allwise" or alt is None else alt
+            try:
+                rows = await cpu.run(allwise_cone, a, d, radius + 1.0)
+            except Exception:  # the cloud copy did not answer either: the first failure is the one said
+                raise first from None
+            answer = from_allwise(part, rows, radius)
+            if answer is None:
+                raise first
+            return answer
 
     async def _vsx(self, ra: float, dec: float, radius: float) -> dict[str, Any]:
         adql = (
@@ -341,9 +399,10 @@ class CatalogueContext:
 
         for part, (_, _, year, _) in IRSA_PARTS.items():
             a, d = at(year)
+            alt = at(2010.5)
 
-            def fetch(part: str = part, a: float = a, d: float = d) -> Awaitable[dict[str, Any]]:
-                return self._irsa(part, a, d, radius)
+            def fetch(part: str = part, a: float = a, d: float = d, alt: tuple[float, float] = alt) -> Awaitable[dict[str, Any]]:
+                return self._irsa(part, a, d, radius, alt)
 
             tasks[part] = asyncio.create_task(self._kept(f"{part}_{a:.5f}_{d:.5f}_{radius:.1f}", fetch))
         for k, t in tasks.items():
