@@ -48,6 +48,44 @@ def fit_stamps(
     return out
 
 
+def stamps_and_fits(
+    img_raw: NDArray[np.generic],
+    flg_raw: NDArray[np.generic],
+    y0: int,
+    px: NDArray[np.float64],
+    py: NDArray[np.float64],
+    inside: NDArray[np.bool_],
+    cw_rows: NDArray[np.float64],
+    bad_mask: int,
+    over_mask: int,
+    ps: Any,
+) -> list[tuple[int, onoff.Point]]:
+    """The stamps of every place of one exposure and their PSF fits (a worker process). `img_raw`/`flg_raw`: the detector rows y0.. read;
+    `cw_rows`: the wavelength map of the same rows; px, py: the places on the detector; inside: which of them the window covers."""
+    img = img_raw.astype(np.float64)
+    flg = flg_raw.astype(np.int64)
+    good = np.isfinite(img) & (flg == 0)
+    if good.sum() < 100:
+        return []
+    var = max(1.4826 * float(np.median(np.abs(img[good] - np.median(img[good])))), 1e-6) ** 2
+    bad = (flg & bad_mask) != 0
+    overflow = (flg & over_mask) != 0
+    items: list[Item] = []
+    for k in np.where(inside)[0]:
+        x, y = float(px[k]), float(py[k])
+        xi, yi = round(x), round(y)
+        sl = (slice(yi - HALF - y0, yi + HALF + 1 - y0), slice(xi - HALF, xi + HALF + 1))
+        st = img[sl]
+        lam = float(cw_rows[yi - y0, xi])
+        if st.shape != (2 * HALF + 1, 2 * HALF + 1) or not (math.isfinite(lam) and lam > 0):
+            continue
+        usable = np.isfinite(st) & ~bad[sl] & ~overflow[sl]
+        saturated = overflow[sl] | (~np.isfinite(st) & ~bad[sl])
+        fx, fy = x - xi, y - yi
+        items.append((int(k), st, usable, saturated, spxpsf.stamp(ps, ps.zone_index(x, y), fx, fy, HALF), fx, fy, lam))
+    return fit_stamps(var, items)
+
+
 async def measure_places(
     fr: FileReader,
     wl: WavelengthMaps,
@@ -57,7 +95,8 @@ async def measure_places(
     places: Sequence[tuple[float, float]],
     compute: Callable[..., Awaitable[Any]],
 ) -> list[onoff.Point | None]:
-    """The PSF flux at every place of one exposure (None where the place is off the detector or the window could not be read)."""
+    """The PSF flux at every place of one exposure (None where the place is off the detector or the window could not be read).
+    The reading is done here; every array step runs in a worker process."""
     lay = await fr.layout(key)
     w = spxwcs.celestial(lay.image_header)
     ra = np.array([p[0] for p in places])
@@ -77,37 +116,8 @@ async def measure_places(
     cw, _ = await wl.get(det)
     bad_mask = spxflags.mask_of(table, [n for n in spxflags.BAD_ALWAYS if n not in spxflags.MOVER_KEEP])
     over_mask = spxflags.mask_of(table, spxflags.SATURATION)
-
-    def prepare() -> tuple[float, list[Item]] | None:
-        """The stamps of every place of the exposure (array work on the rows read: off the event loop)."""
-        img = img_raw.astype(np.float64)
-        flg = flg_raw.astype(np.int64)
-        good = np.isfinite(img) & (flg == 0)
-        if good.sum() < 100:
-            return None
-        var = max(1.4826 * float(np.median(np.abs(img[good] - np.median(img[good])))), 1e-6) ** 2
-        bad = (flg & bad_mask) != 0
-        overflow = (flg & over_mask) != 0
-        items: list[Item] = []
-        for k in np.where(inside)[0]:
-            x, y = float(px[k]), float(py[k])
-            xi, yi = round(x), round(y)
-            sl = (slice(yi - HALF - y0, yi + HALF + 1 - y0), slice(xi - HALF, xi + HALF + 1))
-            st = img[sl]
-            lam = float(cw[yi, xi])
-            if st.shape != (2 * HALF + 1, 2 * HALF + 1) or not (math.isfinite(lam) and lam > 0):
-                continue
-            usable = np.isfinite(st) & ~bad[sl] & ~overflow[sl]
-            saturated = overflow[sl] | (~np.isfinite(st) & ~bad[sl])
-            fx, fy = x - xi, y - yi
-            items.append((int(k), st, usable, saturated, spxpsf.stamp(ps, ps.zone_index(x, y), fx, fy, HALF), fx, fy, lam))
-        return var, items
-
-    prepared = await asyncio.to_thread(prepare)
-    if prepared is None:
-        return out
-    var, items = prepared
-    for k, pt in await compute(fit_stamps, var, items):
+    cw_rows = np.ascontiguousarray(cw[y0:y1])
+    for k, pt in await compute(stamps_and_fits, img_raw, flg_raw, y0, px, py, inside, cw_rows, bad_mask, over_mask, ps):
         out[k] = pt
     return out
 

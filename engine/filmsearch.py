@@ -41,6 +41,7 @@ LINK_MAX = 1000
 VMIN, VMAX, TOL, DT_MAX = 3.0, 200.0, 4.0, 5.0
 RMS_MAX = 2.0
 NMIN_FOUND = 4
+ORBIT_FOUND_MIN = 3  # an orbit track of verified candidates needs this many visits where one was found (the chance control sets the total)
 REC_Z, REC_R, REC_PAD = 3.5, 1.5, 0.5
 CHANCE_MAX = 0.15
 CONTROL_TRIALS = 40
@@ -243,7 +244,7 @@ def chance_by_visits(
 
 
 ORBIT_TRIALS = 12
-VERIFY_MAX = 600
+VERIFY_MAX = 5000
 
 
 def orbit_tracks(
@@ -259,8 +260,8 @@ def orbit_tracks(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Link the candidates that on − off photometry found positive in every exposure of their visit (at least PRE_NSIG sigma) with the orbit
     model (the observer is the Earth plus the spacecraft at the frame), follow each track into the visits where the orbit predicts it,
-    and keep the tracks that chance does not make: the same linking on the same candidates at chance places, `trials`
-    times. -> (tracks, control)."""
+    and keep the tracks that chance does not make: the same linking on the same candidates at chance places, `trials` times.
+    -> (tracks, control)."""
     from engine import onoff
     from engine import orbit as _orbit
 
@@ -310,7 +311,7 @@ def orbit_tracks(
             win = zmaps[k, iy - rad : iy + rad + 1, ix - rad : ix + rad + 1]
             if np.isfinite(win).any() and np.nanmax(win) >= REC_Z:
                 rec.append((k, float(x), float(y), float(np.nanmax(win))))
-        if len(have) + len(rec) < nv_min or len(have) < NMIN_FOUND:
+        if len(have) + len(rec) < nv_min or len(have) < ORBIT_FOUND_MIN:
             continue
         pts = [
             {"f": cands[c].frame, "x": round(cands[c].x, 2), "y": round(cands[c].y, 2), "z": round(cands[c].sn, 1), "how": "found"}
