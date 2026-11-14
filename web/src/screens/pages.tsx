@@ -165,26 +165,11 @@ function FindingsPage() {
         <p class="hint">What the searches find in real SPHEREx exposures. Every number is measured by this system on SPHEREx Level-2 files.</p>
       </div>
       <SearchedCounter fields={searched} />
-      <LeadsList leads={leads} onOpen={setLeadId} openId={open?.id ?? null} />
+      <LeadsList leads={leads} onOpen={setLeadId} openId={open?.id ?? null} all={searched ? searched.reduce((a, f) => a + f.found, 0) : undefined} />
       {open && <LeadPanel lead={open} onClose={() => setLeadId(null)} />}
-      <div class="pg-grid">
-        <section class="card glass">
-          <h3>Motion measured on the stacks (validation)</h3>
-          <dl class="kv">
-            {kv("Barnard's Star", '10.7 ± 0.8 ″/yr toward 353° in its 20′ field (Gaia DR3 10.4 ″/yr); 3 passes')}
-            {kv('ε Indi B', '4.7 ± 0.5 ″/yr toward 125° in its 20′ field (Gaia DR3 4.7 ″/yr); 4 passes')}
-            {kv('Star width (FWHM)', '8.8″, isolated unsaturated stars')}
-            {kv('Pass-to-pass registration', '0.14–0.26″ scatter')}
-          </dl>
-        </section>
-        <section class="card glass">
-          <h3>Spectra (validation)</h3>
-          <dl class="kv">
-            {kv('2MASS J17572542+0446559', '357 of 385 exposures used; 42 mJy in D2 against J 11.53 (39 mJy)')}
-            {kv('A click in an open field', 'all 377 exposures measured in about 3 s (16 worker processes)')}
-          </dl>
-        </section>
-      </div>
+      <p class="fmethod">
+        <a href="#/method?sec=validation">How we know it works → Method, validation</a>
+      </p>
     </>
   );
 }

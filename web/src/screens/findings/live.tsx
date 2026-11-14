@@ -35,7 +35,7 @@ export interface AnomalyLite {
   points?: number;
   score: number;
   drivers: { lo: number; hi: number; z: number; share: number }[];
-  identified?: { simbad?: { state: string; name?: string; type?: string }; gaia?: { state: string; source_id?: string } };
+  identified?: { simbad?: { state: string; name?: string; type?: string; sp?: string | null }; gaia?: { state: string; source_id?: string } };
 }
 export interface Live {
   name: string;
