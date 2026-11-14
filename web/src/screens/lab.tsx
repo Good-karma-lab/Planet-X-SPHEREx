@@ -2353,7 +2353,7 @@ export function Lab({ route }: { route: Route }) {
                           transform: `translateX(${j === 0 ? 0 : j === all.length - 1 ? -100 : -50}%)`,
                         }}
                       >
-                        {t}
+                        {archStep === j || j === 0 || j === all.length - 1 ? t : '·'}
                       </span>
                     ))}
                   </div>
