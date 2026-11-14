@@ -1333,6 +1333,15 @@ export function Lab({ route }: { route: Route }) {
         // a narrow picture: a name pushed away from its own ring would point at the wrong thing, so it is left out (the ring and the list keep it)
         if (box.w < 520 && !mk.selected && mk.kind !== 'target' && Math.abs(ly - ly0) > 6) return;
         ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2, ly));
+        // pushed back inside the picture (at its bottom edge) the label can land on another one again: it then goes above that one, and
+        // when no room is left only the selected mark and the test target keep their name (the ring and the list carry the rest)
+        const clash = () => placed.find((p) => lx < p.x1 && lx + tw > p.x0 && ly < p.y1 && ly + th > p.y0);
+        for (let tries = 0; tries < 8; tries++) {
+          const hit = clash();
+          if (!hit) break;
+          ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2, hit.y0 - th - 2));
+        }
+        if (clash() && !mk.selected && mk.kind !== 'target') return;
         placed.push({ x0: lx, y0: ly, x1: lx + tw, y1: ly + th });
         lines.forEach((l, i) => {
           ctx.font = i ? '500 10.5px ui-monospace, Menlo, monospace' : '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -2186,7 +2195,7 @@ export function Lab({ route }: { route: Route }) {
     if (fpxHold || fpxOff || fpx) return;
     if (fpxRuns.some((r) => r.ds.state === 'loading')) return;
     const next = fpxRuns.find((r) => r.ds.state === 'idle');
-    if (next) void next.start(null);
+    if (next) void next.start(null, true);
   });
   const fpxAllOver = FPX_AUTO && fpxRuns.every((r) => r.ds.state !== 'idle' && r.ds.state !== 'loading');
   const deepOn = FPX_AUTO && passes.length >= 3;
@@ -3228,7 +3237,7 @@ export function Lab({ route }: { route: Route }) {
                         dec={dec}
                         fov={fov}
                         passes={passes.map((q) => q.mjd_mid)}
-                        autoRun={[30, 300]}
+                        autoRun={[60, 110]}
                         autoHold={fpxHold || !fpxAllOver}
                         onState={(x) => {
                           setDeepSt((o) => (o[0] === x.state ? o : [x.state, o[1]]));
@@ -3240,7 +3249,7 @@ export function Lab({ route }: { route: Route }) {
                         dec={dec}
                         fov={fov}
                         passes={passes.map((q) => q.mjd_mid)}
-                        autoRun={[250, 2000]}
+                        autoRun={[250, 800]}
                         autoHold={fpxHold || !fpxAllOver || !['done', 'none', 'error'].includes(deepSt[0])}
                         onState={(x) => {
                           setDeepSt((o) => (o[1] === x.state ? o : [o[0], x.state]));

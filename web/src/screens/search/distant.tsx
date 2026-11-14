@@ -106,7 +106,8 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
     setDs({ state: 'idle' });
     setKeys({});
   }, [aim.ra, aim.dec, aim.fov]);
-  const start = async (pass: number | null) => {
+  /** `bg`: an automatic run of the page, which gives way to every person's job (the service's bg=1) */
+  const start = async (pass: number | null, bg = false) => {
     const my = ++tok.current;
     const t0 = Date.now();
     setDs({ state: 'loading', text: 'asking the service…', frac: null });
@@ -118,6 +119,7 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
       dmax: String(aim.dmax ?? DMAX),
     });
     if (aim.det) q.set('det', aim.det);
+    if (bg) q.set('bg', '1');
     if (pass != null) q.set('pass', String(pass));
     else if (aim.mjd != null) q.set('mjd', String(aim.mjd));
     try {
