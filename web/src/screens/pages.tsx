@@ -13,12 +13,28 @@ import { SearchedCounter, useSearched } from './search/searched';
 mountTour();
 
 
+/** True from 1100 px up: the lead report then sits beside the list instead of sliding over it. */
+function useWide() {
+  const q = '(min-width: 1100px)';
+  const [w, setW] = useState(() => matchMedia(q).matches);
+  useEffect(() => {
+    const m = matchMedia(q);
+    const f = () => setW(m.matches);
+    m.addEventListener('change', f);
+    return () => m.removeEventListener('change', f);
+  }, []);
+  return w;
+}
+
 function FindingsPage() {
   const live = useLive();
   const searched = useSearched();
   const leads = [...rankLeads(live), ATLAS_LEAD];
   const [leadId, setLeadId] = useLeadParam();
+  const wide = useWide();
   const open = leads.find((l) => l.id === leadId);
+  const shown = open ?? (wide ? leads[0] : undefined);
+  const all = searched ? searched.reduce((a, f) => a + f.found, 0) : undefined;
   return (
     <>
       <div class="pg-h">
@@ -26,8 +42,17 @@ function FindingsPage() {
         <p class="hint">What the searches find in real SPHEREx exposures. Every number is measured by this system on SPHEREx Level-2 files.</p>
       </div>
       <SearchedCounter fields={searched} />
-      <LeadsList leads={leads} onOpen={setLeadId} openId={open?.id ?? null} all={searched ? searched.reduce((a, f) => a + f.found, 0) : undefined} />
-      {open && <LeadPanel lead={open} onClose={() => setLeadId(null)} />}
+      {wide ? (
+        <div class="fsplit">
+          <LeadsList leads={leads} onOpen={setLeadId} openId={shown?.id ?? null} all={all} />
+          {shown ? <LeadPanel lead={shown} onClose={() => setLeadId(null)} inline /> : <div class="leadpanel glass inline mono-s">reading the searches…</div>}
+        </div>
+      ) : (
+        <>
+          <LeadsList leads={leads} onOpen={setLeadId} openId={open?.id ?? null} all={all} />
+          {open && <LeadPanel lead={open} onClose={() => setLeadId(null)} />}
+        </>
+      )}
       <p class="fmethod">
         <a href="#/method?sec=validation">How we know it works → Method, validation</a>
       </p>

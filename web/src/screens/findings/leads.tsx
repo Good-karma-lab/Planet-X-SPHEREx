@@ -217,15 +217,16 @@ interface NeosCard {
   snr: number | null;
 }
 
-function PanelShell({ lead, rows, media, onClose }: { lead: Lead; rows: [string, string][]; media: preact.ComponentChildren; onClose: () => void }) {
+function PanelShell({ lead, rows, media, onClose, inline }: { lead: Lead; rows: [string, string][]; media: preact.ComponentChildren; onClose: () => void; inline?: boolean }) {
   useEffect(() => {
+    if (inline) return;
     const k = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
-  }, [onClose]);
+  }, [onClose, inline]);
   const json = () => JSON.stringify({ title: lead.title, field: lead.field, ra: lead.ra, dec: lead.dec, kind: lead.kind, rows: Object.fromEntries(rows), note: lead.atlas ? 'SPHEREx and NEOSSat observations of 3I/ATLAS' : 'a lead, not a discovery', generated: new Date().toISOString() }, null, 2);
   return (
-    <aside class="leadpanel glass" role="dialog" aria-label="Lead report">
+    <aside class={`leadpanel glass${inline ? ' inline' : ''}`} role={inline ? 'region' : 'dialog'} aria-label="Lead report">
       <button class="leadpanel-x" aria-label="Close" onClick={onClose}>
         ×
       </button>
@@ -253,7 +254,7 @@ function PanelShell({ lead, rows, media, onClose }: { lead: Lead; rows: [string,
 }
 
 /** 3I/ATLAS: the SPHEREx picture of the 60′ field and the NEOSSat frame of the same day, side by side, with the measured numbers. */
-function AtlasPanel({ lead, onClose }: { lead: Lead; onClose: () => void }) {
+function AtlasPanel({ lead, onClose, inline }: { lead: Lead; onClose: () => void; inline?: boolean }) {
   const [c, setC] = useState<NeosCard | null>(null);
   const [fld, setFld] = useState<{ key: string | null; passes: number }>({ key: null, passes: 1 });
   useEffect(() => {
@@ -291,13 +292,13 @@ function AtlasPanel({ lead, onClose }: { lead: Lead; onClose: () => void }) {
       </figure>
     </div>
   );
-  return <PanelShell lead={lead} rows={rows} media={media} onClose={onClose} />;
+  return <PanelShell lead={lead} rows={rows} media={media} onClose={onClose} inline={inline} />;
 }
 
 /** The lead slid in from the right: the picture of the field, every number and check, the link into the lab, and the report as JSON. Closes with × or Esc. */
-export function LeadPanel({ lead, onClose }: { lead: Lead; onClose: () => void }) {
-  if (lead.atlas) return <AtlasPanel lead={lead} onClose={onClose} />;
-  return <PanelShell lead={lead} rows={lead.rows} media={<FieldThumb fieldKey={lead.fieldKey} passes={lead.passes} size={200} />} onClose={onClose} />;
+export function LeadPanel({ lead, onClose, inline }: { lead: Lead; onClose: () => void; inline?: boolean }) {
+  if (lead.atlas) return <AtlasPanel lead={lead} onClose={onClose} inline={inline} />;
+  return <PanelShell lead={lead} rows={lead.rows} media={<FieldThumb fieldKey={lead.fieldKey} passes={lead.passes} size={200} />} onClose={onClose} inline={inline} />;
 }
 
 /** One plain sentence for a field card: what the searches found there, in words a visitor can follow. */
