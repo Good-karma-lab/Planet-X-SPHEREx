@@ -12,8 +12,6 @@ All numbers were obtained on 2026-11-14. A "live" source is an endpoint of the r
 | Known asteroids found blind | 6 of the 8 known bodies brighter than V 19.1 with at least 4 frames in the 60′ ecliptic film of December 2025; 0 of 6 tracks unmatched | live `/api/v1/film/48c5bbb2c5e028b847075c51/tracks` and `/bodies` (JPL Small-Body Identification and Horizons) |
 | Chance controls | 0.0 chance tracks per field between passes (20 trials, five 5′ fields and ε Indi at 10′, 20′, 60′); in the film search 0.0 at 4 or more visits (12 trials) and 1.83 per trial at 3 or more | live `/api/v1/movers` and the film's search result |
 | Spectra against 2MASS and WISE | field star: 357 of 385 exposures, J 0.99, H 1.02, Ks 1.03, W1 0.985; ε Indi B: 415 of 445 exposures, J 0.92, H 0.94, Ks 0.98, W1 1.18 | `docs/PROGRESS.md`, `docs/submission/project-page.md`; ε Indi B on the live service |
-| Find Planet X on known bodies | Eris linked over 3 passes 95.6 ± 0.4 au (JPL 95.5); deep sum of Eris 22.0σ; Makemake 52.4 ± 0.2 au (JPL 52.3) | Eris link: test instance of the service code, not the live service; deep sum and Makemake: service run |
-| Planet Nine field, ecliptic | noise ceiling 7.13σ, threshold 7.48σ, best photometry 4.2σ: nothing confirmed | production deep job |
 | Anomaly search | ε Indi B first in its 20′ field: score 13.8 against a threshold of 2.6 (next 4.6) | `docs/submission/project-page.md`, `docs/PROGRESS.md` |
 | Wavelength, index and engine | wavelength of a pixel: median difference 0.00008–0.00048 µm against IRSA's per-pixel calibration; PSF identical in 12 of 12 detector-release pairs; index of 1,628,230 files; the number of exposures that hold a body equals IRSA's Moving Object Search Tool for 4 of 4 asteroids | `docs/validation/` reports of 2026-11-14 |
 
@@ -84,23 +82,9 @@ On a 60′ field near the ecliptic the first-ranked source among 93 spectra is a
 
 We search for bodies beyond Neptune in one pass (a distance search), in the sum of all passes along one orbit (the deep sum), and by linking passes; the known dwarf planets show whether the method works.
 
-**Result:** Eris linked over three passes by one orbit is at 95.6 ± 0.4 au (95.609 ± 0.424 au, misfit 1.57″, third pass confirmed) against 95.5 au from JPL Horizons. Source: Find Planet X link route on a test instance of the service code, 2026-11-14 (not the live service).
-
-**Result:** one pass alone finds Eris at 11.9σ, but its distance is flat over 70–165 au; the deep sum of the three passes gives 22.0σ (21.5σ in photometry) with controls at or below 1.3σ, at 95.5 au. Source: service run, 2026-11-14.
-
-**Result:** Makemake linked over two passes is at 52.4 ± 0.2 au against 52.3 au from JPL. Source: service run, 2026-11-14.
+We check the method on Eris and Makemake: each is searched blind in one pass, in the deep sum of its passes and by the link of its passes, and the distances are compared with JPL Horizons.
 
 [figure: slider-eris | the distance slider for Eris: one pass cannot fix the distance, the link of passes can]
-
-### The Planet Nine ecliptic field
-
-We search the deep sum of the passes over the ecliptic field at RA 60.94°, Dec +8.39° in the same way.
-
-**Result:** the noise ceiling is 7.13σ, the threshold 7.48σ and the best photometry 4.2σ: nothing is confirmed. Source: production deep job, 2026-11-14.
-
-[figure: p9-orbits | the orbits the deep sum tries on the ecliptic Planet Nine field and the threshold they must pass]
-
-A search that finds nothing does not show that nothing is there: the depth of one blind search is about V 20–21 in reflected light.
 
 ## Recall of the search between passes
 

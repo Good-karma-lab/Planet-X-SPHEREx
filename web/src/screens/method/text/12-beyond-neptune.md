@@ -135,25 +135,10 @@ so each place on the sky has a fixed direction of own motion for each inclinatio
 
 Each row is one run, with the method that gave it. Runs are not merged.
 
-| Run | Method | Result | Source |
-|---|---|---|---|
-| Eris, three passes (MJD 60876.5, 61049.6, 61238.5: July 2025, January 2026, July 2026), 18 arcmin field, D1-D3, 40-165 au | one-pass distance search of each pass | scan 11.9 / 14.6 / 13.6 sigma; photometry 9.3 / 14.2 / 10.9 sigma | run of the service code on a test instance, 2026-11-14 |
-| the same three tracks | link of passes, tolerance 6 arcsec | 95.609 ± 0.424 au, misfit 1.57 arcsec, third pass confirmed, a = 69.4 au, e = 0.45; JPL Horizons 95.5 au at those dates | the same run |
-| the same three passes | deep sum | 22.0 sigma in the sum, 21.5 sigma in photometry, 95.5 au; 7.65 million orbits, 1339 s on 6 processes | the same run |
-
-**Result:** Linking the three Eris tracks with one orbit gives 95.609 ± 0.424 au (misfit 1.57 arcsec, third pass confirmed; JPL Horizons 95.5 au); source: run of the service code on a test instance, 2026-11-14.
-
-**Result:** The deep sum of the same three passes finds Eris at 22.0 sigma in the sum and 21.5 sigma in photometry, at 95.5 au; source: the same run.
-
-The distance is the product of the link: the arcs of three passes fix how far the body is, and a and e are given as fitted. The deep sum assumes zero speed along the line of sight and still lands on the right distance.
-
 Planet Nine searches, deep sum of the passes of each field, nothing found above the bar:
-
-**Result:** The 1 degree D4 deep sum with the Planet Nine prior (5-30 degrees, 0.4-0.9 of escape speed, 250-2000 au) found nothing above its bar: noise ceiling 7.13 sigma, threshold 7.48 sigma, best photometry 4.2 sigma; source: deep job on the service, 2026-11-14.
 
 | Field | Parameters | Result | Source |
 |---|---|---|---|
-| Ecliptic field, RA 60.94, Dec +8.39 | 1 degree, D4, prior 5-30 degrees and 0.4-0.9 of escape speed, 250-2000 au, 3 passes | noise ceiling 7.13 sigma, threshold 7.48 sigma, best photometry 4.2 sigma: nothing confirmed | deep job on the service, 2026-11-14 |
 | Ecliptic field, RA 60.94, Dec +8.39 | 18 arcmin, D1-D3, 250-800 au, 3 passes, 620,160 orbits | sum peak 7.21 sigma against a threshold of 7.52 sigma (ceiling 7.16 sigma); no control track reaches 5 sigma; the strongest photometry is 6.7 sigma at 648 au (RA 60.8063, Dec +8.4559, 0.022 mJy), above the photometry threshold of 5.39 sigma but below the sum threshold, while the negated sums reach 5.1 sigma in photometry: a lead to re-observe, not a detection | overnight run on the production machine (tools/planet_nine_night.py), recorded in docs/PROGRESS.md |
 | IRAS/AKARI Planet Nine field, RA 34.72, Dec -49.79 | 18 arcmin, D1-D3, 250-800 au, passes 1 and 3 | best 6.6 sigma against a threshold of 6.74 sigma (ceiling 6.41 sigma) | the same overnight run |
 
