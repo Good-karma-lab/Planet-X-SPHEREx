@@ -352,6 +352,22 @@ function MethodPage() {
     ],
     ['Film', 'The visits inside one pass, aligned; the static sky removed; what moves between visits is shown in amber.'],
     [
+      'Known bodies',
+      "JPL Small-Body Identification lists the asteroids and comets that cross a film's field during its pass (V ≤ 20.5); Horizons gives each one's place on every visit. A visit counts as seen when the motion map shows z ≥ 4 within two grid pixels of that place; the visits stacked along the track give the body's significance, with the same stack 20 pixels aside as the chance level. The number of SPHEREx detector images that hold a body is counted from the exposure index and equals IRSA's Moving Object Search Tool (119, 107, 118 and 121 for four asteroids on 14–20 Dec 2025).",
+    ],
+    [
+      'Red sources',
+      "Flux at 3.8–5 µm (D5–D6) against flux at 1.1–1.6 µm (D2), measured pass by pass at each pass's own peak so that a moving dwarf does not blend with a star beside it; red when far above the field's own stars. WISE 0855−0714 and ε Indi B stand out; saturated stars are left out.",
+    ],
+    [
+      'Catalogue check',
+      "The spectrum averaged under the 2MASS J, H, Ks and WISE W1, W2 filters (photon counting) against the catalogue magnitudes at each survey's epoch, quality A or B only. An ordinary star gives 0.99, 1.02, 1.03 and 0.985.",
+    ],
+    [
+      'Other missions',
+      "CSA's NEOSSat frame of 3I/ATLAS on 14 Dec 2025 (CADC): its pointing refitted on Gaia DR3 stars, the comet found 5.6″ from JPL's place at G ≈ 12.4. A 15 s NEOSSat frame reaches only G ≈ 15–16, so it confirms bright comets, not the V 18–20 asteroids SPHEREx sees.",
+    ],
+    [
       'Archive',
       "Cutouts of DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010) from all-sky HiPS tiles, north up and east left like the SPHEREx picture; a test target is ringed where it was at each survey's epoch.",
     ],
