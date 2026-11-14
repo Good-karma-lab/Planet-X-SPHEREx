@@ -121,7 +121,7 @@ def test_a_fast_star_is_found_where_it_stands_at_the_epoch_not_where_it_was_cata
     }
     out = ctx.parse_gaia_rows([row], 330.8923, -56.8042, 2025.9, 6.0, "Gaia DR3 archive")
     assert out["state"] == "ok" and out["source_id"] == row["source_id"] and out["sep"] < 1.0
-    # the same star clicked 6.3 arcsec from the propagated place (a saturated core's centre is uncertain): taken, with a note, because it is bright
+    # the same star clicked 6.3 arcsec from the propagated place (a saturated core's centre is uncertain): taken, with a note
     near = ctx.parse_gaia_rows([row], 330.8925, -56.8025, 2025.9, 6.0, "x")
     assert near["state"] == "ok" and "saturated" in near["note"] and 6.0 < near["sep"] < 7.0
     faint = dict(row, phot_g_mean_mag=15.0)
