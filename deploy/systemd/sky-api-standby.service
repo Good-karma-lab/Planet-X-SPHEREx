@@ -1,0 +1,25 @@
+[Unit]
+Description=SPHEREx Sky API, standby instance (serves while the main one restarts)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=sky
+WorkingDirectory=/opt/sky
+EnvironmentFile=/etc/sky/env
+Environment=SKY_STORE=/var/lib/sky
+Environment=SKY_WARM=0
+Environment=SKY_STANDBY=1
+Environment=SKY_WORKERS=1
+Environment=SKY_WEB_DIST=/opt/sky/web/dist
+ExecStart=/home/sky/.local/bin/uv run --no-dev uvicorn service.app:app --host 127.0.0.1 --port 8781 --timeout-graceful-shutdown 25
+Restart=always
+RestartSec=3
+TimeoutStopSec=40
+KillMode=mixed
+LimitNOFILE=65536
+# memory: the scheduler admits jobs within its budget; this is the outer fence
+MemoryMax=3G
+
+[Install]
+WantedBy=multi-user.target

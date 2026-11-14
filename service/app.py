@@ -36,6 +36,8 @@ from service.workers import fieldjob, filmjob
 
 SERVICE_NAME = "spherex-sky"
 API_PREFIX = "/api/v1"
+# a second instance that takes over while the main one restarts (deploy/push.sh): it builds nothing new
+STANDBY = os.environ.get("SKY_STANDBY", "0") == "1"
 
 
 class State:
@@ -97,7 +99,11 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         await st.scheduler.stop()
         await st.s3.close()
         if st.executor is not None:
-            st.executor.shutdown(cancel_futures=True)
+            # do not wait for a field still being computed in a worker: its job is recomputed (or attached) after the restart
+            procs = list(getattr(st.executor, "_processes", {}).values())
+            st.executor.shutdown(wait=False, cancel_futures=True)
+            for proc in procs:
+                proc.terminate()
         st.store.close()
         if st.index is not None:
             st.index.close()
@@ -107,6 +113,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
         if st.store.is_complete(key):
             return key, None
+        if STANDBY:
+            # the standby instance serves while the main one restarts: finished products only; the page asks again in a moment
+            raise HTTPException(503, "the sky service is restarting; ask again in a few seconds", headers={"Retry-After": "3"})
         index, files, store, wl = st.index, st.files, st.store, st.wavelengths
 
         async def fn(ctx: Any) -> dict[str, Any]:
@@ -178,6 +187,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         return {
             "ok": True,
             "service": SERVICE_NAME,
+            "role": "standby" if STANDBY else "main",
             "version": __version__,
             "started_at": st.started_at,
             "uptime_s": round(time.monotonic() - st.started, 1),
@@ -323,6 +333,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 return JSONResponse(
                     {"error": "too many new searches from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
                 )
+            if STANDBY:
+                raise HTTPException(503, "the sky service is restarting; ask again in a few seconds", headers={"Retry-After": "3"})
             run = st.anomalies.start(key)
         return st.anomalies.view(run)
 

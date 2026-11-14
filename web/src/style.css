@@ -394,3 +394,15 @@ input[type='range']::-moz-range-thumb { width: 12px; height: 12px; border-radius
   .dchecks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .ipage { padding: 6px 4px 40px; }
 }
+
+/* narrow windows (about 800 px): labels wrap instead of being cut */
+@media (max-width: 1100px) {
+  .vswitch b { white-space: normal; text-align: left; }
+  .dgroup .dacts { flex-wrap: wrap; }
+  .srow { flex-wrap: wrap; }
+  .srow .st { white-space: normal; }
+  .catalog { min-width: 300px; }
+  .gobtns .btn { font-size: 11px; padding: 4px 7px; }
+  .row { grid-template-columns: minmax(0, 1fr) auto; }
+}
+.srow .st { white-space: normal; }

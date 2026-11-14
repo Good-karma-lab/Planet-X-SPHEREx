@@ -25,8 +25,14 @@ if [ "${2:-}" = "--index" ]; then
   rm -f "$snap"
 fi
 
-$SSH "$HOST" 'sudo install -m 644 /opt/sky/deploy/systemd/sky-api.service /opt/sky/deploy/systemd/sky-index.service /opt/sky/deploy/systemd/sky-index.timer /etc/systemd/system/ \
-  && sudo systemctl daemon-reload \
-  && sudo -u sky bash -lc "cd /opt/sky && ~/.local/bin/uv sync --frozen --no-dev -q" \
-  && sudo systemctl restart sky-api.service && sleep 3 && curl -s -m 10 http://127.0.0.1:8780/api/v1/health | head -c 160; echo'
+# zero-downtime: the standby restarts first and must answer; then the main instance restarts while the standby serves
+$SSH "$HOST" 'set -e
+sudo install -m 644 /opt/sky/deploy/systemd/sky-api.service /opt/sky/deploy/systemd/sky-api-standby.service /opt/sky/deploy/systemd/sky-index.service /opt/sky/deploy/systemd/sky-index.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo -u sky bash -lc "cd /opt/sky && ~/.local/bin/uv sync --frozen --no-dev -q"
+healthy() { for i in $(seq 1 90); do curl -sf -m 3 "http://127.0.0.1:$1/api/v1/health" >/dev/null && return 0; sleep 1; done; echo "port $1 did not come up" >&2; return 1; }
+sudo systemctl enable --now sky-api-standby.service
+sudo systemctl restart sky-api-standby.service && healthy 8781
+sudo systemctl restart sky-api.service && healthy 8780
+curl -s -m 10 http://127.0.0.1:8780/api/v1/health | head -c 160; echo'
 echo "released $rev to $HOST"

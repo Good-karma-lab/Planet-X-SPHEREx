@@ -38,23 +38,31 @@ sudo -u sky bash -c 'test -x ~/.local/bin/uv || curl -LsSf https://astral.sh/uv/
 
 # the sky user may restart its own service and nothing else
 cat > /etc/sudoers.d/sky <<'SUDO'
-sky ALL=(root) NOPASSWD: /usr/bin/systemctl restart sky-api.service, /usr/bin/systemctl reload caddy
+sky ALL=(root) NOPASSWD: /usr/bin/systemctl restart sky-api.service, /usr/bin/systemctl restart sky-api-standby.service, /usr/bin/systemctl reload caddy
 SUDO
 chmod 440 /etc/sudoers.d/sky
 
 # Caddyfile: the domain with automatic HTTPS, and the bare address over HTTP
+# the main instance takes the traffic; while it restarts the standby (8781) answers, and a request waits up to 30 s for either
+UPSTREAM='\treverse_proxy 127.0.0.1:8780 127.0.0.1:8781 {\n\t\tlb_policy first\n\t\tlb_try_duration 30s\n\t\tlb_try_interval 250ms\n\t\thealth_uri /api/v1/health\n\t\thealth_interval 2s\n\t\thealth_timeout 2s\n\t\tfail_duration 5s\n\t}\n'
 {
   if [ -n "$DOMAIN" ]; then
-    printf '%s, www.%s {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:8780\n}\n\n' "$DOMAIN" "$DOMAIN"
+    printf '%s, www.%s {\n\tencode {\n\t\tzstd\n\t\tgzip\n\t\tmatch {\n\t\t\theader Content-Type text/*\n\t\t\theader Content-Type application/json*\n\t\t\theader Content-Type application/javascript*\n\t\t\theader Content-Type application/octet-stream*\n\t\t\theader Content-Type image/svg+xml*\n\t\t}\n\t}\n'"$UPSTREAM"'}\n\n' "$DOMAIN" "$DOMAIN"
   fi
-  printf ':80 {\n\tencode zstd gzip\n\treverse_proxy 127.0.0.1:8780\n}\n'
-} > /etc/caddy/Caddyfile
+  printf ':80 {\n\tencode zstd gzip\n'"$UPSTREAM"'}\n'
+} > /etc/caddy/Caddyfile.new
+# a Caddyfile that does not validate never replaces the running one
+if caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile.new; then
+  mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile
+else
+  echo "the new Caddyfile does not validate; the old one stays" >&2
+fi
 systemctl enable caddy
 systemctl reload caddy || systemctl restart caddy
 
 if [ -d "$APP/deploy/systemd" ]; then
-  install -m 644 "$APP"/deploy/systemd/sky-api.service "$APP"/deploy/systemd/sky-index.service "$APP"/deploy/systemd/sky-index.timer /etc/systemd/system/
+  install -m 644 "$APP"/deploy/systemd/sky-api.service "$APP"/deploy/systemd/sky-api-standby.service "$APP"/deploy/systemd/sky-index.service "$APP"/deploy/systemd/sky-index.timer /etc/systemd/system/
   systemctl daemon-reload
-  systemctl enable sky-api.service sky-index.timer
+  systemctl enable sky-api.service sky-api-standby.service sky-index.timer
 fi
 echo "provisioned; after the first push: systemctl start sky-api; curl -s http://127.0.0.1:8780/api/v1/health"

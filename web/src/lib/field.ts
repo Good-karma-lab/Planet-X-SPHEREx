@@ -64,7 +64,8 @@ export class FieldClient {
   async open(ra: number, dec: number, fov: number): Promise<void> {
     this.asked = [ra, dec, fov];
     this.ev.onPhase('asking the sky service…');
-    const r = await fetch(`/api/v1/fields?ra=${ra}&dec=${dec}&fov=${fov}`, { cache: 'no-store' });
+    const r = await retrying(`/api/v1/fields?ra=${ra}&dec=${dec}&fov=${fov}`, (t) => this.ev.onPhase(t), () => this.stopped);
+    if (!r) return;
     if (!r.ok) return this.ev.onError(`the sky service answered ${r.status}`);
     const body = (await r.json()) as { key: string; state?: string; meta?: FieldMeta; job?: JobView };
     this.key = body.key;
@@ -102,27 +103,52 @@ export class FieldClient {
       }
       if (view.state === 'error' || view.state === 'cancelled') return this.ev.onError(view.error ?? view.state);
       await new Promise((res) => setTimeout(res, POLL_MS));
-      const r = await fetch(`/api/v1/jobs/${view.id}`, { cache: 'no-store' });
+      const r = await retrying(`/api/v1/jobs/${view.id}`, (t) => this.ev.onPhase(t), () => this.stopped);
+      if (!r) return;
       if (r.status === 404) return this.open(...this.asked); // the service restarted: ask for the field again
+      if (!r.ok) continue;
       view = (await r.json()) as JobView;
     }
   }
 
+  /** Fetch every wanted part not held yet, all at once; each is handed over as soon as it arrives. */
   private async fetchParts(names: string[]): Promise<void> {
-    for (const name of names) {
-      if (this.parts.has(name) || ![...this.wanted].some((w) => name.startsWith(w))) continue;
-      const p = fetch(`/api/v1/fields/${this.key}/parts/${name}`).then(async (r) => {
-        if (!r.ok) throw new Error(`${name}: ${r.status}`);
-        return parseSxp(await r.arrayBuffer());
-      });
-      this.parts.set(name, p);
-      try {
-        this.ev.onPart(name, await p);
-      } catch (e) {
-        this.parts.delete(name);
-        this.ev.onError(String(e));
-      }
+    const todo = names.filter((name) => !this.parts.has(name) && [...this.wanted].some((w) => name.startsWith(w)));
+    await Promise.all(
+      todo.map(async (name) => {
+        const p = (async () => {
+          for (let attempt = 0; ; attempt++) {
+            const r = await fetch(`/api/v1/fields/${this.key}/parts/${name}`);
+            if (r.ok) return parseSxp(await r.arrayBuffer());
+            if (attempt >= 4 || (r.status !== 502 && r.status !== 503 && r.status !== 504)) throw new Error(`${name}: ${r.status}`);
+            await new Promise((res) => setTimeout(res, 1000 * (attempt + 1)));
+          }
+        })();
+        this.parts.set(name, p);
+        try {
+          this.ev.onPart(name, await p);
+        } catch (e) {
+          this.parts.delete(name);
+          this.ev.onError(String(e));
+        }
+      }),
+    );
+  }
+}
+
+/** A request that waits out a restart of the service (502/503/504 or no answer): retried with a growing pause for about a minute.
+ *  Null when the caller stopped meanwhile. */
+async function retrying(url: string, say: (t: string) => void, stopped: () => boolean): Promise<Response | null> {
+  for (let attempt = 0; ; attempt++) {
+    if (stopped()) return null;
+    try {
+      const r = await fetch(url, { cache: 'no-store' });
+      if ((r.status !== 502 && r.status !== 503 && r.status !== 504) || attempt >= 12) return r;
+    } catch (e) {
+      if (attempt >= 12) throw e;
     }
+    say('the sky service is restarting; trying again…');
+    await new Promise((res) => setTimeout(res, Math.min(8000, 1000 * (attempt + 1))));
   }
 }
 

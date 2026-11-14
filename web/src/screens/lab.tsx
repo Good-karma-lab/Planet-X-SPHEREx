@@ -104,13 +104,14 @@ const season = (mjd: number) => {
 };
 
 interface Opts {
+  trajectory: boolean;
   reference: boolean;
   archive: boolean;
   anomalies: boolean;
   movers: boolean;
   marker: boolean;
   sharp: boolean;
-  trim: 'fixed' | 'p999' | 'p995';
+  trim: 'fixed' | 'p999' | 'p995' | 'adaptive';
   boost: boolean;
   sat: boolean;
   rings: boolean;
@@ -227,11 +228,12 @@ export function Lab({ route }: { route: Route }) {
     movers: p['movers'] !== '0',
     marker: p['marker'] !== '0',
     sharp: p['sharp'] !== '0',
-    trim: p['trim'] === 'p999' || p['trim'] === 'p995' ? p['trim'] : 'fixed',
+    trim: p['trim'] === 'p999' || p['trim'] === 'p995' || p['trim'] === 'adaptive' ? p['trim'] : 'fixed',
     boost: p['boost'] === '1',
     sat: p['sat'] !== '0',
     rings: p['rings'] === '1',
-    morph: p['morph'] !== '0',
+    morph: p['morph'] === '1',
+    trajectory: p['traj'] !== '0',
     mono: p['blend'] === 'mono',
   };
 
@@ -449,7 +451,7 @@ export function Lab({ route }: { route: Route }) {
       r.hi = st.opts.boost
         ? 40
         : st.opts.trim !== 'fixed' && trims
-          ? Math.min(400, Math.max(0.8, st.opts.trim === 'p999' ? trims.p999 : trims.p995))
+          ? Math.min(400, Math.max(0.8, st.opts.trim === 'p999' ? trims.p999 : st.opts.trim === 'p995' ? trims.p995 : 1.5 * trims.p999))
           : 400;
       r.soft = st.stretch;
       const { w, h } = r.begin();
@@ -632,6 +634,31 @@ export function Lab({ route }: { route: Route }) {
           ctx.fillStyle = '#fff';
           ctx.strokeText(o.n, x + rr + 8, y - rr * 0.35);
           ctx.fillText(o.n, x + rr + 8, y - rr * 0.35);
+          if (st.opts.trajectory && m.passes.length > 1) {
+            // the trajectory: where the target is on the date of every season, joined
+            const pts = m.passes.map((pp) => {
+              const [pra, pdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2000 + (pp.mjd_mid - 51544.5) / 365.25);
+              return [
+                (m.grid.n / 2 -
+                  ((((pra - m.grid.ra0 + 540) % 360) - 180) * Math.cos((m.grid.dec0 * Math.PI) / 180) * 3600) / m.grid.step_arcsec) *
+                  scale,
+                (m.grid.n / 2 - ((pdec - m.grid.dec0) * 3600) / m.grid.step_arcsec) * scale,
+              ] as const;
+            });
+            ctx.setLineDash([3, 3]);
+            ctx.lineWidth = 1.4;
+            ctx.strokeStyle = 'rgba(127,240,228,0.9)';
+            ctx.beginPath();
+            pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#7ff0e4';
+            for (const [px, py] of pts) {
+              ctx.beginPath();
+              ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
+              ctx.fill();
+            }
+          }
           ctx.restore();
         }
       }
@@ -773,7 +800,8 @@ export function Lab({ route }: { route: Route }) {
     if (!valid || !meta) return;
     let stop = false;
     const go = async () => {
-      for (let i = 0; i < 120 && !stop; i++) {
+      let pause = 3000;
+      for (let i = 0; i < 80 && !stop; i++) {
         try {
           const r = await fetch(`/api/v1/movers?ra=${ra}&dec=${dec}&fov=${fov}`, { cache: 'no-store' });
           if (r.ok) {
@@ -786,7 +814,8 @@ export function Lab({ route }: { route: Route }) {
         } catch {
           /* the next round asks again */
         }
-        await new Promise((res) => setTimeout(res, 2500));
+        await new Promise((res) => setTimeout(res, pause));
+        pause = Math.min(20000, pause * 1.5);
       }
     };
     void go();
@@ -828,7 +857,7 @@ export function Lab({ route }: { route: Route }) {
       } catch {
         /* asked again on the next round */
       }
-      await new Promise((res) => setTimeout(res, 2000));
+      await new Promise((res) => setTimeout(res, 3000));
     }
   };
   useEffect(() => {
@@ -1093,13 +1122,14 @@ export function Lab({ route }: { route: Route }) {
         '→' +
         '1'
       : '';
-  const status = phase
-    ? phase
-    : archStep !== null && archStep < ARCHIVE.length
-      ? `Archive · ${ARCHIVE[archStep]!.name} · ${ARCHIVE[archStep]!.years} · then the SPHEREx seasons`
-      : shown && meta
-        ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd0) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}`
-        : '';
+  const status =
+    phase && !(shown && meta)
+      ? phase
+      : archStep !== null && archStep < ARCHIVE.length
+        ? `Archive · ${ARCHIVE[archStep]!.name} · ${ARCHIVE[archStep]!.years} · then the SPHEREx seasons`
+        : shown && meta
+          ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd0) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}${phase ? ` · ${phase}` : ''}`
+          : phase;
   const frameIndex = frame ?? shown?.pass ?? 0;
   const fName = 'Sky field';
   const fCls = ` · ${formatRA(ra)} ${formatDec(dec)}`;
@@ -1435,7 +1465,14 @@ export function Lab({ route }: { route: Route }) {
                     opts.rings,
                     (v) => set({ rings: v ? '1' : null }),
                   )}
-                  {dchk('trailChk', 'path', 'Trajectory', 'Trajectory of the selected source over the seasons', false, null)}
+                  {dchk(
+                    'trailChk',
+                    'path',
+                    'Trajectory',
+                    'Trajectory: the path of the test target over the seasons, a dot at each season’s date',
+                    opts.trajectory,
+                    (v) => set({ traj: v ? null : '0' }),
+                  )}
                   {dchk(
                     'movChk',
                     'binoculars',
@@ -1466,7 +1503,7 @@ export function Lab({ route }: { route: Route }) {
                     'Interpolate',
                     'Interpolate: cross-fade between seasons instead of stepping',
                     opts.morph,
-                    (v) => set({ morph: v ? null : '0' }),
+                    (v) => set({ morph: v ? '1' : null }),
                   )}
                   {dchk(
                     'refChk',
@@ -1535,6 +1572,7 @@ export function Lab({ route }: { route: Route }) {
                     <option value="fixed">Trim fixed</option>
                     <option value="p999">Trim 99.9 %</option>
                     <option value="p995">Trim 99.5 %</option>
+                    <option value="adaptive">Trim adaptive</option>
                   </select>
                 </div>
                 <label
@@ -1589,28 +1627,6 @@ export function Lab({ route }: { route: Route }) {
                 <div class="sechead">
                   <span class="h2">Searches</span>
                 </div>
-                <button
-                  class="btn primary wide"
-                  disabled={!an || an.state === 'waiting' || an.state === 'running' || an.state === 'done'}
-                  onClick={() => void startAnomalies()}
-                  title={
-                    an?.state === 'waiting'
-                      ? 'Starts once the field is finished'
-                      : 'Find spectral anomalies here: sources whose spectrum differs from an ordinary star of the field. Every exposure of the field is measured; a 20′ field takes a few minutes'
-                  }
-                  data-testid="anomalies"
-                >
-                  <span dangerouslySetInnerHTML={{ __html: icon('sparkle', 16) }} style={{ display: 'contents' }} />
-                  {an?.state === 'running'
-                    ? `Finding anomalies · ${an.done} of ${an.total || '…'} exposures`
-                    : 'Find spectral anomalies here'}
-                </button>
-                {an?.state === 'running' && (
-                  <div class="prog thin">
-                    <i style={{ width: `${an.total ? (100 * an.done) / an.total : 3}%` }} />
-                  </div>
-                )}
-                {an?.state === 'failed' && <div class="mono-s">Anomaly search failed: {an.error}</div>}
                 {an?.result && (
                   <>
                     <div class="srow" title="Spectral anomaly map: every source's spectrum against the ordinary star of this field">
@@ -1658,6 +1674,32 @@ export function Lab({ route }: { route: Route }) {
             </div>
           )}
           <div class="panel-foot">
+            {film === null && view === 'picture' && (
+              <>
+                <button
+                  class="btn primary wide"
+                  disabled={!an || an.state === 'waiting' || an.state === 'running' || an.state === 'done'}
+                  onClick={() => void startAnomalies()}
+                  title={
+                    an?.state === 'waiting'
+                      ? 'Starts once the field is finished'
+                      : 'Find spectral anomalies here: sources whose spectrum differs from an ordinary star of the field. Every exposure of the field is measured; a 20′ field takes a few minutes'
+                  }
+                  data-testid="anomalies"
+                >
+                  <span dangerouslySetInnerHTML={{ __html: icon('sparkle', 16) }} style={{ display: 'contents' }} />
+                  {an?.state === 'running'
+                    ? `Finding anomalies · ${an.done} of ${an.total || '…'} exposures`
+                    : 'Find spectral anomalies here'}
+                </button>
+                {an?.state === 'running' && (
+                  <div class="prog thin">
+                    <i style={{ width: `${an.total ? (100 * an.done) / an.total : 3}%` }} />
+                  </div>
+                )}
+                {an?.state === 'failed' && <div class="mono-s">Anomaly search failed: {an.error}</div>}
+              </>
+            )}
             <div class="prow">
               <button
                 class="play"

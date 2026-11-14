@@ -115,7 +115,7 @@ function SpectrumChart({ points }: { points: SpecPoint[] }) {
     const ok = points.filter((p) => p.ok && p.flux != null);
     const L = 42;
     const R = 8;
-    const T = 8;
+    const T = 20;
     const B = 26;
     const x = (lam: number) => L + ((lam - 0.7) / (5.05 - 0.7)) * (W - L - R);
     let lo = 0;
@@ -147,7 +147,7 @@ function SpectrumChart({ points }: { points: SpecPoint[] }) {
       c.stroke();
       c.fillText(fmt(v), 2, y(v) + 3);
     }
-    c.fillText('mJy', 2, T + 8);
+    c.fillText('mJy', 2, 12);
     if (lo < 0) {
       c.strokeStyle = 'rgba(214,231,237,0.35)';
       c.beginPath();
@@ -212,15 +212,17 @@ export function SpectrumTab({ src }: { src: Source | null }) {
         </span>
       </div>
       <div class="spec-state">
-        {view
-          ? view.state === 'running'
-            ? `Measuring: ${view.measured} of ${view.total} exposures · ${usable} used`
+        {!view || (view.state === 'running' && view.total === 0)
+          ? 'Finding the exposures that cover this place…'
+          : view.state === 'running'
+            ? `Measuring: ${view.measured} of ${view.total} exposures that cover this place · ${usable} used`
             : view.state === 'done'
-              ? `${usable} points from ${view.total} exposures`
-              : `Failed: ${view.error}`
-          : 'Finding the exposures of this place…'}
+              ? `${usable} points from the ${view.total} exposures that cover this place`
+              : `Failed: ${view.error}`}
       </div>
-      {view?.no_spectrum && <div class="partial">Saturated in most exposures: no SPHEREx spectrum</div>}
+      {(view?.no_spectrum || (view && view.measured >= 20 && view.saturated > 0.5 * view.measured)) && (
+        <div class="partial">Saturated in most exposures: no SPHEREx spectrum (the core of this star overflows the detector)</div>
+      )}
       <SpectrumChart points={points} />
       <div class="spec-dets">
         {perDet.map((n, i) => (
