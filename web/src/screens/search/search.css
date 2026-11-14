@@ -1,0 +1,31 @@
+.search-h { font: 600 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin: 12px 0 6px; }
+.ctxbox .okv { margin-bottom: 6px; }
+.known .sb-bar { padding: 8px 14px; display: flex; flex-direction: column; gap: 6px; }
+.known-q { width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--edge); border-radius: 9px; color: var(--ink); padding: 6px 10px; font-size: 12.5px; }
+.known-note { padding: 4px 14px; }
+.ftracks { display: flex; flex-direction: column; gap: 6px; margin: 6px 0; }
+.ft-line { font: 500 11.5px var(--mono); color: var(--muted); }
+.ft-switches { display: flex; gap: 14px; flex-wrap: wrap; }
+.ft-sw { font-size: 12px; color: var(--muted); display: inline-flex; gap: 6px; align-items: center; }
+.paircard .ohead { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; margin-bottom: 6px; }
+.paircard .oname { font-size: 14px; }
+.pair-crops { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0; }
+.pair-crop { margin: 0; }
+.pair-crop canvas { width: 96px; height: 96px; image-rendering: pixelated; border: 1px solid var(--edge-soft); border-radius: 4px; display: block; }
+.pair-crop figcaption { font: 500 10.5px var(--mono); color: var(--muted); margin-top: 3px; }
+.leadbtn { white-space: normal; text-align: left; }
+.dsbox { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.dsbox .sechead { display: flex; justify-content: space-between; align-items: baseline; }
+.dsbox .srrow { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.dsbox .srt { font-weight: 650; font-size: 13px; }
+.ds-lab { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+.ds-chk { font-size: 11.5px; color: var(--muted); display: flex; gap: 6px; align-items: center; }
+.ds-canvas { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
+.stl { margin: 0; }
+.ds-prog { height: 3px; border-radius: 2px; background: rgba(95, 227, 214, 0.15); overflow: hidden; }
+.ds-prog i { display: block; height: 100%; background: var(--accent); transition: width 0.4s; }
+.ds-prog.indet i { width: 35%; animation: ds-indet 1.4s ease-in-out infinite; }
+@keyframes ds-indet { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+.ds-in { width: 72px; background: rgba(0, 0, 0, 0.3); border: 1px solid var(--edge); border-radius: 6px; color: var(--ink); padding: 2px 6px; font: 500 11px var(--mono); }
+.linkcard { display: flex; flex-direction: column; gap: 5px; }
+.jump-cv { width: 100%; height: 220px; display: block; border-radius: 8px; background: rgba(2, 7, 10, 0.55); border: 1px solid var(--edge-soft); }
