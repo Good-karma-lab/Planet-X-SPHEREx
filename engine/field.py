@@ -111,6 +111,130 @@ def _weight(e: NativeExposure) -> float:
     return 1.0 / max(e.sigma, 1e-6) ** 2
 
 
+@dataclass
+class DetectorContribution:
+    """What one detector of one pass adds to the pass (the map step; summed by `reduce_pass`)."""
+
+    det: int
+    n_exposures: int
+    mjd: tuple[float, float]
+    num: NDArray[np.float32]  # smoothed detector layer
+    den: NDArray[np.float32]
+    band_num: dict[str, NDArray[np.float32]]  # unsmoothed band sums (smoothing needs the count over all detectors)
+    band_den: dict[str, NDArray[np.float32]]
+    band_count: dict[str, int]
+    sat: NDArray[np.float32]  # unsmoothed saturated weight
+    census_total: NDArray[np.float32]  # unsmoothed presence counts
+    census: dict[str, NDArray[np.float32]]
+    rejected: int
+    visit_dropped: int
+
+
+def build_detector(exposures: Sequence[NativeExposure], grid: Grid, bands: Sequence[Band], test: bool = True) -> DetectorContribution:
+    """The leave-one-out test, the per-visit test (fields ≤ 12′), the detector layer and this detector's share of the band stacks, the
+    saturated weight and the census, for the exposures of ONE detector of ONE pass. Only these exposures are held in memory."""
+    n = grid.n
+    step = grid.step_arcsec
+    det = exposures[0].det
+    exps = [Exposure(u=e.u, v=e.v, val=e.val, weight=_weight(e), sigma=e.sigma) for e in exposures]
+    res = stack_with_rejection(exps, n, step, test=test)
+    dropped = 0
+    if test and grid.fov_arcmin <= MAX_FOV_ARCMIN + 0.5:
+        visits: dict[int, list[int]] = defaultdict(list)
+        for k, e in enumerate(exposures):
+            visits[e.visit].append(k)
+        dropped = visit_test(exps, list(visits.values()), n, step)
+    s = sigma_grid(len(exps), step)
+    a, b = np.zeros((n, n)), np.zeros((n, n))
+    for x in exps:
+        da, db = deposit(n, x.u[x.keep], x.v[x.keep], x.val[x.keep], np.full(int(x.keep.sum()), x.weight))
+        a += da
+        b += db
+    band_num: dict[str, NDArray[np.float32]] = {}
+    band_den: dict[str, NDArray[np.float32]] = {}
+    band_count: dict[str, int] = {}
+    for band in bands:
+        ba, bb = np.zeros((n, n)), np.zeros((n, n))
+        cnt = 0
+        for e, x in zip(exposures, exps, strict=True):
+            inb = np.zeros(e.lam.size, bool)
+            for lo, hi in band.windows:
+                inb |= (e.lam >= lo) & (e.lam < hi)
+            sel = x.keep & inb
+            if sel.any():
+                cnt += 1
+                da, db = deposit(n, e.u[sel], e.v[sel], e.val[sel], np.full(int(sel.sum()), x.weight))
+                ba += da
+                bb += db
+        if cnt:
+            band_num[band.key], band_den[band.key], band_count[band.key] = ba.astype(np.float32), bb.astype(np.float32), cnt
+    sat = np.zeros((n, n))
+    total = np.zeros((n, n))
+    census: dict[str, NDArray[np.float64]] = defaultdict(lambda: np.zeros((n, n)))
+    for e, x in zip(exposures, exps, strict=True):
+        if e.sat_u.size:
+            sat += deposit(n, e.sat_u, e.sat_v, np.ones(e.sat_u.size), np.full(e.sat_u.size, x.weight))[1]
+        if e.footprint_uv is not None:
+            total += _presence(n, *e.footprint_uv)
+            for name, (u, v) in e.census.items():
+                if u.size:
+                    census[name] += _presence(n, u, v)
+    mjd = [e.mjd for e in exposures]
+    return DetectorContribution(
+        det=det,
+        n_exposures=len(exps),
+        mjd=(float(min(mjd)), float(max(mjd))),
+        num=smooth(a, s).astype(np.float32),
+        den=smooth(b, s).astype(np.float32),
+        band_num=band_num,
+        band_den=band_den,
+        band_count=band_count,
+        sat=sat.astype(np.float32),
+        census_total=total.astype(np.float32),
+        census={k: v.astype(np.float32) for k, v in census.items()},
+        rejected=res.rejected,
+        visit_dropped=dropped,
+    )
+
+
+def reduce_pass(index: int, parts: Sequence[DetectorContribution], grid: Grid, cdet: Sequence[int]) -> PassProducts:
+    n = grid.n
+    step = grid.step_arcsec
+    num: dict[str, NDArray[np.float32]] = {}
+    den: dict[str, NDArray[np.float32]] = {}
+    for c in parts:
+        num[f"D{c.det}"], den[f"D{c.det}"] = c.num, c.den
+    keys = sorted({k for c in parts for k in c.band_num})
+    for k in keys:
+        a = sum((c.band_num[k] for c in parts if k in c.band_num), np.zeros((n, n), np.float32))
+        b = sum((c.band_den[k] for c in parts if k in c.band_den), np.zeros((n, n), np.float32))
+        s = sigma_grid(sum(c.band_count.get(k, 0) for c in parts), step)
+        num[k], den[k] = smooth(a, s).astype(np.float32), smooth(b, s).astype(np.float32)
+    sat = sum((c.sat for c in parts if c.det in cdet), np.zeros((n, n), np.float32))
+    cs = NATIVE_PIXEL_ARCSEC / step / 2.0
+    total = smooth(sum((c.census_total for c in parts), np.zeros((n, n), np.float32)), cs)
+    census: dict[str, NDArray[np.float32]] = {}
+    for name in sorted({k for c in parts for k in c.census}):
+        cnt = smooth(sum((c.census[name] for c in parts if name in c.census), np.zeros((n, n), np.float32)), cs)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            share = np.where(total > 0.5, cnt / np.maximum(total, 1e-9), 0.0)
+        if share.max() >= CENSUS_MIN_SHARE:
+            census[name] = np.clip(share, 0, 1).astype(np.float32)
+    return PassProducts(
+        index=index,
+        mjd0=min(c.mjd[0] for c in parts),
+        mjd1=max(c.mjd[1] for c in parts),
+        grid=grid,
+        detectors={c.det: c.n_exposures for c in parts},
+        num=num,
+        den=den,
+        sat_num=smooth(sat, sigma_grid(16, step)).astype(np.float32),
+        rejected={c.det: c.rejected for c in parts},
+        visit_rejected=sum(c.visit_dropped for c in parts),
+        census=census,
+    )
+
+
 def build_pass(
     index: int,
     exposures: Sequence[NativeExposure],
@@ -119,77 +243,12 @@ def build_pass(
     cdet: Sequence[int],
     test: bool = True,
 ) -> PassProducts:
-    n = grid.n
-    step = grid.step_arcsec
-    by_det: dict[int, list[int]] = defaultdict(list)
-    for i, e in enumerate(exposures):
-        by_det[e.det].append(i)
-    num: dict[str, NDArray[np.float32]] = {}
-    den: dict[str, NDArray[np.float32]] = {}
-    rejected: dict[int, int] = {}
-    stack_exps: dict[int, Exposure] = {}
-    visit_dropped = 0
-    for det, idx in sorted(by_det.items()):
-        exps = [
-            Exposure(u=exposures[i].u, v=exposures[i].v, val=exposures[i].val, weight=_weight(exposures[i]), sigma=exposures[i].sigma)
-            for i in idx
-        ]
-        res = stack_with_rejection(exps, n, step, test=test)
-        rejected[det] = res.rejected
-        if test and grid.fov_arcmin <= MAX_FOV_ARCMIN + 0.5:
-            visits: dict[int, list[int]] = defaultdict(list)
-            for k, i in enumerate(idx):
-                visits[exposures[i].visit].append(k)
-            dropped = visit_test(exps, list(visits.values()), n, step)
-            visit_dropped += dropped
-        for k, i in enumerate(idx):
-            stack_exps[i] = exps[k]
-        s = sigma_grid(len(idx), step)
-        a, b = np.zeros((n, n)), np.zeros((n, n))
-        for x in exps:
-            da, db = deposit(n, x.u[x.keep], x.v[x.keep], x.val[x.keep], np.full(int(x.keep.sum()), x.weight))
-            a += da
-            b += db
-        num[f"D{det}"], den[f"D{det}"] = smooth(a, s).astype(np.float32), smooth(b, s).astype(np.float32)
-    # named bands from the surviving pixels, each by its own wavelength
-    for band in bands:
-        a, b = np.zeros((n, n)), np.zeros((n, n))
-        contributing = 0
-        for i, e in enumerate(exposures):
-            keep = stack_exps[i].keep
-            inb = np.zeros(e.lam.size, bool)
-            for lo, hi in band.windows:
-                inb |= (e.lam >= lo) & (e.lam < hi)
-            sel = keep & inb
-            if sel.any():
-                contributing += 1
-                da, db = deposit(n, e.u[sel], e.v[sel], e.val[sel], np.full(int(sel.sum()), _weight(e)))
-                a += da
-                b += db
-        if contributing:
-            s = sigma_grid(contributing, step)
-            num[band.key], den[band.key] = smooth(a, s).astype(np.float32), smooth(b, s).astype(np.float32)
-    # saturated share over CDET
-    sat = np.zeros((n, n))
+    """All detectors of one pass in one call (for tests and small fields); the service maps `build_detector` over detectors."""
+    by_det: dict[int, list[NativeExposure]] = defaultdict(list)
     for e in exposures:
-        if e.det in cdet and e.sat_u.size:
-            sat += deposit(n, e.sat_u, e.sat_v, np.ones(e.sat_u.size), np.full(e.sat_u.size, _weight(e)))[1]
-    sat_num = smooth(sat, sigma_grid(16, step)).astype(np.float32)
-    census = flag_census(exposures, n, step)
-    mjd = [e.mjd for e in exposures]
-    return PassProducts(
-        index=index,
-        mjd0=float(min(mjd)),
-        mjd1=float(max(mjd)),
-        grid=grid,
-        detectors={d: len(v) for d, v in by_det.items()},
-        num=num,
-        den=den,
-        sat_num=sat_num,
-        rejected=rejected,
-        visit_rejected=visit_dropped,
-        census=census,
-    )
+        by_det[e.det].append(e)
+    parts = [build_detector(v, grid, bands, test) for _, v in sorted(by_det.items())]
+    return reduce_pass(index, parts, grid, cdet)
 
 
 def flag_census(exposures: Sequence[NativeExposure], n: int, step_arcsec: float) -> dict[str, NDArray[np.float32]]:

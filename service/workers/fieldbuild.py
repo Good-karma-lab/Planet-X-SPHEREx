@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from engine.bands import Band, load_bands
-from engine.field import NativeExposure, PassProducts, build_pass
+from engine.field import NativeExposure, PassProducts, build_detector, reduce_pass
 from engine.grid import Grid, grid_for_fov
 from engine.passes import common_detectors, detectors_per_pass, split_passes, split_visits
 from engine.register import register, stars
@@ -91,33 +91,35 @@ async def build_field(
             natives[i] = ne
 
     built: list[PassProducts] = []
-    member_lists: list[list[int]] = []
+    counts = detectors_per_pass(passes, [e.det for e in exps])
+    cdet = common_detectors(counts)
+    kept: dict[int, list[NativeExposure]] = {}
+    tc_total = 0.0
     for p in passes:
-        ts = time.time()
-        await asyncio.gather(*(one(i) for i in p.members))
-        t_read += time.time() - ts
-        members = [i for i in p.members if i in natives]
-        member_lists.append(members)
-        if progress:
-            progress(f"pass {p.index + 1} of {len(passes)}: read {len(members)} of {len(p.members)}")
-    counts = [{d: n for d, n in c.items()} for c in detectors_per_pass(passes, [e.det for e in exps])]
-    present: list[defaultdict[int, int]] = [defaultdict(int) for _ in passes]
-    for k, members in enumerate(member_lists):
-        for i in members:
-            present[k][natives[i].det] += 1
-    cdet = common_detectors([dict(c) for c in present]) or common_detectors(counts)
-    tc = time.time()
-    for p, members in zip(passes, member_lists, strict=True):
-        ex = [natives[i] for i in members]
-        if not ex:
-            continue
-        if executor is not None:
-            pp = await loop.run_in_executor(executor, build_pass, p.index, ex, grid, bands, cdet)
-        else:
-            pp = build_pass(p.index, ex, grid, bands, cdet)
-        built.append(pp)
-        if progress:
-            progress(f"pass {p.index + 1} of {len(passes)}: stacked")
+        groups: dict[int, list[int]] = defaultdict(list)
+        for i in p.members:
+            groups[exps[i].det].append(i)
+        parts = []
+        for det, members in sorted(groups.items()):
+            ts = time.time()
+            await asyncio.gather(*(one(i) for i in members))
+            t_read += time.time() - ts
+            group = [natives.pop(i) for i in members if i in natives]  # pop: only this detector's exposures stay in memory
+            if not group:
+                continue
+            if keep_natives:
+                kept.setdefault(p.index, []).extend(group)
+            tc = time.time()
+            if executor is not None:
+                parts.append(await loop.run_in_executor(executor, build_detector, group, grid, bands))
+            else:
+                parts.append(build_detector(group, grid, bands))
+            tc_total += time.time() - tc
+            del group
+            if progress:
+                progress(f"pass {p.index + 1} of {len(passes)}: D{det} stacked")
+        if parts:
+            built.append(reduce_pass(p.index, parts, grid, cdet))
     if built:
         ref = stars(built[0].white(cdet), built[0].sat_share(cdet), grid.step_arcsec)
         for pp in built[1:]:
@@ -129,6 +131,6 @@ async def build_field(
         cdet=cdet,
         thinned_from=len(found),
         missing=missing,
-        timings={"read_s": t_read, "compute_s": time.time() - tc, "total_s": time.time() - t0},
-        natives={k: [natives[i] for i in m] for k, m in enumerate(member_lists)} if keep_natives else {},
+        timings={"read_s": t_read, "compute_s": tc_total, "total_s": time.time() - t0},
+        natives=kept,
     )

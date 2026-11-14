@@ -84,20 +84,20 @@ async def read_native(
             continue
         m = inside & ((flags_flat & (1 << bit)) != 0)
         if m.any():
-            census[name] = (u[m], v[m])
+            census[name] = (u[m].astype(np.float32), v[m].astype(np.float32))
     satm = sat & inside
     return NativeExposure(
         key=key,
         det=lay.detector,
         mjd=lay.mjd,
         visit=visit,
-        u=u[usable],
-        v=v[usable],
+        u=u[usable].astype(np.float32),
+        v=v[usable].astype(np.float32),
         val=vals_bg[usable].astype(np.float32),
         lam=lam[usable].astype(np.float32),
         sigma=float(sigma) if np.isfinite(sigma) and sigma > 0 else 1.0,
-        sat_u=u[satm],
-        sat_v=v[satm],
+        sat_u=u[satm].astype(np.float32),
+        sat_v=v[satm].astype(np.float32),
         census=census,
-        footprint_uv=(u[inside], v[inside]),
+        footprint_uv=(u[inside].astype(np.float32), v[inside].astype(np.float32)),
     )
