@@ -2255,3 +2255,16 @@ input[type='range']::-moz-range-thumb {
 .psec .coords .field { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .psec .coords label { font: 600 10.5px var(--font); color: var(--muted); }
 .psec .coords .inp { min-width: 0; width: 100%; font: 500 12px var(--mono); padding: 4px 7px; }
+
+/* lab v2.3: square view buttons, the Findings tab, the scans bar */
+.vsquares { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.vsquare { aspect-ratio: 1; max-height: 92px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border-radius: 10px; border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.03); color: var(--muted); font-size: 11.5px; font-weight: 600; }
+.vsquare .vi { display: grid; place-items: center; }
+.vsquare .vi svg { width: 30px; height: 30px; }
+.vsquare:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+.vsquare.on { background: rgba(95, 227, 214, 0.14); border-color: rgba(95, 227, 214, 0.6); color: var(--accent-l); }
+.tbadge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 999px; background: var(--accent); color: #02161a; font: 700 10px var(--font); }
+.fsec { gap: 4px; }
+.fsh { font: 650 12px var(--font); color: var(--ink); }
+.sbar { cursor: pointer; }
+.sbar .sline:hover b { color: var(--accent-l); }

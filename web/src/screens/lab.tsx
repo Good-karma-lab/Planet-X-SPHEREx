@@ -35,7 +35,7 @@ import { useAsteroidSearch } from './asteroids';
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
 type Time = 'loop' | 'diff' | 'sum';
-type Tab = 'ctl' | 'obj' | 'spec';
+type Tab = 'ctl' | 'obj' | 'spec' | 'find';
 
 const ICON_DET =
   '<svg viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="8" aria-hidden="true"><rect x="28" y="64" width="62" height="56" rx="8"/><rect x="97" y="64" width="62" height="56" rx="8"/><rect x="166" y="64" width="62" height="56" rx="8"/><rect x="28" y="136" width="62" height="56" rx="8"/><rect x="97" y="136" width="62" height="56" rx="8"/><rect x="166" y="136" width="62" height="56" rx="8"/></svg>';
@@ -136,6 +136,7 @@ interface Opts {
   morph: boolean;
   mono: boolean;
   artifacts: boolean;
+  motion: boolean;
 }
 
 interface Track {
@@ -326,6 +327,7 @@ export function Lab({ route }: { route: Route }) {
     trajectory: p['traj'] !== '0',
     mono: p['blend'] === 'mono',
     artifacts: p['art'] === '1',
+    motion: p['mot'] === '1',
   };
 
   const set = (params: Record<string, string | null>) => {
@@ -431,6 +433,7 @@ export function Lab({ route }: { route: Route }) {
   const [visit, setVisit] = useState(0);
   const [insetBox, setInsetBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const artMap = useRef(new Map<number, HTMLCanvasElement>());
+  const motionCache = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
   const artRef = useRef<HTMLCanvasElement | null>(null);
   const [stage, setStage] = useState({ w: 400, h: 400 });
   const stageRef = useRef<HTMLDivElement>(null);
@@ -896,6 +899,31 @@ export function Lab({ route }: { route: Route }) {
       const grid = days && F ? F.meta.grid : (m?.grid ?? (!days && st.view === 'picture' ? st.prov : undefined));
       if (!grid) return;
       const { rects, inset } = layoutRef.current;
+      if (days && F && st.opts.motion) {
+        // Motion only: the visit's motion map (masked = black, changes above 4σ amber) instead of its sky
+        const n = F.meta.grid.n;
+        let mc = motionCache.current;
+        if (!mc || mc.key !== `${F.key}:${shownVisit}`) {
+          const c = document.createElement('canvas');
+          c.width = c.height = n;
+          const g = c.getContext('2d')!;
+          const img = g.createImageData(n, n);
+          const off = shownVisit * n * n;
+          for (let i = 0; i < n * n; i++) {
+            const m = F.motion[off + i]!;
+            const z = m ? ((m - 1) / 254) * 20 - 5 : 0;
+            const a = m ? Math.min(1, Math.max(0, (z - 4) / 4)) : 0;
+            img.data[4 * i] = m ? 16 + 239 * a : 0;
+            img.data[4 * i + 1] = m ? 20 + 157 * a : 0;
+            img.data[4 * i + 2] = m ? 26 + 33 * a : 0;
+            img.data[4 * i + 3] = 255;
+          }
+          g.putImageData(img, 0, 0);
+          mc = motionCache.current = { key: `${F.key}:${shownVisit}`, canvas: c };
+        }
+        ctx.imageSmoothingEnabled = false;
+        for (const box of rects) ctx.drawImage(mc.canvas, box.x, box.y, box.w, box.h);
+      }
       // artifacts: where the pipeline flagged the pixel in many exposures of the season shown
       const art = artMap.current.get(shownPass) ?? artRef.current;
       if (st.opts.artifacts && art && (days || st.view === 'picture')) {
@@ -968,7 +996,8 @@ export function Lab({ route }: { route: Route }) {
       const near = (ra: number, dec: number, arcsec: number) =>
         marks.find((k) => Math.hypot((k.ra - ra) * Math.cos((dec * Math.PI) / 180), k.dec - dec) * 3600 < arcsec);
       const anv = anRef.current;
-      if (st.opts.anomalies && anv?.result) {
+      // anomalies and red sources belong to the passes (Months); the Days scale shows the visit's own movers
+      if (st.opts.anomalies && anv?.result && !days) {
         for (const a of anv.result.anomalies) {
           const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
           const k = near(ara, adec, 10);
@@ -987,7 +1016,7 @@ export function Lab({ route }: { route: Route }) {
         }
       }
       const rv = redRef.current;
-      if (rv?.result) {
+      if (rv?.result && !days) {
         rv.result.red.forEach((x, i) => {
           const [rra, rdec] =
             x.moves && x.ra_j2000 != null && x.dec_j2000 != null
@@ -1054,6 +1083,7 @@ export function Lab({ route }: { route: Route }) {
       }
       const all = selMark ? [...marks, selMark] : marks;
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+      let labelled = 0;
       const ring = (x: number, y: number, mk: Mark, rr: number, ticks: boolean) => {
         const shape = () => {
           ctx.beginPath();
@@ -1199,6 +1229,8 @@ export function Lab({ route }: { route: Route }) {
             const x = box.x + u * box.w;
             const y = box.y + v * box.h;
             if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y) || mk.ghost) continue;
+            // a crowded field: names for the first dozen marks (targets, movers, known bodies first), rings only for the rest
+            if (++labelled > 14 && (mk.kind === 'anomaly' || mk.kind === 'red') && !mk.selected) continue;
             label(x, y, mk.rr, mk, box);
           }
         ctx.restore();
@@ -1809,7 +1841,8 @@ export function Lab({ route }: { route: Route }) {
             : filmBodies
               ? `${filmBodies.bodies.length} known asteroids predicted, ${bodiesSeen} seen in the visits`
               : '') +
-          (Math.abs(beta) > 25 ? ' · far from the ecliptic: few asteroids expected here' : '');
+          (Math.abs(beta) > 25 ? ' · far from the ecliptic: few asteroids expected here' : '') +
+          (opts.motion ? ' · motion only' : '');
   const passMjd = (passes.find((q) => q.index === (shown?.pass ?? 0)) ?? passes[0])?.mjd_mid;
   const toDays = () => {
     setFrame(null);
@@ -1857,6 +1890,12 @@ export function Lab({ route }: { route: Route }) {
   const pairMjds = (mv as unknown as { mjd?: number[] } | null)?.mjd ?? passes.map((q) => q.mjd_mid);
   const anFrac = an?.state === 'done' ? 1 : an?.state === 'running' ? (an.total ? an.done / an.total : null) : 0;
   const dist = distRef;
+  const foundCount =
+    (mvr?.tracks.length ?? 0) +
+    pairs.length +
+    (redv?.result?.red.length ?? 0) +
+    (an?.result?.anomalies.length ?? 0) +
+    (ast.tracks?.length ?? 0);
 
   return (
     <div class="screen">
@@ -2243,10 +2282,12 @@ export function Lab({ route }: { route: Route }) {
                   ['ctl', 'Controls'],
                   ['obj', 'Object'],
                   ['spec', 'Spectrum'],
+                  ['find', 'Findings'],
                 ] as const
               ).map(([k, n]) => (
-                <button key={k} class={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)}>
+                <button key={k} class={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
                   {n}
+                  {k === 'find' && foundCount > 0 && <span class="tbadge">{foundCount}</span>}
                 </button>
               ))}
             </div>
@@ -2284,17 +2325,17 @@ export function Lab({ route }: { route: Route }) {
               </section>
               <section class="psec">
                 <div class="psh">View</div>
-                <div class="seg sm" role="group" aria-label="View">
+                <div class="vsquares" role="group" aria-label="View">
                   {VIEWS.map((v) => (
                     <button
                       key={v.id}
-                      class={v.id === view && film === null ? 'on' : ''}
+                      class={`vsquare ${v.id === view && film === null ? 'on' : ''}`}
                       title={v.tip}
                       onClick={() => set({ view: v.id === 'picture' ? null : v.id, film: null })}
                       data-testid={`view-${v.id}`}
                     >
-                      <span dangerouslySetInnerHTML={{ __html: v.icon }} style={{ display: 'contents' }} />
-                      {v.name}
+                      <span class="vi" dangerouslySetInnerHTML={{ __html: v.icon }} />
+                      <span>{v.name}</span>
                     </button>
                   ))}
                 </div>
@@ -2393,6 +2434,14 @@ export function Lab({ route }: { route: Route }) {
                     opts.morph,
                     (v) => set({ morph: v ? '1' : null }),
                   )}
+                  {sw(
+                    'motionChk',
+                    'Motion only',
+                    'Motion only: the visit’s motion map instead of its sky (static sources masked, changes above 4σ in amber)',
+                    opts.motion && film !== null,
+                    film !== null && filmData ? (v) => set({ mot: v ? '1' : null }) : null,
+                    'Days scale only',
+                  )}
                 </div>
                 <div class="seg sm" role="group" aria-label="Blend">
                   <button
@@ -2447,27 +2496,11 @@ export function Lab({ route }: { route: Route }) {
                   'Months scale only',
                 )}
               </section>
-              <section class="psec">
-                <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
-                {passes.length >= 3 && <DeepSumPanel ra={ra} dec={dec} fov={fov} passes={passes.map((q) => q.mjd_mid)} />}
-                {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
-              </section>
             </div>
           )}
           {tab === 'obj' && (
             <div class="pbody">
-              {pairSel !== null && pairs[pairSel] ? (
-                <PairCard
-                  pair={pairs[pairSel]!}
-                  mjds={pairMjds}
-                  onSpectrum={(pra, pdec) => {
-                    setSelAn(null);
-                    setSel({ ra: pra, dec: pdec });
-                    setTab('spec');
-                  }}
-                  onBack={() => setPairSel(null)}
-                />
-              ) : selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
+              {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                 <>
                   {portraitOf(
                     an.result.anomalies.find((a) => a.n === selAn)!,
@@ -2527,9 +2560,169 @@ export function Lab({ route }: { route: Route }) {
               <SpectrumTab src={sel} />
             </div>
           )}
-          <div class="sbar">
+          {tab === 'find' && (
+            <div class="pbody">
+              {pairSel !== null && pairs[pairSel] && (
+                <PairCard
+                  pair={pairs[pairSel]!}
+                  mjds={pairMjds}
+                  onSpectrum={(pra, pdec) => {
+                    setSelAn(null);
+                    setSel({ ra: pra, dec: pdec });
+                    setTab('spec');
+                  }}
+                  onBack={() => setPairSel(null)}
+                />
+              )}
+              <div class="psh">Found in this field</div>
+              <section class="psec fsec">
+                <div class="fsh">Movers between passes</div>
+                <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
+              </section>
+              <section class="psec fsec">
+                <div class="fsh">Planet X · bodies beyond Neptune</div>
+                <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
+                {passes.length >= 3 && <DeepSumPanel ra={ra} dec={dec} fov={fov} passes={passes.map((q) => q.mjd_mid)} />}
+                {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
+              </section>
+              <section class="psec fsec">
+                <div class="fsh">Pairs that change in place</div>
+                {!pairs.length && (
+                  <div class="ssum">{mv?.state === 'done' ? 'none in this field' : 'waiting for the search between passes'}</div>
+                )}
+                {pairs.length > 0 &&
+                  pairs.map((pr, i) => (
+                    <PairButton
+                      key={i}
+                      pair={pr}
+                      on={pairSel === i}
+                      onClick={() => {
+                        setPairSel(i);
+                        setTab('find');
+                      }}
+                    />
+                  ))}
+              </section>
+              <section class="psec fsec">
+                <div class="fsh">Red sources</div>
+                {redv?.state === 'done' && !redv.result?.red.length && <div class="ssum">none far redder than the field's stars</div>}
+                {redv?.result?.red.map((x, k) => (
+                  <button
+                    key={k}
+                    class="anrow"
+                    onClick={() => pickRed(k)}
+                    title="Select this source: its spectrum is measured in every exposure"
+                  >
+                    <b>Red source {k + 1}</b>
+                    <span class="t">
+                      {redv.result!.median_colour
+                        ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
+                        : ''}
+                      {x.moves && x.pmra != null ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr` : ''}
+                    </span>
+                    <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
+                  </button>
+                ))}
+              </section>
+              <section class="psec fsec">
+                <div class="fsh">Spectral anomalies</div>
+                {an?.result && (
+                  <div class="ssum">
+                    {an.result.reason ||
+                      `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)}`}
+                  </div>
+                )}
+                {an?.result?.anomalies.map((a) => (
+                  <button key={a.n} class="anrow" onClick={() => pickAnomaly(a.n)} title={driverWords(a).join('; ')}>
+                    <b>Anomaly {a.n}</b>
+                    <span class="t">
+                      {a.identified?.simbad?.name ??
+                        (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')}
+                    </span>
+                    <span class="faint">score {a.score.toFixed(1)}</span>
+                  </button>
+                ))}
+              </section>
+              <section class="psec fsec">
+                <div class="fsh">Asteroids{astMjd ? ` · pass of ${season(astMjd)}` : ''}</div>
+                <div class="ssum">
+                  {ast.state === 'done'
+                    ? `${ast.tracks?.length ?? 0} track${ast.tracks?.length === 1 ? '' : 's'} · drawn on the picture in Days`
+                    : ast.text || 'waiting for the field'}
+                </div>
+                {ast.state === 'done' &&
+                  (ast.tracks ?? []).slice(0, 8).map((t, i) => (
+                    <button
+                      key={i}
+                      class="mvrow"
+                      onClick={() => {
+                        setTrackSel(i);
+                        if (film === null) toDays();
+                        setFrame(t.pts[0]?.f ?? 0);
+                        setPlaying(false);
+                      }}
+                      title="Show this track in the Days scale (its first visit)"
+                    >
+                      <b>{t.known ? t.known.name : `Track ${i + 1}`}</b>
+                      <span>
+                        {t.rate.toFixed(1)}″/h · {t.n} visits
+                      </span>
+                      <span class="faint">{t.known ? 'known' : t.verified ? 'verified' : 'lead'}</span>
+                    </button>
+                  ))}
+                {film !== null && filmBodies && (
+                  <>
+                    <div
+                      class="sline"
+                      title="Known asteroids and comets JPL predicts in this field during the pass; seen = the visit shows something at the predicted place"
+                    >
+                      <b>Known bodies</b>
+                      <span class="sval wide">
+                        {filmBodies.state === 'running'
+                          ? 'asking JPL…'
+                          : filmBodies.state === 'unavailable'
+                            ? 'JPL not reachable'
+                            : `${filmBodies.bodies.length} predicted · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen`}
+                      </span>
+                    </div>
+                    {filmBodies.bodies.some((b) => b.name.includes('3I/ATLAS')) && <NeossatCard />}
+                    {[...filmBodies.bodies]
+                      .sort((a, b) => (b.stackZ ?? 0) - (a.stackZ ?? 0) || (a.v ?? 99) - (b.v ?? 99))
+                      .slice(0, 6)
+                      .map((b) => (
+                        <div key={b.name} class="mvrow body" style={{ cursor: 'default' }}>
+                          <b>
+                            {b.name} · V {b.v?.toFixed(1) ?? '—'}
+                          </b>
+                          <span class="faint">
+                            seen {b.seen.length} of {b.expected.length} visits
+                            {b.stackZ != null && b.stackN
+                              ? ` · along its track z ${b.stackZ.toFixed(1)} (chance ${b.controlZ?.toFixed(1)})`
+                              : ''}
+                            {b.planes != null ? ` · in ${b.planes} detector images` : ''}
+                          </span>
+                          <span class="bodylinks">
+                            <a
+                              target="_blank"
+                              rel="noopener"
+                              href={`https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}`}
+                            >
+                              JPL
+                            </a>
+                            <a target="_blank" rel="noopener" href={ssoisUrl(b.name, filmMjd)}>
+                              SSOIS
+                            </a>
+                          </span>
+                        </div>
+                      ))}
+                  </>
+                )}
+              </section>
+            </div>
+          )}
+          <div class="sbar" onClick={() => setTab('find')} title="Open the findings of this field">
             <div class="sbh">
-              <span>Searches</span>
+              <span>Scans</span>
               <em>start by themselves</em>
             </div>
             {srow(
@@ -2539,57 +2732,13 @@ export function Lab({ route }: { route: Route }) {
               'Between passes: sources that move in a straight line over the passes (3–120 ″/yr), checked against Gaia DR3',
               'search-movers',
             )}
-            <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
-            {pairs.length > 0 &&
-              pairs.map((pr, i) => (
-                <PairButton
-                  key={i}
-                  pair={pr}
-                  on={pairSel === i}
-                  onClick={() => {
-                    setPairSel(i);
-                    setTab('obj');
-                  }}
-                />
-              ))}
             {srow(
-              `Asteroids${astMjd ? ` · pass of ${season(astMjd)}` : ''}`,
-              ast.state === 'done' ? 1 : ast.state === 'none' || ast.state === 'failed' || ast.state === 'idle' ? 0 : ast.frac,
-              ast.state === 'done'
-                ? `${ast.tracks?.length ?? 0} found`
-                : ast.state === 'none'
-                  ? 'too few visits'
-                  : ast.state === 'failed'
-                    ? 'failed'
-                    : ast.state === 'idle'
-                      ? 'waiting'
-                      : pct(ast.frac) !== null
-                        ? `${pct(ast.frac)} %`
-                        : 'running',
-              ast.text ||
-                'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
-              'search-asteroids',
+              'Pairs',
+              !mv ? 0 : mv.state === 'done' ? 1 : null,
+              !mv || mv.state !== 'done' ? 'waiting' : pairs.length ? `${pairs.length} found` : 'none',
+              'Two sources close together whose brightness changes in place between passes, against chance pairs',
+              'search-pairs',
             )}
-            {ast.state === 'done' &&
-              (ast.tracks ?? []).slice(0, 8).map((t, i) => (
-                <button
-                  key={i}
-                  class="mvrow"
-                  onClick={() => {
-                    setTrackSel(i);
-                    if (film === null) toDays();
-                    setFrame(t.pts[0]?.f ?? 0);
-                    setPlaying(false);
-                  }}
-                  title="Show this track in the Days scale (its first visit)"
-                >
-                  <b>{t.known ? t.known.name : `Track ${i + 1}`}</b>
-                  <span>
-                    {t.rate.toFixed(1)}″/h · {t.n} visits
-                  </span>
-                  <span class="faint">{t.known ? 'known' : t.verified ? 'verified' : 'lead'}</span>
-                </button>
-              ))}
             {srow(
               'Red sources',
               !redv ? 0 : redv.state === 'done' ? 1 : redv.state === 'failed' ? 0 : null,
@@ -2603,23 +2752,6 @@ export function Lab({ route }: { route: Route }) {
               'Red sources: bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (cold brown dwarfs and the like)',
               'search-red',
             )}
-            {redv?.result?.red.map((x, k) => (
-              <button
-                key={k}
-                class="anrow"
-                onClick={() => pickRed(k)}
-                title="Select this source: its spectrum is measured in every exposure"
-              >
-                <b>Red source {k + 1}</b>
-                <span class="t">
-                  {redv.result!.median_colour
-                    ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
-                    : ''}
-                  {x.moves && x.pmra != null ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr` : ''}
-                </span>
-                <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
-              </button>
-            ))}
             {srow(
               'Spectral anomalies',
               anFrac,
@@ -2640,62 +2772,23 @@ export function Lab({ route }: { route: Route }) {
                   : 'Every source of the field measured in every exposure; spectra unlike the field’s ordinary star'),
               'search-anomalies',
             )}
-            {an?.result?.anomalies.map((a) => (
-              <button key={a.n} class="anrow" onClick={() => pickAnomaly(a.n)} title={driverWords(a).join('; ')}>
-                <b>Anomaly {a.n}</b>
-                <span class="t">
-                  {a.identified?.simbad?.name ??
-                    (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')}
-                </span>
-                <span class="faint">score {a.score.toFixed(1)}</span>
-              </button>
-            ))}
-            {film !== null && filmBodies && (
-              <>
-                <div
-                  class="sline"
-                  title="Known asteroids and comets JPL predicts in this field during the pass; seen = the visit shows something at the predicted place"
-                >
-                  <b>Known bodies</b>
-                  <span class="sval wide">
-                    {filmBodies.state === 'running'
-                      ? 'asking JPL…'
-                      : filmBodies.state === 'unavailable'
-                        ? 'JPL not reachable'
-                        : `${filmBodies.bodies.length} predicted · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen`}
-                  </span>
-                </div>
-                {filmBodies.bodies.some((b) => b.name.includes('3I/ATLAS')) && <NeossatCard />}
-                {[...filmBodies.bodies]
-                  .sort((a, b) => (b.stackZ ?? 0) - (a.stackZ ?? 0) || (a.v ?? 99) - (b.v ?? 99))
-                  .slice(0, 6)
-                  .map((b) => (
-                    <div key={b.name} class="mvrow body" style={{ cursor: 'default' }}>
-                      <b>
-                        {b.name} · V {b.v?.toFixed(1) ?? '—'}
-                      </b>
-                      <span class="faint">
-                        seen {b.seen.length} of {b.expected.length} visits
-                        {b.stackZ != null && b.stackN
-                          ? ` · along its track z ${b.stackZ.toFixed(1)} (chance ${b.controlZ?.toFixed(1)})`
-                          : ''}
-                        {b.planes != null ? ` · in ${b.planes} detector images` : ''}
-                      </span>
-                      <span class="bodylinks">
-                        <a
-                          target="_blank"
-                          rel="noopener"
-                          href={`https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}`}
-                        >
-                          JPL
-                        </a>
-                        <a target="_blank" rel="noopener" href={ssoisUrl(b.name, filmMjd)}>
-                          SSOIS
-                        </a>
-                      </span>
-                    </div>
-                  ))}
-              </>
+            {srow(
+              `Asteroids${astMjd ? ` · pass of ${season(astMjd)}` : ''}`,
+              ast.state === 'done' ? 1 : ast.state === 'none' || ast.state === 'failed' || ast.state === 'idle' ? 0 : ast.frac,
+              ast.state === 'done'
+                ? `${ast.tracks?.length ?? 0} found`
+                : ast.state === 'none'
+                  ? 'too few visits'
+                  : ast.state === 'failed'
+                    ? 'failed'
+                    : ast.state === 'idle'
+                      ? 'waiting'
+                      : pct(ast.frac) !== null
+                        ? `${pct(ast.frac)} %`
+                        : 'running',
+              ast.text ||
+                'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
+              'search-asteroids',
             )}
           </div>
         </aside>
