@@ -27,4 +27,4 @@ A planet of a few Earth masses at 400 to 800 au reflects very little sunlight an
 
 ## What SPHEREx adds
 
-SPHEREx observes at 0.75 to 5 µm and sees every place several times a year from different positions of the Earth's orbit, so a distant body shifts by a large, known parallax between passes. One place where it can add to the other searches is 3 to 4 µm, where a cold planet's thermal light is relatively brighter. Our search for bodies beyond Neptune adds the exposures of a pass along the motion a body at each trial distance would have; at the right distance a point comes into focus. We say plainly in the Method what depth that reaches and that we claim no Planet Nine.
+SPHEREx observes at 0.75 to 5 µm and sees every place several times a year from different positions of the Earth's orbit, so a distant body shifts by a large, known parallax between passes. Our search for bodies beyond Neptune adds the exposures of a pass along the motion a body at each trial distance would have; at the right distance a point comes into focus. The depth of each search is its measured noise limit, stated with its result, and we claim no Planet Nine.

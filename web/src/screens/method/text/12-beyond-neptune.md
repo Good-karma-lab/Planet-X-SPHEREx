@@ -133,8 +133,7 @@ so each place on the sky has a fixed direction of own motion for each inclinatio
 
 ## What it can and cannot say
 
-- A blind search reaches a limited depth. A body fainter than that is not found, and a search that finds nothing does not show that nothing is there. The depth of a given field is the noise ceiling and the bar of that run, printed with every result.
-- The predicted Planet Nine is fainter than the reach of the D1-D3 searches. The one place SPHEREx can add to the existing Planet Nine searches is 3 micrometres (D4, 2.4 to 3.8 µm); there the margin over earlier searches is small. The Planet X page shows this wording next to every result.
+- A blind search reaches a limited depth. A body fainter than that is not found, and a search that finds nothing does not show that nothing is there. The depth on a field is the measured noise limit of its deep sum: the noise ceiling and the bar of that run, printed with every result.
 - A candidate is a lead, not a discovery. Before it counts it needs the link of two or three passes, a check against the known bodies (JPL) and, for a body seen in D4, a check of the archive images of NEOWISE.
 - One pass cannot tell distances apart well: the result is an interval, and at several hundred au the parallax inside a pass is small. The jump between passes and the link are what turn the interval into a distance.
 - The deep sum takes the speed along the line of sight as zero; the link of passes fits it as a free number.
