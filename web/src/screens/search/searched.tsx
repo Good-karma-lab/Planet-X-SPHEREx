@@ -23,8 +23,12 @@ export interface SearchedField {
   open: { ra: number; dec: number; fov: number; pass?: number | null; film?: number | null };
 }
 
-export const SEARCHED_COLOR = { found: '#ffb454', nothing: '#5fe3d6', running: '#8aa0a8' } as const;
-const colorOf = (f: SearchedField) => (f.state === 'running' ? SEARCHED_COLOR.running : f.found > 0 ? SEARCHED_COLOR.found : SEARCHED_COLOR.nothing);
+/** One colour per result kind: something found (amber), nothing found (teal), Find Planet X depth reached (violet), still running (grey). */
+export const SEARCHED_COLOR = { found: '#ffb454', nothing: '#4fe3d6', depth: '#c58bff', running: '#9fb4bd' } as const;
+export type SearchedKind = keyof typeof SEARCHED_COLOR;
+export const kindOf = (f: SearchedField): SearchedKind =>
+  f.state === 'running' ? 'running' : f.kinds.includes('distant') || f.kinds.includes('deep') ? 'depth' : f.found > 0 ? 'found' : 'nothing';
+const colorOf = (f: SearchedField) => SEARCHED_COLOR[kindOf(f)];
 
 /** The searched fields. `null` while unknown or when the service does not make the list (then nothing is drawn). Refreshed once a minute while `live`. */
 export function useSearched(live = true): SearchedField[] | null {
@@ -69,30 +73,43 @@ function shape(f: SearchedField, project: Project, minR: number): { x: number; y
   return { x: c[0], y: c[1], r: Math.max(minR, size), poly: size >= minR ? poly : null };
 }
 
+/** The smallest a zone is drawn: a field of 5′ is a few pixels on a whole-sky view, so it is a ring of at least this radius. */
+const MIN_R = 7;
+
 /**
- * «Where we've searched» on the globe or map: every searched field drawn as its footprint (a dot when it is too small to see), coloured by what the searches found:
- * amber = leads (a lead is not a discovery), teal = searched, nothing above the bar, grey = still running. The selected field is ringed.
+ * «Where we've searched» on the globe or map: every searched field as a filled translucent footprint with a bright outline (a ring of at least MIN_R pixels when the
+ * footprint is smaller), one colour per result kind (see SEARCHED_COLOR). The selected field is ringed in white. Small zones are drawn last so that they stay on top.
  */
 export function drawSearched(c: CanvasRenderingContext2D, project: Project, fields: SearchedField[], selected?: string | null): void {
   c.save();
-  for (const f of fields) {
-    const s = shape(f, project, 4);
-    if (!s) continue;
+  const shapes = fields.map((f) => ({ f, s: shape(f, project, MIN_R) })).filter((x): x is { f: SearchedField; s: NonNullable<ReturnType<typeof shape>> } => !!x.s);
+  shapes.sort((p, q) => q.s.r - p.s.r);
+  for (const { f, s } of shapes) {
     const col = colorOf(f);
-    c.strokeStyle = col;
-    c.fillStyle = `${col}33`;
-    c.lineWidth = f.key === selected ? 2.5 : 1.4;
+    const sel = f.key === selected;
     c.beginPath();
-    if (s.poly) s.poly.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])));
-    else c.arc(s.x, s.y, 4, 0, 7);
-    if (s.poly) c.closePath();
+    if (s.poly) {
+      s.poly.forEach((p, i) => (i ? c.lineTo(p[0], p[1]) : c.moveTo(p[0], p[1])));
+      c.closePath();
+    } else c.arc(s.x, s.y, MIN_R, 0, 7);
+    c.fillStyle = `${col}${s.poly ? '40' : '66'}`;
     c.fill();
+    // a dark under-stroke, then the bright outline with a soft glow
+    c.lineJoin = 'round';
+    c.strokeStyle = 'rgba(3,8,15,0.6)';
+    c.lineWidth = sel ? 5 : 4;
     c.stroke();
-    if (f.key === selected) {
+    c.shadowColor = col;
+    c.shadowBlur = 8;
+    c.strokeStyle = col;
+    c.lineWidth = sel ? 3 : 2;
+    c.stroke();
+    c.shadowBlur = 0;
+    if (sel) {
       c.strokeStyle = '#fff';
       c.lineWidth = 1.5;
       c.beginPath();
-      c.arc(s.x, s.y, Math.max(8, s.r + 5), 0, 7);
+      c.arc(s.x, s.y, Math.max(MIN_R + 4, s.r + 5), 0, 7);
       c.stroke();
     }
   }
@@ -104,7 +121,7 @@ export function hitSearched(project: Project, fields: SearchedField[], px: numbe
   let best: SearchedField | null = null;
   let bd = Infinity;
   for (const f of fields) {
-    const s = shape(f, project, 4);
+    const s = shape(f, project, MIN_R);
     if (!s) continue;
     const d = Math.hypot(px - s.x, py - s.y);
     if (d <= Math.max(8, s.r) && d < bd) {
@@ -115,20 +132,25 @@ export function hitSearched(project: Project, fields: SearchedField[], px: numbe
   return best;
 }
 
-/** The key under the layer: the three colours and what they say. */
-export function SearchedLegend({ count }: { count: number }) {
-  const dot = (c: string) => <span class="sw" style={{ background: c }} />;
+const KIND_TEXT: Record<SearchedKind, string> = { found: 'something found', nothing: 'nothing found', depth: 'Find Planet X depth reached', running: 'running' };
+
+/** The key and the counter of the zones, small, floating over the globe while the zones are shown: a colour per result kind with its count, and the fields and sky searched. */
+export function SearchedLegend({ fields }: { fields: SearchedField[] }) {
+  const n: Record<SearchedKind, number> = { found: 0, nothing: 0, depth: 0, running: 0 };
+  for (const f of fields) n[kindOf(f)]++;
+  const deg2 = fields.reduce((a, f) => a + (f.fov / 60) ** 2, 0);
   return (
-    <div class="searched-key">
-      <span class="mono-s">{count.toLocaleString('en-US')} fields searched</span>
-      <span class="mono-s">
-        {dot(SEARCHED_COLOR.found)}leads
-      </span>
-      <span class="mono-s">
-        {dot(SEARCHED_COLOR.nothing)}nothing above the bar
-      </span>
-      <span class="mono-s">
-        {dot(SEARCHED_COLOR.running)}running
+    <div class="searched-key" data-testid="searched-key">
+      {(Object.keys(KIND_TEXT) as SearchedKind[])
+        .filter((k) => k !== 'running' || n.running > 0)
+        .map((k) => (
+          <span class="mono-s" key={k}>
+            <span class="sw" style={{ borderColor: SEARCHED_COLOR[k], background: `${SEARCHED_COLOR[k]}55` }} />
+            {KIND_TEXT[k]} · {n[k]}
+          </span>
+        ))}
+      <span class="mono-s faint">
+        {fields.length.toLocaleString('en-US')} fields · {deg2 < 10 ? deg2.toFixed(2) : deg2.toFixed(0)} deg² searched
       </span>
     </div>
   );

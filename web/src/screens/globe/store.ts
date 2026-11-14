@@ -26,7 +26,7 @@ export type SurveyId = 'dss2' | 'spherex' | '2mass' | 'wise' | 'dust';
 export const kept = {
   /** null until the first visit sets it from the aim */
   view: null as null | { ra: number; dec: number; zoom: number },
-  survey: '2mass' as SurveyId,
+  survey: 'dss2' as SurveyId,
   proj: 'globe' as 'globe' | 'moll',
   covOn: false,
   catOpen: false,

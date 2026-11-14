@@ -5,7 +5,6 @@ import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVE
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, type SkyLayer } from './globe/sky';
-import { fovOfGlobe, haloOf, paintGround, toneBounds, toneOf } from './globe/glow';
 import { catalogNow, coverageNow, kept, loadCatalog, loadCoverage, type Obj, type SurveyId } from './globe/store';
 import { tiles } from '../lib/hips';
 import { KnownList } from './search/known';
@@ -61,13 +60,13 @@ const SURVEYS: { id: SurveyId; name: string; layer: SkyLayer[]; note: string }[]
   {
     id: 'dust',
     name: 'Dust map',
-    layer: [{ id: 'dust', gain: 1.6, black: 0 }],
+    layer: [{ id: 'dust', gain: 1, black: 0 }],
     note: 'IRAS far infrared (IRIS: 12, 60, 100 µm): the dust of the Galaxy, colour',
   },
 ];
 const SIZES = [2, 5, 10, 20, 60];
 /** the globe zoom limits; above ZOOM_NEAR a pin is an open ring so that the star under it shows */
-const ZOOM_MIN = 1.11; // the widest view of the camera inside the sphere is 108°
+const ZOOM_MIN = 0.8;
 const ZOOM_MAX = 400;
 const ZOOM_NEAR = 30;
 /** a catalogue object faster than this (mas/yr) gets its path drawn when selected */
@@ -157,12 +156,6 @@ function spanOf(o: Obj, fov: number): number {
   return Math.max((fov / 60) * 1.2, (Math.hypot(mo.pmra, mo.pmdec) * (2050 - y0)) / 3.6e6);
 }
 
-/** How interesting a catalogue object is on the globe: the test targets, then the fast and the cold, then the variable, then the rest by motion. */
-function importance(o: Obj): number {
-  const pm = Math.hypot(o.pmra ?? 0, o.pmdec ?? 0);
-  return (o.b ? 1000 : 0) + (o.k === 'fast' ? 40 : o.k === 'bd' ? 30 : o.k === 'young' || o.k === 'mira' || o.k === 'var' ? 15 : 0) + Math.log10(1 + pm) * 5;
-}
-
 export function Globe() {
   const [catalog, setCatalog] = useState<Obj[]>(catalogNow);
   const [a, setA] = useState<AimState>(aim.get());
@@ -190,10 +183,8 @@ export function Globe() {
   const searched = useSearched(true);
   const [searchedOn, setSearchedOn] = useState(false);
   const [searchedSel, setSearchedSel] = useState<SearchedField | null>(null);
-  // a click on an empty place of the sky: the real catalogue objects around it (the most important are labelled)
-  const [nearby, setNearby] = useState<Obj[] | null>(null);
-  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel, nearby });
-  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel, nearby };
+  const live = useRef({ survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel });
+  live.current = { survey, proj, covOn, a, sel, catalog, bodyPath, searched, searchedOn, searchedSel };
   const dirty = useRef(true);
   const view = useRef(kept.view ?? { ra: a.ra, dec: a.dec, zoom: 1.6 });
   kept.view = view.current;
@@ -250,7 +241,7 @@ export function Globe() {
 
   useEffect(() => {
     dirty.current = true;
-  }, [survey, proj, covOn, sel, catalog, bodyPath, searched, searchedOn, searchedSel, nearby]);
+  }, [survey, proj, covOn, sel, catalog, bodyPath, searched, searchedOn, searchedSel]);
 
   // the sky canvas
   useEffect(() => {
@@ -279,9 +270,7 @@ export function Globe() {
     resize();
     const offTile = tiles.onTile(() => (sky.stale = true));
 
-    // pixels per radian at the centre: at zoom 1.6 the camera inside the sphere sees 78° across the width (stereographic: k = W / (4 tan(fov/4)))
-    const R0 = () => W / (4 * Math.tan((78 * D2R) / 4)) / 1.6;
-    const R = () => R0() * view.current.zoom;
+    const R = () => (Math.min(W, H) / 2) * 0.9 * view.current.zoom;
     const mw = () => Math.min(W - 20, (H - 20) * 2);
     const basis = () => {
       const ra = view.current.ra * D2R;
@@ -303,11 +292,10 @@ export function Globe() {
       const d = dec * D2R;
       const v = [Math.cos(d) * Math.cos(r), Math.cos(d) * Math.sin(r), Math.sin(d)];
       const z = v[0]! * b.c[0]! + v[1]! * b.c[1]! + v[2]! * b.c[2]!;
-      if (z < -0.5) return [0, 0, false];
-      const kk = (2 * R()) / (1 + z);
+      if (z < 0.02) return [0, 0, false];
       return [
-        W / 2 - (v[0]! * b.e[0]! + v[1]! * b.e[1]! + v[2]! * b.e[2]!) * kk,
-        H / 2 - (v[0]! * b.n[0]! + v[1]! * b.n[1]! + v[2]! * b.n[2]!) * kk,
+        W / 2 - (v[0]! * b.e[0]! + v[1]! * b.e[1]! + v[2]! * b.e[2]!) * R(),
+        H / 2 - (v[0]! * b.n[0]! + v[1]! * b.n[1]! + v[2]! * b.n[2]!) * R(),
         true,
       ];
     };
@@ -321,13 +309,11 @@ export function Globe() {
         const lam = (Math.PI * X) / Math.cos(th);
         return [(((180 - lam / D2R) % 360) + 360) % 360, phi / D2R];
       }
-      const u = (W / 2 - px) / (2 * R());
-      const w = (H / 2 - py) / (2 * R());
-      const rho2 = u * u + w * w;
-      const den = 1 + rho2;
-      const z = (1 - rho2) / den;
-      const sx = (2 * u) / den;
-      const sy = (2 * w) / den;
+      const sx = (W / 2 - px) / R();
+      const sy = (H / 2 - py) / R();
+      const rr = sx * sx + sy * sy;
+      if (rr > 1) return null;
+      const z = Math.sqrt(1 - rr);
       const b = basis();
       const v = [0, 1, 2].map((i) => z * b.c[i]! + sx * b.e[i]! + sy * b.n[i]!);
       return [(((Math.atan2(v[1]!, v[0]!) / D2R) % 360) + 360) % 360, Math.asin(Math.max(-1, Math.min(1, v[2]!))) / D2R];
@@ -335,41 +321,60 @@ export function Globe() {
 
     // where each test target's pin and the selected object's pin were drawn: the click finds them there
     let pins: { o: Obj; x: number; y: number }[] = [];
-    let drag: { x: number; y: number; ra: number; dec: number; moved: boolean } | null = null;
-    let lastBreath = 0;
-    let lastLoop = performance.now();
-    let lastTouch = 0;
-    let driftGain = 0;
-    let driftClock = 0;
-    const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     const font = getComputedStyle(document.body).fontFamily;
     const draw = () => {
       const st = live.current;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.clearRect(0, 0, W, H);
-      paintGround(ctx, W, H);
-      const tNow = performance.now();
-      // the survey's own pixels in the night palette at every zoom (one black and white point per survey, taken from the whole-sky view), with the light halo of the band
       if (sky.shown) {
-        const wide = st.proj !== 'globe' || fovOfGlobe(W, R()) > 60;
-        const tb = toneBounds(sky.canvas, sky.gen, st.survey, wide);
         ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
-        ctx.globalCompositeOperation = 'screen';
-        ctx.drawImage(toneOf(sky.canvas, sky.gen, tb, st.survey), 0, 0, W, H);
-        ctx.globalAlpha = 0.35;
-        ctx.drawImage(haloOf(sky.canvas, sky.gen, tb, st.survey), 0, 0, W, H);
-        ctx.globalAlpha = 1;
-        ctx.globalCompositeOperation = 'source-over';
+        ctx.drawImage(sky.canvas, 0, 0, W, H);
       }
       const b = basis();
-      if (st.proj !== 'globe') {
-        ctx.strokeStyle = 'rgba(255,255,255,.14)';
-        ctx.lineWidth = 1;
+      // grid
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255,255,255,.10)';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = 'rgba(255,255,255,.45)';
+      ctx.font = `11px ${font}`;
+      const line = (pts: [number, number][]) => {
         ctx.beginPath();
-        ctx.ellipse(W / 2, H / 2, mw() / 2, mw() / 4, 0, 0, 7);
+        let pen = false;
+        let lx = 0;
+        for (const [ra, de] of pts) {
+          const p = project(ra, de, b);
+          if (!p[2] || (st.proj === 'moll' && pen && Math.abs(p[0] - lx) > W / 2)) {
+            pen = false;
+            if (!p[2]) continue;
+          }
+          if (pen) ctx.lineTo(p[0], p[1]);
+          else ctx.moveTo(p[0], p[1]);
+          pen = true;
+          lx = p[0];
+        }
         ctx.stroke();
+      };
+      for (let ra = 0; ra < 360; ra += 30) {
+        const pts: [number, number][] = [];
+        for (let de = -90; de <= 90; de += 3) pts.push([ra, de]);
+        line(pts);
+        const lp = project(ra, 2, b);
+        if (lp[2]) ctx.fillText(`${ra / 15}h`, lp[0] + 3, lp[1] - 3);
       }
+      for (let de = -60; de <= 60; de += 30) {
+        const pts: [number, number][] = [];
+        for (let ra = 0; ra <= 360; ra += 3) pts.push([ra, de]);
+        line(pts);
+        const lp = project(st.proj === 'moll' ? 170 : view.current.ra, de, b);
+        if (lp[2]) ctx.fillText(`${de > 0 ? '+' : ''}${de}°`, lp[0] + 3, lp[1] - 3);
+      }
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(255,255,255,.22)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      if (st.proj === 'globe') ctx.arc(W / 2, H / 2, R(), 0, 7);
+      else ctx.ellipse(W / 2, H / 2, mw() / 2, mw() / 4, 0, 0, 7);
+      ctx.stroke();
       // coverage
       const cov = coverageNow();
       if (st.covOn && cov) {
@@ -429,102 +434,38 @@ export function Globe() {
           }
         }
       }
-      // test targets (and a selected object without a path): a thin ring at the place on the date of the backdrop and a name with a dark halo, no box;
-      // the selected one is a larger teal ring with finder ticks, a soft glow and a slow breath
-      let breathing = false;
-      ctx.textBaseline = 'middle';
+      // test targets (and a selected object without a path): a pin at the place on the date of the backdrop; zoomed in, an open ring
+      ctx.font = `600 12.5px ${font}`;
       for (const o of st.catalog) {
         if (!(o.b || o === st.sel) || (o === st.sel && pathPin)) continue;
         const p = project(...shownPlace(o, st.survey, datesOf(o, st.sel)), b);
         if (!p[2]) continue;
         pins.push({ o, x: p[0], y: p[1] });
-        const isSel = o === st.sel;
-        const r = isSel ? 20 : 9;
-        const breath = isSel ? 0.5 + 0.5 * Math.sin(((tNow / 1000) * 2 * Math.PI) / 3.6) : 0;
-        if (isSel) {
-          breathing = true;
-          const gl = ctx.createRadialGradient(p[0], p[1], 0, p[0], p[1], r * 0.7);
-          gl.addColorStop(0, `rgba(95,227,214,${0.22 + 0.08 * breath})`);
-          gl.addColorStop(1, 'rgba(95,227,214,0)');
-          ctx.save();
-          ctx.globalCompositeOperation = 'lighter';
-          ctx.fillStyle = gl;
-          ctx.fillRect(p[0] - r, p[1] - r, r * 2, r * 2);
-          ctx.restore();
-        }
-        const ring = (w: number, col: string, a: number) => {
-          ctx.lineWidth = w;
-          ctx.strokeStyle = col;
-          ctx.globalAlpha = a;
+        const lx = near ? 14 : 9;
+        ctx.strokeStyle = '#000';
+        ctx.fillStyle = '#ffb454';
+        if (near) {
+          ctx.lineWidth = 4;
           ctx.beginPath();
-          ctx.arc(p[0], p[1], r, 0, 7);
+          ctx.arc(p[0], p[1], 9, 0, 7);
           ctx.stroke();
-          if (isSel) {
-            ctx.beginPath();
-            for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-              ctx.moveTo(p[0] + dx * (r + 4), p[1] + dy * (r + 4));
-              ctx.lineTo(p[0] + dx * (r + 12), p[1] + dy * (r + 12));
-            }
-            ctx.stroke();
-          }
-          ctx.globalAlpha = 1;
-        };
-        ring(3, '#03080f', 0.35);
-        ring(1.5, isSel ? '#5fe3d6' : '#e9f1f4', isSel ? 0.88 + 0.12 * breath : 0.8);
-        // no labels while the globe is turning
-        if (!anim && !(drag && drag.moved)) {
-          const lx = p[0] + r + (isSel ? 16 : 7);
-          ctx.font = `600 ${isSel ? 14 : 12.5}px ${font}`;
+          ctx.strokeStyle = '#ffb454';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.strokeStyle = '#000';
+        } else {
           ctx.lineWidth = 3;
-          ctx.lineJoin = 'round';
-          ctx.strokeStyle = 'rgba(3,8,15,.75)';
-          ctx.strokeText(o.n, lx, p[1]);
-          ctx.fillStyle = isSel ? '#ffffff' : 'rgba(233,241,244,.9)';
-          ctx.fillText(o.n, lx, p[1]);
-          if (isSel) {
-            const pm = Math.hypot(o.pmra ?? 0, o.pmdec ?? 0) / 1000;
-            const sub = `${o.c.toLowerCase()}${pm >= 0.05 ? ` · ${pm.toFixed(1)}″/yr` : ''}`;
-            ctx.font = '500 11.5px ui-monospace, SFMono-Regular, Menlo, monospace';
-            ctx.strokeText(sub, lx, p[1] + 16);
-            ctx.fillStyle = 'rgba(163,188,197,.95)';
-            ctx.fillText(sub, lx, p[1] + 16);
-          }
-        }
-      }
-      ctx.textBaseline = 'alphabetic';
-      if (breathing && tNow - lastBreath > 40) {
-        lastBreath = tNow;
-        dirty.current = true;
-      }
-      // the objects around the last click: a small ring each, a name for the first five (no name on top of another)
-      if (st.nearby && st.nearby.length) {
-        const boxes: [number, number, number, number][] = [];
-        ctx.textBaseline = 'middle';
-        st.nearby.forEach((o, i) => {
-          const p = project(...shownPlace(o, st.survey), b);
-          if (!p[2] || p[0] < 0 || p[1] < 0 || p[0] > W || p[1] > H) return;
-          ctx.lineWidth = 3;
-          ctx.strokeStyle = 'rgba(3,8,15,.45)';
           ctx.beginPath();
           ctx.arc(p[0], p[1], 5, 0, 7);
+          ctx.fill();
           ctx.stroke();
-          ctx.lineWidth = 1.3;
-          ctx.strokeStyle = 'rgba(233,241,244,.85)';
-          ctx.stroke();
-          if (i >= 5 || anim || (drag && drag.moved)) return;
-          ctx.font = `600 12px ${font}`;
-          const w = ctx.measureText(o.n).width;
-          const box: [number, number, number, number] = [p[0] + 9, p[1] - 8, p[0] + 9 + w, p[1] + 8];
-          if (boxes.some((q) => box[0] < q[2] && box[2] > q[0] && box[1] < q[3] && box[3] > q[1])) return;
-          boxes.push(box);
+        }
+        if (view.current.zoom > 1.5 || st.proj === 'moll' || o === st.sel) {
           ctx.lineWidth = 3;
-          ctx.lineJoin = 'round';
-          ctx.strokeStyle = 'rgba(3,8,15,.75)';
-          ctx.strokeText(o.n, p[0] + 9, p[1]);
-          ctx.fillStyle = 'rgba(233,241,244,.92)';
-          ctx.fillText(o.n, p[0] + 9, p[1]);
-        });
-        ctx.textBaseline = 'alphabetic';
+          ctx.strokeText(o.n, p[0] + lx, p[1] + 4);
+          ctx.fillStyle = '#fff';
+          ctx.fillText(o.n, p[0] + lx, p[1] + 4);
+        }
       }
       // aim frame
       const p = project(st.a.ra, st.a.dec, b);
@@ -564,28 +505,13 @@ export function Globe() {
       const now = performance.now();
       if (anim) {
         const t = Math.min(1, (now - anim.t0) / anim.dur);
-        const e = t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2; // cubic ease-in-out
+        const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
         view.current.ra = (((anim.ra0 + anim.dra * e) % 360) + 360) % 360;
         view.current.dec = anim.de0 + anim.dde * e;
         // the scale follows a curve in log zoom through zm: out while the globe turns far, in at the end
         view.current.zoom = Math.exp((1 - e) * (1 - e) * anim.z0 + 2 * e * (1 - e) * anim.zm + e * e * anim.z1);
         if (t >= 1) anim = null;
         dirty.current = true;
-      }
-      // idle drift: 0.5°/s of yaw and a ±3° nod over 60 s; it eases out over 0.8 s while the user drags, a target or a card is open, or a move is under way
-      const dtDrift = Math.min(0.1, (now - lastLoop) / 1000);
-      lastLoop = now;
-      {
-        const w = live.current;
-        const calm = !anim && !drag && w.proj === 'globe' && !w.sel && !w.bodyPath && !w.searchedSel && now - lastTouch > 1500 && !reducedMotion && fovOfGlobe(W, R()) > 20;
-        driftGain = Math.max(0, Math.min(1, driftGain + (calm ? 1 : -1) * (dtDrift / 0.8)));
-        if (driftGain > 0) {
-          const t1 = driftClock + dtDrift;
-          view.current.ra = (((view.current.ra - 0.5 * driftGain * dtDrift) % 360) + 360) % 360;
-          view.current.dec = Math.max(-80, Math.min(80, view.current.dec + 3 * driftGain * (Math.sin((2 * Math.PI * t1) / 60) - Math.sin((2 * Math.PI * driftClock) / 60))));
-          driftClock = t1;
-          dirty.current = true;
-        }
       }
       // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
       const st = live.current;
@@ -628,7 +554,6 @@ export function Globe() {
         sky.stale = true;
       }
     }
-    view.current.zoom = Math.max(ZOOM_MIN, view.current.zoom);
     loop();
     const flyTo = (ra: number, dec: number, spanDeg?: number) => {
       if (live.current.proj === 'moll') return;
@@ -636,7 +561,7 @@ export function Globe() {
       const z0 = view.current.zoom;
       const minWH = Math.min(W, H);
       const z1 = spanDeg
-        ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, (0.42 * minWH) / (spanDeg * D2R) / R0()))
+        ? Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, (0.42 * minWH) / (spanDeg * D2R) / ((minWH / 2) * 0.9)))
         : z0;
       if (!spanDeg && th < (Math.PI / 2) * 0.9 && R() * Math.sin(th) < minWH * 0.3) return;
       // the widest view on the way: the whole move fits in it
@@ -646,7 +571,7 @@ export function Globe() {
       const lzm = zm < Math.min(z0, z1) ? 2 * Math.log(zm) - (lz0 + lz1) / 2 : (lz0 + lz1) / 2;
       anim = {
         t0: performance.now(),
-        dur: 1600,
+        dur: th > 0.3 || Math.abs(lz1 - lz0) > 3 ? 1400 : 900,
         ra0: view.current.ra,
         dra: ((ra - view.current.ra + 540) % 360) - 180,
         de0: view.current.dec,
@@ -658,9 +583,9 @@ export function Globe() {
     };
     flyRef.current = flyTo;
 
+    let drag: { x: number; y: number; ra: number; dec: number; moved: boolean } | null = null;
     c.onpointerdown = (e) => {
       c.setPointerCapture(e.pointerId);
-      lastTouch = performance.now();
       drag = { x: e.clientX, y: e.clientY, ra: view.current.ra, dec: view.current.dec, moved: false };
       anim = null;
     };
@@ -670,14 +595,13 @@ export function Globe() {
       const dy = e.clientY - drag.y;
       if (Math.abs(dx) + Math.abs(dy) > 4) drag.moved = true;
       if (drag.moved && live.current.proj === 'globe') {
-        const k = 1 / (R() * D2R);
-        view.current.ra = (((drag.ra + (dx * k) / Math.max(0.2, Math.cos(view.current.dec * D2R))) % 360) + 360) % 360;
+        const k = (90 / R()) * 0.9;
+        view.current.ra = (((drag.ra + ((dx * k) / Math.max(0.2, Math.cos(view.current.dec * D2R))) * 0.6) % 360) + 360) % 360;
         view.current.dec = Math.max(-89, Math.min(89, drag.dec + dy * k));
         dirty.current = true;
       }
     };
     c.onpointerup = (e) => {
-      lastTouch = performance.now();
       const r = c.getBoundingClientRect();
       const px = e.clientX - r.left;
       const py = e.clientY - r.top;
@@ -711,15 +635,6 @@ export function Globe() {
           if (s) {
             setSel(null);
             aim.set({ ra: s[0], dec: s[1] }, 'map');
-            // the catalogue objects within about 40 px of the click (and at most 25° away): the most important first
-            const rad = Math.min(25, Math.max(0.05, 40 / (st.proj === 'globe' ? R() : mw() / 6.28) / D2R));
-            const found = st.catalog
-              .map((o) => ({ o, d: separation(...shownPlace(o, st.survey), s[0], s[1]) }))
-              .filter((x) => x.d <= rad)
-              .sort((a, b) => importance(b.o) - importance(a.o) || a.d - b.d)
-              .slice(0, 12)
-              .map((x) => x.o);
-            setNearby(found);
           }
         }
       }
@@ -732,7 +647,6 @@ export function Globe() {
     };
     c.onwheel = (e) => {
       e.preventDefault();
-      lastTouch = performance.now();
       if (live.current.proj !== 'globe') return;
       anim = null;
       // a mouse-wheel notch (100 px) zooms ×1.25: twenty notches about ×90; a trackpad's small steps zoom in proportion
@@ -845,9 +759,8 @@ export function Globe() {
 
   return (
     <div class="screen">
-      <div class={`globe-wrap${catOpen ? " cat-open" : ""}`}>
+      <div class="globe-wrap">
         <canvas ref={cv} aria-label="Sky globe" data-testid="sky" />
-        <div class="globe-vig" aria-hidden="true" />
         <div class="map-ui map-tl">
     <section class="aim aimchip dark-glass" aria-label="Aim">
       <div class="coords">
@@ -904,14 +817,55 @@ export function Globe() {
               Catalogue
             </button>
           </div>
-          <div class="seg sm" role="group" aria-label="Sky background">
+          <div class="maprow wrap">
+            <div class="seg sm" role="group" aria-label="Sky background">
             {SURVEYS.map((s) => (
               <button key={s.id} class={s.id === survey ? 'on' : ''} aria-pressed={s.id === survey} title={s.note} onClick={() => setSurvey(s.id)}>
                 {s.name}
               </button>
             ))}
           </div>
+            <button
+              class={`btn sm dark-glass tgl ${covOn ? 'on' : ''}`}
+              aria-pressed={covOn}
+              onClick={() => setCovOn(!covOn)}
+              title="Where SPHEREx exposures exist, from the exposure index. Teal: DR1 exposures; blue: QR3 only; more opaque = more exposures (log scale)"
+            >
+              Coverage
+            </button>
+            {searched && (
+              <button
+                class={`btn sm dark-glass tgl ${searchedOn ? 'on' : ''}`}
+                aria-pressed={searchedOn}
+                data-testid="searched-toggle"
+                onClick={() => {
+                  setSearchedOn(!searchedOn);
+                  setSearchedSel(null);
+                }}
+                title="Every field a search ran on: amber = something found, teal = nothing found, violet = Find Planet X depth reached. Click a zone for its result."
+              >
+                Searched zones
+              </button>
+            )}
+          </div>
         </div>
+        {searched && searchedOn && (
+          <div class="searched-float dark-glass">
+            <SearchedLegend fields={searched} />
+    {searchedSel && (
+      <SearchedCard
+        f={searchedSel}
+        onClose={() => setSearchedSel(null)}
+        onOpen={(o) => {
+          location.hash = formatHash({
+            screen: 'lab',
+            params: { ra: o.ra.toFixed(5), dec: o.dec.toFixed(5), fov: String(o.fov), ...(o.film ? { film: String(o.film) } : {}) },
+          });
+        }}
+      />
+    )}
+          </div>
+        )}
         <div class="map-bl">
           {(count || sel) && (
             <div class="map-read">
@@ -949,33 +903,8 @@ export function Globe() {
           <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
           ★ are test targets.
-          <span class="globe-credit">
-            {survey === 'spherex' ? 'Backdrop: SPHEREx DR1 (IRSA)' : `Backdrop: ${sv.name} (IRSA / CDS HiPS)`}
-          </span>
         </div>
         </div>
-        <label
-          class="chk covsw dark-glass"
-          title="Where SPHEREx exposures exist, from the exposure index. Teal: DR1 exposures; blue: QR3 only; more opaque = more exposures (log scale)"
-        >
-          <input type="checkbox" checked={covOn} onChange={(e) => setCovOn((e.target as HTMLInputElement).checked)} />
-          Exposure coverage
-          <span class="covkey">teal: DR1 exposures · blue: QR3 only · more opaque = more exposures (log scale)</span>
-        </label>
-        {searched && (
-          <label class="chk covsw srchsw dark-glass" title="Every field a search ran on, coloured by what was found: amber = leads, teal = nothing above the bar, grey = running. Click a field for its result.">
-            <input
-              type="checkbox"
-              checked={searchedOn}
-              onChange={(e) => {
-                setSearchedOn((e.target as HTMLInputElement).checked);
-                setSearchedSel(null);
-              }}
-            />
-            Where we've searched
-            {searchedOn && <SearchedLegend count={searched.length} />}
-          </label>
-        )}
         <button class="btn primary big map-open" onClick={showArea} title="Open the field under the frame in the spectral lab">
           <span dangerouslySetInnerHTML={{ __html: icon('scan', 18) }} style={{ display: 'contents' }} />
           Show area
@@ -1024,40 +953,6 @@ export function Globe() {
           </div>
         </div>
         <div class="cat-list">
-          {nearby && (
-            <div class="near-box">
-              <div class="near-h">
-                <span class="mono-s">{nearby.length ? `Near the click · ${nearby.length} catalogue object${nearby.length === 1 ? '' : 's'}` : 'No catalogue object near the click'}</span>
-                <button class="lnk" onClick={() => setNearby(null)}>
-                  Clear
-                </button>
-              </div>
-              {nearby.map((o) => (
-                <div key={o.n} class="row" onClick={() => select(o)}>
-                  <div class="nm">
-                    <span class="t">{o.n}</span>
-                    {o.b ? <span class="badge orange">target</span> : null}
-                  </div>
-                  <div class="co">
-                    <span>{o.c}</span>
-                    {o.pmra != null ? <span> · {(Math.hypot(o.pmra, o.pmdec ?? 0) / 1000).toFixed(2)}″/yr</span> : null}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          {searchedSel && (
-            <SearchedCard
-              f={searchedSel}
-              onClose={() => setSearchedSel(null)}
-              onOpen={(o) => {
-                location.hash = formatHash({
-                  screen: 'lab',
-                  params: { ra: o.ra.toFixed(5), dec: o.dec.toFixed(5), fov: String(o.fov), ...(o.film ? { film: String(o.film) } : {}) },
-                });
-              }}
-            />
-          )}
           {filter !== 'demo' && filter !== 'small' && !slice.length && catalog.length > 0 && (
             <div class="empty">Not in the local SIMBAD snapshot. Coordinates work too, e.g. “17h57m48s, +04d41m”.</div>
           )}
