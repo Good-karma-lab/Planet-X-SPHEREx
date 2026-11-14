@@ -117,7 +117,7 @@ function IndexPage({ health }: { health: FullHealth | null }) {
           <dl class="kv">
             {kv('Exposures indexed', fmtN(ix['files'] as number))}
             {kv('Releases', String(ix['releases'] ?? 'DR1 (year 1), QR3 (after it)'))}
-            {kv('Built', String(ix['built_at'] ?? ix['updated_at'] ?? '—').replace('T', ' '))}
+            {kv('Built', String(ix['built_at'] ?? ix['updated_at'] ?? ix['bootstrap_at'] ?? '—').replace('T', ' '))}
             {kv('Source', String(ix['source'] ?? 'IRSA TAP, checked against the archive bucket'))}
           </dl>
         </section>

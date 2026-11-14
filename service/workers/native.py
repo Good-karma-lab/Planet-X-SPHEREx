@@ -3,6 +3,8 @@ and wavelength of every pixel (docs/plan/02-methods/2.1-data-and-reading.md 2.1.
 
 from __future__ import annotations
 
+from typing import Any
+
 import numpy as np
 from scipy.ndimage import distance_transform_edt
 
@@ -12,6 +14,7 @@ from engine.grid import Grid
 from engine.spx import flags as spxflags
 from engine.spx import wave as spxwave
 from engine.spx import wcs as spxwcs
+from service import cpu
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 
@@ -55,21 +58,66 @@ async def read_native(
         return None
     img = (await fr.rows(key, "image", y0, y1))[:, x0:x1].astype(np.float32)
     flg = (await fr.rows(key, "flags", y0, y1))[:, x0:x1].astype(np.int64)
-    table, _, _ = spxflags.resolve(lay.flags_header)
+    lam_box = None
+    if wavelengths is not None:
+        try:
+            cw, _ = await wavelengths.get(lay.detector)
+            lam_box = np.ascontiguousarray(cw[y0:y1, x0:x1], dtype=np.float64)
+        except Exception:  # the calibration map could not be read: the file's own table below
+            lam_box = None
+    wave = None if lam_box is not None else await fr.table_bytes(key, "wave")
+    # the rest is compute: in a worker process, never in the API process
+    return await cpu.run(
+        prepare_native,
+        key,
+        lay.detector,
+        lay.mjd,
+        visit,
+        lay.image_header,
+        lay.flags_header,
+        img,
+        flg,
+        x0,
+        y0,
+        grid,
+        lam_box,
+        wave,
+        target,
+        keep_outlier,
+    )
+
+
+def prepare_native(
+    key: str,
+    detector: int,
+    mjd: float,
+    visit: int,
+    image_header: Any,
+    flags_header: Any,
+    img: np.ndarray,
+    flg: np.ndarray,
+    x0: int,
+    y0: int,
+    grid: Grid,
+    lam_box: np.ndarray | None,
+    wave: tuple[Any, bytes] | None,
+    target: tuple[float, float] | None,
+    keep_outlier: bool,
+) -> NativeExposure:
+    """Masks, background, grid position and wavelength of every pixel of the box (runs in a worker process)."""
+    w = spxwcs.celestial(image_header)
+    y1, x1 = y0 + img.shape[0], x0 + img.shape[1]
+    table, _, _ = spxflags.resolve(flags_header)
     jj, ii = np.mgrid[y0:y1, x0:x1]
     xd, yd = ii.ravel().astype(float), jj.ravel().astype(float)
     pra, pdec = spxwcs.pix2sky(w, xd, yd)
     u, v = grid.sky_to_grid(pra, pdec)
-    lam = None
-    if wavelengths is not None:
-        try:
-            cw, _ = await wavelengths.get(lay.detector)
-            lam = cw[y0:y1, x0:x1].ravel().astype(np.float64)
-        except Exception:  # the calibration map could not be read: the file's own table below
-            lam = None
-    if lam is None:
-        wh, wd = await fr.table_bytes(key, "wave")
-        lam, _ = spxwave.WaveMap(spxwave.table_from_hdu_bytes(wh, wd), lay.detector)(xd, yd)
+    if lam_box is not None:
+        lam = lam_box.ravel()
+    else:
+        assert wave is not None
+        wh, wd = wave
+        lam, _ = spxwave.WaveMap(spxwave.table_from_hdu_bytes(wh, wd), detector)(xd, yd)
     vals = img.ravel()
     flags_flat = flg.ravel()
     r_t = None
@@ -99,8 +147,8 @@ async def read_native(
     fit_ok = ((flags_flat & unreliable) == 0)[usable]
     return NativeExposure(
         key=key,
-        det=lay.detector,
-        mjd=lay.mjd,
+        det=detector,
+        mjd=mjd,
         visit=visit,
         u=u[usable].astype(np.float32),
         v=v[usable].astype(np.float32),

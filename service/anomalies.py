@@ -28,6 +28,7 @@ from engine.spx import flags as spxflags
 from engine.spx import psf as spxpsf
 from engine.spx import wcs as spxwcs
 from indexer.store import Exposure, Index
+from service import cpu
 from service.products.store import Store, product_key
 from service.products.sxp import decode
 from service.reader.calib import WavelengthMaps
@@ -123,7 +124,8 @@ class Anomalies:
                 raise ValueError("the field is not finished")
             g = meta["grid"]
             grid = Grid(g["ra0"], g["dec0"], g["step_arcsec"], g["n"])
-            sources = await asyncio.to_thread(self._sources, run.field_key, meta, grid)
+            raws = await asyncio.to_thread(self._quick_parts, run.field_key, meta)
+            sources = await cpu.run(field_sources, meta, grid, raws)
             radius = g["n"] * g["step_arcsec"] / 3600.0 / 2.0 * math.sqrt(2.0)
             exps = await asyncio.to_thread(self.index.overlapping, g["ra0"], g["dec0"], radius)
             if len(exps) > MAX_EXPOSURES:
@@ -144,7 +146,7 @@ class Anomalies:
 
             await asyncio.gather(*(one(e) for e in exps))
             run.phase = "comparing every spectrum with the ordinary star of the field"
-            result = await asyncio.to_thread(self._score, sources, points)
+            result = await cpu.run(score_sources, sources, points)
             run.phase = "asking SIMBAD and Gaia about the anomalies"
             for a in result["anomalies"]:
                 a["identified"] = await self.identify(a["ra"], a["dec"], a.get("pmra", 0.0), a.get("pmdec", 0.0))
@@ -160,41 +162,17 @@ class Anomalies:
             run.state, run.error = "failed", str(e)[:300]
             self.runs.pop(run.key, None)
 
-    def _sources(self, field_key: str, meta: dict[str, Any], grid: Grid) -> list[dict[str, Any]]:
-        passes = meta["passes"]
-        whites, sats = [], []
-        for p in passes:
+    def _quick_parts(self, field_key: str, meta: dict[str, Any]) -> list[bytes]:
+        raws = []
+        for p in meta["passes"]:
             raw = self.store.read_part(fieldjob.KIND, field_key, f"quick_p{p['index']}.sxp")
             if raw is None:
                 raise ValueError("a pass of the field is missing")
-            _, arr = decode(raw)
-            whites.append(arr["white"].astype(np.float32))
-            sats.append(arr["sat"].astype(np.float32) / 255.0)
-        mjds = [p["mjd_mid"] for p in passes]
-        if len(passes) >= 3:
-            res = movers.search(whites, sats, mjds, grid.step_arcsec)
-            still = res.still_sources
-            tracks = res.tracks
-        else:  # two passes: no tracks, and every source of the first pass counts
-            still = movers.find_sources(whites[0], sats[0], grid.step_arcsec)
-            tracks = []
-        still = [s for s in still if not s.saturated and s.snr >= MIN_SNR][:MAX_SOURCES]
-        out: list[dict[str, Any]] = []
-        if still:
-            ra, dec = grid.grid_to_sky([s.x for s in still], [s.y for s in still])
-            for s, r, d in zip(still, ra, dec, strict=True):
-                out.append({"ra": float(r), "dec": float(d), "snr": s.snr, "moves": False})
-        for t in tracks:
-            # the track's J2000 place and its motion (mas/yr), so that place_at() puts it where it was on each exposure's date
-            r0, d0 = grid.grid_to_sky([t.x0], [t.y0])
-            yrs = _year(t.ref_mjd) - 2000.0
-            d2000 = float(d0[0]) - t.v_north * yrs / 3600.0
-            r2000 = float(r0[0]) - t.v_east * yrs / 3600.0 / math.cos(math.radians(d2000))
-            snr = min((x for x in t.snr if math.isfinite(x)), default=1e9)
-            out.append(
-                {"ra": r2000 % 360.0, "dec": d2000, "pmra": t.v_east * 1000.0, "pmdec": t.v_north * 1000.0, "snr": snr, "moves": True}
-            )
-        return out
+            raws.append(raw)
+        return raws
+
+    def _sources(self, field_key: str, meta: dict[str, Any], grid: Grid) -> list[dict[str, Any]]:
+        return field_sources(meta, grid, self._quick_parts(field_key, meta))
 
     async def _measure(self, e: Exposure, sources: list[dict[str, Any]]) -> list[tuple[int, float, float]]:
         lay = await self.files.layout(e.key)
@@ -214,100 +192,9 @@ class Anomalies:
         ps = await self.psfs.for_file(e.key)
         cw, _ = await self.wavelengths.get(lay.detector)
         table, _, _ = spxflags.resolve(lay.flags_header)
-        return await asyncio.to_thread(self._fit_all, w, img, flg, table, ps, cw, px, py, inside, x0, y0, sources, places)
-
-    @staticmethod
-    def _fit_all(
-        w: Any,
-        img: np.ndarray,
-        flg: np.ndarray,
-        table: dict[str, int],
-        ps: spxpsf.PsfSet,
-        cw: np.ndarray,
-        px: np.ndarray,
-        py: np.ndarray,
-        inside: np.ndarray,
-        x0: int,
-        y0: int,
-        sources: list[dict[str, Any]],
-        places: list[tuple[float, float]],
-    ) -> list[tuple[int, float, float]]:
-        bad_all = spxflags.mask_of(table, spxflags.BAD_ALWAYS)
-        bad_mover = spxflags.mask_of(table, [n for n in spxflags.BAD_ALWAYS if n not in spxflags.MOVER_KEEP])
-        overflow = (flg & spxflags.mask_of(table, spxflags.SATURATION)) != 0
-        good = np.isfinite(img) & ((flg & bad_all) == 0) & ~overflow
-        if good.sum() < 50:
-            return []
-        v = img[good]
-        sigma = 1.4826 * float(np.median(np.abs(v - np.median(v))))
-        if not np.isfinite(sigma) or sigma <= 0:
-            return []
-        out: list[tuple[int, float, float]] = []
-        for i in np.nonzero(inside)[0]:
-            x, y = float(px[i]), float(py[i])
-            xi, yi = round(x), round(y)
-            sl = (slice(yi - HALF - y0, yi + HALF + 1 - y0), slice(xi - HALF - x0, xi + HALF + 1 - x0))
-            stamp, f = img[sl], flg[sl]
-            if stamp.shape != (2 * HALF + 1, 2 * HALF + 1):
-                continue
-            bad = (f & (bad_mover if sources[i]["moves"] else bad_all)) != 0
-            ov = overflow[sl]
-            usable = np.isfinite(stamp) & ~bad & ~ov
-            saturated = ov | (~np.isfinite(stamp) & ~bad)
-            psf = spxpsf.stamp(ps, ps.zone_index(x, y), x - xi, y - yi, HALF)
-            # the solid angle of the pixel enters as a constant: the shape of a spectrum, not its scale, is compared
-            pt = photometry.fit(stamp, np.full(stamp.shape, sigma * sigma), usable, saturated, psf, x - xi, y - yi, 1.0e-9)
-            if pt.ok and pt.flux_mjy is not None:
-                lam = float(cw[yi, xi])
-                if np.isfinite(lam) and lam > 0:
-                    out.append((int(i), lam, pt.flux_mjy))
-        del places
-        return out
-
-    def _score(self, sources: list[dict[str, Any]], points: list[list[tuple[float, float]]]) -> dict[str, Any]:
-        binned = [
-            anomaly.bin_spectrum(np.array([p[0] for p in pts]), np.array([p[1] for p in pts]))
-            if pts
-            else anomaly.bin_spectrum(np.zeros(0), np.zeros(0))
-            for pts in points
-        ]
-        brightness = [float(np.nansum(b.med)) for b in binned]
-        fs = anomaly.score_field(binned, brightness)
-        anomalies = []
-        scored = [(i, s) for i, s in enumerate(fs.scores) if s is not None]
-        ranked = sorted([x for x in scored if x[1].anomalous], key=lambda x: -x[1].score)
-        for n, (i, s) in enumerate(ranked, start=1):
-            src = sources[i]
-            anomalies.append(
-                {
-                    "n": n,
-                    "ra": round(src["ra"], 6),
-                    "dec": round(src["dec"], 6),
-                    "pmra": round(src.get("pmra", 0.0), 2),
-                    "pmdec": round(src.get("pmdec", 0.0), 2),
-                    "moves": src["moves"],
-                    "snr": None if not math.isfinite(src["snr"]) else round(src["snr"], 1),
-                    "score": round(s.score, 2),
-                    "points": binned[i].points,
-                    "drivers": [{k: round(v, 3) for k, v in d.items()} for d in s.drivers],
-                    "shape": [None if not np.isfinite(x) else round(float(x), 6) for x in s.shape],
-                    "shape_err": [None if not np.isfinite(x) else round(float(x), 6) for x in s.shape_err],
-                    "model": [round(float(x), 6) for x in s.model],
-                    "resid_z": [None if not np.isfinite(x) else round(float(x), 2) for x in s.resid_z],
-                }
-            )
-        return {
-            "sources": len(sources),
-            "with_spectrum": fs.family_size,
-            "median": None if not math.isfinite(fs.median) else round(fs.median, 3),
-            "scatter": None if not math.isfinite(fs.scatter) else round(fs.scatter, 3),
-            "threshold": None if not math.isfinite(fs.threshold) else round(fs.threshold, 3),
-            "reason": fs.reason,
-            "bins": [round(float(x), 4) for x in anomaly.CENTRES],
-            "edges": [round(float(x), 4) for x in anomaly.EDGES],
-            "scores": sorted([round(s.score, 3) for _, s in scored]),
-            "anomalies": anomalies,
-        }
+        box = np.ascontiguousarray(cw[y0:y1, x0:x1])  # only the box crosses to the worker, not the detector's whole map
+        moves = [bool(s["moves"]) for s in sources]
+        return await cpu.run(fit_all, img, flg, table, ps, box, px, py, inside, x0, y0, moves)
 
     # ---- identification ----------------------------------------------------------------------------------------------------------
     async def _tap(self, which: str, url: str, adql: str) -> list[dict[str, Any]]:
@@ -382,3 +269,127 @@ class Anomalies:
         except Exception as e:  # neither the archive nor the Parquet copy answered
             out["gaia"] = {"state": "unavailable", "error": str(e)[:120]}
         return out
+
+
+def field_sources(meta: dict[str, Any], grid: Grid, raws: list[bytes]) -> list[dict[str, Any]]:
+    passes = meta["passes"]
+    whites, sats = [], []
+    for raw in raws:
+        _, arr = decode(raw)
+        whites.append(arr["white"].astype(np.float32))
+        sats.append(arr["sat"].astype(np.float32) / 255.0)
+    mjds = [p["mjd_mid"] for p in passes]
+    if len(passes) >= 3:
+        res = movers.search(whites, sats, mjds, grid.step_arcsec)
+        still = res.still_sources
+        tracks = res.tracks
+    else:  # two passes: no tracks, and every source of the first pass counts
+        still = movers.find_sources(whites[0], sats[0], grid.step_arcsec)
+        tracks = []
+    still = [s for s in still if not s.saturated and s.snr >= MIN_SNR][:MAX_SOURCES]
+    out: list[dict[str, Any]] = []
+    if still:
+        ra, dec = grid.grid_to_sky([s.x for s in still], [s.y for s in still])
+        for s, r, d in zip(still, ra, dec, strict=True):
+            out.append({"ra": float(r), "dec": float(d), "snr": s.snr, "moves": False})
+    for t in tracks:
+        # the track's J2000 place and its motion (mas/yr), so that place_at() puts it where it was on each exposure's date
+        r0, d0 = grid.grid_to_sky([t.x0], [t.y0])
+        yrs = _year(t.ref_mjd) - 2000.0
+        d2000 = float(d0[0]) - t.v_north * yrs / 3600.0
+        r2000 = float(r0[0]) - t.v_east * yrs / 3600.0 / math.cos(math.radians(d2000))
+        snr = min((x for x in t.snr if math.isfinite(x)), default=1e9)
+        out.append({"ra": r2000 % 360.0, "dec": d2000, "pmra": t.v_east * 1000.0, "pmdec": t.v_north * 1000.0, "snr": snr, "moves": True})
+    return out
+
+
+def fit_all(
+    img: np.ndarray,
+    flg: np.ndarray,
+    table: dict[str, int],
+    ps: spxpsf.PsfSet,
+    cw: np.ndarray,
+    px: np.ndarray,
+    py: np.ndarray,
+    inside: np.ndarray,
+    x0: int,
+    y0: int,
+    moves: list[bool],
+) -> list[tuple[int, float, float]]:
+    """PSF fits of the sources inside one exposure's box (runs in a worker process; cw is the wavelength map of the box)."""
+    bad_all = spxflags.mask_of(table, spxflags.BAD_ALWAYS)
+    bad_mover = spxflags.mask_of(table, [n for n in spxflags.BAD_ALWAYS if n not in spxflags.MOVER_KEEP])
+    overflow = (flg & spxflags.mask_of(table, spxflags.SATURATION)) != 0
+    good = np.isfinite(img) & ((flg & bad_all) == 0) & ~overflow
+    if good.sum() < 50:
+        return []
+    v = img[good]
+    sigma = 1.4826 * float(np.median(np.abs(v - np.median(v))))
+    if not np.isfinite(sigma) or sigma <= 0:
+        return []
+    out: list[tuple[int, float, float]] = []
+    for i in np.nonzero(inside)[0]:
+        x, y = float(px[i]), float(py[i])
+        xi, yi = round(x), round(y)
+        sl = (slice(yi - HALF - y0, yi + HALF + 1 - y0), slice(xi - HALF - x0, xi + HALF + 1 - x0))
+        stamp, f = img[sl], flg[sl]
+        if stamp.shape != (2 * HALF + 1, 2 * HALF + 1):
+            continue
+        bad = (f & (bad_mover if moves[i] else bad_all)) != 0
+        ov = overflow[sl]
+        usable = np.isfinite(stamp) & ~bad & ~ov
+        saturated = ov | (~np.isfinite(stamp) & ~bad)
+        psf = spxpsf.stamp(ps, ps.zone_index(x, y), x - xi, y - yi, HALF)
+        # the solid angle of the pixel enters as a constant: the shape of a spectrum, not its scale, is compared
+        pt = photometry.fit(stamp, np.full(stamp.shape, sigma * sigma), usable, saturated, psf, x - xi, y - yi, 1.0e-9)
+        if pt.ok and pt.flux_mjy is not None:
+            lam = float(cw[yi - y0, xi - x0])
+            if np.isfinite(lam) and lam > 0:
+                out.append((int(i), lam, pt.flux_mjy))
+    return out
+
+
+def score_sources(sources: list[dict[str, Any]], points: list[list[tuple[float, float]]]) -> dict[str, Any]:
+    binned = [
+        anomaly.bin_spectrum(np.array([p[0] for p in pts]), np.array([p[1] for p in pts]))
+        if pts
+        else anomaly.bin_spectrum(np.zeros(0), np.zeros(0))
+        for pts in points
+    ]
+    brightness = [float(np.nansum(b.med)) for b in binned]
+    fs = anomaly.score_field(binned, brightness)
+    anomalies = []
+    scored = [(i, s) for i, s in enumerate(fs.scores) if s is not None]
+    ranked = sorted([x for x in scored if x[1].anomalous], key=lambda x: -x[1].score)
+    for n, (i, s) in enumerate(ranked, start=1):
+        src = sources[i]
+        anomalies.append(
+            {
+                "n": n,
+                "ra": round(src["ra"], 6),
+                "dec": round(src["dec"], 6),
+                "pmra": round(src.get("pmra", 0.0), 2),
+                "pmdec": round(src.get("pmdec", 0.0), 2),
+                "moves": src["moves"],
+                "snr": None if not math.isfinite(src["snr"]) else round(src["snr"], 1),
+                "score": round(s.score, 2),
+                "points": binned[i].points,
+                "drivers": [{k: round(v, 3) for k, v in d.items()} for d in s.drivers],
+                "shape": [None if not np.isfinite(x) else round(float(x), 6) for x in s.shape],
+                "shape_err": [None if not np.isfinite(x) else round(float(x), 6) for x in s.shape_err],
+                "model": [round(float(x), 6) for x in s.model],
+                "resid_z": [None if not np.isfinite(x) else round(float(x), 2) for x in s.resid_z],
+            }
+        )
+    return {
+        "sources": len(sources),
+        "with_spectrum": fs.family_size,
+        "median": None if not math.isfinite(fs.median) else round(fs.median, 3),
+        "scatter": None if not math.isfinite(fs.scatter) else round(fs.scatter, 3),
+        "threshold": None if not math.isfinite(fs.threshold) else round(fs.threshold, 3),
+        "reason": fs.reason,
+        "bins": [round(float(x), 4) for x in anomaly.CENTRES],
+        "edges": [round(float(x), 4) for x in anomaly.EDGES],
+        "scores": sorted([round(s.score, 3) for _, s in scored]),
+        "anomalies": anomalies,
+    }

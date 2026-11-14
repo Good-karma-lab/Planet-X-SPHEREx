@@ -94,28 +94,10 @@ async def run_field(
 
     async def on_pass(pp: PassProducts, cdet: tuple[int, ...]) -> None:
         k = pp.index
-        rgb = pp.rgb(cdet)
-        sat = pp.sat_share(cdet)
-        r, g, b = rgb
-        kr, kb = white_balance(r, g, b, np.isfinite(r) & (g > STAR_THRESHOLD) & (sat < 0.5))
-        store.write_part(
-            KIND, key, f"picture_p{k}.sxp", encode({"rgb": _f16(rgb), "sat": (np.clip(sat, 0, 1) * 255).astype(np.uint8)}, {"pass": k})
-        )
-        dets = np.stack([pp.layer(f"D{d}") for d in range(1, 7)])
-        noise = np.stack([pp.noise(f"D{d}") for d in range(1, 7)])
-        store.write_part(
-            KIND,
-            key,
-            f"dets_p{k}.sxp",
-            encode({"dets": _f16(dets), "noise": _f16(noise)}, {"pass": k, "layers": [f"D{d}" for d in range(1, 7)]}),
-        )
-        bl = np.stack([pp.layer(b.key) for b in bands])
-        store.write_part(KIND, key, f"bands_p{k}.sxp", encode({"bands": _f16(bl)}, {"pass": k, "layers": [b.key for b in bands]}))
-        names = sorted(pp.census)
-        if names:
-            fl = np.stack([(pp.census[n] * 255).astype(np.uint8) for n in names])
-            store.write_part(KIND, key, f"flags_p{k}.sxp", encode({"flags": fl}, {"pass": k, "names": names}))
-        passes_meta.append(pass_meta(pp, kr, kb))
+        parts, pm = await ctx.compute(encode_pass, pp, cdet, bands)
+        for name, data in parts.items():
+            store.write_part(KIND, key, name, data)
+        passes_meta.append(pm)
         built.append(pp)
         for part in ("picture", "dets", "bands", "flags"):
             ctx.part_ready(f"{part}_p{k}")
@@ -123,11 +105,7 @@ async def run_field(
 
     async def on_quick(pp: PassProducts, cdet: tuple[int, ...]) -> None:
         k = pp.index
-        white = pp.white(cdet)
-        sat = pp.sat_share(cdet)
-        store.write_part(
-            KIND, key, f"quick_p{k}.sxp", encode({"white": _f16(white), "sat": (np.clip(sat, 0, 1) * 255).astype(np.uint8)}, {"pass": k})
-        )
+        store.write_part(KIND, key, f"quick_p{k}.sxp", await ctx.compute(encode_quick, pp, cdet))
         ctx.part_ready(f"quick_p{k}")
 
     def progress(text: str) -> None:
@@ -148,19 +126,13 @@ async def run_field(
     )
     ctx.phase("comparing passes")
     if len(built) >= 2:
-        z = {}
+        z: dict[str, np.ndarray] = {}
+        ref = diff_layers(built[0], b.cdet, bands)
         for pp in built[1:]:
-            names = ["white", *[bd.key for bd in bands]]
-            for name in names:
-                if name == "white":
-                    a, c = built[0].white(b.cdet), pp.white(b.cdet)
-                    sa = _white_noise([built[0].noise(f"D{d}") for d in b.cdet])
-                    sc = _white_noise([pp.noise(f"D{d}") for d in b.cdet])
-
-                else:
-                    a, c, sa, sc = built[0].layer(name), pp.layer(name), built[0].noise(name), pp.noise(name)
-                z[f"p{pp.index}_{name}"] = _encode_z(z_map(a, c, sa, sc, b.grid.step_arcsec))
-        store.write_part(KIND, key, "diff.sxp", encode(z, {"reference_pass": 0, "encoding": "128 + 12.7 z, clipped at ±10; 0 = no data"}))
+            await ctx.checkpoint()
+            z.update(await ctx.compute(diff_pass, ref, diff_layers(pp, b.cdet, bands), pp.index, b.grid.step_arcsec))
+        note = {"reference_pass": 0, "encoding": "128 + 12.7 z, clipped at ±10; 0 = no data"}
+        store.write_part(KIND, key, "diff.sxp", await ctx.compute(encode, z, note))
         ctx.part_ready("diff")
     meta = {
         "kind": KIND,
@@ -192,3 +164,50 @@ def exposure_signature(index: Index, params: dict[str, Any]) -> str:
     import hashlib
 
     return hashlib.sha256(json.dumps(sorted(e.key for e in found)).encode()).hexdigest()[:16]
+
+
+# ---- compute of the published parts (module level: these run in worker processes) -------------------------------------------------
+def encode_pass(pp: PassProducts, cdet: tuple[int, ...], bands: list[Any]) -> tuple[dict[str, bytes], dict[str, Any]]:
+    k = pp.index
+    rgb = pp.rgb(cdet)
+    sat = pp.sat_share(cdet)
+    r, g, b = rgb
+    kr, kb = white_balance(r, g, b, np.isfinite(r) & (g > STAR_THRESHOLD) & (sat < 0.5))
+    out = {f"picture_p{k}.sxp": encode({"rgb": _f16(rgb), "sat": (np.clip(sat, 0, 1) * 255).astype(np.uint8)}, {"pass": k})}
+    dets = np.stack([pp.layer(f"D{d}") for d in range(1, 7)])
+    noise = np.stack([pp.noise(f"D{d}") for d in range(1, 7)])
+    out[f"dets_p{k}.sxp"] = encode({"dets": _f16(dets), "noise": _f16(noise)}, {"pass": k, "layers": [f"D{d}" for d in range(1, 7)]})
+    bl = np.stack([pp.layer(bd.key) for bd in bands])
+    out[f"bands_p{k}.sxp"] = encode({"bands": _f16(bl)}, {"pass": k, "layers": [bd.key for bd in bands]})
+    names = sorted(pp.census)
+    if names:
+        fl = np.stack([(pp.census[n] * 255).astype(np.uint8) for n in names])
+        out[f"flags_p{k}.sxp"] = encode({"flags": fl}, {"pass": k, "names": names})
+    return out, pass_meta(pp, kr, kb)
+
+
+def encode_quick(pp: PassProducts, cdet: tuple[int, ...]) -> bytes:
+    white = pp.white(cdet)
+    sat = pp.sat_share(cdet)
+    return encode({"white": _f16(white), "sat": (np.clip(sat, 0, 1) * 255).astype(np.uint8)}, {"pass": pp.index})
+
+
+def diff_layers(pp: PassProducts, cdet: tuple[int, ...], bands: list[Any]) -> dict[str, tuple[np.ndarray, np.ndarray]]:
+    """The layers a difference needs, with their noise (references to the pass's arrays; the white noise is combined later)."""
+    out: dict[str, tuple[np.ndarray, np.ndarray]] = {"white": (pp.white(cdet), np.stack([pp.noise(f"D{d}") for d in cdet]))}
+    for bd in bands:
+        out[bd.key] = (pp.layer(bd.key), pp.noise(bd.key))
+    return out
+
+
+def diff_pass(
+    ref: dict[str, tuple[np.ndarray, np.ndarray]], cur: dict[str, tuple[np.ndarray, np.ndarray]], index: int, step_arcsec: float
+) -> dict[str, np.ndarray]:
+    z = {}
+    for name in ref:
+        a, sa = ref[name]
+        c, sc = cur[name]
+        if name == "white":
+            sa, sc = _white_noise(list(sa)), _white_noise(list(sc))
+        z[f"p{index}_{name}"] = _encode_z(z_map(a, c, sa, sc, step_arcsec))
+    return z

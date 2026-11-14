@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 from pathlib import Path
@@ -11,6 +12,7 @@ import numpy as np
 
 from engine.grid import Grid
 from engine.red import red_sources
+from service import cpu
 from service.products.store import Store, product_key
 from service.products.sxp import decode
 from service.workers import fieldjob
@@ -24,15 +26,40 @@ def find_red(store: Store, field_key: str, out_dir: Path) -> dict[str, Any]:
     if path.is_file():
         cached: dict[str, Any] = json.loads(path.read_text())
         return cached
+    meta, raws = read_parts(store, field_key)
+    return keep(red_result(field_key, meta, raws), out_dir, key)
+
+
+async def find_red_async(store: Store, field_key: str, out_dir: Path) -> dict[str, Any]:
+    """The same, with the reading in a thread and the compute in a worker process (never in the API process)."""
+    key = product_key(KIND, {"field": field_key})
+    path = out_dir / f"{key}.json"
+    if path.is_file():
+        cached: dict[str, Any] = json.loads(await asyncio.to_thread(path.read_text))
+        return cached
+    meta, raws = await asyncio.to_thread(read_parts, store, field_key)
+    result = await cpu.run(red_result, field_key, meta, raws)
+    return await asyncio.to_thread(keep, result, out_dir, key)
+
+
+def read_parts(store: Store, field_key: str) -> tuple[dict[str, Any], list[tuple[bytes, bytes]]]:
     meta = store.read_meta(fieldjob.KIND, field_key)
     if meta is None:
         raise ValueError("the field is not finished")
-    dets, noise, sats = [], [], []
+    raws = []
     for p in meta["passes"]:
         raw = store.read_part(fieldjob.KIND, field_key, f"dets_p{p['index']}.sxp")
         q = store.read_part(fieldjob.KIND, field_key, f"quick_p{p['index']}.sxp")
         if raw is None or q is None:
             raise ValueError("a pass of the field is missing")
+        raws.append((raw, q))
+    return meta, raws
+
+
+def red_result(field_key: str, meta: dict[str, Any], raws: list[tuple[bytes, bytes]]) -> dict[str, Any]:
+    """Red sources from the passes' detector stacks (runs in a worker process)."""
+    dets, noise, sats = [], [], []
+    for raw, q in raws:
         _, a = decode(raw)
         _, b = decode(q)
         dets.append(a["dets"].astype(np.float32))
@@ -74,8 +101,12 @@ def find_red(store: Store, field_key: str, out_dir: Path) -> dict[str, Any]:
         "red": [x for x in rows if x["red"]],
         "all": rows[:60],
     }
+    return result
+
+
+def keep(result: dict[str, Any], out_dir: Path, key: str) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp = out_dir / f"{key}.part"
     tmp.write_text(json.dumps(result, separators=(",", ":")))
-    tmp.replace(path)
+    tmp.replace(out_dir / f"{key}.json")
     return result

@@ -7,6 +7,7 @@ Allsky image of order 3 (the whole sky at about 0.1° per pixel) and, zoomed in,
 from __future__ import annotations
 
 import re
+import secrets
 import threading
 from pathlib import Path
 
@@ -38,6 +39,60 @@ class HipsTiles:
         self.root = root
         self.client = client or httpx.Client(timeout=httpx.Timeout(30, connect=10), headers={"User-Agent": "spherex-sky/0.1"})
         self.lock = threading.Lock()
+        self.aclient: httpx.AsyncClient | None = None
+        self.count = -1  # tiles on disk (counted once in the background, then kept up to date)
+        self.fetched = 0
+        self.failed = 0
+
+    def count_tiles(self) -> int:
+        self.count = sum(1 for p in self.root.rglob("*") if p.suffix in (".jpg", ".png")) if self.root.is_dir() else 0
+        return self.count
+
+    async def aget(self, survey: str, order: int, tile: str) -> bytes | None:
+        """A tile from disk, or from the mirror with a short timeout and one retry. Never waits behind a job or a lock: its own
+        async client, parallel fetches."""
+        rel = self.relative(survey, order, tile)
+        path = self.root / survey / rel
+        if path.is_file():
+            return path.read_bytes()
+        if self.aclient is None:
+            self.aclient = httpx.AsyncClient(
+                timeout=httpx.Timeout(8, connect=4),
+                headers={"User-Agent": "spherex-sky/0.1"},
+                limits=httpx.Limits(max_connections=32, max_keepalive_connections=16),
+            )
+        url = BASE + SURVEYS[survey][0] + "/" + rel
+        last: Exception | None = None
+        for _ in range(2):
+            try:
+                r = await self.aclient.get(url)
+            except httpx.HTTPError as e:
+                last = e
+                continue
+            if r.status_code == 404:
+                return None
+            if r.status_code >= 500:
+                last = httpx.HTTPStatusError(f"{r.status_code}", request=r.request, response=r)
+                continue
+            r.raise_for_status()
+            self._keep(path, r.content)
+            return r.content
+        self.failed += 1
+        assert last is not None
+        raise last
+
+    def _keep(self, path: Path, data: bytes) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.part")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+        self.fetched += 1
+        if self.count >= 0:
+            self.count += 1
+
+    async def close(self) -> None:
+        if self.aclient is not None:
+            await self.aclient.aclose()
 
     @staticmethod
     def relative(survey: str, order: int, tile: str) -> str:
@@ -66,8 +121,5 @@ class HipsTiles:
         if r.status_code == 404:
             return None
         r.raise_for_status()
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".part")
-        tmp.write_bytes(r.content)
-        tmp.replace(path)
+        self._keep(path, r.content)
         return r.content

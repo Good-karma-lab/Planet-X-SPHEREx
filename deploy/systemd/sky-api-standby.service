@@ -8,6 +8,7 @@ User=sky
 WorkingDirectory=/opt/sky
 EnvironmentFile=/etc/sky/env
 Environment=SKY_STORE=/var/lib/sky
+Environment=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 Environment=SKY_WARM=0
 Environment=SKY_STANDBY=1
 Environment=SKY_WORKERS=1

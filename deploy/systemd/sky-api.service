@@ -8,6 +8,7 @@ User=sky
 WorkingDirectory=/opt/sky
 EnvironmentFile=/etc/sky/env
 Environment=SKY_STORE=/var/lib/sky
+Environment=OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1
 Environment=SKY_WEB_DIST=/opt/sky/web/dist
 ExecStart=/home/sky/.local/bin/uv run --no-dev uvicorn service.app:app --host 127.0.0.1 --port 8780 --timeout-graceful-shutdown 25
 Restart=always

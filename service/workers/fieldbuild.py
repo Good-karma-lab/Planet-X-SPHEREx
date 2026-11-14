@@ -22,6 +22,7 @@ from engine.grid import Grid, grid_for_fov
 from engine.passes import common_detectors, detectors_per_pass, seasons_with_common_detectors, split_passes, split_visits
 from engine.register import register, stars
 from indexer.store import Exposure, Index
+from service import cpu
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.workers.native import read_native
@@ -82,7 +83,6 @@ async def build_field(
     passes = seasons_with_common_detectors(split_passes([e.mjd0 for e in exps]), [e.det for e in exps])
     visits_all = split_visits([e.mjd0 for e in exps], [e.det for e in exps])
     visit_of = {i: k for k, v in enumerate(visits_all) for i in v}
-    loop = asyncio.get_running_loop()
     natives: dict[int, NativeExposure] = {}
     missing: list[str] = []
     t_read = 0.0
@@ -117,15 +117,16 @@ async def build_field(
                 group = [natives[i] for i in chosen if i in natives and exps[i].det == det]
                 if group:
                     if executor is not None:
-                        parts_q.append(await loop.run_in_executor(executor, build_detector, group, grid, [], True, sig_q))
+                        parts_q.append(await cpu.run(build_detector, group, grid, [], True, sig_q))
                     else:
                         parts_q.append(build_detector(group, grid, [], True, sig_q))
             for i in chosen:
                 natives.pop(i, None)
             if parts_q:
-                await on_quick(reduce_pass(p.index, parts_q, grid, cdet), cdet)
+                await on_quick(await cpu.run(reduce_pass, p.index, parts_q, grid, cdet), cdet)
             if progress:
                 progress(f"quick picture of pass {p.index + 1} of {len(passes)}")
+    ref_stars: Any = None
     for p in passes:
         groups: dict[int, list[int]] = defaultdict(list)
         for i in p.members:
@@ -156,7 +157,7 @@ async def build_field(
                 kept.setdefault(p.index, []).extend(group)
             tc = time.time()
             if executor is not None:
-                parts.append(await loop.run_in_executor(executor, build_detector, group, grid, bands))
+                parts.append(await cpu.run(build_detector, group, grid, bands))
             else:
                 parts.append(build_detector(group, grid, bands))
             tc_total += time.time() - tc
@@ -164,10 +165,10 @@ async def build_field(
             if progress:
                 progress(f"pass {p.index + 1} of {len(passes)}: D{det} stacked")
         if parts:
-            pp = reduce_pass(p.index, parts, grid, cdet)
-            if built:  # register on pass 0 as soon as the pass exists, so it can be published at once
-                ref = stars(built[0].white(cdet), built[0].sat_share(cdet), grid.step_arcsec)
-                pp.register(register(ref, stars(pp.white(cdet), pp.sat_share(cdet), grid.step_arcsec), grid.step_arcsec))
+            if built and ref_stars is None:
+                ref_stars = await cpu.run(_stars_of, built[0], cdet, grid.step_arcsec)
+            # register on pass 0 as soon as the pass exists, so it can be published at once
+            pp = await cpu.run(_reduce_registered, p.index, parts, grid, cdet, ref_stars if built else None)
             built.append(pp)
             if on_pass is not None:
                 await on_pass(pp, cdet)
@@ -181,3 +182,15 @@ async def build_field(
         timings={"read_s": t_read, "compute_s": tc_total, "total_s": time.time() - t0},
         natives=kept,
     )
+
+
+def _stars_of(pp: PassProducts, cdet: tuple[int, ...], step_arcsec: float) -> Any:
+    return stars(pp.white(cdet), pp.sat_share(cdet), step_arcsec)
+
+
+def _reduce_registered(index: int, parts: list[Any], grid: Grid, cdet: tuple[int, ...], ref: Any) -> PassProducts:
+    """One pass from its detector stacks, registered on pass 0's stars (runs in a worker process)."""
+    pp = reduce_pass(index, parts, grid, cdet)
+    if ref is not None:
+        pp.register(register(ref, stars(pp.white(cdet), pp.sat_share(cdet), grid.step_arcsec), grid.step_arcsec))
+    return pp

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import multiprocessing
 import os
 import secrets
 import time
@@ -17,7 +19,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__
+from service import __version__, cpu
 from service.anomalies import Anomalies
 from service.bodies import KnownBodies
 from service.catalogue_check import check as catalogue_check
@@ -33,7 +35,7 @@ from service.ratelimit import Buckets, client_id
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.reader.s3 import S3
-from service.red import find_red
+from service.red import find_red_async
 from service.spectrum import Spectra, spectrum_params
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
@@ -59,6 +61,7 @@ class State:
         self.s3: S3 | None = None
         self.scheduler: Scheduler | None = None
         self.executor: ProcessPoolExecutor | None = None
+        self.index_health: dict[str, Any] | None = None
         self.warm: WarmRunner | None = None
         self.hips: HipsTiles | None = None
         self.coverage: dict[str, Any] | None = None
@@ -92,11 +95,21 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
             st.anomalies = Anomalies(st.index, st.files, st.wavelengths, st.store, cfg.store_dir)
         if scheduler is None:
-            st.executor = ProcessPoolExecutor(max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2))))
+            workers = max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2)))
+            # fresh worker processes (forkserver), not copies of the API process: small, and the memory cap counts only their own work
+            st.executor = ProcessPoolExecutor(
+                workers,
+                mp_context=multiprocessing.get_context("forkserver"),
+                initializer=cpu.worker_init,
+                initargs=(int(os.environ.get("SKY_WORKER_MEM_MB", "6000")),),
+            )
+            cpu.configure(st.executor, workers)
             st.scheduler = Scheduler(executor=st.executor)
         else:
             st.scheduler = scheduler
         st.scheduler.start()
+        hips = st.hips
+        asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         warm_task = None
         if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None:
             st.warm = WarmRunner(warm_set())
@@ -106,12 +119,14 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             warm_task.cancel()
         await st.scheduler.stop()
         await st.s3.close()
+        await st.hips.close()
         if st.executor is not None:
             # do not wait for a field still being computed in a worker: its job is recomputed (or attached) after the restart
             procs = list(getattr(st.executor, "_processes", {}).values())
             st.executor.shutdown(wait=False, cancel_futures=True)
             for proc in procs:
                 proc.terminate()
+            cpu.configure(None, 0)
         st.store.close()
         if st.index is not None:
             st.index.close()
@@ -245,11 +260,27 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "started_at": st.started_at,
             "uptime_s": round(time.monotonic() - st.started, 1),
             "product_versions": dict(VERSIONS),
-            "index": None if st.index is None else {"files": st.index.count(), **st.index.meta()},
+            "index": index_health(),
             "jobs": st.scheduler.snapshot() if st.scheduler else None,
             "warm": st.warm.snapshot() if st.warm else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
+            "cpu": cpu.stats(),
+            "tiles": None if st.hips is None else {"cached": st.hips.count, "fetched": st.hips.fetched, "failed": st.hips.failed},
         }
+
+    def index_health() -> dict[str, Any] | None:
+        """The index's size and dates, read once (a count of 1.6 million rows is not free)."""
+        if st.index is None:
+            return None
+        if st.index_health is None:
+            meta: dict[str, Any] = dict(st.index.meta())
+            rec = meta.pop("reconcile", None)
+            try:
+                meta["reconciled_at"] = json.loads(rec)["at"] if rec else None
+            except (ValueError, KeyError, TypeError):
+                meta["reconciled_at"] = None
+            st.index_health = {"files": st.index.count(), **meta}
+        return st.index_health
 
     @app.get(f"{API_PREFIX}/fields")
     def field(
@@ -435,7 +466,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if not st.store.is_complete(key):
             return {"state": "waiting", "result": None}
         try:
-            result = await asyncio.to_thread(find_red, st.store, key, cfg.store_dir / "red")
+            result = await find_red_async(st.store, key, cfg.store_dir / "red")
         except ValueError as e:
             return {"state": "failed", "error": str(e), "result": None}
         return {"state": "done", "result": result}
@@ -544,7 +575,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if st.hips is None:
             raise HTTPException(503)
         try:
-            data = await asyncio.to_thread(st.hips.get, survey, order, tile)
+            data = await st.hips.aget(survey, order, tile)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
         except Exception as e:  # the mirror is down or slow: the globe keeps the coarser tiles it has

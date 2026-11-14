@@ -19,6 +19,7 @@ from numpy.typing import NDArray
 from engine.spx import rows as spxrows
 from engine.spx.fitsio import HDU, hdu_at, header_length
 from engine.spx.layout import Layout, PlainImage, RiceImage, layout_from_hdus
+from service import cpu
 from service.reader.s3 import S3, ReadError
 from service.storage import digest, load_npz, save_npz, sharded
 
@@ -92,7 +93,9 @@ class FileReader:
         return sharded(self.store / "raw" / "bands", digest("band-v1", key, plane, BAND_ROWS, band), ".npz")
 
     async def rows(self, key: str, plane: Plane, y0: int, y1: int) -> NDArray[np.generic]:
-        """Rows y0..y1-1 of a plane, native byte order (float32 for image/variance/zodi, int32 for flags)."""
+        """Rows y0..y1-1 of a plane, native byte order (float32 for image/variance/zodi, int32 for flags).
+
+        Decoding and the band cache's compression run in a worker process (service.cpu); this process only fetches bytes."""
         lay = await self.layout(key)
         img = _plane(lay, plane)
         ny = img.ny
@@ -100,35 +103,29 @@ class FileReader:
         if y1 <= y0:
             raise ValueError(f"rows {y0}..{y1} outside 0..{ny}")
         b0, b1 = y0 // BAND_ROWS, (y1 - 1) // BAND_ROWS + 1
-        bands: dict[int, NDArray[np.generic]] = {}
-        missing = []
-        for b in range(b0, b1):
-            z = load_npz(self._band_path(key, plane, b))
-            if z is not None:
-                bands[b] = z["rows"]
-            else:
-                missing.append(b)
+        paths = {b: self._band_path(key, plane, b) for b in range(b0, b1)}
+        loaded = await asyncio.to_thread(_load_bands, [paths[b] for b in range(b0, b1)])
+        bands: dict[int, NDArray[np.generic]] = {b: a for b, a in zip(range(b0, b1), loaded, strict=True) if a is not None}
+        missing = [b for b in range(b0, b1) if b not in bands]
         for run in _runs(missing):
-            got = await self._fetch_bands(key, img, run[0], run[-1] + 1)
-            for b, arr in got.items():
-                save_npz(self._band_path(key, plane, b), rows=arr)
-                bands[b] = arr
+            bands.update(await self._fetch_bands(key, img, run[0], run[-1] + 1, [paths[b] for b in range(run[0], run[-1] + 1)]))
         block = np.concatenate([bands[b] for b in range(b0, b1)], axis=0)
         return block[y0 - b0 * BAND_ROWS : y1 - b0 * BAND_ROWS]
 
-    async def _fetch_bands(self, key: str, img: PlainImage | RiceImage, b0: int, b1: int) -> dict[int, NDArray[np.generic]]:
+    async def _fetch_bands(
+        self, key: str, img: PlainImage | RiceImage, b0: int, b1: int, paths: list[Path] | None = None
+    ) -> dict[int, NDArray[np.generic]]:
         y0, y1 = b0 * BAND_ROWS, min(img.ny, b1 * BAND_ROWS)
         if isinstance(img, PlainImage):
             a, b = img.rows_range(y0, y1)
-            arr: NDArray[np.generic] = spxrows.plain_rows(img, await self.s3.get_range(key, a, b), y1 - y0)
-        else:
-            t0, t1 = img.tiles_of_rows(y0, y1)
-            da, db = img.descriptor_range(t0, t1)
-            desc = spxrows.descriptors(img, await self.s3.get_range(key, da, db))
-            ha, hb = spxrows.heap_span(desc)
-            heap = await self.s3.get_range(key, img.heap_offset + ha, img.heap_offset + hb)
-            arr = spxrows.rice_rows(img, desc, heap, ha, t0)[: y1 - y0]
-        return {b: arr[(b - b0) * BAND_ROWS : (b - b0 + 1) * BAND_ROWS] for b in range(b0, b1)}
+            buf = await self.s3.get_range(key, a, b)
+            return await cpu.run(_decode_plain, img, buf, y1 - y0, b0, b1, paths)
+        t0, t1 = img.tiles_of_rows(y0, y1)
+        da, db = img.descriptor_range(t0, t1)
+        desc = spxrows.descriptors(img, await self.s3.get_range(key, da, db))
+        ha, hb = spxrows.heap_span(desc)
+        heap = await self.s3.get_range(key, img.heap_offset + ha, img.heap_offset + hb)
+        return await cpu.run(_decode_rice, img, desc, heap, ha, t0, y1 - y0, b0, b1, paths)
 
     async def table_bytes(self, key: str, which: Literal["psf", "wave"]) -> tuple[fits.Header, bytes]:
         """The data of the PSF or WCS-WAVE extension. The small WCS-WAVE table is cached in the store; PSF sets are shared by
@@ -163,3 +160,30 @@ def _runs(xs: list[int]) -> list[list[int]]:
         else:
             out.append([x])
     return out
+
+
+# ---- compute of the row cache (module level: these run in worker processes) ---------------------------------------------------------
+def _load_bands(paths: list[Path]) -> list[NDArray[np.generic] | None]:
+    out: list[NDArray[np.generic] | None] = []
+    for p in paths:
+        z = load_npz(p)
+        out.append(z["rows"] if z is not None else None)
+    return out
+
+
+def _split_and_keep(arr: NDArray[np.generic], b0: int, b1: int, paths: list[Path] | None) -> dict[int, NDArray[np.generic]]:
+    got = {b: arr[(b - b0) * BAND_ROWS : (b - b0 + 1) * BAND_ROWS] for b in range(b0, b1)}
+    if paths is not None:
+        for b, p in zip(range(b0, b1), paths, strict=True):
+            save_npz(p, rows=got[b])
+    return got
+
+
+def _decode_plain(img: PlainImage, buf: bytes, n_rows: int, b0: int, b1: int, paths: list[Path] | None) -> dict[int, NDArray[np.generic]]:
+    return _split_and_keep(spxrows.plain_rows(img, buf, n_rows), b0, b1, paths)
+
+
+def _decode_rice(
+    img: RiceImage, desc: NDArray[np.int64], heap: bytes, ha: int, t0: int, n_rows: int, b0: int, b1: int, paths: list[Path] | None
+) -> dict[int, NDArray[np.generic]]:
+    return _split_and_keep(spxrows.rice_rows(img, desc, heap, ha, t0)[:n_rows], b0, b1, paths)

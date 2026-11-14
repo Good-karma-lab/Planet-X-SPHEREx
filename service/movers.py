@@ -25,6 +25,7 @@ import numpy as np
 
 from engine import movers
 from engine.grid import Grid
+from service import cpu
 from service.products.store import Store, product_key
 from service.products.sxp import decode
 from service.upstream import gaia, gaia_hats
@@ -93,7 +94,8 @@ class Movers:
             meta = self.store.read_meta(fieldjob.KIND, run.field_key)
             if meta is None:
                 raise ValueError("the field is not finished")
-            result = await asyncio.to_thread(self._search, run.field_key, meta)
+            raws = await asyncio.to_thread(self._quick_parts, run.field_key, meta)
+            result = await cpu.run(search_parts, run.field_key, meta, raws)
             run.result = result
             run.checked_at = time.monotonic()
             await self._check_all(run)
@@ -102,58 +104,17 @@ class Movers:
             run.state, run.error = "failed", str(e)[:300]
             self.runs.pop(run.key, None)
 
-    def _search(self, field_key: str, meta: dict[str, Any]) -> dict[str, Any]:
-        passes = meta["passes"]
-        whites, sats = [], []
-        for p in passes:
+    def _quick_parts(self, field_key: str, meta: dict[str, Any]) -> list[bytes]:
+        raws = []
+        for p in meta["passes"]:
             raw = self.store.read_part(fieldjob.KIND, field_key, f"quick_p{p['index']}.sxp")
             if raw is None:
                 raise ValueError("a pass of the field is missing")
-            _, arr = decode(raw)
-            whites.append(arr["white"].astype(np.float32))
-            sats.append(arr["sat"].astype(np.float32) / 255.0)
-        g = meta["grid"]
-        grid = Grid(g["ra0"], g["dec0"], g["step_arcsec"], g["n"])
-        t0 = time.monotonic()
-        res = movers.search(whites, sats, [p["mjd_mid"] for p in passes], g["step_arcsec"])
-        tracks = []
-        for t in res.tracks:
-            ra, dec = grid.grid_to_sky([p[0] for p in t.xy], [p[1] for p in t.xy])
-            # the place at 2025.9 on the fitted line (x0, y0 is its place at the first pass)
-            yrs = 2025.9 - year_of(passes[0]["mjd_mid"])
-            ra_e, dec_e = grid.grid_to_sky([t.x0], [t.y0])
-            dec_m = float(dec_e[0]) + t.v_north * yrs / 3600.0
-            ra_m = float(ra_e[0]) + t.v_east * yrs / 3600.0 / math.cos(math.radians(dec_m))
-            tracks.append(
-                {
-                    "passes": t.passes,
-                    "mjd": [round(m, 4) for m in t.mjd],
-                    "ra": [round(float(x), 6) for x in ra],
-                    "dec": [round(float(x), 6) for x in dec],
-                    "ra_2025_9": round(ra_m % 360.0, 6),
-                    "dec_2025_9": round(dec_m, 6),
-                    "speed": round(t.speed, 2),
-                    "pa": round(t.pa, 1),
-                    "v_east": round(t.v_east, 3),
-                    "v_north": round(t.v_north, 3),
-                    "rms_arcsec": round(t.rms_arcsec, 2),
-                    "saturated": t.saturated,
-                    "snr": [None if not math.isfinite(s) else round(s, 1) for s in t.snr],
-                    "check": "pending",
-                    "gaia": None,
-                }
-            )
-        return {
-            "field": field_key,
-            "passes": len(passes),
-            "sources_per_pass": res.sources_per_pass,
-            "stationary": res.stationary,
-            "weak": res.weak,
-            "chance": {"trials": res.chance_trials, "mean": round(res.chance_mean, 3), "any": round(res.chance_any, 3)},
-            "still": 0,
-            "tracks": tracks,
-            "seconds": round(time.monotonic() - t0, 2),
-        }
+            raws.append(raw)
+        return raws
+
+    def _search(self, field_key: str, meta: dict[str, Any]) -> dict[str, Any]:
+        return search_parts(field_key, meta, self._quick_parts(field_key, meta))
 
     async def _check_all(self, run: Run) -> None:
         for t in run.result.get("tracks", []):
@@ -247,3 +208,55 @@ class Movers:
             r["tracks"] = [t for t in r["tracks"] if t["check"] != "still"]
             out["result"] = r
         return out
+
+
+def search_parts(field_key: str, meta: dict[str, Any], raws: list[bytes]) -> dict[str, Any]:
+    """The search between passes on the field's quick parts (runs in a worker process)."""
+    passes = meta["passes"]
+    whites, sats = [], []
+    for raw in raws:
+        _, arr = decode(raw)
+        whites.append(arr["white"].astype(np.float32))
+        sats.append(arr["sat"].astype(np.float32) / 255.0)
+    g = meta["grid"]
+    grid = Grid(g["ra0"], g["dec0"], g["step_arcsec"], g["n"])
+    t0 = time.monotonic()
+    res = movers.search(whites, sats, [p["mjd_mid"] for p in passes], g["step_arcsec"])
+    tracks = []
+    for t in res.tracks:
+        ra, dec = grid.grid_to_sky([p[0] for p in t.xy], [p[1] for p in t.xy])
+        # the place at 2025.9 on the fitted line (x0, y0 is its place at the first pass)
+        yrs = 2025.9 - year_of(passes[0]["mjd_mid"])
+        ra_e, dec_e = grid.grid_to_sky([t.x0], [t.y0])
+        dec_m = float(dec_e[0]) + t.v_north * yrs / 3600.0
+        ra_m = float(ra_e[0]) + t.v_east * yrs / 3600.0 / math.cos(math.radians(dec_m))
+        tracks.append(
+            {
+                "passes": t.passes,
+                "mjd": [round(m, 4) for m in t.mjd],
+                "ra": [round(float(x), 6) for x in ra],
+                "dec": [round(float(x), 6) for x in dec],
+                "ra_2025_9": round(ra_m % 360.0, 6),
+                "dec_2025_9": round(dec_m, 6),
+                "speed": round(t.speed, 2),
+                "pa": round(t.pa, 1),
+                "v_east": round(t.v_east, 3),
+                "v_north": round(t.v_north, 3),
+                "rms_arcsec": round(t.rms_arcsec, 2),
+                "saturated": t.saturated,
+                "snr": [None if not math.isfinite(s) else round(s, 1) for s in t.snr],
+                "check": "pending",
+                "gaia": None,
+            }
+        )
+    return {
+        "field": field_key,
+        "passes": len(passes),
+        "sources_per_pass": res.sources_per_pass,
+        "stationary": res.stationary,
+        "weak": res.weak,
+        "chance": {"trials": res.chance_trials, "mean": round(res.chance_mean, 3), "any": round(res.chance_any, 3)},
+        "still": 0,
+        "tracks": tracks,
+        "seconds": round(time.monotonic() - t0, 2),
+    }

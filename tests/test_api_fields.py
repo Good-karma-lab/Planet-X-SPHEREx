@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import time
 from pathlib import Path
+from typing import Any
 
 from astropy.io import fits
 from fastapi.testclient import TestClient
@@ -85,3 +86,21 @@ def test_field_life_cycle(tmp_path: Path) -> None:
         assert again["state"] == "done" and again["key"] == key  # the finished product, no new job
         assert c.get(f"/api/v1/fields/{key}/parts/nothing").status_code == 404
         assert c.get("/api/v1/jobs/j999").status_code == 404
+
+
+def test_field_built_in_worker_processes(tmp_path: Path, monkeypatch: Any) -> None:
+    """The same build with the real process pool: every compute step crosses to a worker (all its inputs and outputs pickle)."""
+    monkeypatch.setenv("SKY_WORKERS", "2")
+    monkeypatch.setenv("SKY_WARM", "0")
+    bucket = setup(tmp_path)
+    app = create_app(Config(store_dir=tmp_path, web_dist=tmp_path / "none", serve_web=False), s3=bucket.s3())
+    with TestClient(app) as c:
+        body = c.get("/api/v1/fields", params={"ra": RA, "dec": DEC, "fov": 2}).json()
+        for _ in range(600):
+            v = c.get(f"/api/v1/jobs/{body['job']['id']}").json()
+            if v["state"] in ("done", "error"):
+                break
+            time.sleep(0.1)
+        assert v["state"] == "done", v
+        assert {"quick_p0", "picture_p1", "dets_p0", "bands_p1", "meta", "diff"} <= set(v["parts"])
+        assert c.get("/api/v1/health").json()["cpu"]["waiting"] == 0

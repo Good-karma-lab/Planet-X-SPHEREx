@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Any, Literal, TypeVar
 
+from service import cpu
+
 T = TypeVar("T")
 
 PERSON_QUIET_S = 60.0
@@ -128,8 +130,10 @@ class Context:
             raise Cancelled
 
     async def compute(self, fn: Callable[..., T], *args: Any) -> T:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self._s.executor, fn, *args)
+        """fn (module-level, picklable arguments) in a worker process, through the priority gate of service.cpu."""
+        if self._s.executor is None:
+            return fn(*args)
+        return await cpu.run(fn, *args)
 
 
 @dataclass
@@ -265,6 +269,7 @@ class Scheduler:
         fn = self._fns[j.id]
 
         async def run() -> None:
+            cpu.JOB.set(j)  # every compute call of this job (and of the tasks it starts) is gated at the job's priority
             try:
                 j.result = await fn(ctx)
                 j.state, j.phase = "done", "done"
