@@ -64,6 +64,10 @@ User items "U, 20:5x": warm set 37/37 fields; the warm searches now include the 
 its known bodies, unknown movers) for every test-target zone up to 60′ — bdce43a. Submission texts lead with movers, brown dwarfs
 and Find Planet X — 0c6c0e3. lab-ui builds the globe layout and palettes, Planet X labels, the Candidates tab and the
 coordinate-only lab entry; prod-build reviews and merges each branch as it lands.
+Merged and live: Candidates tab and the Planet X tab in the lab, every planet named on the Planet X model — 273c65f; the globe seen
+from outside again (survey gain/black, the all-sky dust map, no self-motion: identical canvas once the tiles have arrived; 20:5x
+layout; Coverage and Searched zones toggles with filled footprints and a legend; per-survey palettes held) — 48f23e5; the guided
+tour ends when the visitor leaves its screen — 0aefbce.
 
 Open, with owner (the app pauses this session's messages to the other sessions, so these are the hand-over notes):
 - sky-service: WISE 0855 5′ movers find no track (blend); WISE 0855 5′ Find Planet X has fewer than four usable visits per pass
