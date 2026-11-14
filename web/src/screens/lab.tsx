@@ -36,7 +36,7 @@ import { useAsteroidSearch } from './asteroids';
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
 type Time = 'loop' | 'diff' | 'sum';
-type Tab = 'ctl' | 'obj' | 'spec' | 'find';
+type Tab = 'ctl' | 'cand' | 'obj' | 'spec' | 'find';
 
 const ICON_DET =
   '<svg viewBox="0 0 256 256" fill="none" stroke="currentColor" stroke-width="8" aria-hidden="true"><rect x="28" y="64" width="62" height="56" rx="8"/><rect x="97" y="64" width="62" height="56" rx="8"/><rect x="166" y="64" width="62" height="56" rx="8"/><rect x="28" y="136" width="62" height="56" rx="8"/><rect x="97" y="136" width="62" height="56" rx="8"/><rect x="166" y="136" width="62" height="56" rx="8"/></svg>';
@@ -2103,7 +2103,7 @@ export function Lab({ route }: { route: Route }) {
                   );
                   if (hit >= 0) {
                     setTrackSel(hit);
-                    setTab('find');
+                    setTab('cand');
                     return;
                   }
                 }
@@ -2485,14 +2485,15 @@ export function Lab({ route }: { route: Route }) {
               {(
                 [
                   ['ctl', 'Controls'],
+                  ['cand', 'Candidates'],
                   ['obj', 'Object'],
                   ['spec', 'Spectrum'],
-                  ['find', 'Findings'],
+                  ['find', 'Planet X'],
                 ] as const
               ).map(([k, n]) => (
                 <button key={k} class={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
                   {n}
-                  {k === 'find' && foundCount > 0 && <span class="tbadge">{foundCount}</span>}
+                  {k === 'cand' && foundCount > 0 && <span class="tbadge">{foundCount}</span>}
                 </button>
               ))}
             </div>
@@ -2785,7 +2786,7 @@ export function Lab({ route }: { route: Route }) {
               <SpectrumTab src={sel} />
             </div>
           )}
-          {tab === 'find' && (
+          {tab === 'cand' && (
             <div class="pbody">
               {pairSel !== null && pairs[pairSel] && (
                 <PairCard
@@ -2799,7 +2800,7 @@ export function Lab({ route }: { route: Route }) {
                   onBack={() => setPairSel(null)}
                 />
               )}
-              <div class="psh">Found in this field</div>
+              <div class="psh">Candidates in this field</div>
               <section class="psec fsec">
                 <div class="fsh">Movers between passes</div>
                 <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
@@ -2851,12 +2852,6 @@ export function Lab({ route }: { route: Route }) {
                 ))}
               </section>
               <section class="psec fsec">
-                <div class="fsh">Planet X · bodies beyond Neptune</div>
-                <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
-                {passes.length >= 3 && <DeepSumPanel ra={ra} dec={dec} fov={fov} passes={passes.map((q) => q.mjd_mid)} />}
-                {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
-              </section>
-              <section class="psec fsec">
                 <div class="fsh">Pairs that change in place</div>
                 {!pairs.length && (
                   <div class="ssum">{mv?.state === 'done' ? 'none in this field' : 'waiting for the search between passes'}</div>
@@ -2869,7 +2864,7 @@ export function Lab({ route }: { route: Route }) {
                       on={pairSel === i}
                       onClick={() => {
                         setPairSel(i);
-                        setTab('find');
+                        setTab('cand');
                       }}
                     />
                   ))}
@@ -2991,6 +2986,16 @@ export function Lab({ route }: { route: Route }) {
               </section>
             </div>
           )}
+          {tab === 'find' && (
+            <div class="pbody">
+              <section class="psec fsec">
+                <div class="fsh">Planet X · bodies beyond Neptune</div>
+                <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
+                {passes.length >= 3 && <DeepSumPanel ra={ra} dec={dec} fov={fov} passes={passes.map((q) => q.mjd_mid)} />}
+                {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
+              </section>
+            </div>
+          )}
           <div class={`sbar ${trayOpen ? '' : 'tray'}`}>
             <div
               class="tray-line"
@@ -3040,7 +3045,7 @@ export function Lab({ route }: { route: Route }) {
               <span class="tg">{trayOpen ? '▾' : '▴'}</span>
             </div>
             {trayOpen && (
-              <div onClick={() => setTab('find')} title="Open the findings of this field">
+              <div onClick={() => setTab('cand')} title="Open the candidates of this field">
                 {srow(
                   'Movers',
                   !mv ? 0 : mv.state === 'done' ? 1 : mv.state === 'failed' ? 0 : null,
