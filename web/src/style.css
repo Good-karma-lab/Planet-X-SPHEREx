@@ -2272,6 +2272,12 @@ input[type='range']::-moz-range-thumb {
 /* rail: the words fit (U) */
 .rail .tab { font-size: 8.5px; letter-spacing: 0.04em; padding: 8px 0 6px; gap: 4px; }
 .rail .tab svg { width: 22px; height: 22px; }
+/* phones: a gap between the words of the rail */
+@media (max-width: 860px), (max-aspect-ratio: 1/1) {
+  .rail .tabs { gap: 4px; }
+  .rail .tab { font-size: 8px; letter-spacing: 0; padding: 4px 2px; white-space: nowrap; flex: 1 1 auto; }
+  .rail .tab svg { width: 20px; height: 20px; }
+}
 /* the lab's frame never moves: fixed-height time bar, no wrapping */
 .tbar { height: 50px; flex-wrap: nowrap; overflow: hidden; }
 .tbar .acts { display: inline-flex; gap: 4px; flex: none; }
