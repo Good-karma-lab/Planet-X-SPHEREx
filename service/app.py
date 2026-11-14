@@ -82,7 +82,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.files = FileReader(st.s3, cfg.store_dir)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
         st.movers = Movers(st.store, cfg.store_dir)
-        st.bodies = KnownBodies(cfg.store_dir)
+        st.bodies = KnownBodies(cfg.store_dir, st.index)
         if st.index is not None:
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
             st.anomalies = Anomalies(st.index, st.files, st.wavelengths, st.store, cfg.store_dir)

@@ -25,6 +25,8 @@ export interface KnownBody {
   v: number | null;
   frames: { k: number; x: number; y: number; inside: boolean }[];
   expected: number[];
+  /** SPHEREx detector images of the pass (all detectors) that hold the body */
+  planes?: number;
   /** the expected frames on which the film's motion map shows something at the predicted place (z ≥ 4 within 2 grid pixels) */
   seen: number[];
 }

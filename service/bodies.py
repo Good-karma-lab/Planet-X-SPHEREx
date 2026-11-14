@@ -20,8 +20,10 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+import numpy as np
 
 from engine.grid import Grid
+from indexer.store import Index
 from service.upstream.breaker import Breaker
 
 SB_IDENT = "https://ssd-api.jpl.nasa.gov/sb_ident.api"
@@ -60,6 +62,23 @@ def _sexa_dec(deg: float) -> str:
     return f"{sign}{dd:02d}-{mm:02d}-{ss:04.1f}"
 
 
+def planes_holding(index: Index, mjd: np.ndarray, ra: np.ndarray, dec: np.ndarray) -> int:
+    """Detector images of the index that hold a moving body: its ephemeris (mjd, ra, dec, a fine time step) interpolated to each
+    exposure's mid-time and tested against that exposure's footprint (the count IRSA MOST calls planes)."""
+    seen: set[int] = set()
+    for k in range(len(mjd) - 1):
+        for e in index.containing(float(ra[k]), float(dec[k]), float(mjd[k]), float(mjd[k + 1])):
+            tm = 0.5 * (e.mjd0 + e.mjd1)
+            if e.id in seen or not mjd[k] <= tm <= mjd[k + 1]:
+                continue
+            f = (tm - mjd[k]) / (mjd[k + 1] - mjd[k])
+            r_t = float(ra[k] + f * (((ra[k + 1] - ra[k] + 540.0) % 360.0) - 180.0))
+            d_t = float(dec[k] + f * (dec[k + 1] - dec[k]))
+            if any(x.id == e.id for x in index.containing(r_t % 360.0, d_t, e.mjd0, e.mjd1)):
+                seen.add(e.id)
+    return len(seen)
+
+
 def horizons_command(name: str) -> str:
     """'9078 (1994 PB2)' → '9078;'; '(2010 AB12)' or '2010 AB12' → 'DES=2010 AB12;'; a comet 'C/2025 N1 (ATLAS)' → 'DES=C/2025 N1;'."""
     m = re.match(r"^\s*(\d+)\s", name + " ")
@@ -71,7 +90,8 @@ def horizons_command(name: str) -> str:
 
 
 class KnownBodies:
-    def __init__(self, store_dir: Path) -> None:
+    def __init__(self, store_dir: Path, index: Index | None = None) -> None:
+        self.index = index
         self.dir = store_dir / "bodies"
         self.breaker = Breaker("JPL")
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10), headers={"User-Agent": "spherex-sky/0.1"})
@@ -196,6 +216,44 @@ class KnownBodies:
 
             got = await asyncio.gather(*(ephemeris(r) for r in cands))
             bodies = sorted([b for b in got if b is not None], key=lambda b: b["v"] if b["v"] is not None else 99.0)
+            # how many SPHEREx detector images of the pass hold each body (all detectors; the count IRSA MOST gives)
+            if self.index is not None:
+                p0, p1 = float(meta["pass"]["mjd0"]) - 0.05, float(meta["pass"]["mjd1"]) + 0.05
+
+                async def count(b: dict[str, Any]) -> None:
+                    async with sem:
+                        try:
+                            eph = await self._horizons(
+                                {
+                                    "format": "json",
+                                    "COMMAND": f"'{horizons_command(b['name'])}'",
+                                    "CENTER": "'500@399'",
+                                    "MAKE_EPHEM": "YES",
+                                    "EPHEM_TYPE": "OBSERVER",
+                                    "START_TIME": f"'JD {_jd(p0):.5f}'",
+                                    "STOP_TIME": f"'JD {_jd(p1):.5f}'",
+                                    "STEP_SIZE": "'30m'",
+                                    "QUANTITIES": "'1'",
+                                    "ANG_FORMAT": "DEG",
+                                    "CSV_FORMAT": "YES",
+                                    "OBJ_DATA": "NO",
+                                    "CAL_FORMAT": "JD",
+                                }
+                            )
+                        except Exception:  # the count stays unknown, never guessed
+                            return
+                    text = str(eph.get("result", ""))
+                    if "$$SOE" not in text:
+                        return
+                    lines_ = text.split("$$SOE")[1].split("$$EOE")[0].strip().splitlines()
+                    rows_ = [[q.strip() for q in ln.split(",")] for ln in lines_]
+                    m = np.array([float(x[0]) - 2400000.5 for x in rows_])
+                    ra_ = np.array([float(x[3]) for x in rows_])
+                    de_ = np.array([float(x[4]) for x in rows_])
+                    assert self.index is not None
+                    b["planes"] = await asyncio.to_thread(planes_holding, self.index, m, ra_, de_)
+
+                await asyncio.gather(*(count(b) for b in bodies if (b["v"] or 99.0) <= 19.5))
             result = {
                 "state": "done",
                 "bodies": bodies,

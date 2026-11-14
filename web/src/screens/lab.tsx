@@ -1688,7 +1688,8 @@ export function Lab({ route }: { route: Route }) {
                           <b>{b.name}</b>
                           <span>V {b.v?.toFixed(1) ?? '—'}</span>
                           <span class="faint">
-                            seen {b.seen.length} of {b.expected.length} visits
+                            seen {b.seen.length} of {b.expected.length} film visits
+                            {b.planes != null ? ` · in ${b.planes} detector images` : ''}
                           </span>
                         </div>
                       ))}

@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-from engine.spx.footprint import Footprint, overlaps_circle, radec_to_xyz
+from engine.spx.footprint import Footprint, contains, overlaps_circle, radec_to_xyz
 from indexer.irsa import Row
 
 SCHEMA = """
@@ -173,4 +173,28 @@ class Index:
             if overlaps_circle(fp, ra, dec, radius_deg + EDGE_MARGIN_DEG):
                 out.append(Exposure(fid, key, rel, per, seq, grp, det, m0, m1, size, md5))
         out.sort(key=lambda e: (e.mjd0, e.det))
+        return out
+
+    def containing(self, ra: float, dec: float, mjd0: float, mjd1: float) -> list[Exposure]:
+        """Exposures whose footprint holds a point (no margin) and whose time overlaps [mjd0, mjd1]."""
+        ids: set[int] = set()
+        for a0, a1, d0, d1 in boxes_for(ra, dec, 1.0 / 3600.0):
+            ids.update(
+                i
+                for (i,) in self.db.execute(
+                    "SELECT fid FROM boxes WHERE ra1 >= ? AND ra0 <= ? AND dec1 >= ? AND dec0 <= ?", (a0, a1, d0, d1)
+                )
+            )
+        if not ids:
+            return []
+        q = ",".join("?" * len(ids))
+        sql = (
+            "SELECT id, key, release, period, seq, grp, det, mjd0, mjd1, size, md5, cra, cdec, radius, poly FROM files "
+            f"WHERE id IN ({q}) AND mjd1 >= ? AND mjd0 <= ?"
+        )
+        out = []
+        for fid, key, rel, per, seq, grp, det, m0, m1, size, md5, cra, cdec, rad, poly in self.db.execute(sql, (*ids, mjd0, mjd1)):
+            pv = np.frombuffer(poly, np.float64).reshape(2, -1)
+            if contains(Footprint(pv[0], pv[1], (cra, cdec), rad), ra, dec):
+                out.append(Exposure(fid, key, rel, per, seq, grp, det, m0, m1, size, md5))
         return out
