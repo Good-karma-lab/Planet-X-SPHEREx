@@ -5,11 +5,13 @@ import { Globe } from './screens/globe';
 import { Lab } from './screens/lab';
 import { InfoPage } from './screens/pages';
 import { Landing } from './screens/landing';
+import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
 
 const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
   { screen: 'globe', name: 'Globe', icon: 'globe', tip: 'The sky: globe and catalogue' },
   { screen: 'lab', name: 'Lab', icon: 'chart-line-up', tip: 'Spectral lab' },
+  { screen: 'planetx', name: 'Planet X', icon: 'planet-x', tip: 'Planet X: the Solar System, the predicted orbit and what we searched' },
   { screen: 'findings', name: 'Findings', icon: 'sparkle', tip: 'Findings: what the real data reveal' },
   { screen: 'index', name: 'Index', icon: 'database', tip: 'Exposure index: what the sky service can search' },
   { screen: 'method', name: 'Method', icon: 'sigma', tip: 'Method: how everything is computed' },
@@ -61,7 +63,7 @@ export function App() {
         </div>
       </nav>
       <main data-screen={route.screen}>
-        {route.screen === 'lab' ? <Lab route={route} /> : route.screen === 'globe' ? <Globe /> : <InfoPage screen={route.screen} health={health} />}
+        {route.screen === 'lab' ? <Lab route={route} /> : route.screen === 'globe' ? <Globe /> : route.screen === 'planetx' ? <PlanetXPage /> : <InfoPage screen={route.screen} health={health} />}
       </main>
     </div>
   );
