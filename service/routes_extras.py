@@ -15,13 +15,15 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, FastAPI, HTTPException, Query
+import numpy as np
+from fastapi import APIRouter, FastAPI, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from engine.extras import ades, allwise, cadc_ref, gaia_readiness, spherex_orbit, ssois
+from engine.extras import ades, allwise, cadc_ref, gaia_readiness, spherex_orbit, ssois, tracking
 from engine.extras.cloudcat import Reader, separation_arcsec
 from engine.extras.cube import PIXEL_SR, CubeSource, RangeReader
+from service.products.sxp import decode
 from service.reader.s3 import S3, ReadError
 from service.spectrum import place_at, spectrum_params
 from service.upstream import gaia_hats
@@ -63,6 +65,26 @@ class AdesRequest(BaseModel):
     fill_positions: bool = False  # ask JPL Horizons for the spacecraft's position wherever an observation has none
 
 
+def film_motion(buf: bytes) -> tuple[np.ndarray, np.ndarray, float]:
+    """(motion maps in noise units, frame times in hours, grid step in arcsec) of a film part; masked pixels are NaN."""
+    meta, arrays = decode(buf)
+    code = arrays["motion"].astype(np.float32)
+    z = np.where(code > 0, (code - 1.0) / 254.0 * 20.0 - 5.0, np.nan).astype(np.float32)
+    mjd = np.array([f["mjd"] for f in meta["frames"]], dtype=float)
+    return z, (mjd - mjd.min()) * 24.0, float(meta["grid"]["step_arcsec"])
+
+
+def bin2(z: np.ndarray) -> np.ndarray:
+    """2 x 2 block means of (frames, rows, columns), NaN-aware (a block with no value stays NaN)."""
+    f, h, w = z.shape
+    h2, w2 = h // 2 * 2, w // 2 * 2
+    blocks = z[:, :h2, :w2].reshape(f, h2 // 2, 2, w2 // 2, 2)
+    ok = np.isfinite(blocks)
+    total = np.where(ok, blocks, 0.0).sum(axis=(2, 4))
+    n = ok.sum(axis=(2, 4))
+    return np.where(n > 0, total / np.maximum(n, 1), np.nan).astype(np.float32)
+
+
 class Extras:
     """The sources of the extra routes and the small answer caches in front of them."""
 
@@ -84,6 +106,7 @@ class Extras:
         self.reference_cache: OrderedDict[tuple[float, float], dict[str, Any]] = OrderedDict()
         self.cutout_cache: OrderedDict[tuple[str, float, float, float], bytes] = OrderedDict()
         self.artifacts: dict[str, str] = {}
+        self.tracked_cache: dict[tuple[str, float, float, float, int], dict[str, Any]] = {}
 
     def cadc(self) -> httpx.AsyncClient:
         if self._cadc is None:
@@ -246,6 +269,64 @@ def build_router(extras: Extras) -> APIRouter:
     ) -> Any:
         """Catalogue sources at a place from cloud Parquet (AllWISE + 2MASS magnitudes, Gaia DR3): no TAP service in the path."""
         return await extras.xmatch(ra, dec, pmra, pmdec, radius, cats)
+
+    @router.get(f"{API_PREFIX}/film/{{key}}/tracked")
+    async def film_tracked(
+        request: Request,
+        key: str,
+        vmax: float = Query(20.0, gt=0, le=300, description="speed limit, arcsec per hour"),
+        window_h: float = Query(6.0, gt=0, le=72),
+        smear: float = Query(2.0, ge=0.5, le=4.0, description="largest smear along the path, in pixels"),
+        top: int = Query(5, ge=1, le=20),
+    ) -> Any:
+        """Tracked stack (shift-and-add) of a finished film's motion maps: the strongest peaks over velocities, by window of hours."""
+        sky = getattr(request.app.state, "sky", None)
+        store = getattr(sky, "store", None)
+        if store is None or not key.isalnum():
+            raise HTTPException(503 if store is None else 400)
+        cache_key = (key, vmax, window_h, smear, top)
+        hit = extras.tracked_cache.get(cache_key)
+        if hit is not None:
+            return hit
+        buf = store.read_part("film", key, "film.sxp")
+        if buf is None:
+            raise HTTPException(404, "the film is not ready or unknown")
+
+        def work() -> dict[str, Any]:
+            z, t_h, step = film_motion(buf)
+            binned = z.shape[1] > 300
+            if binned:
+                z, step = bin2(z), step * 2.0
+            out: list[dict[str, Any]] = []
+            for idx in tracking.windows(t_h, window_h):
+                sub, ts = z[idx], t_h[idx]
+                try:
+                    peaks = tracking.search(sub, ts, step, vmax, smear_px=smear, top=top, max_cells=2500)
+                except ValueError as e:
+                    return {"state": "too_many_cells", "error": str(e)}
+                scale = 2 if binned else 1
+                out += [
+                    {
+                        "window_h": [round(float(ts.min()), 2), round(float(ts.max()), 2)],
+                        "frames": int(idx.size),
+                        "x": p.x * scale,
+                        "y": p.y * scale,
+                        "v_east_arcsec_h": round(p.v_east, 2),
+                        "v_north_arcsec_h": round(p.v_north, 2),
+                        "snr": round(p.snr, 2),
+                        "n_frames": p.n_frames,
+                    }
+                    for p in peaks
+                ]
+            out.sort(key=lambda r: -float(r["snr"]))
+            return {"state": "ok", "step_arcsec": step / (2 if binned else 1), "binned": binned, "peaks": out[: top * 3]}
+
+        result = await asyncio.to_thread(work)
+        if result["state"] == "ok":
+            extras.tracked_cache[cache_key] = result
+            if len(extras.tracked_cache) > 200:
+                extras.tracked_cache.pop(next(iter(extras.tracked_cache)))
+        return result
 
     @router.get(f"{API_PREFIX}/gaia/readiness")
     async def gaia_ready() -> Any:
