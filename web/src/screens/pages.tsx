@@ -352,6 +352,10 @@ function MethodPage() {
     ],
     ['Film', 'The visits inside one pass, aligned; the static sky removed; what moves between visits is shown in amber.'],
     [
+      'Movers: how many are found',
+      'Moving point sources injected into real stacks (three 20′ fields): a mover with a peak at 40× the stack noise is found in about 85 % of cases at 5–100″/yr; at 20× it is found in 62–88 % of cases but, with only three passes, often as a weak track the page does not draw; below 12× most are missed. Chance alone gives 0.0 tracks per field.',
+    ],
+    [
       'Known bodies',
       "JPL Small-Body Identification lists the asteroids and comets that cross a film's field during its pass (V ≤ 20.5); Horizons gives each one's place on every visit. A visit counts as seen when the motion map shows z ≥ 4 within two grid pixels of that place; the visits stacked along the track give the body's significance, with the same stack 20 pixels aside as the chance level. The number of SPHEREx detector images that hold a body is counted from the exposure index and equals IRSA's Moving Object Search Tool (119, 107, 118 and 121 for four asteroids on 14–20 Dec 2025).",
     ],

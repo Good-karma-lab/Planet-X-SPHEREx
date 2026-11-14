@@ -78,6 +78,7 @@ class Result:
     tracks: list[Track] = field(default_factory=list)
     weak: int = 0
     still_sources: list[Source] = field(default_factory=list)  # the stationary sources of the first pass (the anomaly search's input)
+    weak_tracks: list[Track] = field(default_factory=list)  # tracks of three passes below S/N 15: counted, not shown
     chance_trials: int = 0
     chance_mean: float = 0.0  # tracks per field that chance alone makes
     chance_any: float = 0.0  # share of trials with at least one track
@@ -265,6 +266,7 @@ def search(
     weak = sum(1 for t in kept if t.weak)
     still = [q for q, st in zip(srcs[0], stationary[0], strict=True) if st]
     res = Result([len(s) for s in srcs], len(still), [t for t in kept if not t.weak], weak, still)
+    res.weak_tracks = [t for t in kept if t.weak]
     # chance control: the moving (non-stationary) sources of every pass put at uniform random places of the field, the stationary
     # ones kept, the linker run again; the mean number of tracks per field is what chance alone gives
     ys, xs = np.nonzero(usable)
