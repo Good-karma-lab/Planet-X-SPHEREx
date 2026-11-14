@@ -115,6 +115,9 @@ function hslRgb(h: number): [number, number, number] {
   return [f(0), f(8), f(4)];
 }
 
+/** Short band names for a small picture (the full name stays in the tooltip). */
+const SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
+
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** A season by its middle month: "Aug ’25". */
 const season = (mjd: number) => {
@@ -834,7 +837,8 @@ export function Lab({ route }: { route: Route }) {
                   },
             ];
             if (stack === 'picture' && st.opts.mono) panels[0]!.stack = r.loaded('quick').length ? 'quick' : 'picture';
-            const z = zoomOn();
+            if (!st.bands.length) panels = []; // no band chosen: nothing to draw (black)
+            const z = st.bands.length ? zoomOn() : null;
             if (z) {
               const S = Math.round(Math.min(220, w * 0.26));
               inset = { x: 10, y: 52, w: S, h: S, zoom: z };
@@ -2050,7 +2054,7 @@ export function Lab({ route }: { route: Route }) {
         <div class="vwrap" ref={wrap}>
           <div class="vstage" ref={stageRef}>
             <div
-              class="vsq"
+              class={`vsq ${side < 760 ? 'compact' : ''}`}
               style={{
                 width: `${side}px`, // one square in every view: the frame never moves or grows
                 height: `${side}px`,
@@ -2189,7 +2193,16 @@ export function Lab({ route }: { route: Route }) {
                 </label>
               </div>
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
-                {note || (bandsWait ? 'loading the pictures of the chosen bands…' : film !== null ? daysStatus : status)}
+                {note ||
+                  (bandsWait
+                    ? 'loading the pictures of the chosen bands…'
+                    : film === null && view !== 'det' && !bands.length
+                      ? 'No band chosen: switch a band on (or ALL) to see the sky'
+                      : film === null && view === 'det' && !dets.length
+                        ? 'No detector chosen: switch one on (or ALL)'
+                        : film !== null
+                          ? daysStatus
+                          : status)}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
                     <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter
@@ -2222,7 +2235,7 @@ export function Lab({ route }: { route: Route }) {
                         title={`${bd.name}: ${bd.band}`}
                       >
                         <i class="dot" />
-                        <b>{bd.name}</b>
+                        <b>{side < 760 ? (SHORT[bd.key] ?? bd.name) : bd.name}</b>
                       </button>
                     ))}
                 <button class="mini" onClick={() => set(view === 'det' ? { dets: null } : { bands: null })} title="Switch every one on">
@@ -2231,7 +2244,7 @@ export function Lab({ route }: { route: Route }) {
                 <button
                   class="mini"
                   onClick={() => set(view === 'det' ? { dets: 'none' } : { bands: 'none' })}
-                  title={view === 'det' ? 'Only D1' : 'Only Starlight'}
+                  title={view === 'det' ? 'Switch every detector off' : 'Switch every band off'}
                 >
                   NONE
                 </button>
@@ -2687,7 +2700,6 @@ export function Lab({ route }: { route: Route }) {
                           score {a.score.toFixed(1)} against the field's bar {an.result.threshold?.toFixed(1) ?? '—'} (median{' '}
                           {an.result.median?.toFixed(2) ?? '—'})
                         </span>
-                        <span class="w">{driverWords(a).join('; ') || 'its spectrum differs from the ordinary star of the field'}</span>
                       </div>
                     );
                   })()}
@@ -2775,7 +2787,13 @@ export function Lab({ route }: { route: Route }) {
                     ? 'waiting for the field'
                     : dwarfs.state !== 'done'
                       ? 'checking the red sources that move against Gaia and SIMBAD…'
-                      : `${dwarfs.result?.candidates.length ?? 0} candidate${dwarfs.result?.candidates.length === 1 ? '' : 's'} (red, moving, no Gaia counterpart) · ${dwarfs.result?.known.length ?? 0} known red movers recovered`}
+                      : (() => {
+                          const cs = dwarfs.result?.candidates ?? [];
+                          const knownBd = cs.filter((c) => (c.status ?? '').startsWith('known')).length;
+                          const fresh = cs.length - knownBd;
+                          const gaiaKnown = dwarfs.result?.known.length ?? 0;
+                          return `${cs.length} red source${cs.length === 1 ? '' : 's'} moving with no Gaia counterpart${cs.length ? ` (${knownBd ? `${knownBd} a known brown dwarf in SIMBAD` : ''}${knownBd && fresh ? ', ' : ''}${fresh ? `${fresh} not in SIMBAD` : ''})` : ''} · ${gaiaKnown} red mover${gaiaKnown === 1 ? '' : 's'} with a Gaia star`;
+                        })()}
                 </div>
                 {[
                   ...(dwarfs?.result?.candidates ?? []).map((c) => ({ c, known: false })),

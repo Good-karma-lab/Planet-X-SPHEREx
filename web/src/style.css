@@ -2311,3 +2311,23 @@ input[type='range']::-moz-range-thumb {
   .tbar .tl-mid { order: 9; flex-basis: 100%; }
   .tbar .seg.scale button { padding: 3px 6px; font-size: 11px; }
 }
+
+/* a picture under 760 px: compact buttons on one row, nothing hidden at the edges (QA r5) */
+.vsq.compact .fbands { gap: 2px; padding: 3px 4px; }
+.vsq.compact .fbands .bchip { padding: 2px 5px; font-size: 10px; }
+.vsq.compact .fbands .bchip em, .vsq.compact .fbands .bchip .dot { display: none; }
+.vsq.compact .fbands .mini { height: 20px; padding: 0 5px; font-size: 10px; }
+.vsq.compact .fstatus { font-size: 10.5px; bottom: 44px; }
+/* a narrow window: the time bar wraps instead of hiding its last controls behind the panel */
+@media (max-width: 1250px) {
+  .tbar { height: auto; flex-wrap: wrap; row-gap: 6px; }
+  .tbar .tl-mid { order: 9; flex-basis: 100%; }
+}
+/* phone: the band buttons sit under the picture, not over it */
+@media (max-width: 760px) {
+  .vsq { margin-bottom: 64px; }
+  .vsq .fbands { top: calc(100% + 6px); bottom: auto; background: rgba(6, 10, 14, 0.85); }
+  .vsq .fstatus { bottom: 8px; }
+}
+.vsq.compact .ftitle { max-width: calc(100% - 140px); }
+.vsq.compact .ftitle span { display: none; }
