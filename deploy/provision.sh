@@ -45,11 +45,14 @@ chmod 440 /etc/sudoers.d/sky
 # Caddyfile: the domain with automatic HTTPS, and the bare address over HTTP
 # the main instance takes the traffic; while it restarts the standby (8781) answers, and a request waits up to 30 s for either
 UPSTREAM='\treverse_proxy 127.0.0.1:8780 127.0.0.1:8781 {\n\t\tlb_policy first\n\t\tlb_try_duration 30s\n\t\tlb_try_interval 250ms\n\t\thealth_uri /api/v1/health\n\t\thealth_interval 2s\n\t\thealth_timeout 2s\n\t\tfail_duration 5s\n\t}\n'
+# baked globe tiles (tools/bake_tiles.py): static files, no Python in the request path; a tile that exists is immutable for a year, one that does
+# not is a plain 404, and the manifest (which lists the layers) is cached for five minutes
+TILES='\thandle /tiles/manifest.json {\n\t\troot * /var/www/spherex-tiles\n\t\turi strip_prefix /tiles\n\t\theader Cache-Control "public, max-age=300"\n\t\theader Access-Control-Allow-Origin *\n\t\tfile_server\n\t}\n\thandle /tiles/* {\n\t\troot * /var/www/spherex-tiles\n\t\turi strip_prefix /tiles\n\t\t@exists file\n\t\theader @exists Cache-Control "public, max-age=31536000, immutable"\n\t\theader Access-Control-Allow-Origin *\n\t\tfile_server\n\t}\n\thandle {\n\t'"$UPSTREAM"'\t}\n'
 {
   if [ -n "$DOMAIN" ]; then
-    printf '%s, www.%s {\n\tencode {\n\t\tzstd\n\t\tgzip\n\t\tmatch {\n\t\t\theader Content-Type text/*\n\t\t\theader Content-Type application/json*\n\t\t\theader Content-Type application/javascript*\n\t\t\theader Content-Type application/octet-stream*\n\t\t\theader Content-Type image/svg+xml*\n\t\t}\n\t}\n'"$UPSTREAM"'}\n\n' "$DOMAIN" "$DOMAIN"
+    printf '%s, www.%s {\n\tencode {\n\t\tzstd\n\t\tgzip\n\t\tmatch {\n\t\t\theader Content-Type text/*\n\t\t\theader Content-Type application/json*\n\t\t\theader Content-Type application/javascript*\n\t\t\theader Content-Type application/octet-stream*\n\t\t\theader Content-Type image/svg+xml*\n\t\t}\n\t}\n'"$TILES"'}\n\n' "$DOMAIN" "$DOMAIN"
   fi
-  printf ':80 {\n\tencode zstd gzip\n'"$UPSTREAM"'}\n'
+  printf ':80 {\n\tencode zstd gzip\n'"$TILES"'}\n'
 } > /etc/caddy/Caddyfile.new
 # a Caddyfile that does not validate never replaces the running one
 if caddy validate --adapter caddyfile --config /etc/caddy/Caddyfile.new; then
