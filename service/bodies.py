@@ -31,6 +31,8 @@ HORIZONS = "https://ssd.jpl.nasa.gov/api/horizons.api"
 V_LIMIT = 20.5
 MARGIN_RATE = 40.0  # ″/h: a fast main-belt body; the search window is widened by this rate over half the pass
 MAX_BODIES = 200
+# bodies JPL's Small-Body Identification does not list (interstellar comets): always asked of Horizons, kept when in the field
+NOTABLE = ["C/2025 N1 (3I/ATLAS)"]
 NEAR_DEG = 0.15  # a candidate whose straight-line track comes this close to the field is asked of Horizons
 
 
@@ -86,7 +88,8 @@ def horizons_command(name: str) -> str:
         return f"{m.group(1)};"
     m = re.search(r"\(([^)]+)\)", name)
     des = (m.group(1) if m and re.match(r"^\d{4}\s", m.group(1)) else name.split("(")[0]).strip()
-    return f"DES={des};"
+    # a comet has one orbit per apparition: the one closest to now
+    return f"DES={des};CAP;" if re.match(r"^[CPI]/", des) or re.match(r"^\d+[PI]/", des) else f"DES={des};"
 
 
 class KnownBodies:
@@ -212,9 +215,16 @@ class KnownBodies:
                 expected = [q["k"] for q in pos if q["inside"]]
                 if not expected:
                     return None
-                return {"name": name, "v": float(row[iv]) if row[iv] else None, "frames": pos, "expected": expected}
+                v = float(row[iv]) if row[iv] else None
+                if v is None:  # a body asked of Horizons directly: its apparent magnitude from the ephemeris
+                    try:
+                        v = float([q.strip() for q in lines[0].split(",")][5])
+                    except (IndexError, ValueError):
+                        v = None
+                return {"name": name, "v": v, "frames": pos, "expected": expected}
 
-            got = await asyncio.gather(*(ephemeris(r) for r in cands))
+            extra = [[name, "", "", "", "", "", "", "", ""] for name in NOTABLE]
+            got = await asyncio.gather(*(ephemeris(r) for r in [*cands, *extra]))
             bodies = sorted([b for b in got if b is not None], key=lambda b: b["v"] if b["v"] is not None else 99.0)
             # how many SPHEREx detector images of the pass hold each body (all detectors; the count IRSA MOST gives)
             if self.index is not None:

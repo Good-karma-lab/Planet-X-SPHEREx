@@ -34,13 +34,41 @@ const TARGET_CLASS: Record<string, string> = {
 };
 
 const SURVEYS = [
-  { id: 'dss2', name: 'Visible — DSS2', max: 9, gain: 2.4, black: 16, note: 'Digitized Sky Survey: red, blue and infrared photographic plates, colour' },
+  {
+    id: 'dss2',
+    name: 'Visible — DSS2',
+    max: 9,
+    gain: 2.4,
+    black: 16,
+    note: 'Digitized Sky Survey: red, blue and infrared photographic plates, colour',
+  },
   { id: '2mass', name: 'Near-infrared — 2MASS', max: 9, gain: 2.2, black: 0, note: '2MASS J, H and Ks (1.2, 1.7, 2.2 µm), colour' },
   { id: 'wise', name: 'Infrared — WISE', max: 8, gain: 2.4, black: 0, note: 'AllWISE W1, W2 and W4 (3.4, 4.6, 22 µm), colour' },
-  { id: 'dust', name: 'Dust map', max: 3, gain: 1.6, black: 0, note: 'IRAS far infrared (IRIS: 12, 60, 100 µm): the dust of the Galaxy, colour' },
+  {
+    id: 'dust',
+    name: 'Dust map',
+    max: 3,
+    gain: 1.6,
+    black: 0,
+    note: 'IRAS far infrared (IRIS: 12, 60, 100 µm): the dust of the Galaxy, colour',
+  },
 ] as const;
 type SurveyId = (typeof SURVEYS)[number]['id'];
 const SIZES = [2, 5, 10, 20, 60];
+
+/** Demo fields: places where the tool shows something worth seeing, with the view they open in. */
+const DEMOS: { n: string; what: string; ra: number; dec: number; fov: number; film?: number }[] = [
+  { n: '3I/ATLAS', what: 'interstellar comet · film of 14 Dec 2025', ra: 166.8274, dec: 5.2787, fov: 60, film: 61023.6 },
+  {
+    n: 'Asteroids near the ecliptic',
+    what: 'film of the 14–20 Dec 2025 pass · known bodies ringed',
+    ra: 169.8917,
+    dec: 4.3514,
+    fov: 60,
+    film: 61027,
+  },
+  { n: 'Eris field', what: 'the dwarf planet beyond Neptune', ra: 27.378, dec: -0.12, fov: 20 },
+];
 
 function mollweideTheta(phi: number): number {
   let th = phi;
@@ -56,7 +84,8 @@ function openLab(ra: number, dec: number, fov: number) {
   location.hash = formatHash({ screen: 'lab', params: { ra: ra.toFixed(5), dec: dec.toFixed(5), fov: String(fov) } });
 }
 
-const epochPlace = (o: Obj): [number, number] => (o.pmra != null && o.pmdec != null ? atEpoch(o.ra, o.dec, o.pmra, o.pmdec, SURVEY_EPOCH) : [o.ra, o.dec]);
+const epochPlace = (o: Obj): [number, number] =>
+  o.pmra != null && o.pmdec != null ? atEpoch(o.ra, o.dec, o.pmra, o.pmdec, SURVEY_EPOCH) : [o.ra, o.dec];
 
 export function Globe() {
   const [catalog, setCatalog] = useState<Obj[]>([]);
@@ -92,9 +121,17 @@ export function Globe() {
       .then((m: { order: number; releases: string[]; cells: Record<string, number[]> } | null) => {
         if (!m) return;
         let max = 1;
-        for (const v of Object.values(m.cells)) max = Math.max(max, v.reduce((s, x) => s + x, 0));
+        for (const v of Object.values(m.cells))
+          max = Math.max(
+            max,
+            v.reduce((s, x) => s + x, 0),
+          );
         const di = m.releases.indexOf('dr1');
-        live.current.cov = Object.entries(m.cells).map(([k, v]) => ({ pts: outline(m.order, Number(k), 4), dr1: di >= 0 && v[di]! > 0, t: Math.log(1 + v.reduce((s, x) => s + x, 0)) / Math.log(1 + max) }));
+        live.current.cov = Object.entries(m.cells).map(([k, v]) => ({
+          pts: outline(m.order, Number(k), 4),
+          dr1: di >= 0 && v[di]! > 0,
+          t: Math.log(1 + v.reduce((s, x) => s + x, 0)) / Math.log(1 + max),
+        }));
         dirty.current = true;
       })
       .catch(() => {});
@@ -115,7 +152,9 @@ export function Globe() {
     const t = setTimeout(() => {
       void fetch(`/api/v1/coverage?ra=${a.ra.toFixed(5)}&dec=${a.dec.toFixed(5)}&fov=${a.fov}`, { signal: ctl.signal })
         .then((r) => (r.ok ? r.json() : null))
-        .then((c: { n_exposures: number; by_release: Record<string, number> } | null) => c && setCount({ n: c.n_exposures, by: c.by_release }))
+        .then(
+          (c: { n_exposures: number; by_release: Record<string, number> } | null) => c && setCount({ n: c.n_exposures, by: c.by_release }),
+        )
         .catch(() => {});
     }, 350);
     return () => {
@@ -168,7 +207,7 @@ export function Globe() {
     const project = (ra: number, dec: number, b: B): [number, number, boolean] => {
       if (live.current.proj === 'moll') {
         const th = mollweideTheta(dec * D2R);
-        const lam = ((((ra - 180 + 540) % 360) - 180) * D2R);
+        const lam = (((ra - 180 + 540) % 360) - 180) * D2R;
         return [W / 2 - ((lam * Math.cos(th)) / Math.PI) * (mw() / 2), H / 2 - Math.sin(th) * (mw() / 4), true];
       }
       const r = ra * D2R;
@@ -176,7 +215,11 @@ export function Globe() {
       const v = [Math.cos(d) * Math.cos(r), Math.cos(d) * Math.sin(r), Math.sin(d)];
       const z = v[0]! * b.c[0]! + v[1]! * b.c[1]! + v[2]! * b.c[2]!;
       if (z < 0.02) return [0, 0, false];
-      return [W / 2 - (v[0]! * b.e[0]! + v[1]! * b.e[1]! + v[2]! * b.e[2]!) * R(), H / 2 - (v[0]! * b.n[0]! + v[1]! * b.n[1]! + v[2]! * b.n[2]!) * R(), true];
+      return [
+        W / 2 - (v[0]! * b.e[0]! + v[1]! * b.e[1]! + v[2]! * b.e[2]!) * R(),
+        H / 2 - (v[0]! * b.n[0]! + v[1]! * b.n[1]! + v[2]! * b.n[2]!) * R(),
+        true,
+      ];
     };
     const unproject = (px: number, py: number): [number, number] | null => {
       if (live.current.proj === 'moll') {
@@ -413,7 +456,10 @@ export function Globe() {
           ctx.stroke();
           ctx.font = `600 11px ${font}`;
           ctx.lineWidth = 3;
-          for (const [y, t, right] of [[2000, '2000', false], [2050, '2050', true]] as const) {
+          for (const [y, t, right] of [
+            [2000, '2000', false],
+            [2050, '2050', true],
+          ] as const) {
             const q = at(y);
             ctx.fillStyle = '#ffb454';
             ctx.beginPath();
@@ -494,9 +540,15 @@ export function Globe() {
     loop();
     const flyTo = (ra: number, dec: number) => {
       if (live.current.proj === 'moll') return;
-      const th = (separation(ra, dec, view.current.ra, view.current.dec) * D2R);
+      const th = separation(ra, dec, view.current.ra, view.current.dec) * D2R;
       if (th < (Math.PI / 2) * 0.9 && R() * Math.sin(th) < Math.min(W, H) * 0.3) return;
-      anim = { t0: performance.now(), ra0: view.current.ra, dra: ((ra - view.current.ra + 540) % 360) - 180, de0: view.current.dec, dde: dec - view.current.dec };
+      anim = {
+        t0: performance.now(),
+        ra0: view.current.ra,
+        dra: ((ra - view.current.ra + 540) % 360) - 180,
+        de0: view.current.dec,
+        dde: dec - view.current.dec,
+      };
     };
     flyRef.current = flyTo;
 
@@ -552,7 +604,8 @@ export function Globe() {
     c.ondblclick = (e) => {
       const r = c.getBoundingClientRect();
       const f = frame;
-      if (f && Math.abs(e.clientX - r.left - f.x) < f.s && Math.abs(e.clientY - r.top - f.y) < f.s) openLab(live.current.a.ra, live.current.a.dec, live.current.a.fov);
+      if (f && Math.abs(e.clientX - r.left - f.x) < f.s && Math.abs(e.clientY - r.top - f.y) < f.s)
+        openLab(live.current.a.ra, live.current.a.dec, live.current.a.fov);
     };
     c.onwheel = (e) => {
       e.preventDefault();
@@ -575,12 +628,14 @@ export function Globe() {
     else if (filter === 'bd') L = L.filter((o) => o.k === 'bd');
     else if (filter === 'fast') L = L.filter((o) => o.k === 'fast');
     else if (filter === 'var') L = L.filter((o) => o.k === 'mira' || o.k === 'young' || o.k === 'var');
+    else if (filter === 'demo') L = [];
     const q = query.trim().toLowerCase();
     if (q) {
       const m = q.match(/^(.+?)[,;]\s*(.+)$/);
       const ra = m ? parseRA(m[1]!) : null;
       const de = m ? parseDec(m[2]!) : null;
-      if (ra !== null && de !== null) L = [...L].sort((x, y) => separation(x.ra, x.dec, ra, de) - separation(y.ra, y.dec, ra, de)).slice(0, 200);
+      if (ra !== null && de !== null)
+        L = [...L].sort((x, y) => separation(x.ra, x.dec, ra, de) - separation(y.ra, y.dec, ra, de)).slice(0, 200);
       else L = L.filter((o) => o.n.toLowerCase().includes(q) || o.c.toLowerCase().includes(q) || o.sp.toLowerCase().includes(q));
     }
     return L;
@@ -642,7 +697,15 @@ export function Globe() {
           </div>
           <div class="map-read">
             Aim: <b>{formatRA(a.ra)}</b> · <b>{formatDec(a.dec)}</b> · {a.fov}′
-            {count && (count.n ? <span style={{ color: 'var(--good)' }}> · {count.n.toLocaleString('en-US')} exposures (DR1 {count.by['dr1'] ?? 0}, QR3 {count.by['qr3'] ?? 0})</span> : <span class="faint"> · no SPHEREx exposures here</span>)}
+            {count &&
+              (count.n ? (
+                <span style={{ color: 'var(--good)' }}>
+                  {' '}
+                  · {count.n.toLocaleString('en-US')} exposures (DR1 {count.by['dr1'] ?? 0}, QR3 {count.by['qr3'] ?? 0})
+                </span>
+              ) : (
+                <span class="faint"> · no SPHEREx exposures here</span>
+              ))}
             {sel && (
               <>
                 {' · '}
@@ -653,13 +716,17 @@ export function Globe() {
             )}
           </div>
         </div>
-        <label class="chk covsw dark-glass" title="Where SPHEREx exposures exist, from the exposure index. Teal: DR1 exposures; blue: QR3 only; more opaque = more exposures (log scale)">
+        <label
+          class="chk covsw dark-glass"
+          title="Where SPHEREx exposures exist, from the exposure index. Teal: DR1 exposures; blue: QR3 only; more opaque = more exposures (log scale)"
+        >
           <input type="checkbox" checked={covOn} onChange={(e) => setCovOn((e.target as HTMLInputElement).checked)} />
           Exposure coverage
           <span class="covkey">teal: DR1 exposures · blue: QR3 only · more opaque = more exposures (log scale)</span>
         </label>
         <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
-          <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange ★ are test targets.
+          <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
+          ★ are test targets.
         </div>
         <button class="btn primary big map-open" onClick={() => (sel ? openObj(sel) : openLab(a.ra, a.dec, a.fov))}>
           <span dangerouslySetInnerHTML={{ __html: icon('scan', 18) }} style={{ display: 'contents' }} />
@@ -672,11 +739,27 @@ export function Globe() {
             <div class="coords">
               <div class="field">
                 <label for="gRa">RA</label>
-                <input id="gRa" class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`} spellcheck={false} value={raIn} onInput={(e) => setRaIn((e.target as HTMLInputElement).value)} onKeyDown={(e) => e.key === 'Enter' && goAim()} onBlur={goAim} />
+                <input
+                  id="gRa"
+                  class={`inp coord ${parseRA(raIn) === null ? 'bad' : ''}`}
+                  spellcheck={false}
+                  value={raIn}
+                  onInput={(e) => setRaIn((e.target as HTMLInputElement).value)}
+                  onKeyDown={(e) => e.key === 'Enter' && goAim()}
+                  onBlur={goAim}
+                />
               </div>
               <div class="field">
                 <label for="gDec">Dec</label>
-                <input id="gDec" class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`} spellcheck={false} value={decIn} onInput={(e) => setDecIn((e.target as HTMLInputElement).value)} onKeyDown={(e) => e.key === 'Enter' && goAim()} onBlur={goAim} />
+                <input
+                  id="gDec"
+                  class={`inp coord ${parseDec(decIn) === null ? 'bad' : ''}`}
+                  spellcheck={false}
+                  value={decIn}
+                  onInput={(e) => setDecIn((e.target as HTMLInputElement).value)}
+                  onKeyDown={(e) => e.key === 'Enter' && goAim()}
+                  onBlur={goAim}
+                />
               </div>
             </div>
             <div class="field">
@@ -690,7 +773,16 @@ export function Globe() {
               </div>
             </div>
           </section>
-          <input class="inp search" placeholder="Search a name or coordinates" autocomplete="off" value={query} onInput={(e) => { setQuery((e.target as HTMLInputElement).value); setPage(1); }} />
+          <input
+            class="inp search"
+            placeholder="Search a name or coordinates"
+            autocomplete="off"
+            value={query}
+            onInput={(e) => {
+              setQuery((e.target as HTMLInputElement).value);
+              setPage(1);
+            }}
+          />
           <div class="chips">
             {(
               [
@@ -699,46 +791,124 @@ export function Globe() {
                 ['bd', 'Brown dwarfs'],
                 ['fast', 'Fast stars'],
                 ['var', 'Variables'],
+                ['demo', `Demo fields (${DEMOS.length})`],
               ] as const
             ).map(([k, l]) => (
-              <button key={k} class={`chip ${filter === k ? 'on' : ''}`} onClick={() => { setFilter(k); setPage(1); }} data-testid={`chip-${k}`}>
+              <button
+                key={k}
+                class={`chip ${filter === k ? 'on' : ''}`}
+                onClick={() => {
+                  setFilter(k);
+                  setPage(1);
+                }}
+                data-testid={`chip-${k}`}
+              >
                 {l}
               </button>
             ))}
           </div>
         </div>
         <div class="cat-list">
-          {!slice.length && catalog.length > 0 && <div class="empty">Not in the local SIMBAD snapshot. Coordinates work too, e.g. “17h57m48s, +04d41m”.</div>}
-          {slice.map((o) => {
-            const { ra, dec } = o;
-            return (
-              <div key={o.n} class={`row ${sel === o ? 'on' : ''}`} onClick={() => select(o)} onDblClick={() => openObj(o)} data-testid={o.b ? `target-${o.n}` : undefined}>
+          {filter !== 'demo' && !slice.length && catalog.length > 0 && (
+            <div class="empty">Not in the local SIMBAD snapshot. Coordinates work too, e.g. “17h57m48s, +04d41m”.</div>
+          )}
+          {filter === 'demo' &&
+            DEMOS.map((d) => (
+              <div key={d.n} class="row" onClick={() => aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog')}>
                 <div class="nm">
-                  {o.b ? <span title="Test target of this project">★</span> : null}
-                  <span class="t" title={o.n}>
-                    {o.n}
-                  </span>
-                  <span class={`badge ${KIND[o.k]?.cls ?? ''}`}>{o.b ? TARGET_CLASS[o.n] ?? o.c : o.c}</span>
+                  <span class="t">{d.n}</span>
+                  <span class="badge orange">{d.film ? 'film' : 'field'}</span>
                 </div>
                 <div class="co">
-                  {formatRA(ra)} {formatDec(dec)}
+                  {formatRA(d.ra)} {formatDec(d.dec)} · {d.fov}′
                 </div>
                 <div class="mv">
-                  <span>{motion(o)}</span>
+                  <span>{d.what}</span>
                 </div>
                 <div class="gobtns">
-                  <button class="btn sm primary go" title="Fly to the object on the map and draw its path" onClick={(e) => { e.stopPropagation(); select(o); }}>
+                  <button
+                    class="btn sm primary go"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
+                      flyRef.current(d.ra, d.dec);
+                    }}
+                  >
                     <span dangerouslySetInnerHTML={{ __html: icon('target', 16) }} style={{ display: 'contents' }} />
                     Show on map
                   </button>
-                  <button class="btn sm go" title="Open this field in the spectral lab" onClick={(e) => { e.stopPropagation(); openObj(o); }}>
+                  <button
+                    class="btn sm go"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      location.hash = formatHash({
+                        screen: 'lab',
+                        params: {
+                          ra: d.ra.toFixed(5),
+                          dec: d.dec.toFixed(5),
+                          fov: String(d.fov),
+                          ...(d.film ? { film: String(d.film) } : {}),
+                        },
+                      });
+                    }}
+                  >
                     <span dangerouslySetInnerHTML={{ __html: icon('chart-line-up', 16) }} style={{ display: 'contents' }} />
                     Open in lab
                   </button>
                 </div>
               </div>
-            );
-          })}
+            ))}
+          {filter !== 'demo' &&
+            slice.map((o) => {
+              const { ra, dec } = o;
+              return (
+                <div
+                  key={o.n}
+                  class={`row ${sel === o ? 'on' : ''}`}
+                  onClick={() => select(o)}
+                  onDblClick={() => openObj(o)}
+                  data-testid={o.b ? `target-${o.n}` : undefined}
+                >
+                  <div class="nm">
+                    {o.b ? <span title="Test target of this project">★</span> : null}
+                    <span class="t" title={o.n}>
+                      {o.n}
+                    </span>
+                    <span class={`badge ${KIND[o.k]?.cls ?? ''}`}>{o.b ? (TARGET_CLASS[o.n] ?? o.c) : o.c}</span>
+                  </div>
+                  <div class="co">
+                    {formatRA(ra)} {formatDec(dec)}
+                  </div>
+                  <div class="mv">
+                    <span>{motion(o)}</span>
+                  </div>
+                  <div class="gobtns">
+                    <button
+                      class="btn sm primary go"
+                      title="Fly to the object on the map and draw its path"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        select(o);
+                      }}
+                    >
+                      <span dangerouslySetInnerHTML={{ __html: icon('target', 16) }} style={{ display: 'contents' }} />
+                      Show on map
+                    </button>
+                    <button
+                      class="btn sm go"
+                      title="Open this field in the spectral lab"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openObj(o);
+                      }}
+                    >
+                      <span dangerouslySetInnerHTML={{ __html: icon('chart-line-up', 16) }} style={{ display: 'contents' }} />
+                      Open in lab
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
         </div>
         <div class="pager">
           <button class="pg" disabled={pg === 1} onClick={() => setPage(pg - 1)}>
@@ -755,7 +925,14 @@ export function Globe() {
           <button class="pg" disabled={pg === pages} onClick={() => setPage(pg + 1)}>
             ›
           </button>
-          <select title="Objects per page" value={String(per)} onChange={(e) => { setPer(Number((e.target as HTMLSelectElement).value)); setPage(1); }}>
+          <select
+            title="Objects per page"
+            value={String(per)}
+            onChange={(e) => {
+              setPer(Number((e.target as HTMLSelectElement).value));
+              setPage(1);
+            }}
+          >
             {[25, 50, 100].map((v) => (
               <option value={String(v)}>{v} / page</option>
             ))}
