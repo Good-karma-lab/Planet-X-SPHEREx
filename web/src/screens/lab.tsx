@@ -191,6 +191,7 @@ interface MoversView {
     still: number;
     tracks: Track[];
     chance?: { trials: number; mean: number; any: number };
+    passes_left_out?: number[];
   };
 }
 
@@ -236,7 +237,7 @@ function MoversRows({ mv, names, onPick }: { mv: MoversView | null; names: strin
           ? 'searching…'
           : r.passes < 3
             ? `${r.passes} passes: a track needs 3`
-            : `${r.tracks.length} track${r.tracks.length === 1 ? '' : 's'} · ${r.sources_per_pass.join(' / ')} sources per pass${r.still ? ` · ${r.still} centroid shift${r.still === 1 ? '' : 's'} rejected` : ''}${r.weak ? ` · ${r.weak} weak` : ''}${r.chance?.trials ? ` · chance ${r.chance.mean.toFixed(2)} tracks per field (${r.chance.trials} trials)` : ''}`;
+            : `${r.tracks.length} track${r.tracks.length === 1 ? '' : 's'} · ${r.sources_per_pass.join(' / ')} sources per pass${r.still ? ` · ${r.still} centroid shift${r.still === 1 ? '' : 's'} rejected` : ''}${r.weak ? ` · ${r.weak} weak` : ''}${r.chance?.trials ? ` · chance ${r.chance.mean.toFixed(2)} tracks per field (${r.chance.trials} trials)` : ''}${r.passes_left_out?.length ? ` · season ${r.passes_left_out.map((i) => i + 1).join(', ')} left out (it covers only part of the field)` : ''}`;
   return (
     <>
       <div

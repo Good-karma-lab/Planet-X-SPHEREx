@@ -212,12 +212,16 @@ class Movers:
 
 def search_parts(field_key: str, meta: dict[str, Any], raws: list[bytes]) -> dict[str, Any]:
     """The search between passes on the field's quick parts (runs in a worker process)."""
-    passes = meta["passes"]
     whites, sats = [], []
     for raw in raws:
         _, arr = decode(raw)
         whites.append(arr["white"].astype(np.float32))
         sats.append(arr["sat"].astype(np.float32) / 255.0)
+    # a pass that covers only a corner of the field (the survey's edge) would leave no place seen by every pass: such passes sit out
+    keep = covering_passes(whites)
+    dropped = [meta["passes"][i]["index"] for i in range(len(whites)) if i not in keep]
+    passes = [meta["passes"][i] for i in keep]
+    whites, sats = [whites[i] for i in keep], [sats[i] for i in keep]
     g = meta["grid"]
     grid = Grid(g["ra0"], g["dec0"], g["step_arcsec"], g["n"])
     t0 = time.monotonic()
@@ -232,7 +236,7 @@ def search_parts(field_key: str, meta: dict[str, Any], raws: list[bytes]) -> dic
         ra_m = float(ra_e[0]) + t.v_east * yrs / 3600.0 / math.cos(math.radians(dec_m))
         tracks.append(
             {
-                "passes": t.passes,
+                "passes": [passes[i]["index"] for i in t.passes],
                 "mjd": [round(m, 4) for m in t.mjd],
                 "ra": [round(float(x), 6) for x in ra],
                 "dec": [round(float(x), 6) for x in dec],
@@ -256,7 +260,15 @@ def search_parts(field_key: str, meta: dict[str, Any], raws: list[bytes]) -> dic
         "stationary": res.stationary,
         "weak": res.weak,
         "chance": {"trials": res.chance_trials, "mean": round(res.chance_mean, 3), "any": round(res.chance_any, 3)},
+        "passes_left_out": dropped,
         "still": 0,
         "tracks": tracks,
         "seconds": round(time.monotonic() - t0, 2),
     }
+
+
+def covering_passes(whites: list[np.ndarray], share: float = 0.5) -> list[int]:
+    """The passes that cover at least `share` of what the best-covering pass covers."""
+    cover = [float(np.isfinite(w).mean()) for w in whites]
+    best = max(cover, default=0.0)
+    return [i for i, c in enumerate(cover) if best > 0 and c >= share * best]

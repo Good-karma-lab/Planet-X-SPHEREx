@@ -29,6 +29,7 @@ from engine.spx import psf as spxpsf
 from engine.spx import wcs as spxwcs
 from indexer.store import Exposure, Index
 from service import cpu
+from service.movers import covering_passes
 from service.products.store import Store, product_key
 from service.products.sxp import decode
 from service.reader.calib import WavelengthMaps
@@ -278,6 +279,9 @@ def field_sources(meta: dict[str, Any], grid: Grid, raws: list[bytes]) -> list[d
         _, arr = decode(raw)
         whites.append(arr["white"].astype(np.float32))
         sats.append(arr["sat"].astype(np.float32) / 255.0)
+    keep = covering_passes(whites)
+    passes = [passes[i] for i in keep]
+    whites, sats = [whites[i] for i in keep], [sats[i] for i in keep]
     mjds = [p["mjd_mid"] for p in passes]
     if len(passes) >= 3:
         res = movers.search(whites, sats, mjds, grid.step_arcsec)
