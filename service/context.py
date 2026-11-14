@@ -346,7 +346,7 @@ class CatalogueContext:
             except (httpx.HTTPError, BreakerOpenError) as e:
                 err = e
         try:  # no archive answered: the Parquet copy in AWS (a worker process: it reads files over the network)
-            rows = await cpu.run(gaia_cloud_rows, ra, dec, big)
+            rows = await cpu.run(gaia_cloud_rows, ra, dec, big * 3600.0)
         except Exception:
             raise err or RuntimeError("no Gaia archive") from None
         return parse_gaia_rows(rows, ra, dec, epoch, radius, "Gaia DR3 on AWS (the archives did not answer)")
