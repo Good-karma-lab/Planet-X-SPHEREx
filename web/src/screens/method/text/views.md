@@ -1,0 +1,165 @@
+# 2.3 Views
+
+Every view below is computed in the browser by WebGL2 fragment shaders from stacks already on the page (R16F texture arrays), so
+switching view, band, pass or display option needs no request. The only exceptions are the films and archive images, which are their
+own products.
+
+## 2.3.1 Display law (one for all passes)
+
+`s = asinh((x − lo)/soft) / asinh((hi − lo)/soft)`, lo = −0.05, hi = 400, soft = 0.4 MJy/sr; smoothing 0.5 grid pixel; bilinear
+sampling. One law for all passes of a field (otherwise brightness alone blinks). Saturated share > 0.5 → white. No data inside the
+field → flat blue-grey; outside the coverage of a wall panel → black.
+
+Measured on screen: the display law adds 3.5–5″ to the stack FWHM (asinh lifts the wings), resampling 0.2–0.4″; flatter
+laws make stars smaller but lose faint ones (their brightness falls to a quarter) — rejected.
+
+## 2.3.2 Spectral colour (default)
+
+```
+lam_rgb(λ):  f_log = (ln λ − ln 0.74)/(ln 5.02 − ln 0.74);  f_lin = (λ − 0.74)/(5.02 − 0.74)
+             h = 0.74 − 0.78·(0.35·f_log + 0.65·f_lin);   rgb = hsv(h mod 1, 0.88, 1.0)
+R, G, B  = M (3×6) · detector stacks      # M from lam_rgb at each detector's wavelengths
+balance  = per pass, from that pass's own field stars (pixels > 2.5 MJy/sr, ≥ 50″ from the target): kR = med(G/R), kB = med(G/B)
+           fewer than 6 stars → a typical-star model by detector set (fitted on 10 fields, within 4 %), shown with less saturation
+colour   = saturate(stretch(chan · [kR, 1, kB]), k = 2.4), one saturation for the whole field
+```
+
+- Colour boost is switched off for very bright pixels (the wings of a saturated core otherwise change colour between passes).
+- Validation: field stars within ±0.1 of white in every pass at 10′ and 20′ for all five targets; ε Indi B orange-red among white stars
+  in all four passes.
+- Limit: stars are wider at long wavelengths, so a faint reddish ring can appear round bright stars (cure would be PSF matching; not
+  built).
+
+## 2.3.3 Named bands
+
+A band is a set of wavelength windows (half-open, lower edge included); an exposure pixel contributes to a band only if its own
+wavelength lies inside a window. Windows are our working definitions of broad tracers, not line fluxes; one source of truth
+(`data/bands.json`) is read by the engine, the page and the Method page.
+
+| # | Band | Windows (µm) | Hue |
+|---|---|---|---|
+| 1 | Starlight | 0.75–1.10 | 48 |
+| 2 | Water vapor (H₂O) | 1.30–1.50 · 1.80–2.00 · 2.55–2.90 | 205 |
+| 3 | Methane (CH₄) | 1.62–1.76 · 3.20–3.50 | 24 |
+| 4 | Water ice | 2.90–3.20 | 185 |
+| 5 | Dust (PAH) | 3.20–3.40 | 140 |
+| 6 | Carbon dioxide (CO₂) | 4.20–4.35 | 275 |
+| 7 | Carbon monoxide (CO) | 4.55–4.85 | 345 |
+
+One band alone shows that band's stack in its hue; several bands blend their hues; All shows the colour picture. Limit: a band image is
+continuum plus feature; a molecule is never claimed from band images (continuum-subtracted maps are not built).
+
+## 2.3.4 Pendulum (the main view)
+
+Passes in the order 1→2→…→N→…→2 (no return jump, which the eye reads as a separate motion); hold 430 ms; crossfade 100 ms with
+`t²(3 − 2t)`. Rate 2–3 Hz, where a jump is most noticeable. A ×2.8 zoom inset synchronised with the main picture sits in the corner
+farthest from the object (a quarter of the width). Co-add = all passes stacked (inverse-variance) as one still picture.
+
+## 2.3.5 Wall of bands and wall of detectors (two separate views)
+
+- **Wall of bands:** seven panels (named bands): what the object is made of, in which light it is bright. A band with no exposure in a
+  pass says so in one line on a black panel. Same display law for all panels.
+- **Wall of detectors:** six panels labelled in words ("very near infrared" …), D1–D6 and microns, with the number of exposures: a real
+  object jumps in all six at once by the same amount; a cosmic ray or glint lives in one. One blink timer for all panels.
+- **Agreement for a named target:** the shift between first and last pass measured in each detector (12 exposures per detector and pass,
+  taken evenly; Moffat fit on unsaturated pixels within 8 px with a robust loss for saturated cores; median per pass), compared with the
+  **catalogue** shift over each detector's own interval (floor 1″; 1.5″ for detectors whose fits had a masked core); without a catalogue
+  motion, with the median of the six (floor 0.5″). "N of 6 agree" (≥ 4 = agree). A median alone lets a wrong majority win: WISE 0855's
+  fits in D1–D4 settle on blended neighbours.
+- Validation: Barnard's Star 6 of 6 (shifts 9.7–10.4″, mean 10.1 ± 0.3″; Gaia 10.2″); ε Indi B 6 of 6 (D2 6.30, D3 6.36, D5 6.56,
+  D6 6.52″; Gaia 6.47″); RW Aurigae 6 of 6 (no motion); WISE 0855 1 of 6 (D5 7.4 ± 1.2″ vs catalogue 8″); R Draconis 3 of 6.
+
+## 2.3.6 Difference between passes
+
+Per band and per pixel, the significance of pass b against the first pass a:
+
+```
+D = b − a;  S = smooth part of D (median of valid pixels in 24-px windows on an 8-px grid, bilinear)
+z = (D − S) / sqrt( (k·σ)² + (k·σ₁)² + (0.05·max(|a|, |b|))² ),   σ, σ₁ = 1/sqrt(Σw) of the two stacks
+k = robust width of (D − S)/σ measured in the same windows on source-free pixels (source = > 2 robust widths above the 15×15 median,
+    dilated by 2 detector pixels); the 5 % floor is NOT scaled (it is about flux, not noise)
+several bands: Stouffer Σz/√m, m = bands with exposures in both passes (dust and methane share exposures: count as one)
+colour: |z| > 4, magenta = brighter, cyan = fainter, saturating at |z| = 10; the first pass shows nothing
+```
+
+- S removes the change of the diffuse sky (zodiacal light) and real extended change larger than ~2.5′.
+- Validation: width of z on empty sky 0.93–1.05 for the white frame in every pass of ε Indi B and Barnard's Star (before the
+  calibration 2.2–4.4; 11.9 % of the field above |z| = 4, now 0.9 % and a single pair at the target). Single bands 0.82–1.4; the
+  Stouffer sum of a band subset 1.1–1.25 (bands share exposures; stated).
+- Limit: a coloured star is not by itself a variable: passes sample different wavelengths; a change is claimed only at matched
+  wavelengths (2.4.5). Heavy tails where static stars differ (roll angle, PSF): 93–98 % of the area above |z| = 4 lies in blobs ≥ 12 px.
+
+## 2.3.7 Artifact mask
+
+Per pixel, the share of exposures (inside their footprints) carrying each flag name set in ≥ 2 % of exposures somewhere in the field
+(the flag census, built in the same streaming pass). Red = 1 − Π(1 − share) over the flags that mark a bad pixel (phantom, reference,
+non-functional, missing data, hot, cold, outlier, snowball, transient, overflow, SUR_ERROR, persistence); SOURCE and BLOOM are listed but
+do not redden. Hover names the flags set in ≥ 5 % ("SOURCE 100 % · SUR_ERROR 71 % · BLOOM 65 %").
+
+## 2.3.8 Speed rings (nested fields)
+
+Rings of 1, 3, 10, 30, 100, 300 ″/yr with `r = v · Δt` (Δt = first to last frame shown; with archive images on, the longest span),
+drawn when 14 px < r < 0.72 of the panel, centred on the place of the selected object in the first frame (else the target, else the
+strongest track, else the picture centre). They answer "which field do I need": a small field shows what is slow, a large one catches
+what is fast. Screen shift of Barnard's Star per year: 61 px at 2′, 25 at 5′, 12 at 10′, 6 at 20′, 2 at 60′.
+
+## 2.3.9 Sharpening (a display option, audit-gated)
+
+Display-only gain on real pixels, never new data: `gain = 1 + A · t² / (t + 0.1)`, `t = (L − blur)/L` on the white-light layer L of the
+pass (blur radius one detector pixel in grid pixels, between 1.5 and 5; taps over valid unsaturated pixels), A = 16; zero where L is
+under 3σ of the pass's noise and full from 8σ; faded to zero over 1–3 detector pixels toward any saturated pixel or hole in any layer;
+tapered to zero as the stretched value rises 0.12 → 0.4; the same gain multiplied into every layer and channel before the display law
+(so colour cannot change); the same code path in every view and stage. The audit (5 targets × 5 sizes × every pass, 95 frame
+pairs) found no red isolated cell, no contour, ≤ 1/255 channel-mean change, ≤ 2.2 % of cells changed by > 20/255; faint stars crisper
+at 2′–10′, nothing at 20′–60′. **Production rule (decided 2026-11-14):** it ships as a switch, off until the production frame audit passes on every frame, then on by default. A first, simpler unsharp mask failed exactly this audit
+(contours, red rims, specks), which is why the audit exists.
+
+## 2.3.10 The film of the visits of one pass (days)
+
+A body that crosses the field in days is in no pass stack (at each place it is in one visit of a few exposures out of many), so the film
+shows the visits of one pass in time order.
+
+```
+grid: ≤ 400 px across, ≥ 3.075″ (fields ≤ 30′); 60′: 6″ (600 px) unless the film exceeds 80 MB (then the largest grid that fits)
+every exposure of D1–D3 of the pass: background as for stacks, OUTLIER kept, smoothed to 3.2″
+frame[visit] = median of its exposures (a hit is in one exposure and drops out; a body is in all)
+   use visits with ≥ 3 exposures where most have them; drop visits covering < 50 % of the field
+align frames of a detector on bright sources (cross-correlation with their median, parabola at the peak, ≤ 2 grid points)
+static[det] = median of the frames of the detector;  motion = (frame − static) / robust scatter
+mask: static > 5σ grown by 1 grid point; halo of a saturated star (static blob, equivalent radius ≥ 150″) grown by 0.4 × radius
+```
+
+Display: **sky of each visit by default** (stars stand still) with the motion layer drawn only around found bodies; switches "Show
+candidates", "Motion only" (dark below 3.5σ, amber from ~7σ, a bright point spread over 3×3 so it is visible — display aid only),
+"Trail" (last three places of each found body, fading) and "Blink" (a strip of cut-outs of the chosen track's visits, unmarked). The
+same detector set throughout so the wavelength mix does not flicker.
+
+## 2.3.11 The film of one visit (hours)
+
+One frame per exposure instant of a visit (two exposures taken at the same moment share a frame). Each exposure is another wavelength,
+so: (1) scale each exposure by its median brightness relative to the visit's other exposures, measured on static stars (3×3 peak, ≥ 5σ,
+unsaturated, ≥ 3 stars; else no scaling); (2) static sky = pixelwise median of the scaled exposures (≥ 40 % valid); (3) motion only:
+`z = (scaled − static)/sqrt(σ² + (0.15·static)²)` (15 % is an assumed allowance for the PSF changing with wavelength), clipped to
+[−5, 12], 3×3 sum / 3, amber from 5 to 17 over a dim static sky; Gaia stars (G ≤ 16.5) and stars found by the search masked; a known
+body's place never masked.
+
+## 2.3.12 Archive images (time machine)
+
+Images of the same field from other surveys on the field's own grid, placed on the same timeline before the SPHEREx passes, labelled
+with survey, band, year and credit (never presented as SPHEREx):
+
+| Survey | Source | Dates |
+|---|---|---|
+| DSS plates (POSS-I red/blue 1950s, Quick-V, POSS-II/UK Schmidt blue/red/IR) | STScI `dss_search` | from the plate header (`DATE-OBS`; hours as decimal) |
+| 2MASS J, H, Ks | IRSA Finder Chart | 1997–2001 (service table) |
+| AllWISE W1, W2 | IRSA Finder Chart | 2010 |
+| Pan-STARRS g, i | STScI `fitscut` | stack of 2010–2014 (no date in the file: "2010–2014") |
+
+Reprojection: the sphere cut into grid pixels (centre of the field, ≤ 600 px, the stack step up to 20′), the image smoothed to the grid
+pixel when finer, sampled bilinearly; outside the image = no data. Stretch per image: asinh between its 0.5 and 99.7 percentiles, tinted
+by band wavelength. The selected object's place on each date = its place at its epoch + proper motion × years (back to 1950); the
+marker, trajectory (dots with years), speed rings (longest span), camera-on-object (frame moved by the object's motion) and playback
+(archive frames oldest first, 0.9 s each, then the pendulum) all use the archive frames. Validation: Barnard's Star sits at the
+Gaia-predicted point within 0.3″ (2MASS), 0.6″ (Quick-V), 1.7″ (WISE), 2.8–3.7″ (POSS); its 1950 place is 13′ south of its 2025 place
+(the status line says when the object is outside the frame on that date); ε Indi B on the 1997 IR plate 26σ, 0.9″ from prediction.
+Limits: POSS-I and Pan-STARRS stop at Dec −30°; 2MASS tiles have edges (black strip).

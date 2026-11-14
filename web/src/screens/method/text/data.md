@@ -1,0 +1,143 @@
+# 2.1 Data and reading
+
+## 2.1.1 SPHEREx Level-2 exposures
+
+SPHEREx has six H2RG detectors behind linear variable filters; each pixel sees one wavelength, which changes slowly across the
+detector. 102 spectral channels span 0.75–5.0 µm.
+
+| Detector | Wavelength (µm) | R = λ/Δλ (nominal) | Arm | Single-frame 5σ depth, AB (measured, PSF fit, ±0.4 mag) |
+|---|---|---|---|---|
+| D1 | 0.75–1.11 | 41 | short | 18.3 |
+| D2 | 1.11–1.64 | 41 | short | 18.3 |
+| D3 | 1.64–2.42 | 41 | short | 18.4 |
+| D4 | 2.42–3.82 | 35 | long | 18.2 |
+| D5 | 3.82–4.42 | 110 | long | 17.4 |
+| D6 | 4.42–5.00 | 130 | long | 16.9 |
+
+Source (IRSA's advice: DR1 + QR3 for new work; QR2 has the old gain and leaves direct download in February 2027, so it is a fallback
+only): the public S3 copy of the IRSA archive, bucket `nasa-irsa-spherex` in AWS us-east-1: the quick releases QR2 (pipeline
+v20–v25) and QR3 (v27) with the deep-field collection, and **DR1** (`dr1/level2/`, uploaded 2026-11-11: periods 2025W17_4B–2026W20_1A,
+the first survey year reprocessed with one pipeline, l2b-v27-2026-235). Files are 2040 × 2040 per detector (~66 MB).
+
+**Release rule:** an exposure present in DR1 and in a quick release is read from DR1 (one pipeline version for the first year: the
+limit "exposures of one field mix pipeline versions" applies only to periods after DR1); later periods come from QR3. The bucket also
+holds `dr1/hips5_cube/` (an all-sky SPHEREx HiPS spectral cube, order 5, ~321 MB per tile), `l3_flux_corrections/` and calibration
+files; the HiPS cube is the SPHEREx layer of the globe.
+
+**Layout of a Level-2 file** (byte offsets measured on real files; header lengths differ between files, so offsets are always found by
+walking the header chain, never hard-coded):
+
+| HDU | QR2 (2025) | QR3 (2026) |
+|---|---|---|
+| PRIMARY | 0 | 0 |
+| IMAGE, float32 MJy/sr | data at 23040 (or 25920) | data at 25920 |
+| FLAGS, int32 | plain image, 16,646,400 bytes | **tile-compressed** (`CompImageHDU`), ~7 MB |
+| VARIANCE, float32 | plain image, right after FLAGS | plain image, right after the compressed FLAGS (header + NAXIS1·NAXIS2 + PCOUNT, padded to 2880) |
+| ZODI, float32 | plain image, right after VARIANCE | same |
+| PSF | `PSF` image cube 101×101×121, optical PSF ×10 oversampled, 4.9 MB | `EPSF` binary table, 441 rows (21×21 zones), each 33×33 ×5 oversampled, already pixel-integrated, 3.9 MB |
+| WCS-WAVE | binary table at the end | binary table at the end |
+
+Header keywords used: `MJD-AVG` (time), `DETECTOR`, the celestial WCS with SIP distortion, the wavelength WCS (key `W`, with the
+WCS-WAVE lookup table), `X_SC`, `Y_SC`, `Z_SC` (spacecraft position, km, geocentric), the flag-bit table (`MP_<NAME>` or `MSKN`/`MSKM`
+cards), `XCTR_i/YCTR_i` (QR2 PSF zones) or `XCENTER/YCENTER` columns (QR3 EPSF).
+
+## 2.1.2 Reading only what a field needs
+
+S3 does not serve multi-range requests, and a row of the image is 2040 pixels, so the unit of reading is a **band of whole rows**.
+
+- One request reads exactly the rows of the field's bounding box in an exposure, for IMAGE and FLAGS (and VARIANCE/ZODI only when a
+  product needs them: spectra, distant-body products). Bytes per exposure measured: 1.2 MB at 5′, ~4 MB at 20′, 9–12 MB at 60′.
+- The raw rows are cached on disk as **row bands of 64 rows** per file and plane (compressed `npz`), so neighbouring fields and later
+  products read from disk. Window results (the native pixels of one exposure inside a field box) are cached too.
+- The QR3 compressed FLAGS are decoded tile by tile; only the tiles that cover the needed rows are fetched.
+- Reads that fail are retried once with back-off; reads that stall for 40 s are dropped and counted as missing; a field states how many
+  exposures it could not read. A circuit breaker opens on repeated S3 failures.
+- Measured throughput (residential link): cold reading is link-bound at 12–15 MB/s with 96 reads in flight; more threads
+  did not help. In AWS us-east-1 (or next to it) the expectation is several times higher; it is measured again on the server.
+
+**Result of reading one exposure inside a field:** native pixel values, the **full flag word** (int32, every bit), sky position of every
+native pixel (`all_pix2world`), wavelength of every pixel, the time, detector, spacecraft position and the file identity (release,
+pipeline folder). Nothing is resampled at this stage: resampling before stacking blurs.
+
+## 2.1.3 Flags
+
+The bit numbers are read from each file's own flag table; a built-in table is used only if a file has none, and a mismatch is logged.
+
+| Group (display) | Pipeline flags | Treatment in the stacks |
+|---|---|---|
+| saturation | OVERFLOW, NONLINEAR, BLOOM | masked; feeds the saturated share |
+| source | SOURCE (pipeline's own source mask) | kept, not an error |
+| transient | TRANSIENT, PERSIST, OUTLIER, SNOWBALL, HALO, SATELLITE_HALO, CROSSTALK, STREAK, GHOST, GHOST_FPA, GHOST_EXT | masked for the fixed sky |
+| bad pixel | SUR_ERROR, PHANTOM, REFERENCE, NONFUNC, DICHROIC, MISSING_DATA, HOT, COLD, PHANMISS … | masked |
+
+Rules from measurements:
+
+- `BAD_ALWAYS` = bits 4, 5, 6, 9, 10, 11, 19, 27 (dead, lost and outlier pixels) are masked for every stack of the fixed sky.
+- `BAD_FAR` = bits 0, 1, 2, 17 (transient, overflow, processing error, residual charge) are masked only farther than 6 px from a
+  bright target: around a bright star they are set almost always and masking them everywhere leaves a hole where the star is.
+- A saturated core (OVERFLOW or no value) goes into no stack and is filled with nothing; it is shown white through the saturated share.
+- **OUTLIER (bit 19) is set by the SPHEREx pipeline on asteroid pixels** (72 % of exposures within a pixel of the ephemeris against
+  18 % at random places). It is masked for the fixed sky and **kept** for every search for moving objects and for the photometry of a
+  moving body.
+- FULLSAMPLE is in no group and is ignored.
+
+## 2.1.4 Wavelength of a pixel
+
+Each exposure measures one wavelength per sky position. IRSA documents the WCS-WAVE table of a file as an approximation for
+visualisation and the calibration files `spectral_wcs` (CWAVE and CBAND: one wavelength and bandwidth per detector pixel, in the bucket
+under `dr1/spectral_wcs/`) as the reference. **The fields read CWAVE per pixel** (two 16 MB planes per detector, read once and cached);
+the bicubic spline through the WCS-WAVE nodes (with the v3.0 offset for D5/D6 tables of QR2) is the fallback. Validation V1
+(2026-11-14): spline − CWAVE median 0.0001–0.0005 µm per detector, worst 0.010 µm (D5,
+a quarter of a channel); a check had found +0.00003 µm against IRSA's tool on 123 ε Indi B points. Fields carry, per exposure, the wavelength at the field centre or target; per-pixel
+wavelengths feed the named-band stacks and the wavelength-dependent background.
+
+## 2.1.5 PSF
+
+- QR2: the `PSF` cube is the optical PSF ×10 oversampled; it must be **integrated over the 10×10 pixel box** before fitting (taken as
+  is it gives fluxes 8 % below catalogues). QR3: the `EPSF` table (33×33, ×5) is already pixel-integrated.
+- Zones are chosen by detector coordinates (nearest zone centre). The EPSF has 441 zones (21×21) in D1, D2, D4, D5, D6 and 451 (11×41)
+  in D3 (checked on DR1 files; the selection works for any count).
+- **The QR1/QR2 PSF header error** (IRSA, https://irsa.ipac.caltech.edu/data/SPHEREx/docs/psfhdrerr.html): the 121 planes of the PSF
+  cube are stored x-major while the header described y-major (plane index `y·ncols + x + 1`), up to ±5 % in photometry, worst in two
+  corners, for files without the `+psffix1` tag. The system avoids it: it uses DR1 (EPSF tables) for the first year and QR3 after;
+  QR2 files are a fallback only and, if ever read, get the corrected plane index.
+- **Identity check:** for every detector D1–D6 and both releases, two files taken months apart and reduced by different pipeline
+  versions have byte-identical PSF data (measured: 12 of 12 pairs). The provider therefore reads a PSF once per (detector, release,
+  PSF checksum) and shares it, after verifying the checksum of the PSF data unit of each new file family; a mismatch falls back to a
+  per-file read. The checksum is cheap (one range read of the PSF data unit header + a hash of its bytes, cached per file).
+- Limit: the PSF tables are cut at about 2.5–3 px; real stars are 3–4× brighter than the table at 3–3.5 px. This is why a
+  saturated star cannot be measured from its wings.
+
+## 2.1.6 The exposure index
+
+The system keeps its own index of the whole archive, because IRSA's ObsCore lags the bucket (on 2026-11-12 ObsCore listed 192,961 QR3
+files where the bucket held 361,305; no rows for periods 2026W20_2A and later).
+
+- **Releases indexed:** QR2, QR3 (with deep) and DR1; the index links the same exposure across releases (same period, sequence and
+  detector) so that the release rule above can be applied.
+- **What it holds per file:** S3 key, release, period, detector, MJD, the 12-vertex sky footprint (corners and edge midpoints through
+  the SIP WCS), the centre, the wavelength range, the IMAGE/FLAGS/VARIANCE/ZODI/PSF byte offsets (from the header walk), the spacecraft
+  position and the pipeline version.
+- **How it is built:** list the bucket by period; for each new file read only its headers (range reads of the first ~30–60 kB, then
+  of each extension header as found by the header chain); compute the footprint; write HEALPix-sharded columnar shards (orders 3, 4, 5 by
+  footprint size; one shard file per cell; immutable once a period is complete). Measured size: 170 periods, 1,815,127 files, ~0.9 GB.
+- **How it is queried:** the cells that touch the field (a 3×3 grid of query points up to 20′, 5×5 above; production: an exact
+  polygon–circle overlap test against the footprints of the candidate cells); exposures whose footprint **overlaps** the field, not
+  only those that contain the centre.
+- **How it stays fresh:** a daily job lists new periods, indexes them, reconciles counts per period with IRSA ObsCore (a lag on IRSA's
+  side is reported, never "fixed" by dropping files); a field computed before a period arrived keeps its old key until the index cell
+  changes (the key includes the index cell versions it read).
+- **Fallback:** while a period is not yet indexed, the IRSA SIA2 service is asked for that period only.
+
+Validation: exposures of the test fields: Barnard's Star 5′ 384 overlapping (361 contain the centre), 60′ 603; ε Indi B 447 at the
+target; WISE 0855 256; RW Aurigae 333; R Draconis 2617 (thinned to 800, see 2.2.9).
+
+## 2.1.7 Visits and passes
+
+- Visit: consecutive exposures of one detector with gaps under 0.5 h (near the ecliptic: groups of about four, two minutes apart; far
+  from it: singles or groups of two to four).
+- Pass: exposures separated by more than **60 days** start a new pass; a pass longer than **90 days** is cut, so that a field observed
+  without a break (near the ecliptic poles, R Draconis) still gives several frames. Any number of passes is supported.
+- Every product names a pass by its time span and middle MJD, not by an index, so two products that split passes differently can never
+  disagree about "pass 2" (a fault found between the film and the distant-body search; one rule serves all).
+- A detector present in a pass with fewer than 4 exposures is "absent" in that pass for the white frame (2.2.7).
