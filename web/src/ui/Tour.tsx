@@ -14,7 +14,7 @@ const LAB = '#/lab?ra=133.75999&dec=-7.24220&fov=5';
 /** Five steps on a real field: WISE 0855−0714, the coldest known brown dwarf, at 5′. Each step opens its screen; nothing is simulated. */
 export const STEPS: Step[] = [
   {
-    hash: '#/globe',
+    hash: '#/explore',
     title: '1 · The sky',
     text: 'This is the globe: the whole sky with every SPHEREx exposure. Drag to rotate, scroll to zoom, click to aim, double-click to open the frame in the lab. Orange stars are the test targets.',
   },
@@ -68,7 +68,8 @@ export function Tour({ auto = true }: { auto?: boolean }) {
   useEffect(() => {
     const on = () => setK(0);
     window.addEventListener('spherex:tour', on);
-    if (auto && !seen() && /^#?\/?(globe)?$/.test(location.hash.replace(/\?.*/, ''))) {
+    // only on the globe itself: the front page (landing) is never taken over by the tour
+    if (auto && !seen() && /^#\/(globe|explore)$/.test(location.hash.replace(/\?.*/, ''))) {
       const t = setTimeout(() => setK(0), 2500);
       return () => {
         clearTimeout(t);

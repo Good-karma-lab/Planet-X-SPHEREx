@@ -8,9 +8,12 @@ describe('hash routes', () => {
       params: { ra: '269.4479', dec: '4.7687', fov: '5' },
     });
   });
-  it('falls back to the globe for an empty or unknown screen', () => {
-    expect(parseHash('').screen).toBe('globe');
-    expect(parseHash('#/nowhere').screen).toBe('globe');
+  it('opens the landing page for an empty or unknown screen; #/explore (and old #/globe links) is the globe', () => {
+    expect(parseHash('').screen).toBe('landing');
+    expect(parseHash('#/nowhere').screen).toBe('landing');
+    expect(parseHash('#/explore').screen).toBe('globe');
+    expect(parseHash('#/globe').screen).toBe('globe');
+    expect(formatHash({ screen: 'globe', params: {} })).toBe('#/explore');
   });
   it('round-trips', () => {
     const r = { screen: 'lab' as const, params: { ra: '331.077', dec: '-56.794', fov: '5' } };
