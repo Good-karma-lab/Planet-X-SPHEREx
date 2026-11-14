@@ -318,6 +318,15 @@ function FindingsPage() {
   );
 }
 
+/** The full account is 300 kB of text: loaded when the Method page opens, not with the app. */
+function LazyMethodFull() {
+  const [C, setC] = useState<null | (() => preact.JSX.Element)>(null);
+  useEffect(() => {
+    void import('./method/MethodFull').then((m) => setC(() => m.MethodFull));
+  }, []);
+  return C ? <C /> : <div class="mono-s">Loading the full account…</div>;
+}
+
 function MethodPage() {
   const steps: [string, string][] = [
     [
@@ -414,9 +423,10 @@ function MethodPage() {
     <>
       <div class="pg-h">
         <h1>Method</h1>
-        <p class="hint">How every picture and number is computed, step by step.</p>
+        <p class="hint">How every picture and number is computed, step by step: what the live site does today, then the full account with its checks, videos and numbers.</p>
       </div>
       <section class="card glass">
+        <h3>In production today</h3>
         <table class="tbl">
           <tbody>
             {steps.map(([k, v]) => (
@@ -428,6 +438,7 @@ function MethodPage() {
           </tbody>
         </table>
       </section>
+      <LazyMethodFull />
     </>
   );
 }
