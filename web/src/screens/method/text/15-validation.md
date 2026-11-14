@@ -8,7 +8,7 @@ All numbers were obtained on 2026-11-14. A "live" source is an endpoint of the r
 
 | Check | Number obtained | Source |
 |---|---|---|
-| Motion of stars against Gaia DR3 | Barnard's Star 11.37 ± 0.47 ″/yr (Gaia 10.393, 2.1σ); ε Indi B 4.59 ± 0.49 ″/yr (Gaia 4.684, 0.2σ); WISE 0855−0714 7.93 ± 0.61 ″/yr (SIMBAD 8.15, −0.4σ) | live `/api/v1/movers` on 5′ fields; WISE 0855 from live `/api/v1/browndwarfs` |
+| Motion of stars against Gaia DR3 | Barnard's Star 11.37 ± 0.47 ″/yr at 5′ and 10.7 ± 0.8 ″/yr at 20′ (Gaia 10.393, 2.1σ at 5′); ε Indi B 4.59 ± 0.49 ″/yr (Gaia 4.684, 0.2σ); WISE 0855−0714 7.93 ± 0.61 ″/yr (SIMBAD 8.15, −0.4σ) | live `/api/v1/movers` on 5′ fields; WISE 0855 from live `/api/v1/browndwarfs` |
 | Known asteroids found blind | 6 of the 8 known bodies brighter than V 19.1 with at least 4 frames in the 60′ ecliptic film of December 2025; 0 of 6 tracks unmatched | live `/api/v1/film/48c5bbb2c5e028b847075c51/tracks` and `/bodies` (JPL Small-Body Identification and Horizons) |
 | Chance controls | 0.0 chance tracks per field between passes (20 trials, five 5′ fields and ε Indi at 10′, 20′, 60′); in the film search 0.0 at 4 or more visits (12 trials) and 1.83 per trial at 3 or more | live `/api/v1/movers` and the film's search result |
 | Wavelength, index and engine | wavelength of a pixel: median difference 0.00008–0.00048 µm against IRSA's per-pixel calibration; PSF identical in 12 of 12 detector-release pairs; index of 1,628,230 files; the number of exposures that hold a body equals IRSA's Moving Object Search Tool for 4 of 4 asteroids | `docs/validation/` reports of 2026-11-14 |
@@ -21,7 +21,7 @@ We run the search between passes on 5′ fields and compare each track with the 
 
 **Result:** Barnard's Star (RA 269.44629°, Dec +4.76792°) moves at 11.37 ± 0.47 ″/yr, position angle 353.1°, against Gaia DR3 10.393 ″/yr, 355.6° (source 4472832130942575872): 2.1σ, 9 %. Source: live `/api/v1/movers`, 5′ field, 2026-11-14.
 
-A 5′ field has a saturated core that pulls the rate up; a 20′ field gives 10.7 ± 0.8 ″/yr (source: `docs/PROGRESS.md`, search between passes, 20′ field).
+A 5′ field has a saturated core that pulls the rate up; a 20′ field gives 10.7 ± 0.8 ″/yr against Gaia 10.4 (live service, 2026-11-14).
 
 [figure: pendulum-barnard | Barnard's Star at the three passes, its track and the Gaia positions moved to each date]
 

@@ -13,7 +13,7 @@ Every search on this site has a depth and a set of conditions under which it wor
 - The film search recovered 6 of the 8 known bodies brighter than V 19.1 that have at least four frames in the ecliptic film; none of the 17 fainter bodies in that film was recovered, so its limit there is about V 19 (live run on spherex.space, 2026-11-14).
 - A track in the film search needs at least four visits, because chance alone makes 1.83 tracks per trial at three visits and 0.0 at four or more (12 trials, same film).
 - The search between passes needs at least three passes; a track of only three passes whose faintest member is below S/N 15 is counted and not drawn.
-- The motion of a saturated star in a 5′ field is pulled by its saturated core: Barnard's Star gives 11.37 ± 0.47 ″/yr at 5′ against Gaia's 10.393, and 10.7 ± 0.8 at 20′ (live, 2026-11-14, and docs/PROGRESS.md).
+- The motion of a saturated star in a 5′ field is pulled by its saturated core: Barnard's Star gives 11.37 ± 0.47 ″/yr at 5′ against Gaia's 10.393, and 10.7 ± 0.8 at 20′ (live service, 2026-11-14).
 - Saturated stars have no SPHEREx spectrum, and RW Aurigae and R Draconis give no tracks for the same reason; the spectrum tab says so and shows the catalogue photometry instead.
 - A spectrum checked against 2MASS and WISE is checked on the stars we measured (a field star and ε Indi B); we have no statistic over many stars.
 - One pass of the search for bodies beyond Neptune finds a place but does not fix the distance; the link of several passes does.
