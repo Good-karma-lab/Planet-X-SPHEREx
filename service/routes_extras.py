@@ -15,8 +15,9 @@ from typing import Any
 import httpx
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel, Field
 
-from engine.extras import allwise, cadc_ref
+from engine.extras import ades, allwise, cadc_ref
 from engine.extras.cloudcat import Reader, separation_arcsec
 from engine.extras.cube import PIXEL_SR, CubeSource, RangeReader
 from service.reader.s3 import S3, ReadError
@@ -33,6 +34,30 @@ CUBE_CAVEATS = [
     "stripes at the sky's helium line (1.083 µm), Pa-α, the 3.3 µm PAH band and Br-α come from the sky, not the object",
     "empty channels (NaN) are real gaps: the pipeline wrote none for those channels at this place",
 ]
+
+
+class AdesObservation(BaseModel):
+    mjd_utc: float = Field(ge=40000, le=90000)
+    ra: float = Field(ge=0, lt=360)
+    dec: float = Field(ge=-90, le=90)
+    rms_ra_arcsec: float = Field(gt=0, le=3600)
+    rms_dec_arcsec: float = Field(gt=0, le=3600)
+    mag: float | None = None
+    rms_mag: float | None = None
+    band: str | None = None
+    position_km: tuple[float, float, float] | None = None
+
+
+class AdesRequest(BaseModel):
+    track_id: str = Field(max_length=16)
+    observations: list[AdesObservation] = Field(min_length=1, max_length=200)
+    submitter: str = Field(default="", max_length=120)
+    institution: str = Field(default="", max_length=120)
+    observers: list[str] = Field(default_factory=list, max_length=10)
+    measurers: list[str] = Field(default_factory=list, max_length=10)
+    ast_cat: str = Field(default="UNK", max_length=12)
+    mode: str = Field(default="UNK", max_length=4)
+    comment: str = Field(default="", max_length=200)
 
 
 class Extras:
@@ -256,7 +281,28 @@ def build_router(extras: Extras) -> APIRouter:
             png, media_type="image/png", headers={"Cache-Control": "public, max-age=86400", "X-Image-Facts": str(facts).replace("\n", " ")}
         )
 
+    @router.post(f"{API_PREFIX}/export/ades")
+    async def export_ades(req: AdesRequest) -> Any:
+        """An MPC ADES (pipe-separated) file for a mover lead's positions, and what is missing before it can be sent. Nothing is sent."""
+        obs = [ades.Observation(**o.model_dump(exclude={"position_km"}), position_km=o.position_km) for o in req.observations]
+        header = ades.Header(
+            submitter=req.submitter,
+            institution=req.institution,
+            observers=req.observers,
+            measurers=req.measurers,
+            ast_cat=req.ast_cat,
+            mode=req.mode,
+            comment=req.comment,
+        )
+        issues = ades.problems(req.track_id, obs, header)
+        text = ades.to_psv(req.track_id, obs, header) if _track_id_ok(req.track_id) else ""
+        return {"ready": not issues, "problems": issues, "observatory_code": ades.OBSERVATORY_CODE, "text": text}
+
     return router
+
+
+def _track_id_ok(track_id: str) -> bool:
+    return bool(ades.TRK_SUB.match(track_id))
 
 
 def register(app: FastAPI, extras: Extras | None = None) -> Extras:
