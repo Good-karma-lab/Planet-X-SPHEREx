@@ -11,5 +11,6 @@ SPHEREx Level-2 exposures (November 2026).
 | 4 | [User interface](04-ui.md) | interaction rules and wireframes: globe, lab, walls, Object, Spectrum, cards, films, slider, Findings, Method, phone |
 | 5 | [Architecture](05-architecture.md) | services, scheduling (a person first), jobs and keys, versioned products and the warm set, payloads, API, browser renderer, deployment, testing, observability, security |
 | 6 | [Build plan](06-build-plan.md) | milestones M0–M16 with tests and "done", risks, open questions |
+| 7 | [Submission and pitch](07-submission-and-pitch.md) | NASA Space Apps 2026 requirements with sources, deadline, judging criteria, pitch materials |
 
 Progress against this plan is kept in [`docs/PROGRESS.md`](../PROGRESS.md).

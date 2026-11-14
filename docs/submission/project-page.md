@@ -77,7 +77,7 @@ discoveries until confirmed.
 See `data-and-references.md` (NASA: SPHEREx Level-2 via IRSA, 2MASS, WISE/NEOWISE, JPL Horizons and Small-Body Database, IRSA
 services; ESA: Gaia DR3; others: SIMBAD/CDS, IMCCE SkyBoT, STScI DSS and Pan-STARRS).
 
-## Use of software intelligence (SI / AI)
+## Use of Super Intelligence (SI)
 
 See `si-disclosure.md` (to be pasted as the SI-use statement).
 

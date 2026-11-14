@@ -1,4 +1,4 @@
-# Software-intelligence (SI / AI) disclosure — draft
+# Super Intelligence (SI) use disclosure — draft
 
 **Statement for the project page (draft):**
 
@@ -15,7 +15,7 @@ AI-written code and text are acknowledged here and in the repository (commit mes
 
 **Notes for the user (not for the page):**
 - Space Apps asks that SI-generated images or videos carry a visible watermark and that SI-generated code or data be acknowledged
-  in text or metadata (as reported by the supervisor from spaceappschallenge.org, 2026-11-14; exact wording to be checked).
+  in text or metadata (Project Submission Guide, checked 2026-11-14; "SI" there means "Super Intelligence").
   Our pictures are computed renderings of data, not generated media; if the demo video uses any AI voice, AI-generated graphics or AI
   editing, that part needs the watermark.
 - Keep NASA logos out of the slides and video unless the rules allow them.
