@@ -124,6 +124,23 @@ vec3 diffColour(int k) {
   if (e < 0.5) return base;
   float z = (e - 128.0) / 12.7;
   float a = clamp((abs(z) - 4.0) / 6.0, 0.0, 1.0) * step(4.0, abs(z));
+  // a real change is large against the light that is there: a star whose wings shift by a fraction of a pixel between passes
+  // (registration, a different point-spread function) leaves significant but small residual rings, which are not shown
+  float ak = uMode == 1 ? raw(k, uLayer, uv) : white(k, uv);
+  float a0 = uMode == 1 ? raw(0, uLayer, uv) : white(0, uv);
+  // against the brightest light within a detector pixel and a half (in either pass): a moving source changes by about its whole
+  // peak; a static star whose profile differs slightly between passes changes by a small part of its peak
+  float peak = max(abs(ak), abs(a0));
+  for (int j = 0; j < 8; j++) {
+    float an = float(j) * 0.7853982;
+    vec2 q = uv + vec2(cos(an), sin(an)) * uDP * 1.5;
+    float bk = uMode == 1 ? raw(k, uLayer, q) : white(k, q);
+    float b0 = uMode == 1 ? raw(0, uLayer, q) : white(0, q);
+    if (!isnan(bk)) peak = max(peak, bk);
+    if (!isnan(b0)) peak = max(peak, b0);
+  }
+  float frac = abs(ak - a0) / max(peak, 1e-6);
+  a *= smoothstep(0.3, 0.5, frac);
   vec3 c = z > 0.0 ? vec3(1.0, 0.15, 0.85) : vec3(0.1, 0.9, 1.0);  // magenta brighter, cyan fainter
   return mix(base, c, a > 0.0 ? 0.35 + 0.65 * a : 0.0);
 }

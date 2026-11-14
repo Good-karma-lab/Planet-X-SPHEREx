@@ -110,7 +110,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 initargs=(int(os.environ.get("SKY_WORKER_MEM_MB", "6000")),),
             )
             cpu.configure(st.executor, workers)
-            st.scheduler = Scheduler(executor=st.executor)
+            # two heavy jobs on 4 cores, more on a larger machine (each field build itself spreads over the pool)
+            st.scheduler = Scheduler(executor=st.executor, slots={"light": 8, "heavy": max(2, workers // 4)})
         else:
             st.scheduler = scheduler
         st.scheduler.start()
