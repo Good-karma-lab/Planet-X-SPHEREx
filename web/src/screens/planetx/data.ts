@@ -70,7 +70,7 @@ export interface Field {
 export const FIELDS: Field[] = [
   { id: 'ecl', name: 'Ecliptic D4 field', why: 'inside the band of Planet Nine’s predicted orbit', ra: 60.7116, dec: 8.617, size: 60, dmin: 250, dmax: 2000, colour: '#5fe3d6' },
   { id: 'iras', name: 'IRAS/AKARI field', why: 'a second direction searched for distant bodies', ra: 34.72, dec: -49.79, size: 60, dmin: 250, dmax: 2000, colour: '#7dd3fc' },
-  { id: 'sedna', name: 'Sedna (test)', why: 'V 20.8: the proof that the search finds a body this faint', ra: 61.7725, dec: 8.8408, size: 18, dmin: 75, dmax: 92, colour: '#6fdc8c' },
+  { id: 'sedna', name: 'Sedna (known body)', why: 'V 20.8: the proof that the search finds a body this faint', ra: 61.7725, dec: 8.8408, size: 18, dmin: 75, dmax: 92, colour: '#6fdc8c' },
 ];
 
 /** What was recorded for the three directions (the validation of the search; dated 2026-11-14). */
@@ -102,8 +102,7 @@ export const DEPTH: { name: string; note: string; mjy: number; colour: string }[
 
 /** Known distant bodies found blind: the proof of the method. */
 export const PROOF: { who: string; what: string; got: string }[] = [
-  { who: 'Eris', what: 'V 18.7 · 3 of 3 passes', got: '95.89 ± 0.54 au · JPL 95.5' },
+  { who: 'Eris', what: 'V 18.7 · 3 of 3 passes, then the deep sum', got: '95.89 ± 0.54 au (JPL 95.5) · deep sum 20.3σ' },
   { who: 'Makemake', what: 'V 17.1 · linked passes', got: '52.38 ± 0.23 au · JPL 52.3' },
   { who: 'Sedna', what: 'V 20.8 · sum of 3 passes', got: '9.1σ · 82.9 au · JPL 83.0' },
-  { who: 'Eris, deep sum', what: 'all passes along one orbit', got: '20.3σ · 95.5 au' },
 ];

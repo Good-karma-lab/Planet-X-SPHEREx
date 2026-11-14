@@ -134,10 +134,17 @@ export function Model({ onHover }: { onHover?: (s: string | null) => void }) {
         ctx.fillText(`${r} au`, q[0] + 3, q[1] - 3);
       }
       const hits: { x: number; y: number; t: string }[] = [];
-      const label = (t: string, x: number, y: number, dx: number) => {
+      // labels are placed in priority order and skipped when they would overlap one already drawn (every body still answers on hover)
+      const placed: [number, number, number, number][] = [];
+      const label = (t: string, x: number, y: number, dx: number, font = '11px system-ui, sans-serif'): boolean => {
+        ctx.font = font;
         const tw = ctx.measureText(t).width;
-        if (x + dx + tw > w - 4) ctx.fillText(t, x - dx - tw, y);
-        else ctx.fillText(t, x + dx, y);
+        const lx = x + dx + tw > w - 4 ? x - dx - tw : x + dx;
+        const r: [number, number, number, number] = [lx - 2, y - 11, lx + tw + 2, y + 3];
+        if (r[0] < 2 || placed.some((p) => r[0] < p[2] && r[2] > p[0] && r[1] < p[3] && r[3] > p[1])) return false;
+        placed.push(r);
+        ctx.fillText(t, lx, y);
+        return true;
       };
       const line = (pts: V3[], col: string, wd: number, dash?: number[]) => {
         ctx.strokeStyle = col;
@@ -199,20 +206,20 @@ export function Model({ onHover }: { onHover?: (s: string | null) => void }) {
       ctx.arc(s[0], s[1], 14, 0, 7);
       ctx.fill();
       hits.push({ x: s[0], y: s[1], t: 'Sun' });
-      for (const b of m.bodies) {
-        if (!on[b.layer]) continue;
+      const prio = (b: Body) => (/Pluto|Eris|Makemake|Haumea|Sedna/.test(b.name) ? 0 : b.layer === 'planets' ? 1 : 2);
+      const shown = m.bodies.filter((b) => on[b.layer]);
+      for (const b of shown) {
         const q = proj(b.at);
         ctx.fillStyle = b.colour;
         ctx.beginPath();
         ctx.arc(q[0], q[1], b.size, 0, 7);
         ctx.fill();
-        const named = b.layer !== 'planets' || b.a > 4;
-        if (named) {
-          ctx.fillStyle = 'rgba(225,240,245,0.85)';
-          ctx.font = '10.5px system-ui, sans-serif';
-          label(b.name, q[0], q[1] + 3, b.size + 3);
-        }
         hits.push({ x: q[0], y: q[1], t: `${b.name} · a ${b.a < 10 ? b.a.toFixed(2) : Math.round(b.a)} au` });
+      }
+      ctx.fillStyle = 'rgba(225,240,245,0.85)';
+      for (const b of [...shown].filter((b) => b.layer !== 'planets' || b.a > 4).sort((p, q) => prio(p) - prio(q))) {
+        const q = proj(b.at);
+        label(b.name, q[0], q[1] + 3, b.size + 3, '10.5px system-ui, sans-serif');
       }
       st.current.hit = hits;
     };
