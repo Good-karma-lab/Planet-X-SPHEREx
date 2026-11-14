@@ -13,3 +13,11 @@
 .leadrow .rank { font: 700 14px var(--mono); color: var(--accent); text-align: center; }
 .leadrow .lt { display: flex; flex-direction: column; min-width: 0; }
 .fcard .plain { margin: 4px 0 8px; font-size: 13px; color: var(--ink); }
+.leadlist { padding-left: 0 !important; }
+.leadrow .lt b { overflow-wrap: anywhere; }
+@media (max-width: 600px) {
+  .leadrow { grid-template-columns: 22px 1fr; }
+  .leadrow .badge { grid-column: 2; justify-self: start; }
+  .fcard { flex-direction: column; }
+  .fcard .fthumb { width: 100% !important; height: auto !important; aspect-ratio: 1; max-width: 320px; }
+}

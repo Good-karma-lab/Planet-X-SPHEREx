@@ -9,4 +9,5 @@ export { about, progressText, runJob, useProduct } from './jobs';
 export { DeepSumPanel, type DeepCandidate, type DeepResult } from './deep';
 export { JumpView, LinkCard, LinkPanel, type Jump, type LinkEntry, type LinkResult } from './link';
 export { BACKDROP_YEAR, SPHEREX_YEARS, drawMovingPath, placeAt, type MovingObject } from './path';
-export { SEARCHED_COLOR, SearchedCard, SearchedLegend, drawSearched, hitSearched, useSearched, type SearchedField } from './searched';
+export { ExportFound, foundCsv, useFound } from './export';
+export { SEARCHED_COLOR, SearchedCard, SearchedCounter, SearchedLegend, searchedTotals, drawSearched, hitSearched, useSearched, type SearchedField } from './searched';

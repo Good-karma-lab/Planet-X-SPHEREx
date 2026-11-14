@@ -10,6 +10,7 @@ import { FIELD, useLive } from './findings/live';
 import { AboutBody } from './about/About';
 import { LeadReport, LeadsList, plainLine, rankLeads, useLeadParam } from './findings/leads';
 import { mountTour } from '../ui/Tour';
+import { SearchedCounter, useSearched } from './search/searched';
 
 
 mountTour();
@@ -159,6 +160,7 @@ const CHECK: Record<string, string> = { same: 'Gaia: same motion', none: 'no Gai
 
 function FindingsPage() {
   const live = useLive();
+  const searched = useSearched();
   const leads = rankLeads(live);
   const [leadId, setLeadId] = useLeadParam();
   const open = leads.find((l) => l.id === leadId);
@@ -186,6 +188,7 @@ function FindingsPage() {
         <div><b>{live.reduce((a, l) => a + (l.movers?.result?.tracks.filter((t) => t.check === 'same').length ?? 0), 0)}</b><span>of them a Gaia star with the same motion</span></div>
         <div><b>{live.reduce((a, l) => a + (l.anomalies?.result?.anomalies.length ?? 0), 0)}</b><span>spectral anomalies</span></div>
       </div>
+      <SearchedCounter fields={searched} />
       <LeadsList leads={leads} onOpen={setLeadId} />
       <div class="pg-grid">
         {live.map((l) => {
