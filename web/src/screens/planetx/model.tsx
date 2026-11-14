@@ -288,7 +288,7 @@ export function Model({ onHover }: { onHover?: (s: string | null) => void }) {
     const r = cv.current!.getBoundingClientRect();
     if (s.drag) {
       s.yaw += (e.clientX - s.drag[0]) * 0.008;
-      s.pitch = Math.max(0.05, Math.min(1.5, s.pitch + (e.clientY - s.drag[1]) * 0.006));
+      s.pitch = Math.max(0.05, Math.min(1.5, s.pitch - (e.clientY - s.drag[1]) * 0.006));
       s.drag = [e.clientX, e.clientY];
       mark();
       setTip(null);
