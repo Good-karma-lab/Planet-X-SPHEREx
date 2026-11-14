@@ -566,7 +566,7 @@ export function Landing() {
                   <span class="lp-kind">Beyond Neptune</span>
                   <h3>Eris, the dwarf planet</h3>
                   <p>
-                    Too faint for one picture. Add the exposures along its slow path and it comes into focus, 95.9 ± 0.6 au from the Sun. A planet far beyond
+                    Too faint for one picture. Add the exposures along its slow path and it comes into focus, 95.6 ± 0.4 au from the Sun. A planet far beyond
                     Neptune would be found the same way.
                   </p>
                   <span class="lp-go">Run Find Planet X →</span>
