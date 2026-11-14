@@ -49,6 +49,8 @@ from service.routes_known import make_known_router
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
 from service.routes_search import make_router
+from service.routes_searched import make_searched_router
+from service.searched import Searched
 from service.spectrum import Spectra, place_at, spectrum_params
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
@@ -81,6 +83,7 @@ class State:
         self.known: Known | None = None
         self.pairs: Pairs | None = None
         self.dwarfs: BrownDwarfs | None = None
+        self.searched: Searched | None = None
         self.warm: WarmRunner | None = None
         self.hips: HipsTiles | None = None
         self.coverage: dict[str, Any] | None = None
@@ -133,6 +136,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         else:
             st.scheduler = scheduler
         st.scheduler.start()
+        st.searched = Searched(st.store, cfg.store_dir, st.scheduler, st.movers, st.pairs, st.dwarfs)
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         warm_task = None
@@ -345,6 +349,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_known_router(st))
     app.include_router(make_pairs_router(st))
     app.include_router(make_dwarfs_router(st))
+    app.include_router(make_searched_router(st))
     app.include_router(make_planetx_router(st))
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
     register_extras(app)

@@ -19,6 +19,7 @@ VERSIONS: dict[str, str] = {
     "link": "l1",  # Find Planet X, the link of passes by one orbit
     "filmsearch": "t4",  # the unknown movers of a film; t4: every candidate verified, orbit links from 3 sigma
     "browndwarfs": "bd1",  # brown dwarf candidates of a field: red sources that move, with the Gaia verdict
+    "searched": "s1",  # the list of searched places (/api/v1/searched)
 }
 
 DEPENDS: dict[str, tuple[str, ...]] = {
@@ -33,6 +34,7 @@ DEPENDS: dict[str, tuple[str, ...]] = {
     "link": ("distant",),
     "filmsearch": ("film",),
     "browndwarfs": ("red", "movers"),
+    "searched": (),
 }
 
 
