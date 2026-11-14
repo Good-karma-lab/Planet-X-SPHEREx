@@ -113,6 +113,17 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
         return key, st.scheduler.submit(fieldjob.KIND, key, params, fn, priority, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
 
+    async def warm_searches(key: str, fov: float) -> None:
+        """The searches of a warm field, so that a visitor sees their results at once: movers always, anomalies from 10′ up."""
+        if st.movers is not None:
+            run = st.movers.get_or_start(key)
+            while run.state == "running":
+                await asyncio.sleep(2.0)
+        if st.anomalies is not None and fov >= 10:
+            arun = st.anomalies.get(key) or st.anomalies.start(key)
+            while arun.state == "running":
+                await asyncio.sleep(5.0)
+
     async def ensure_warm(f: WarmField) -> bool:
         params = fieldjob.canonical(f.ra, f.dec, f.fov)
         key, job = submit_field(params, Priority.P2)
@@ -121,6 +132,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         assert st.store is not None
         if st.store.is_complete(key):
             st.store.pin(key)
+            await warm_searches(key, f.fov)
             return True
         if job is not None and job.error:
             raise RuntimeError(job.error)

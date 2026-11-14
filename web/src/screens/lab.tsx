@@ -6,6 +6,7 @@ import { formatDec, formatRA, parseDec, parseRA } from '../lib/sky';
 import type { SxpPart } from '../lib/sxp';
 import { icon } from '../ui/icons';
 import { passLevels, starBalance } from '../viewer/balance';
+import { ARCHIVE, ArchiveSet } from '../viewer/archive';
 import { FADE_MS, HOLD_MS, order } from '../viewer/pendulum';
 import { PER_PASS, Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
 import { atEpoch } from '../lib/sky';
@@ -103,6 +104,8 @@ const season = (mjd: number) => {
 };
 
 interface Opts {
+  reference: boolean;
+  archive: boolean;
   anomalies: boolean;
   movers: boolean;
   marker: boolean;
@@ -210,6 +213,8 @@ export function Lab({ route }: { route: Route }) {
         .filter((d) => d >= 1 && d <= 6)
     : [1, 2, 3, 4, 5, 6];
   const opts: Opts = {
+    reference: p['ref'] !== '0',
+    archive: p['arch'] === '1',
     anomalies: p['ano'] !== '0',
     movers: p['movers'] !== '0',
     marker: p['marker'] !== '0',
@@ -276,6 +281,11 @@ export function Lab({ route }: { route: Route }) {
   const anRef = useRef<AnomalyView | null>(null);
   anRef.current = an;
   const [selAn, setSelAn] = useState<number | null>(null);
+  const archive = useRef<ArchiveSet | null>(null);
+  const [archTick, setArchTick] = useState(0);
+  const [archStep, setArchStep] = useState<number | null>(null);
+  const refCanvas = useRef<HTMLCanvasElement>(null);
+  const archBig = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState('');
   const [meta, setMeta] = useState<FieldMeta | null>(null);
   const [shown, setShown] = useState<{ pass: number; stack: StackName } | null>(null);
@@ -828,6 +838,88 @@ export function Lab({ route }: { route: Route }) {
     setTab('obj');
   };
 
+  // archive images of the field (Reference inset and archive frames): cutouts of older surveys, made once per field
+  const fieldKey = meta ? `${meta.grid.ra0},${meta.grid.dec0},${meta.grid.n},${meta.grid.step_arcsec}` : '';
+  useEffect(() => {
+    if (!meta) return;
+    const set_ = new ArchiveSet(meta.grid.ra0, meta.grid.dec0, (meta.grid.n * meta.grid.step_arcsec) / 60, 400, () =>
+      setArchTick((t) => t + 1),
+    );
+    archive.current = set_;
+    return () => {
+      set_.dispose();
+      archive.current = null;
+    };
+  }, [fieldKey]);
+  // the test targets on an archive picture: where they were at the survey's epoch
+  const drawTargets = (ctx: CanvasRenderingContext2D, size: number, epoch: number, ring: number) => {
+    if (!meta) return;
+    const scale = size / meta.grid.n;
+    for (const o of targets.current) {
+      const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, epoch);
+      const x =
+        (meta.grid.n / 2 -
+          ((((tra - meta.grid.ra0 + 540) % 360) - 180) * Math.cos((meta.grid.dec0 * Math.PI) / 180) * 3600) / meta.grid.step_arcsec) *
+        scale;
+      const y = (meta.grid.n / 2 - ((tdec - meta.grid.dec0) * 3600) / meta.grid.step_arcsec) * scale;
+      if (x < -ring || y < -ring || x > size + ring || y > size + ring) continue;
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.beginPath();
+      ctx.arc(x, y, ring, 0, 2 * Math.PI);
+      ctx.stroke();
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = '#ffb454';
+      ctx.stroke();
+    }
+  };
+  useEffect(() => {
+    const a = archive.current;
+    const c = refCanvas.current;
+    if (a && c) {
+      const ctx = c.getContext('2d')!;
+      ctx.drawImage(a.canvases.get('dss2red')!, 0, 0, c.width, c.height);
+      drawTargets(ctx, c.width, ARCHIVE[0]!.epoch, 7);
+    }
+    const big = archBig.current;
+    if (a && big && archStep !== null && archStep < ARCHIVE.length) {
+      const s = ARCHIVE[archStep]!;
+      const px = Math.round(side * Math.min(2, devicePixelRatio || 1));
+      if (big.width !== px) big.width = big.height = px;
+      const ctx = big.getContext('2d')!;
+      ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(a.canvases.get(s.id)!, 0, 0, px, px);
+      drawTargets(ctx, px, s.epoch, 18 * (px / side));
+    }
+  }, [archTick, archStep, opts.reference, side, meta]);
+  // archive frames blinked before the SPHEREx seasons: archive 1..k, then season 1..N, again
+  useEffect(() => {
+    if (!opts.archive || !meta || film !== null) {
+      setArchStep(null);
+      return;
+    }
+    const n = meta.passes.length;
+    let step = 0;
+    const show = () => {
+      setArchStep(step);
+      if (step >= ARCHIVE.length) setFrame(step - ARCHIVE.length);
+    };
+    show();
+    const t = setInterval(
+      () => {
+        if (!state.current.playing) return;
+        step = (step + 1) % (ARCHIVE.length + n);
+        show();
+      },
+      Math.round(1100 / Math.max(0.25, speed)),
+    );
+    return () => {
+      clearInterval(t);
+      setArchStep(null);
+      setFrame(null);
+    };
+  }, [opts.archive, meta, film, speed]);
+
   // keyboard: space plays / pauses, arrows step through the passes
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
@@ -992,9 +1084,11 @@ export function Lab({ route }: { route: Route }) {
       : '';
   const status = phase
     ? phase
-    : shown && meta
-      ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd0) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}`
-      : '';
+    : archStep !== null && archStep < ARCHIVE.length
+      ? `Archive · ${ARCHIVE[archStep]!.name} · ${ARCHIVE[archStep]!.years} · then the SPHEREx seasons`
+      : shown && meta
+        ? `${time === 'sum' ? 'All seasons co-added' : `Season ${shown.pass + 1} of ${passes.length} · ${passMeta ? season(passMeta.mjd0) : ''}`} · ${colourWord}${time === 'diff' ? (shown.pass === 0 ? ' · Difference: reference season' : ' · Difference against season 1') : ''} · ${meta.exposures} exposures${time === 'loop' && seq ? ` · passes ${seq.slice(0, -2)}` : ''}`
+        : '';
   const frameIndex = frame ?? shown?.pass ?? 0;
   const fName = 'Sky field';
   const fCls = ` · ${formatRA(ra)} ${formatDec(dec)}`;
@@ -1059,8 +1153,23 @@ export function Lab({ route }: { route: Route }) {
                   <em>{l.sub}</em>
                 </div>
               ))}
-            {film === null && view === 'picture' && passMeta && (
-              <div class="vlabel">{time === 'sum' ? 'all seasons' : season(passMeta.mjd0)}</div>
+            {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length && (
+              <canvas ref={archBig} class="archive-big" />
+            )}
+            {film === null && view === 'picture' && opts.reference && !(archStep !== null && archStep < ARCHIVE.length) && (
+              <div class="refbox" title="DSS2 red (POSS-II plates, 1985–1999) of the same field">
+                <canvas ref={refCanvas} width={150} height={150} />
+                <span>DSS2 red · 1985–1999</span>
+              </div>
+            )}
+            {film === null && view === 'picture' && archStep !== null && archStep < ARCHIVE.length ? (
+              <div class="vlabel">
+                {ARCHIVE[archStep]!.name} · {ARCHIVE[archStep]!.years}
+              </div>
+            ) : (
+              film === null &&
+              view === 'picture' &&
+              passMeta && <div class="vlabel">{time === 'sum' ? 'all seasons' : `SPHEREx · ${season(passMeta.mjd0)}`}</div>
             )}
             {film !== null && (
               <div style={{ position: 'absolute', inset: 0 }}>
@@ -1348,7 +1457,14 @@ export function Lab({ route }: { route: Route }) {
                     opts.morph,
                     (v) => set({ morph: v ? null : '0' }),
                   )}
-                  {dchk('refChk', 'scan', 'Reference', 'Reference: an archive picture of the same place for comparison', false, null)}
+                  {dchk(
+                    'refChk',
+                    'scan',
+                    'Reference',
+                    'Reference: the DSS2 red picture of the same place (1985–1999), with the test target where it was then',
+                    opts.reference,
+                    (v) => set({ ref: v ? null : '0' }),
+                  )}
                   {dchk(
                     'sharpChk',
                     'sparkle',
@@ -1410,6 +1526,19 @@ export function Lab({ route }: { route: Route }) {
                     <option value="p995">Trim 99.5 %</option>
                   </select>
                 </div>
+                <label
+                  class="archsw"
+                  title="Archive images: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx seasons"
+                >
+                  <input
+                    type="checkbox"
+                    checked={opts.archive}
+                    disabled={film !== null}
+                    onChange={(e) => set({ arch: (e.target as HTMLInputElement).checked ? '1' : null })}
+                  />
+                  Archive images
+                  <span class="mono-s">{ARCHIVE.length} · 1985–2010</span>
+                </label>
                 <div class="dacts">
                   <select
                     class="inp"

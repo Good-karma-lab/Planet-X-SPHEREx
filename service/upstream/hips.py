@@ -18,6 +18,11 @@ SURVEYS = {
     "2mass": ("CDS/2MASS/Color", 9),
     "wise": ("CDS/AllWISE/RGB-W4-W2-W1", 8),
     "dust": ("CDS/IRIS/color", 3),
+    # archive images of a field (single bands, for the Reference picture and the archive frames of the Lab)
+    "dss2red": ("CDS/DSS2/red", 9),
+    "2massk": ("CDS/2MASS/K", 9),
+    "wise1": ("CDS/AllWISE/W1", 8),
+    "sdss": ("CDS/SDSS/DR9/color", 10),
 }
 TILE = re.compile(r"^(allsky|\d{1,9})$")
 

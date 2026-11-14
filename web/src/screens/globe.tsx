@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { aim, type AimState } from '../lib/aim';
-import { ang2pix, faceXY, outline } from '../lib/healpix';
+import { outline } from '../lib/healpix';
+import { tiles } from '../lib/hips';
 import { formatHash } from '../lib/route';
 import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVEY_EPOCH } from '../lib/sky';
 import { icon } from '../ui/icons';
@@ -40,73 +41,6 @@ const SURVEYS = [
 ] as const;
 type SurveyId = (typeof SURVEYS)[number]['id'];
 const SIZES = [2, 5, 10, 20, 60];
-
-/** Tiles of the all-sky surveys, read through the service and decoded to pixels once. */
-const tiles = (() => {
-  const cache = new Map<string, { w: number; h: number; d: Uint8ClampedArray } | null>();
-  const pending = new Set<string>();
-  let onTile = () => {};
-  const load = (key: string, url: string, soft: number) => {
-    if (cache.has(key) || pending.has(key)) return;
-    pending.add(key);
-    const im = new Image();
-    im.onload = () => {
-      pending.delete(key);
-      const c = document.createElement('canvas');
-      c.width = im.width;
-      c.height = im.height;
-      const x = c.getContext('2d', { willReadFrequently: true })!;
-      if (soft) x.filter = `blur(${soft}px)`;
-      x.drawImage(im, 0, 0);
-      cache.set(key, { w: im.width, h: im.height, d: x.getImageData(0, 0, im.width, im.height).data });
-      if (cache.size > 180) for (const k of cache.keys()) if (!k.endsWith('/allsky')) { cache.delete(k); break; }
-      onTile();
-    };
-    im.onerror = () => {
-      pending.delete(key);
-      cache.set(key, null);
-    };
-    im.src = url;
-  };
-  const px = (t: { w: number; d: Uint8ClampedArray }, row: number, col: number): [number, number, number] => {
-    const q = (row * t.w + col) * 4;
-    return [t.d[q]!, t.d[q + 1]!, t.d[q + 2]!];
-  };
-  /** Colour of a survey at a position, from the deepest tile at hand up to `order`; null until something has arrived. */
-  function sample(id: SurveyId, ra: number, dec: number, order: number): [number, number, number] | null {
-    for (let n = order; n >= 3 && order >= 3; n--) {
-      const i = ang2pix(n, ra, dec);
-      const key = `${id}/${n}/${i}`;
-      const t = cache.get(key);
-      if (t) {
-        const bits = Math.round(Math.log2(t.w));
-        const f = faceXY(n + bits, ra, dec);
-        return px(t, f.ix & (t.w - 1), f.iy & (t.w - 1));
-      }
-      if (t === undefined && n === order) load(key, `/api/v1/hips/${id}/${n}/${i}`, 0);
-    }
-    const key = `${id}/3/allsky`;
-    const a = cache.get(key);
-    if (a === undefined) {
-      load(key, `/api/v1/hips/${id}/3/allsky`, 0.9);
-      return null;
-    }
-    if (!a) return null;
-    const ts = Math.round(a.w / 27);
-    const bits = Math.round(Math.log2(ts));
-    const f = faceXY(3 + bits, ra, dec);
-    const tile = f.face * 64 + ang2pixLocal(f.ix >> bits, f.iy >> bits);
-    return px(a, Math.floor(tile / 27) * ts + (f.ix & (ts - 1)), (tile % 27) * ts + (f.iy & (ts - 1)));
-  }
-  return { sample, setOnTile: (f: () => void) => (onTile = f) };
-})();
-
-/** Nested index of (x, y) inside a face at order 3. */
-function ang2pixLocal(x: number, y: number): number {
-  let r = 0;
-  for (let b = 0; b < 3; b++) r += (((x >> b) & 1) << (2 * b)) + (((y >> b) & 1) << (2 * b + 1));
-  return r;
-}
 
 function mollweideTheta(phi: number): number {
   let th = phi;
@@ -217,7 +151,7 @@ export function Globe() {
     const ro = new ResizeObserver(resize);
     ro.observe(c.parentElement!);
     resize();
-    tiles.setOnTile(() => (dirty.current = true));
+    const offTile = tiles.onTile(() => (dirty.current = true));
 
     const R = () => (Math.min(W, H) / 2) * 0.9 * view.current.zoom;
     const mw = () => Math.min(W - 20, (H - 20) * 2);
@@ -630,6 +564,7 @@ export function Globe() {
       cancelAnimationFrame(raf);
       ro.disconnect();
       clearTimeout(rest);
+      offTile();
     };
   }, []);
   const flyRef = useRef<(ra: number, dec: number) => void>(() => {});

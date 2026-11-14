@@ -361,3 +361,11 @@ input[type='range']::-moz-range-thumb { width: 12px; height: 12px; border-radius
 .anrow .faint { font: 500 11px var(--mono); white-space: nowrap; }
 .prog.thin { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
 .prog.thin i { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), #b6f56a); transition: width 0.4s ease; }
+.vsq .refbox { position: absolute; left: 8px; top: 8px; width: 150px; display: flex; flex-direction: column; gap: 2px; pointer-events: none; z-index: 2; }
+.vsq .refbox canvas { width: 150px; height: 150px; display: block; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.35), 0 4px 14px rgba(0, 0, 0, 0.6); background: #000; }
+.vsq .refbox span { font: 600 10.5px var(--font); color: #e8f0f4; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+.vsq canvas.archive-big { position: absolute; inset: 0; width: 100%; height: 100%; display: block; border-radius: 4px; background: #000; z-index: 1; }
+.archsw { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.archsw input { accent-color: var(--accent); width: 13px; height: 13px; margin: 0; }
+.archsw .mono-s { margin-left: auto; }
+.vsq .vlabel { z-index: 3; }
