@@ -33,6 +33,7 @@ import {
   type Pair,
 } from './search';
 import { useDistantPlan } from './search/distant';
+import { FPX_AUTO } from '../lib/flags';
 import { useAsteroidSearch } from './asteroids';
 
 const SIZES = [2, 5, 10, 20, 60];
@@ -523,6 +524,13 @@ export function Lab({ route }: { route: Route }) {
     mjd: (meta?.passes.find((q) => q.index === (shown?.pass ?? 0)) ?? meta?.passes[0])?.mjd_mid,
     ...fpxRange,
   });
+  // Find Planet X on its own (FPX_AUTO): the other distance range and the other light choice run after the first, one after another
+  const autoMjd = (meta?.passes.find((q) => q.index === (shown?.pass ?? 0)) ?? meta?.passes[0])?.mjd_mid;
+  const distB = useDistant({ ra, dec, fov, pass: null, mjd: autoMjd, dmin: 30, dmax: 300, det: '4' });
+  const distC = useDistant({ ra, dec, fov, pass: null, mjd: autoMjd, dmin: 250, dmax: 2000, det: '123' });
+  const distD = useDistant({ ra, dec, fov, pass: null, mjd: autoMjd, dmin: 250, dmax: 2000, det: '4' });
+  const [deepSt, setDeepSt] = useState<[string, string]>(['idle', 'idle']);
+  const [deepFr, setDeepFr] = useState<[number | null, number | null]>([null, null]);
   const fpxStarted = useRef('');
   useEffect(() => {
     const key = `${ra},${dec},${fov}`;
@@ -2152,7 +2160,36 @@ export function Lab({ route }: { route: Route }) {
     dist.available === true && valid,
   );
 
+  // Find Planet X on its own: after the field's other scans and behind a person's picture, one search at a time
+  const fpxRuns = [distRef, distB, distC, distD];
+  const scanOver = (v?: string) => v === 'done' || v === 'failed' || v === 'none';
+  const othersOver =
+    !!mv && scanOver(mv.state) && !!redv && scanOver(redv.state) && !!dwarfs && scanOver(dwarfs.state) && (!an || an.state === 'done' || an.state === 'failed' || an.state === 'idle') && scanOver(ast.state);
+  const pictureBusy = !meta || wallWait || (film !== null && !filmData);
+  const fpxHold = !FPX_AUTO || !valid || pictureBusy || !othersOver;
+  const fpxOff = fpxRuns.some((r) => r.available !== true);
+  useEffect(() => {
+    if (fpxHold || fpxOff || fpx) return;
+    if (fpxRuns.some((r) => r.ds.state === 'loading')) return;
+    const next = fpxRuns.find((r) => r.ds.state === 'idle');
+    if (next) void next.start(null);
+  });
+  const fpxAllOver = FPX_AUTO && fpxRuns.every((r) => r.ds.state !== 'idle' && r.ds.state !== 'loading');
+  const deepOn = FPX_AUTO && passes.length >= 3;
   const pxState = (() => {
+    if (FPX_AUTO && !fpx) {
+      if (fpxOff) return { frac: 0, text: 'not offered' };
+      const parts = [...fpxRuns.map((r) => (r.ds.state === 'ok' ? 1 : r.ds.state === 'loading' ? (r.ds.frac ?? 0) : r.ds.state === 'idle' ? 0 : 1)), ...(deepOn ? deepFr.map((f) => f ?? (0 as number)) : [])];
+      const frac = parts.reduce((a, b) => a + b, 0) / parts.length;
+      const active = fpxRuns.some((r) => r.ds.state === 'loading') || deepSt.some((x) => x === 'planning' || x === 'plan' || x === 'running');
+      const finished = fpxAllOver && (!deepOn || deepSt.every((x) => x === 'done' || x === 'none' || x === 'error'));
+      if (finished) {
+        const n = fpxRuns.reduce((a, r) => a + (r.ds.state === 'ok' ? (r.ds.r.candidates?.length ?? 0) : 0), 0);
+        return { frac: 1, text: `${n} found` };
+      }
+      if (!active && fpxHold) return { frac: 0, text: 'waiting for the other scans' };
+      return { frac, text: `${Math.round(frac * 100)} %` };
+    }
     const ds = dist.ds;
     if (dist.available !== true) return { frac: 0, text: 'not offered' };
     if (ds.state === 'idle') return { frac: 0, text: pxPlan ? (pxPlan.estimate_s < 90 ? '~1 min' : pxPlan.estimate_s < 5400 ? `~${Math.round(pxPlan.estimate_s / 60)} min` : `~${(pxPlan.estimate_s / 3600).toFixed(1)} h`) : 'ready' };
@@ -2201,7 +2238,7 @@ export function Lab({ route }: { route: Route }) {
                   ],
                 ] as readonly (readonly [string, string | null])[]
     ),
-    ['Planet X', dist.ds.state === 'ok' ? String(dist.ds.r.candidates?.length ?? 0) : dist.ds.state === 'loading' ? `${Math.round((dist.ds.frac ?? 0) * 100)}%` : null],
+    ['Planet X', FPX_AUTO && !fpx ? ((pxState.frac ?? 0) >= 1 ? pxState.text.replace(' found', '') : pxState.text.endsWith('%') ? pxState.text : null) : dist.ds.state === 'ok' ? String(dist.ds.r.candidates?.length ?? 0) : dist.ds.state === 'loading' ? `${Math.round((dist.ds.frac ?? 0) * 100)}%` : null],
   ];
   const foundCount =
     (mvr?.tracks.length ?? 0) +
@@ -2946,8 +2983,9 @@ export function Lab({ route }: { route: Route }) {
               <SpectrumTab src={sel} />
             </div>
           )}
-          {tab === 'cand' && (
-            <div class="pbody">
+          {(tab === 'cand' || (FPX_AUTO && !fpx)) && (
+            // with Find Planet X on its own the body stays mounted (hidden) so its deep sums keep running when another tab is shown
+            <div class="pbody" style={tab === 'cand' ? undefined : { display: 'none' }}>
               {pairSel !== null && pairs[pairSel] && (
                 <PairCard
                   pair={pairs[pairSel]!}
@@ -3147,16 +3185,60 @@ export function Lab({ route }: { route: Route }) {
               </section>
               <section class="psec fsec" id="px-section">
                 <div class="fsh">Planet X · bodies beyond Neptune</div>
-                <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
-                {passes.length >= 3 && (
-                  <DeepSumPanel
-                    ra={ra}
-                    dec={dec}
-                    fov={fov}
-                    passes={passes.map((q) => q.mjd_mid)}
-                    autoPlan={fpx && (fpxRange.dmin ?? 0) >= 200 ? [fpxRange.dmin!, fpxRange.dmax ?? 2000] : undefined}
-                  />
+                {FPX_AUTO && !fpx ? (
+                  [
+                    [distRef, '30–300 au · D1–D3'],
+                    [distB, '30–300 au · D4'],
+                    [distC, '250–2000 au · D1–D3'],
+                    [distD, '250–2000 au · D4'],
+                  ].map(([d, label]) =>
+                    (d as typeof distRef).ds.state === 'idle' ? null : (
+                      <div key={label as string}>
+                        <div class="mono-s">{label as string}</div>
+                        <DistantPanel d={d as typeof distRef} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
+                      </div>
+                    ),
+                  )
+                ) : (
+                  <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
                 )}
+                {passes.length >= 3 &&
+                  (FPX_AUTO && !fpx ? (
+                    <>
+                      <DeepSumPanel
+                        ra={ra}
+                        dec={dec}
+                        fov={fov}
+                        passes={passes.map((q) => q.mjd_mid)}
+                        autoRun={[30, 300]}
+                        autoHold={fpxHold || !fpxAllOver}
+                        onState={(x) => {
+                          setDeepSt((o) => (o[0] === x.state ? o : [x.state, o[1]]));
+                          setDeepFr((o) => (o[0] === x.frac ? o : [x.frac, o[1]]));
+                        }}
+                      />
+                      <DeepSumPanel
+                        ra={ra}
+                        dec={dec}
+                        fov={fov}
+                        passes={passes.map((q) => q.mjd_mid)}
+                        autoRun={[250, 2000]}
+                        autoHold={fpxHold || !fpxAllOver || !['done', 'none', 'error'].includes(deepSt[0])}
+                        onState={(x) => {
+                          setDeepSt((o) => (o[1] === x.state ? o : [o[0], x.state]));
+                          setDeepFr((o) => (o[1] === x.frac ? o : [o[0], x.frac]));
+                        }}
+                      />
+                    </>
+                  ) : (
+                    <DeepSumPanel
+                      ra={ra}
+                      dec={dec}
+                      fov={fov}
+                      passes={passes.map((q) => q.mjd_mid)}
+                      autoPlan={fpx && (fpxRange.dmin ?? 0) >= 200 ? [fpxRange.dmin!, fpxRange.dmax ?? 2000] : undefined}
+                    />
+                  ))}
                 {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
               </section>
             </div>
@@ -3259,12 +3341,12 @@ export function Lab({ route }: { route: Route }) {
                   </span>
                   <span class="sval">{pxState.text}</span>
                   <span class="sacts">
-                    {dist.ds.state === 'idle' && dist.available === true && (
+                    {!FPX_AUTO && dist.ds.state === 'idle' && dist.available === true && (
                       <button class="btn sm mini" onClick={(e) => goPx(e, false)}>
                         Start
                       </button>
                     )}
-                    {passes.length >= 3 && pxPlan && (
+                    {!FPX_AUTO && passes.length >= 3 && pxPlan && (
                       <button class="btn sm mini" onClick={(e) => goPx(e, true)} title="The deep sum of all passes: its plan and time are shown before it starts">
                         Deep sum
                       </button>
