@@ -83,6 +83,9 @@ export interface DistantSliders {
   neg: boolean;
 }
 
+/** the peaks of a result that stand above its bar (the ones that count; below it is noise) */
+export const peaksAbove = (ds: DistantState): number => (ds.state === 'ok' ? ds.r.candidates.filter((c) => c.sn >= ds.r.threshold).length : 0);
+
 export const DMIN = 30;
 export const DMAX = 300;
 
@@ -98,11 +101,13 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
   /** the finished one-pass results of this field by pass index: the keys the link of the passes asks for */
   const [keys, setKeys] = useState<Record<number, string>>({});
   const tok = useRef(0);
+  const closedByUser = useRef(false);
   const keep = useRef(restore);
   keep.current = restore;
   // a new field or aim: the old result no longer belongs to the picture
   useEffect(() => {
     tok.current++;
+    closedByUser.current = false;
     setDs({ state: 'idle' });
     setKeys({});
   }, [aim.ra, aim.dec, aim.fov]);
@@ -124,6 +129,7 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
     else if (aim.mjd != null) q.set('mjd', String(aim.mjd));
     try {
       const j = await runJob(`/api/v1/distant?${q}`, {
+        bg,
         cancelled: () => my !== tok.current,
         onJob: (jj) => {
           const p = progressText(jj, t0);
@@ -173,8 +179,11 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
     start,
     close: () => {
       tok.current++;
+      // a person's cancel stays a cancel: nothing starts this search again on this field (an automatic run asks `closed()`)
+      closedByUser.current = true;
       setDs({ state: 'idle' });
     },
+    closed: () => closedByUser.current,
     setDi: (di: number) => patch({ di }),
     setMu: (mu: [number, number]) => patch({ mu }),
     setNeg: (neg: boolean) => patch({ neg }),
@@ -358,6 +367,7 @@ export function DistantPanel({
   currentPass,
   passLabel,
   onPick,
+  auto,
 }: {
   d: Distant;
   /** from useDistantPlan: shown before the search starts */
@@ -367,6 +377,8 @@ export function DistantPanel({
   passLabel?: string;
   /** a peak was chosen: the owner opens its card (see distantFind) */
   onPick?: (c: DistantCandidate, i: number, r: DistantResult) => void;
+  /** the search runs on its own: nothing to set or to start here, only its result (no pass buttons, no sliders) */
+  auto?: boolean;
 }) {
   const { ds } = d;
   const reading = useMemo(() => (ds.state === 'ok' ? readText(ds, d.peak) : ''), [ds, d.peak]);
@@ -422,6 +434,7 @@ export function DistantPanel({
       )}
       {ds.state === 'ok' && (
         <>
+          {!auto && (
           <div class="chips">
             {ds.r.passes.map((p) => (
               <button
@@ -434,16 +447,21 @@ export function DistantPanel({
               </button>
             ))}
           </div>
+          )}
           <div class="mono-s">{reading}</div>
-          <Slider label="Distance" min={0} max={ds.r.slider.distances.length - 1} value={ds.di} onInput={d.setDi} />
-          <Slider label="Own motion, east–west" min={-100} max={100} value={ds.mu[0]} onInput={(v) => d.setMu([v, ds.mu[1]])} />
-          <Slider label="Own motion, north–south" min={-100} max={100} value={ds.mu[1]} onInput={(v) => d.setMu([ds.mu[0], v])} />
-          <label class="ds-chk">
-            <input type="checkbox" checked={ds.neg} onChange={(e) => d.setNeg((e.target as HTMLInputElement).checked)} /> Show the noise:
-            the same sum of the negated differences
-          </label>
+          {!auto && (
+            <>
+              <Slider label="Distance" min={0} max={ds.r.slider.distances.length - 1} value={ds.di} onInput={d.setDi} />
+              <Slider label="Own motion, east–west" min={-100} max={100} value={ds.mu[0]} onInput={(v) => d.setMu([v, ds.mu[1]])} />
+              <Slider label="Own motion, north–south" min={-100} max={100} value={ds.mu[1]} onInput={(v) => d.setMu([ds.mu[0], v])} />
+              <label class="ds-chk">
+                <input type="checkbox" checked={ds.neg} onChange={(e) => d.setNeg((e.target as HTMLInputElement).checked)} /> Show the noise:
+                the same sum of the negated differences
+              </label>
+            </>
+          )}
           <DistantLines r={ds.r} />
-          {ds.r.candidates.map((c, i) => (
+          {ds.r.candidates.map((c, i) => c.sn < ds.r.threshold ? null : (
             <button
               key={i}
               class={`btn sm leadbtn${ds.sel === i ? ' on' : ''}`}
@@ -520,7 +538,7 @@ export function DistantLines({ r }: { r: DistantResult }) {
   return (
     <>
       {L(
-        `${r.n_hypotheses.toLocaleString('en-US')} orbits · ${lo}–${hi} au · ${r.scan_secs} s`,
+        `${r.n_hypotheses.toLocaleString('en-US')} ${r.n_hypotheses === 1 ? 'orbit' : 'orbits'} tried · ${lo}–${hi} au · ${r.scan_secs} s`,
         'Hypotheses of distance and own motion scanned for this pass.',
       )}
       {r.n_hypotheses < 10 &&
@@ -532,8 +550,8 @@ export function DistantLines({ r }: { r: DistantResult }) {
         'The same sum of the negated differences gives the noise ceiling; a peak counts above the bar.',
       )}
       {L(
-        r.candidates.length
-          ? `${plural(r.candidates.length, 'peak')} above the bar · a lead, not a discovery`
+        r.candidates.filter((c) => c.sn >= r.threshold).length
+          ? `${plural(r.candidates.filter((c) => c.sn >= r.threshold).length, 'peak')} above the bar · a lead, not a discovery`
           : 'nothing above the bar · nothing marked',
       )}
       {L(

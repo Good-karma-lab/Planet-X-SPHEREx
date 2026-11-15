@@ -22,10 +22,15 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 /** Asks a route again and again until the job is done; `onJob` sees every answer (progress). 404: the route does not exist (returns null). */
 export async function runJob(
   url: string,
-  hooks: { cancelled: () => boolean; onJob?: (j: JobView) => void; every?: number; max?: number },
+  hooks: { cancelled: () => boolean; onJob?: (j: JobView) => void; every?: number; max?: number; bg?: boolean },
 ): Promise<JobView | null> {
+  // every run asks no oftener than every 5 s; an automatic run of the page (bg) also waits while the tab is hidden before its first ask
   for (let i = 0; i < (hooks.max ?? 2000); i++) {
     if (hooks.cancelled()) throw new Error('cancelled');
+    while (hooks.bg && typeof document !== 'undefined' && document.hidden) {
+      await sleep(1000);
+      if (hooks.cancelled()) throw new Error('cancelled');
+    }
     const r = await fetch(url, { cache: 'no-store' });
     if (r.status === 404) return null;
     if (r.status === 429) {

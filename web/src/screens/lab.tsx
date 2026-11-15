@@ -20,6 +20,10 @@ import {
   ContextRows,
   DeepSumPanel,
   DistantCanvas,
+  peakRows,
+  type DistantCandidate,
+  type DistantResult,
+  peaksAbove,
   DistantPanel,
   LinkPanel,
   PairButton,
@@ -2085,8 +2089,56 @@ export function Lab({ route }: { route: Route }) {
   };
   /** A click on the picture selects the source there: a test target when one is within 12″ (measured with its motion), else the
    *  brightest pixel within 3 grid pixels of the click in the season shown. */
+  // what a click on a pair, a known body or a peak shows in the Object tab: its own numbers (the card belongs to the selection at `key`)
+  const [objCard, setObjCard] = useState<{ key: string; title: string; rows: [string, string][]; links?: { label: string; href: string }[] } | null>(null);
+  const cardKey = (a: number, d: number) => `${a.toFixed(6)},${d.toFixed(6)}`;
+  const openCard = (ra0: number, dec0: number, name: string, card: { title: string; rows: [string, string][]; links?: { label: string; href: string }[] }) => {
+    setSelAn(null);
+    setSel({ ra: ra0, dec: dec0, name });
+    setObjCard({ key: cardKey(ra0, dec0), ...card });
+    setTab('obj');
+  };
+  /** In Days: a click on a known body's ring opens its card (JPL's numbers, the links to its orbit and to the images that caught it). */
+  const pickBody = (e: MouseEvent) => {
+    const F = filmRef.current;
+    const fb = bodiesRef.current;
+    if (!F || !fb) return;
+    const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const n = F.meta.grid.n;
+    const lx = e.clientX - box.left;
+    const ly = e.clientY - box.top;
+    let best: { b: KnownBody; d: number; ra: number; dec: number } | null = null;
+    const g = F.meta.grid;
+    const cd = Math.cos((g.dec0 * Math.PI) / 180);
+    for (const b of fb.bodies) {
+      const fr = b.frames[visit];
+      if (!fr || !fr.inside) continue;
+      const d = Math.hypot(((fr.x + 0.5) / n) * box.width - lx, ((fr.y + 0.5) / n) * box.height - ly);
+      if (d < 18 && (!best || d < best.d))
+        best = { b, d, ra: g.ra0 - ((fr.x + 0.5 - n / 2) * g.step_arcsec) / 3600 / cd, dec: g.dec0 - ((fr.y + 0.5 - n / 2) * g.step_arcsec) / 3600 };
+    }
+    if (!best) return;
+    const b = best.b;
+    const mjd = F.meta.frames[visit]?.mjd ?? null;
+    openCard(best.ra, best.dec, b.name.replace(/\s*\(.*\)\s*$/, ''), {
+      title: b.name,
+      rows: [
+        ['Predicted by', 'JPL Horizons, at the time of this visit'],
+        ['Magnitude', b.v != null ? `V ${b.v.toFixed(1)}` : 'not given'],
+        ['In the visits', b.seen.includes(visit) ? 'seen on this visit (the motion map shows it there)' : `predicted here; seen in ${b.seen.length} of the pass's visits`],
+      ],
+      links: [
+        { label: 'JPL', href: `https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}` },
+        { label: 'SSOIS', href: ssoisUrl(b.name, mjd) },
+      ],
+    });
+  };
+  /** A peak of the distance search: its card with its numbers, at its place on the picture. */
+  const onPeak = (c: DistantCandidate, i: number, r: DistantResult) =>
+    openCard(c.ra, c.dec, `Peak ${i + 1} · ${c.d} au`, { title: `Find Planet X · peak ${i + 1}: a lead, not a discovery`, rows: peakRows(c, r).map(([k, v]) => [k, v] as [string, string]) });
   const pick = (e: MouseEvent) => {
     const m = meta;
+    if (m && film !== null) return pickBody(e);
     if (!m || film !== null) return;
     const box = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const lx = e.clientX - box.left;
@@ -2127,6 +2179,15 @@ export function Lab({ route }: { route: Route }) {
           pmdec: o.pmdec ?? 0,
         });
         setTab('obj');
+        return;
+      }
+    }
+    // a click on a pair of sources that change in place opens the pair's card
+    for (let k = 0; k < pairs.length; k++) {
+      const [c0, c1] = pairs[k]!.components;
+      if (sep((c0.ra + c1.ra) / 2, (c0.dec + c1.dec) / 2) < tol + (pairs[k]!.separation_arcsec ?? 0) / 2) {
+        setPairSel(k);
+        setTab('cand');
         return;
       }
     }
@@ -2370,10 +2431,11 @@ export function Lab({ route }: { route: Route }) {
   useEffect(() => {
     if (fpxHold || fpxOff || fpx) return;
     if (fpxRuns.some((r) => r.ds.state === 'loading')) return;
-    const next = fpxRuns.find((r) => r.ds.state === 'idle');
+    // a search a person cancelled is not started again on this field
+    const next = fpxRuns.find((r) => r.ds.state === 'idle' && !r.closed());
     if (next) void next.start(null, true);
   });
-  const fpxAllOver = FPX_AUTO && fpxRuns.every((r) => r.ds.state !== 'idle' && r.ds.state !== 'loading');
+  const fpxAllOver = FPX_AUTO && fpxRuns.every((r) => (r.ds.state !== 'idle' && r.ds.state !== 'loading') || r.closed());
   const deepOn = FPX_AUTO && passes.length >= 3;
   const pxState = (() => {
     if (FPX_AUTO && !fpx) {
@@ -2387,7 +2449,7 @@ export function Lab({ route }: { route: Route }) {
         fpxRuns.some((r) => r.ds.state === 'loading') || deepSt.some((x) => x === 'planning' || x === 'plan' || x === 'running');
       const finished = fpxAllOver && (!deepOn || deepSt.every((x) => x === 'done' || x === 'none' || x === 'error'));
       if (finished) {
-        const n = fpxRuns.reduce((a, r) => a + (r.ds.state === 'ok' ? (r.ds.r.candidates?.length ?? 0) : 0), 0);
+        const n = fpxRuns.reduce((a, r) => a + (r.ds.state === 'ok' ? peaksAbove(r.ds) : 0), 0);
         return { frac: 1, text: `${n} found` };
       }
       if (!active && fpxHold) return { frac: 0, text: 'waiting for the other scans' };
@@ -2407,7 +2469,7 @@ export function Lab({ route }: { route: Route }) {
           : 'ready',
       };
     if (ds.state === 'loading') return { frac: ds.frac, text: ds.frac != null ? `${Math.round(ds.frac * 100)} %` : 'running' };
-    if (ds.state === 'ok') return { frac: 1, text: `${ds.r.candidates?.length ?? 0} found` };
+    if (ds.state === 'ok') return { frac: 1, text: `${peaksAbove(ds)} found` };
     if (ds.state === 'none') return { frac: 0, text: 'no data' };
     return { frac: 0, text: 'failed' };
   })();
@@ -2454,7 +2516,7 @@ export function Lab({ route }: { route: Route }) {
             ? pxState.text
             : null
         : dist.ds.state === 'ok'
-          ? String(dist.ds.r.candidates?.length ?? 0)
+          ? String(peaksAbove(dist.ds))
           : dist.ds.state === 'loading'
             ? `${Math.round((dist.ds.frac ?? 0) * 100)}%`
             : null,
@@ -3192,9 +3254,30 @@ export function Lab({ route }: { route: Route }) {
                 </>
               ) : (
                 <>
+                  {sel && objCard && objCard.key === cardKey(sel.ra, sel.dec) && (
+                    <div class="why-card" data-testid="object-card">
+                      <b>{objCard.title}</b>
+                      {objCard.rows.map(([k, v]) => (
+                        <span key={k}>
+                          <span class="faint">{k}: </span>
+                          {v}
+                        </span>
+                      ))}
+                      {objCard.links && (
+                        <span class="xlinks">
+                          {objCard.links.map((l) => (
+                            <a key={l.label} target="_blank" rel="noopener" href={l.href}>
+                              {l.label}
+                            </a>
+                          ))}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {sel && portraitOf(sel, sel.name ?? 'selected source')}
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
-                  {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={2000} pmra={sel.pmra ?? 0} pmdec={sel.pmdec ?? 0} />}
+                  {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
+                  {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={sel.pmra || sel.pmdec ? 2000 : 2025.9} pmra={sel.pmra ?? 0} pmdec={sel.pmdec ?? 0} />}
                   {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}
                   {sel && (
                     <div class="xlinks">
@@ -3474,6 +3557,8 @@ export function Lab({ route }: { route: Route }) {
                           d={d as typeof distRef}
                           currentPass={shown?.pass ?? 0}
                           passLabel={passMeta ? season(passMeta.mjd_mid) : undefined}
+                          auto
+                          onPick={onPeak}
                         />
                       </div>
                     ),
