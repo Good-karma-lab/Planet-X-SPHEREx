@@ -1503,8 +1503,11 @@ export function Lab({ route }: { route: Route }) {
       ctx.lineWidth = 1;
       // centred on the selected source, else the test target, else the middle of the field
       const centre = all.find((k) => k.selected) ?? all.find((k) => k.kind === 'target');
+      // the rings stay where they are on the sky: centred on the place of the object at the first epoch (the first season, or the first visit in
+      // Days), never on where the mark is now, so the object is seen travelling across them
+      const ref: [number, number] | null = centre ? (days && centre.kind === 'target' ? [centre.ra, centre.dec] : ((centre.path?.[0] as [number, number] | undefined) ?? [centre.ra, centre.dec])) : null;
       for (const box of rects) {
-        const [cu, cv] = centre ? uvOf(centre.ra, centre.dec) : [0.5, 0.5];
+        const [cu, cv] = ref ? uvOf(ref[0], ref[1]) : [0.5, 0.5];
         const cx = box.x + cu * box.w;
         const cy = box.y + cv * box.h;
         ctx.save();
