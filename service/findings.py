@@ -101,6 +101,7 @@ def collect(
     `rows`: the product rows of the store; `fkeys[field_key]`: the keys of the field's result files by search."""
     finds: dict[str, dict[str, Any]] = {}
     sig = hashlib.sha1()
+    fp: dict[str, float] | None = None  # the field being read: its place and size, to open its grid again
 
     def seen(p: Path) -> dict[str, Any] | None:
         try:
@@ -111,6 +112,8 @@ def collect(
         return _read(p)
 
     def add(f: dict[str, Any]) -> None:
+        if fp is not None and f["kind"] in ("mover", "pair", "browndwarf", "red", "anomaly"):
+            f["data"]["field_params"] = dict(fp)
         f.update(extras(f))
         cur = finds.get(f["id"])
         if cur is None or f.get("fov", 0) > cur.get("fov", 0):
@@ -126,6 +129,7 @@ def collect(
             k = fkeys[row["key"]]
             ra, dec, fov = float(p["ra"]), float(p["dec"]), float(p.get("fov", 5))
             place = place_name(targets, ra, dec)
+            fp = {"ra": ra, "dec": dec, "fov": fov}
             scans = {"field": row["key"]}
             mv = seen(Path(store_dir) / "movers" / f"{k['movers']}.json")
             if mv:
