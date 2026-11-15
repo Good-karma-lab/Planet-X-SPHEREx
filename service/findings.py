@@ -980,7 +980,14 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
     if known:
         return "known"
     want = list(CATALOGUES) + (["sbident"] if kind in MOVING else [])
-    if any(by.get(c, {}).get("state", "pending") in ("pending", "unavailable") for c in want):
+
+    def open_(c: str) -> bool:
+        i = by.get(c, {})
+        st = i.get("state", "pending")
+        # a catalogue that did not answer after every retry counts as asked (the verdict says it did not answer); one still being retried does not
+        return st == "pending" or (st == "unavailable" and int(i.get("attempts") or 0) < MAX_ATTEMPTS)
+
+    if any(open_(c) for c in want):
         return "unchecked"
     return "unexplained"
 

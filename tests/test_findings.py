@@ -263,3 +263,14 @@ def test_slow_motions_are_not_finds(tmp_path: Path) -> None:
     finds, _ = collect(tmp_path, rows, keys, TARGETS)
     assert not [f for f in finds if f["kind"] == "browndwarf"]
     assert len([f for f in finds if f["kind"] == "mover"]) == 1  # the same-motion track stays, the slow one is out
+
+
+def test_a_catalogue_that_never_answers_does_not_hold_a_find_unchecked_forever() -> None:
+    from service.findings import MAX_ATTEMPTS
+
+    red = {"kind": "red", "data": {}}
+    ids = [{"catalogue": c, "state": "none", "attempts": 0} for c in ("simbad", "gaia", "twomass", "allwise", "ned")]
+    retrying = [*ids, {"catalogue": "vsx", "state": "unavailable", "attempts": 2}]
+    gave_up = [*ids, {"catalogue": "vsx", "state": "unavailable", "attempts": MAX_ATTEMPTS}]
+    assert status_of(red, retrying) == "unchecked"
+    assert status_of(red, gave_up) == "unexplained"
