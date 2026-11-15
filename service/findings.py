@@ -55,7 +55,7 @@ CATALOGUE_LABEL = {
 MOVING = (
     "film",
 )  # asked of JPL Small-Body Identification: only tracks within one pass move like an asteroid (the movers between passes are stars)
-COLLECT_REV = 3  # bump when the way finds are read or merged changes: the next sweep rewrites them
+COLLECT_REV = 4  # bump when the way finds are read or merged changes: the next sweep rewrites them
 SB_VMAG = 21.0  # SPHEREx depth: fainter bodies are not what a find could be
 SB_MATCH_ARCSEC = 15.0
 SB_RATE_TOL = 0.25
@@ -143,7 +143,7 @@ def collect(
             if mv:
                 scans["movers"] = k["movers"]
                 for t in mv.get("tracks", []):
-                    if t.get("check") == "still":
+                    if t.get("check") == "still" or (t.get("grade") == "slow" and t.get("check") != "same"):
                         continue
                     tr_ra, tr_dec = _f(t.get("ra_2025_9")), _f(t.get("dec_2025_9"))
                     if tr_ra is None or tr_dec is None:
@@ -199,7 +199,10 @@ def collect(
                     )
             bd = seen(Path(store_dir) / "browndwarfs" / f"{k['browndwarfs']}.json")
             if bd:
-                for group, known in (("candidates", False), ("known", True), ("slow", False)):
+                for group, known in (
+                    ("candidates", False),
+                    ("known", True),
+                ):  # "slow" ones are a possible slow motion, not candidates: left out
                     for c in bd.get(group, []):
                         cra, cdec = _f(c.get("ra")), _f(c.get("dec"))
                         if cra is None or cdec is None:

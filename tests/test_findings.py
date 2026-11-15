@@ -241,3 +241,25 @@ def test_film_tracks_all_listed_with_their_own_control(tmp_path: Path) -> None:
     by = {f["data"]["track"]["method"]: f for f in finds}
     assert len(finds) == 2 and by["orbit"]["chance"] == 0.04 and not by["orbit"]["data"]["less_certain"]
     assert by["line"]["data"]["less_certain"] and by["line"]["chance"] == 0.0
+
+
+def test_slow_motions_are_not_finds(tmp_path: Path) -> None:
+    rows, keys = _store(tmp_path)
+    slow_track = {
+        "speed": 5.0,
+        "ra_2025_9": 269.3,
+        "dec_2025_9": 4.9,
+        "snr": [5.0],
+        "check": "none",
+        "grade": "slow",
+        "sigma": 2.0,
+        "mjd": [1.0],
+    }
+    mv = json.loads((tmp_path / "movers" / "m1.json").read_text())
+    mv["tracks"].append(slow_track)
+    (tmp_path / "movers" / "m1.json").write_text(json.dumps(mv))
+    bd = {"candidates": [], "known": [], "slow": [{"ra": 269.6, "dec": 4.6, "pm": 4300.0, "grade": "slow", "sigma": 2.0}]}
+    (tmp_path / "browndwarfs" / "b1.json").write_text(json.dumps(bd))
+    finds, _ = collect(tmp_path, rows, keys, TARGETS)
+    assert not [f for f in finds if f["kind"] == "browndwarf"]
+    assert len([f for f in finds if f["kind"] == "mover"]) == 1  # the same-motion track stays, the slow one is out
