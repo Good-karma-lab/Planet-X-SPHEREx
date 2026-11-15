@@ -17,7 +17,7 @@ on the live service (2026-11-14 and 2026-11-15).
    95.5). Makemake 52.5 ± 0.2 au from two passes (JPL 52.3). No Planet X is claimed: a search that finds nothing does not show that
    nothing is there.
 5. **What does not look like a star.** Any dot gives its spectrum in 102 colours; the tool builds the field's ordinary star from them
-   and flags what does not fit. Every find gets a passport: score, wavelengths, motion. "Anomaly", never "discovery".
+   and flags what does not fit. In its field ε Indi B comes out as spectral anomaly 1: a cold brown dwarf glows at the long wavelengths. Every find gets a passport: score, wavelengths, motion. "Anomaly", never "discovery".
 6. **Validated on real data, every number checked against another telescope or catalogue.** Nearby stars against ESA Gaia: Barnard's Star
    11.4″/yr (Gaia 10.4), ε Indi B 4.6 (Gaia 4.7), WISE 0855 7.9 (SIMBAD 8.2). Known asteroids found blind: 6 of 8 known bodies to V 19.1
    on a 60′ field, every track a known body, 0 false. Bodies beyond Neptune: Eris 95.6 ± 0.4 au, Makemake 52.5 au. Chance control: every
