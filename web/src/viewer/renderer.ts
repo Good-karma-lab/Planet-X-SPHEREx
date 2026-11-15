@@ -544,7 +544,7 @@ export class Renderer {
     gl.uniform1f(this.u('uDP'), isFilm ? this.filmDP : this.dp);
     gl.uniform1i(this.u('uLayer'), p.layer ?? 0);
     gl.uniform3fv(this.u('uTint'), new Float32Array(p.tint ?? [1, 1, 1]));
-    gl.uniform3fv(this.u('uNoData'), new Float32Array(p.noData ?? [0.36, 0.4, 0.44]));
+    gl.uniform3fv(this.u('uNoData'), new Float32Array(p.noData ?? [0, 0, 0]));
     gl.uniform1i(this.u('uA'), a);
     gl.uniform1i(this.u('uB'), b);
     gl.uniform1f(this.u('uT'), t);

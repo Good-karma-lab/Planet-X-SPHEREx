@@ -78,7 +78,10 @@ const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2
 /** a band's name on a tile too small for the full one */
 const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
 /** what a picture shows where its pixels have not arrived yet */
-const DARK: [number, number, number] = [0.03, 0.045, 0.06];
+const DARK: [number, number, number] = [0, 0, 0];
+/** room a wall leaves for the title chip above and the band or detector chips below, so neither covers a tile (CSS px) */
+const WALL_TOP = 48;
+const WALL_BOTTOM = 44;
 const BANDS = [
   { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
   {
@@ -1040,8 +1043,8 @@ export function Lab({ route }: { route: Route }) {
           } else if (st.view === 'bands') {
             // the tiles fill the whole picture area (the chips and the title float over it)
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
-            panels = wallLayout(shownBands.length, w, h).map((c0, j) => {
-              const c = c0;
+            panels = wallLayout(shownBands.length, w, Math.max(80, h - WALL_TOP - WALL_BOTTOM)).map((c0, j) => {
+              const c = { ...c0, y: c0.y + WALL_TOP };
               const { bd, i } = shownBands[j]!;
               return {
                 x: c.x,
@@ -1066,8 +1069,8 @@ export function Lab({ route }: { route: Route }) {
             });
           } else {
             const shownDets = st.dets.slice().sort();
-            panels = wallLayout(shownDets.length, w, h).map((c0, j) => {
-              const c = c0;
+            panels = wallLayout(shownDets.length, w, Math.max(80, h - WALL_TOP - WALL_BOTTOM)).map((c0, j) => {
+              const c = { ...c0, y: c0.y + WALL_TOP };
               const d = shownDets[j]! - 1;
               return {
                 x: c.x,
@@ -1458,26 +1461,28 @@ export function Lab({ route }: { route: Route }) {
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
       let labelled = 0;
       const ring = (x: number, y: number, mk: Mark, rr: number, ticks: boolean) => {
+        // a target: a thin crosshair, four 1 px arms with a gap at the centre (no ring over the star); anything else: a thin 1 px ring
         const shape = () => {
           ctx.beginPath();
-          ctx.arc(x, y, rr, 0, 2 * Math.PI);
-          if (ticks)
+          if (ticks) {
+            const gap = Math.max(3, rr * 0.45), arm = rr + 5;
             for (const [ax, ay] of [
               [1, 0],
               [-1, 0],
               [0, 1],
               [0, -1],
             ] as const) {
-              ctx.moveTo(x + ax * (rr - 4), y + ay * (rr - 4));
-              ctx.lineTo(x + ax * (rr + 6), y + ay * (rr + 6));
+              ctx.moveTo(x + ax * gap, y + ay * gap);
+              ctx.lineTo(x + ax * arm, y + ay * arm);
             }
+          } else ctx.arc(x, y, rr, 0, 2 * Math.PI);
           ctx.stroke();
         };
         ctx.setLineDash(mk.dashed ? [4, 3] : []);
-        ctx.lineWidth = mk.selected ? 4.5 : 3.5;
-        ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+        ctx.lineWidth = mk.selected ? 2.6 : 2.2;
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
         shape();
-        ctx.lineWidth = mk.selected ? 2.4 : 1.6;
+        ctx.lineWidth = mk.selected ? 1.4 : 1;
         ctx.strokeStyle = mk.colour;
         shape();
         ctx.setLineDash([]);
@@ -2128,12 +2133,12 @@ export function Lab({ route }: { route: Route }) {
         }
         ctx.restore();
       }
-      ctx.lineWidth = 3;
-      ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+      ctx.lineWidth = 2.2;
+      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
       ctx.beginPath();
       ctx.arc(x, y, ring, 0, 2 * Math.PI);
       ctx.stroke();
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = 1;
       ctx.strokeStyle = '#ffb454';
       ctx.stroke();
     }
