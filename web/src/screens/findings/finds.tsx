@@ -285,13 +285,13 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
   const spec = f.spectrum.filter((s) => s.lam != null && s.flux != null).map((s) => ({ x: ((s.lam as number) + (s.lam_hi ?? (s.lam as number))) / 2, y: s.flux as number, e: s.err, m: s.model }));
   const curves = [...new Set(f.lightcurve.map((p) => p.label))];
   const nums: [string, string][] = [
-    ...(f.rate != null ? ([[f.kind === 'film' ? 'Rate' : 'Rate', `${f.rate.toFixed(2)} ${f.kind === 'film' ? '″/h' : '″/yr'}`]] as [string, string][]) : []),
+    ...(f.rate != null ? ([['Rate', `${f.rate.toFixed(2)}${f.data.rate_err ? ` ± ${Number(f.data.rate_err).toFixed(2)}` : ''} ${f.kind === 'film' ? '″/h' : '″/yr'}${f.data.best_detection ? ` · best of ${f.data.detections.length}` : ''}`]] as [string, string][]) : []),
     ...(f.snr != null ? ([['S/N', f.snr.toFixed(1)]] as [string, string][]) : []),
     ...(f.score != null ? ([['Score', f.score.toFixed(2)]] as [string, string][]) : []),
     ...(f.chance != null ? ([['Chance', f.kind === 'film' ? `controls: ${f.chance.toFixed(2)} per search at ${f.data.track?.n} visits` : `${f.chance.toFixed(2)} per field`]] as [string, string][]) : []),
     [f.kind === 'peak' ? "Place at the search's reference date" : 'Place', `${formatRA(f.ra)} ${formatDec(f.dec)}`],
     ['Field', `${f.place} · ${f.fov}′`],
-    ...(((f.data.detections?.length ?? 0) > 1) ? ([['Detections', `${f.data.detections.length}: ${f.data.detections.map((d: any) => `${d.fov}′`).join(', ')} fields`]] as [string, string][]) : []),
+    ...(((f.data.detections?.length ?? 0) > 1) ? ([['Detections', f.data.detections.map((d: any) => `${d.fov}′${d.rate != null ? ` ${Number(d.rate).toFixed(2)}${d.rate_err ? ` ± ${Number(d.rate_err).toFixed(2)}` : ''}` : ''}${d.sigma != null ? ` (${Number(d.sigma).toFixed(1)}σ)` : ''}`).join(' · ')]] as [string, string][]) : []),
   ];
   return (
     <aside class={`leadpanel glass fdetail${inline ? ' inline' : ''}`} role={inline ? 'region' : 'dialog'} aria-label="Find report">
@@ -342,7 +342,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
             <tr key={i.catalogue} class={`c-${i.state}`}>
               <td>{i.label}</td>
               <td title={i.name ?? ''}>
-                {i.state === 'ok' ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}` : i.state === 'none' ? `nothing within 6″` : i.state === 'unavailable' ? 'did not answer' : 'not asked yet'}
+                {i.state === 'ok' ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}${i.catalogue === 'sbident' && i.detail.visits_matched ? ` · at ${i.detail.visits_matched} of ${i.detail.visits_checked} visits` : ''}` : i.state === 'none' ? `nothing within 6″` : i.state === 'unavailable' ? 'did not answer' : 'not asked yet'}
               </td>
               <td>{i.state === 'ok' && i.sep != null ? `${i.sep.toFixed(1)}″` : ''}</td>
             </tr>

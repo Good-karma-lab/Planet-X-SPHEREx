@@ -274,3 +274,65 @@ def test_a_catalogue_that_never_answers_does_not_hold_a_find_unchecked_forever()
     gave_up = [*ids, {"catalogue": "vsx", "state": "unavailable", "attempts": MAX_ATTEMPTS}]
     assert status_of(red, retrying) == "unchecked"
     assert status_of(red, gave_up) == "unexplained"
+
+
+def _jpl_by_date(rows_by_mjd: dict[str, list[list[Any]]]) -> Any:
+    from service.findings import Findings
+    from service.upstream.breaker import Breaker
+
+    class Client:
+        async def get(self, url: str, params: dict[str, str]) -> _Resp:
+            day = params["obs-time"][:10]
+            return _Resp(_jpl(rows_by_mjd.get(day, [])))
+
+    f = Findings.__new__(Findings)
+    f.breaker = Breaker("JPL")
+    f.catalogue = type("C", (), {"client": Client()})()
+    return f
+
+
+def test_film_track_is_known_when_the_same_body_stands_where_it_does_at_two_of_three_visits() -> None:
+    import sqlite3 as sq
+
+    from service.findings import _iso
+
+    mjds = [61000.0, 61005.0, 61010.0]
+    days = [_iso(m)[:10] for m in mjds]
+    body = [["9952 Test", "2.0", "0.0", "58.0", "0.0", "18.0"]]
+    f = _jpl_by_date({days[0]: body, days[2]: body})  # seen at two visits (the middle date has none)
+    vis = [{"ra": 120.0, "dec": 10.0, "mjd": m} for m in mjds]
+    db = sq.connect(":memory:")
+    db.row_factory = sq.Row
+    db.execute("CREATE TABLE t (kind, ra, dec, data)")
+    db.execute("INSERT INTO t VALUES ('film', 120.0, 10.0, ?)", (json.dumps({"track": {"rate": 58.0, "pa": 90.0}, "visits": vis}),))
+    row = db.execute("SELECT * FROM t").fetchone()
+    got = asyncio.run(f.sbident_visits(row))
+    assert got["state"] == "ok" and got["name"] == "9952 Test" and got["visits_matched"] == 2
+    f2 = _jpl_by_date({days[0]: body})  # one of three: not enough
+    assert asyncio.run(f2.sbident_visits(row))["state"] == "none"
+
+
+def test_wanted_identifications_and_the_best_measurement_of_a_merged_object() -> None:
+    from service.findings import CATALOGUES, ecl_lat, merge, want_of
+
+    assert want_of("film", 10.0, 5.0, {}) == ["sbident"]
+    assert want_of("browndwarf", 133.0, 15.0, {"group": "candidate"})[-1] == "sbident"  # about 1° from the ecliptic... within 15°
+    assert want_of("browndwarf", 133.0, 50.0, {"group": "candidate"}) == list(CATALOGUES)  # far from the ecliptic
+    assert want_of("browndwarf", 133.0, 15.0, {"group": "known"}) == list(CATALOGUES)
+    assert abs(ecl_lat(0.0, 0.0)) < 1e-9
+    a = {
+        "id": "a",
+        "kind": "browndwarf",
+        "place": "p",
+        "fov": 20,
+        "ra": 10.0,
+        "dec": 5.0,
+        "rate": 6.2,
+        "score": 4.0,
+        "snr": 5.0,
+        "scans": ["a"],
+        "data": {"source": {"speed_err": 1.5}},
+    }
+    b = {**a, "id": "b", "fov": 5, "rate": 7.9, "score": 12.9, "scans": ["b"], "data": {"source": {"speed_err": 0.6}}}
+    m = merge([a, b])
+    assert len(m) == 1 and m[0]["rate"] == 7.9 and m[0]["data"]["rate_err"] == 0.6 and m[0]["data"]["best_detection"]["fov"] == 5
