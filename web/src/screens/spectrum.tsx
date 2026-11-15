@@ -24,6 +24,17 @@ interface SpecView {
 const DET_HUE = [270, 220, 175, 95, 40, 5];
 
 /** Follows one spectrum as it is measured: the points arrive in pieces (`since` = points already held). */
+
+/** Gaia's values as people read them: G and BP−RP to 0.01 mag, the parallax to 0.01 mas (with its error when known), RUWE to 0.01. */
+function gaiaLine(ga: { source_id?: string; g?: number | null; bp_rp?: number | null; parallax?: number | null; ruwe?: number | null; parallax_error?: number | null }): string {
+  const parts = [String(ga.source_id ?? '')];
+  if (ga.g != null) parts.push(`G ${ga.g.toFixed(2)}`);
+  if (ga.bp_rp != null) parts.push(`BP−RP ${ga.bp_rp.toFixed(2)}`);
+  if (ga.parallax != null) parts.push(`parallax ${ga.parallax.toFixed(2)}${ga.parallax_error != null ? ` ± ${ga.parallax_error.toFixed(2)}` : ''} mas`);
+  if (ga.ruwe != null) parts.push(`RUWE ${ga.ruwe.toFixed(2)}`);
+  return parts.join(' · ');
+}
+
 export function useSpectrum(src: Source | null): {
   view: SpecView | null;
   points: SpecPoint[];
@@ -500,6 +511,7 @@ interface Identified {
     bp_rp?: number | null;
     parallax?: number | null;
     ruwe?: number | null;
+    parallax_error?: number | null;
     error?: string;
   };
 }
@@ -603,7 +615,7 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
           {id === 'asking'
             ? 'asking…'
             : ga?.state === 'ok'
-              ? `${ga.source_id}${ga.g != null ? ` · G ${ga.g}` : ''}${ga.bp_rp != null ? ` · BP−RP ${ga.bp_rp}` : ''}${ga.parallax != null ? ` · parallax ${ga.parallax} mas` : ''}${ga.ruwe != null ? ` · RUWE ${ga.ruwe}` : ''}`
+              ? gaiaLine(ga)
               : ga?.state === 'none'
                 ? 'nothing within 6″'
                 : ga?.state === 'pending'
@@ -648,7 +660,7 @@ export interface Anomaly {
   resid_z: (number | null)[];
   identified?: {
     simbad?: { state: string; name?: string; type?: string; sp?: string | null; sep?: number };
-    gaia?: { state: string; source_id?: string; g?: number | null; bp_rp?: number | null; parallax?: number | null; ruwe?: number | null };
+    gaia?: { state: string; source_id?: string; g?: number | null; bp_rp?: number | null; parallax?: number | null; ruwe?: number | null; parallax_error?: number | null };
   };
 }
 
@@ -781,7 +793,7 @@ export function Passport({ a, f }: { a: Anomaly; f: AnomalyField }) {
           <span class="faint">Gaia DR3</span>
           <span>
             {ga?.state === 'ok'
-              ? `${ga.source_id}${ga.g != null ? ` · G ${ga.g}` : ''}${ga.bp_rp != null ? ` · BP−RP ${ga.bp_rp}` : ''}${ga.parallax != null ? ` · parallax ${ga.parallax} mas` : ''}${ga.ruwe != null ? ` · RUWE ${ga.ruwe}` : ''}`
+              ? gaiaLine(ga)
               : ga?.state === 'none'
                 ? 'nothing within 6″'
                 : 'not reachable'}
