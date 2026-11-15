@@ -2397,3 +2397,9 @@ input[type='range']::-moz-range-thumb {
 .sbar .sline .sval, .sbar .tray-sum .it { font-variant-numeric: tabular-nums; }
 .sbar .sline .sval { overflow: hidden; text-overflow: ellipsis; }
 .sbar .tray-sum .it .v { display: inline-block; min-width: 4.5ch; text-align: left; }
+
+/* the export button beside Copy link: CSV | JSON open out beside it (the time bar clips anything above it) */
+.expwrap { display: inline-flex; align-items: center; gap: 4px; }
+.expmenu { display: inline-flex; gap: 3px; }
+.expmenu button { height: 26px; padding: 0 8px; border-radius: 7px; border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.05); color: var(--ink); font: 600 11px var(--font); cursor: pointer; }
+.expmenu button:hover { border-color: rgba(95, 227, 214, 0.55); color: var(--accent-l); }

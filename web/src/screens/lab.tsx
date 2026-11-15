@@ -496,6 +496,29 @@ export function Lab({ route }: { route: Route }) {
   const [stage, setStage] = useState({ w: 400, h: 400 });
   const stageRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState('');
+  // the finds of the field as a file (CSV or JSON): the service's export of what the searches have found so far
+  const [exportOpen, setExportOpen] = useState(false);
+  const [exportNote, setExportNote] = useState('');
+  const downloadExport = async (format: 'csv' | 'json') => {
+    setExportOpen(false);
+    try {
+      const r = await fetch(`/api/v1/export/field?ra=${ra.toFixed(5)}&dec=${dec.toFixed(5)}&fov=${fov}&format=${format}`);
+      if (!r.ok) {
+        setExportNote(r.status === 409 ? 'Field not finished' : 'Export failed');
+      } else {
+        const blob = await r.blob();
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `spherex_field_${ra.toFixed(3)}_${dec.toFixed(3)}_${fov}.${format}`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        setExportNote(r.headers.get('x-export-pending') ? 'Saved (searches still running)' : 'Saved');
+      }
+    } catch {
+      setExportNote('Export failed');
+    }
+    setTimeout(() => setExportNote(''), 3000);
+  };
   const ft = useFilmTracks(filmData?.key ?? null);
   const ftRef = useRef<FilmTrack[] | null>(null);
   ftRef.current = ft.state === 'ok' ? ft.tracks : null;
@@ -2745,6 +2768,30 @@ export function Lab({ route }: { route: Route }) {
                 <span dangerouslySetInnerHTML={{ __html: icon('link', 14) }} style={{ display: 'contents' }} />
                 {copied && <span class="t">{copied}</span>}
               </button>
+              <span class="expwrap">
+                <button
+                  class="mini"
+                  disabled={!passes.length}
+                  onClick={() => setExportOpen((o) => !o)}
+                  title="Take away what the searches found in this field: movers, pairs, brown dwarfs, red sources, anomalies"
+                  aria-label="Export the field's finds"
+                  aria-expanded={exportOpen}
+                  data-testid="export"
+                >
+                  <span dangerouslySetInnerHTML={{ __html: icon('archive', 14) }} style={{ display: 'contents' }} />
+                  {exportNote && <span class="t">{exportNote}</span>}
+                </button>
+                {exportOpen && (
+                  <span class="expmenu" role="menu">
+                    <button role="menuitem" onClick={() => void downloadExport('csv')}>
+                      CSV
+                    </button>
+                    <button role="menuitem" onClick={() => void downloadExport('json')}>
+                      JSON
+                    </button>
+                  </span>
+                )}
+              </span>
               <button
                 class="mini"
                 disabled={recording || film !== null || !passes.length}
