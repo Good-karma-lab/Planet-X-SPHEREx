@@ -483,10 +483,9 @@ export class PxScene {
         continue;
       }
       el.style.display = '';
-      if (!t.w) {
-        t.w = el.offsetWidth;
-        t.h = el.offsetHeight;
-      }
+      // measured every frame: a label measured before the web font arrives is too narrow and would run off the edge
+      t.w = el.offsetWidth;
+      t.h = el.offsetHeight;
       const x = ((v.x + 1) / 2) * w, y = ((1 - v.y) / 2) * h, tw = t.w!, th = t.h!;
       const spots: [number, number][] = [[x + 9, y - th / 2], [x - 9 - tw, y - th / 2], [x + 6, y - th - 3], [x + 6, y + 3], [x - tw - 6, y - th - 3], [x - tw - 6, y + 3]];
       const spot = spots.find(([sx, sy]) => !hit(sx, sy, sx + tw, sy + th));
