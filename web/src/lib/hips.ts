@@ -7,7 +7,6 @@
 // At most MAX_INFLIGHT tiles are on their way at once; the tiles of the latest view go first, and requests of views the
 // globe has left are dropped.
 
-import { equiPreload, registerEqui } from './equi';
 
 /** IRSA's HiPS root (CORS open). */
 const IRSA = 'https://irsa.ipac.caltech.edu/data/hips/';
@@ -47,24 +46,9 @@ export function loadManifest(): Promise<boolean> {
     .then((m: { layers?: Record<string, Partial<Baked> & { frame?: string }> } | null) => {
       for (const [id, b0] of Object.entries(m?.layers ?? {})) {
         const b = b0 as typeof b0 & { type?: string; base?: string; gain?: number; black?: number };
-        // a layer baked as an equirectangular pyramid (plate carrée tiles and a full-sky base) is read by its own sampler
-        if (b.type === 'equirect' && b.url && b.max != null) {
-          // the tone-mapped equirect star map (id svs-eq) is THE star map of the globe: it answers to the layer id the globe uses (svs)
-          registerEqui({
-            id: id === 'svs-eq' ? 'svs' : id,
-            label: b.label ?? id,
-            credit: b.credit,
-            size: b.size ?? 512,
-            min: b.min ?? 2,
-            max: b.max,
-            url: b.url,
-            base: b.base,
-            gain: Number(b.gain) > 0 ? Number(b.gain) : 1,
-            black: Number(b.black) >= 0 ? Number(b.black) : 0,
-          });
-          equiPreload(id === 'svs-eq' ? 'svs' : id);
-          continue;
-        }
+        // an equirectangular pyramid (the first star-map bake, svs-eq) is not used: the star map is the HEALPix layer `svs` (tone-mapped, orders 0-6), which the
+        // globe's HEALPix sampler reads with no pole fans or streaks
+        if (b.type === 'equirect') continue;
         if (!b.url || b.max == null) continue;
         const size = b.size ?? 512;
         baked.set(id, { label: b.label ?? id, credit: b.credit, frame: b.frame === 'galactic' ? 'galactic' : 'equatorial', size, min: b.min ?? 0, max: b.max, url: b.url, gain: Number(b.gain) > 0 ? Number(b.gain) : 1, black: Number(b.black) >= 0 ? Number(b.black) : 0 });
