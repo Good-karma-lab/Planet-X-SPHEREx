@@ -9,6 +9,9 @@ export interface Source {
   pmKind?: 'catalogue' | 'measured';
   /** the uncertainty of a measured motion, mas/yr */
   pmErr?: number;
+  /** a moving body (an asteroid track of the film search): its brightness changes with its distance from the Sun and the Earth and with
+   *  its phase, so it has no variable-star verdict; JPL's predicted V and what each visit shows are given instead */
+  moving?: { V?: number | null; visits: { n: number; z: number; how: 'found' | 'recovered' }[] };
 }
 
 export interface SpecPoint {

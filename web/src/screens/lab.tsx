@@ -1955,6 +1955,10 @@ export function Lab({ route }: { route: Route }) {
         ra: g.ra0 - ((p.x + 0.5 - g.n / 2) * g.step_arcsec) / 3600 / cd,
         dec: g.dec0 - ((p.y + 0.5 - g.n / 2) * g.step_arcsec) / 3600,
         name: t.known?.name ?? `Track ${i + 1}`,
+        moving: {
+          V: t.known?.V ?? null,
+          visits: t.pts.map((q, n) => ({ n: n + 1, z: q.z ?? 0, how: q.how ?? 'found' })),
+        },
       });
     }
     setTab('obj');

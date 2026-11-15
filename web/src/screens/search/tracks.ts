@@ -8,6 +8,9 @@ export interface TrackPoint {
   f: number;
   x: number;
   y: number;
+  /** S/N of the visit's difference at the place, and whether a candidate was found there or the visit was only read at the orbit's place */
+  z?: number;
+  how?: 'found' | 'recovered';
 }
 
 export interface FilmTrack {
