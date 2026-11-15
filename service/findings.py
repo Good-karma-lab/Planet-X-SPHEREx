@@ -86,9 +86,27 @@ def want_of(kind: str, ra: float, dec: float, data: dict[str, Any]) -> list[str]
     if kind == "film":
         return ["sbident"]
     near = kind == "browndwarf" and data.get("group") != "known" and abs(ecl_lat(ra, dec)) < ECLIPTIC_BAND
-    return [*CATALOGUES, *(["sbident"] if near else [])]
+    return [*CATALOGUES, *(["sbident"] if near or _ref_mjd(kind, data) is not None else [])]
 
 
+def _ref_mjd(kind: str, data: dict[str, Any]) -> float | None:
+    """The date a Find Planet X peak's place is for (deep results made after the date fix carry it): JPL is asked only at that date."""
+    return _f((data.get("peak") or {}).get("ref_mjd")) if kind == "peak" else None
+
+
+def decisive_of(kind: str, ra: float, dec: float, data: dict[str, Any]) -> list[str]:
+    """The catalogues that decide what a find is; the others only add detail (and are listed as "did not answer" when they did not).
+    Film tracks and peaks: JPL for a moving body (peaks only when their date is known) and, for peaks, SIMBAD and Gaia for a star they sit on;
+    movers, brown dwarfs, pairs, red sources and anomalies: SIMBAD and Gaia (a brown dwarf near the ecliptic JPL too)."""
+    if kind == "film":
+        return ["sbident"]
+    out = ["simbad", "gaia"]
+    if "sbident" in want_of(kind, ra, dec, data):
+        out.append("sbident")
+    return out
+
+
+RESIDUAL_ARCSEC = 3.0
 RADIUS = 6.0  # arcsec: how far from a find a catalogue entry may stand and still be named
 SWEEP_S = 45.0
 RETRY_S = 90.0
@@ -959,6 +977,10 @@ class Findings:
             vis = d.get("visits") or []
             sel = [vis[i] for i in sorted({0, len(vis) // 2, len(vis) - 1})] if vis else []
             rate, pa, check, need = _fnum(trk.get("rate")), _fnum(trk.get("pa")), True, max(1, math.ceil(len(sel) * 2 / 3))
+        elif row["kind"] == "peak":
+            ref = _ref_mjd("peak", d)
+            sel = [{"ra": row["ra"], "dec": row["dec"], "mjd": ref}] if ref is not None else []
+            rate, pa, check, need = None, None, False, 1
         else:
             sel = [{"ra": row["ra"], "dec": row["dec"], "mjd": m} for m in (d.get("mjd") or []) if m is not None]
             rate, pa, check, need = None, None, False, len(sel)
@@ -1078,9 +1100,17 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         known = ok("simbad") and str(by["simbad"].get("type") or "") not in GENERIC_TYPES
     elif kind == "pair":
         known = ok("vsx")
+    if kind == "peak" and ok("sbident"):
+        known = True
     if known:
         return "known"
-    want = want_of(kind, f.get("ra") or 0.0, f.get("dec") or 90.0, d)
+    if kind == "peak":
+        # a peak on a catalogued star is most likely that star's residual in the difference, not a body: said so and kept out of the leads
+        for c in ("simbad", "gaia", "twomass", "allwise"):
+            i = by.get(c, {})
+            if i.get("state") == "ok" and i.get("sep") is not None and i["sep"] <= RESIDUAL_ARCSEC:
+                return "residual"
+    want = decisive_of(kind, f.get("ra") or 0.0, f.get("dec") or 90.0, d)
 
     def open_(c: str) -> bool:
         i = by.get(c, {})
@@ -1096,9 +1126,9 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
 def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> str:
     """One plain sentence about what the catalogues say."""
     asked = [i for i in idents if i["state"] != "pending"]
-    failed = [i["label"] for i in asked if i["state"] == "unavailable"]
+    failed = [i.get("label", i["catalogue"]) for i in asked if i["state"] == "unavailable"]
     named = [
-        f"{i['label']}: {i['name']}"
+        f"{i.get('label', i['catalogue'])}: {i['name']}"
         + (f" ({i['type']})" if i.get("type") else "")
         + (f", {i['sep']:.1f}″ away" if i.get("sep") is not None else "")
         for i in idents
@@ -1106,9 +1136,20 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
     ]
     if not idents or all(i["state"] == "pending" for i in idents):
         return "Not yet checked: the catalogues have not been asked yet."
-    waiting = [i["label"] for i in idents if i["state"] == "pending"]
+    decisive = decisive_of(f["kind"], f.get("ra") or 0.0, f.get("dec") or 90.0, f.get("data") or {})
+    waiting = [i.get("label", i["catalogue"]) for i in idents if i["state"] == "pending" and i["catalogue"] in decisive]
+    if status == "residual":
+        star = next(
+            (
+                f"{i.get('label', i['catalogue'])}: {i['name']}, {i['sep']:.1f}″ away"
+                for i in idents
+                if i["state"] == "ok" and i.get("sep") is not None and i["sep"] <= RESIDUAL_ARCSEC
+            ),
+            "a catalogued star",
+        )
+        return f"It sits on a catalogued star ({star}): most likely a residual of that star in the difference, not a body. Not counted as a lead."
     if status == "unchecked":
-        text = "Not yet checked against every catalogue."
+        text = "Not yet checked: the catalogues that decide have not all answered."
         if waiting:
             text += f" Still to answer: {', '.join(waiting)}."
         if failed:
@@ -1127,7 +1168,7 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         }.get(kind, "Known: ")
         text = base + who + "."
     else:
-        none = [i["label"] for i in idents if i["state"] == "none"]
+        none = [i.get("label", i["catalogue"]) for i in idents if i["state"] == "none"]
         text = {
             "mover": "It moves between the passes and no catalogue names it. A lead to look at, not a discovery.",
             "browndwarf": "A red mover no catalogue names: a brown dwarf candidate, not a confirmed one.",
@@ -1181,25 +1222,26 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         f["idents"] = ids_
         f["verdict"] = verdict_of(f, ids_, st)
         items.append(f)
-    counts: dict[str, dict[str, int]] = {k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0} for k in KINDS}
+    counts: dict[str, dict[str, int]] = {k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0} for k in KINDS}
     for f in items:
-        tally = counts.setdefault(f["kind"], {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0})
-        tally["all"] += 1
+        tally = counts.setdefault(f["kind"], {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0})
+        if f["status"] != "residual":  # a star's residual is not a lead: counted apart
+            tally["all"] += 1
         tally[f["status"]] += 1
     sel = [
         f
         for f in items
         if (not kind or f["kind"] == kind)
-        and (not status or status == "all" or f["status"] == status)
+        and ((status == "residual") == (f["status"] == "residual") if status in (None, "all", "residual") else f["status"] == status)
         and (not place or f["place"] == place)
     ]
-    rank = {"unexplained": 0, "unchecked": 1, "known": 2}
+    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
     unavailable = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable")
     return {
         "count": len(sel),
-        "total": len(items),
+        "total": sum(1 for f in items if f["status"] != "residual"),
         "counts": counts,
         "labels": KIND_LABEL,
         "identification": {
