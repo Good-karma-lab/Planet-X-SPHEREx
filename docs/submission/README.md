@@ -6,7 +6,8 @@ as checked by the supervisor on spaceappschallenge.org on 2026-11-14; the full l
 
 | File | What |
 |---|---|
-| [project-page.md](project-page.md) | text for every field of the project page |
+| [form-fields.md](form-fields.md) | the form, field by field, ready to paste (with word and character counts) |
+| [project-page.md](project-page.md) | the source texts for every field of the project page |
 | [si-disclosure.md](si-disclosure.md) | the Use of Super Intelligence (SI) statement |
 | [data-and-references.md](data-and-references.md) | NASA and partner data, other sources, references |
 | [video-script.md](video-script.md) | the ≤ 30 s demo video: script and shot list |
