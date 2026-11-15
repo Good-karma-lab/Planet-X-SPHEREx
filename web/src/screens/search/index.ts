@@ -4,7 +4,7 @@ export { drawBodyPath, fetchBodyPath, todayText, type BodyPath, type PathPoint, 
 export { FilmTracks, useFilmTracks, chanceText, daysStatus, trackLine, visitMarks } from './film-tracks';
 export { TRACK_COLOURS, drawBlink, drawTracks, hitTrack, trackLabel, trackName, trackPlace, type FilmControl, type FilmTrack, type TrackPoint } from './tracks';
 export { PairButton, PairCard, type ChancePairs, type Pair } from './pair';
-export { DistantCanvas, DistantLines, DistantPanel, peakRows, useDistant, useDistantPlan, type Distant, type DistantPlan, type DistantCandidate, type DistantResult, type DistantSliders } from './distant';
+export { DistantCanvas, DistantLines, DistantPanel, peakRows, peaksAbove, useDistant, useDistantPlan, type Distant, type DistantPlan, type DistantCandidate, type DistantResult, type DistantSliders } from './distant';
 export { about, progressText, runJob, useProduct } from './jobs';
 export { DeepSumPanel, type DeepCandidate, type DeepResult } from './deep';
 export { JumpView, LinkCard, LinkPanel, type Jump, type LinkEntry, type LinkResult } from './link';
