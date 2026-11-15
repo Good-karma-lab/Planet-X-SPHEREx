@@ -183,7 +183,7 @@ def _fetch_hips_tile(args: tuple[str, str, str, int, int, float, float, str]) ->
     dest = tile_path(Path(root_s), layer, order, i)
     if dest.exists():
         return -1
-    url = f"https://irsa.ipac.caltech.edu/data/hips/{path}/Norder{order}/Dir{i // 10000 * 10000}/Npix{i}.{ext}"
+    url = f"{os.environ.get('BAKE_HIPS_ROOT', 'https://irsa.ipac.caltech.edu/data/hips')}/{path}/Norder{order}/Dir{i // 10000 * 10000}/Npix{i}.{ext}"
     raw = b""
     for attempt in range(4):
         try:
@@ -413,6 +413,27 @@ def write_manifest(root: Path) -> None:
         info = json.loads(lj.read_text())
         folder = lj.parent.name  # a versioned folder (svs-v1): the immutable cache never serves stale tiles after a re-bake
         lid = info.get("id", folder)
+        if info.get("type") == "equirect":  # a plate carree pyramid: L{l}/{x}_{y}.webp, level l has 2^l columns and 2^(l-1) rows
+            files = list((root / folder).glob("L*/*.webp"))
+            layers[lid] = {
+                "type": "equirect",
+                "label": info["label"],
+                "credit": info["credit"],
+                "frame": info.get("frame", "equatorial"),
+                "size": TILE,
+                "format": "webp",
+                "min": info.get("min", 2),
+                "max": info["max"],
+                "url": f"/tiles/{folder}/L{{l}}/{{x}}_{{y}}.webp",
+                "base": f"/tiles/{folder}/base.webp",
+                "sky_4k": f"/tiles/{folder}/sky_4k.jpg",
+                "sky_8k": f"/tiles/{folder}/sky_8k.jpg",
+                "gain": info.get("gain", 1),
+                "black": info.get("black", 0),
+                "tiles": len(files),
+                "bytes": sum(p.stat().st_size for p in files),
+            }
+            continue
         tiles = sum(1 for _ in (root / folder).glob("Norder*/**/*.webp"))
         size = sum(p.stat().st_size for p in (root / folder).glob("Norder*/**/*.webp"))
         layers[lid] = {
