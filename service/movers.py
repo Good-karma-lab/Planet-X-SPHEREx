@@ -90,6 +90,7 @@ class Movers:
         self.store = store
         self.dir = store_dir / "movers"
         self.runs: OrderedDict[str, Run] = OrderedDict()
+        self.catalogue: Any = None  # the catalogue context (service.context): names the saturated tracks
         self.gaia = Breaker("Gaia archive")
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(40, connect=10), headers={"User-Agent": "spherex-sky/0.1"})
 
@@ -130,6 +131,8 @@ class Movers:
                 extra = await cpu.run(saturated_movers, meta, raws, stars, result["tracks"]) if stars else []
             except (BreakerOpenError, httpx.HTTPError, ValueError, KeyError, OSError):
                 extra = []  # the catalogue did not answer: the search's own tracks stand, and this part is tried on the next search
+            for t in extra:  # the star's name (SIMBAD: "eps Ind A"), when the catalogue answers in a few seconds
+                t["name"] = await self._star_name(t)
             result["tracks"] = list(result["tracks"]) + extra
             result["saturated_movers"] = len(extra)
             run.result = result
@@ -162,6 +165,19 @@ class Movers:
             tmp = self.dir / f"{run.key}.part"
             tmp.write_text(json.dumps(run.result, separators=(",", ":")))
             tmp.replace(self.dir / f"{run.key}.json")
+
+    async def _star_name(self, t: dict[str, Any]) -> str | None:
+        """SIMBAD's name for a catalogue-named track (its display name, e.g. "eps Ind A"), or None."""
+        if self.catalogue is None:
+            return None
+        try:
+            r = await asyncio.wait_for(self.catalogue.simbad_at(t["ra_2025_9"], t["dec_2025_9"], 2025.9, 6.0), 6.0)
+        except (TimeoutError, httpx.HTTPError, BreakerOpenError, ValueError):
+            return None
+        if r.get("state") != "ok":
+            return None
+        name = r.get("display_name") or r.get("name")
+        return str(name) if name else None
 
     async def _fast_stars(self, meta: dict[str, Any]) -> list[dict[str, Any]]:
         """The bright fast stars of the field in Gaia DR3 (G < SAT_STAR_G, proper motion above SAT_PM_MAS), from the archive or, when it

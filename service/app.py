@@ -93,7 +93,7 @@ class State:
         self.anomalies: Anomalies | None = None
         self.bodies: KnownBodies | None = None
         self.lightcurves: dict[tuple[float, float, int, int], dict[str, Any]] = {}
-        self.identified: dict[tuple[float, float, int, int], dict[str, Any]] = {}
+        self.identified: dict[tuple[float, float, int, int, str | None], dict[str, Any]] = {}
         self.coverage_lock = asyncio.Lock()
         self.coverage_task: asyncio.Task[None] | None = None
 
@@ -118,6 +118,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.pairs = Pairs(st.store, cfg.store_dir, st.catalogue)
         st.wavelengths = WavelengthMaps(st.s3, cfg.store_dir)
         st.movers = Movers(st.store, cfg.store_dir)
+        st.movers.catalogue = st.catalogue
         st.dwarfs = BrownDwarfs(st.store, cfg.store_dir, st.movers, st.catalogue)
         st.bodies = KnownBodies(cfg.store_dir, st.index)
         if st.index is not None:
@@ -605,18 +606,19 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         dec: float = Query(..., ge=-90, le=90),
         pmra: float = Query(0.0, ge=-20000, le=20000),
         pmdec: float = Query(0.0, ge=-20000, le=20000),
+        only: str | None = Query(None, pattern="^(simbad|gaia)$"),
     ) -> Any:
-        """What SIMBAD and Gaia DR3 call a place (each part: ok / none / unavailable)."""
+        """What SIMBAD and Gaia DR3 call a place (each part: ok / none / pending / unavailable). `only` asks one catalogue (the page asks
+        both at once and shows each as it arrives); one that has not answered in 3 s is `pending` and is answered on the next ask."""
         if st.anomalies is None:
             raise HTTPException(503, "the exposure index is not loaded")
-        key = (round(ra, 5), round(dec, 5), round(pmra), round(pmdec))
+        key = (round(ra, 5), round(dec, 5), round(pmra), round(pmdec), only)
         hit = st.identified.get(key)
         if hit is not None:
             return hit
         # the place is where the source stands at the passes' epoch: the catalogues' places are carried to it with their own motions
-        # (the old query looked at the clicked place in the catalogues' epochs, 2000 and 2016, and lost every star that moves)
-        out = await (st.catalogue.identify(ra, dec) if st.catalogue is not None else st.anomalies.identify(ra, dec, pmra, pmdec))
-        if all(v.get("state") != "unavailable" for v in out.values()):
+        out = await (st.catalogue.identify(ra, dec, only=only) if st.catalogue is not None else st.anomalies.identify(ra, dec, pmra, pmdec))
+        if all(v.get("state") not in ("unavailable", "pending") for v in out.values()):
             st.identified[key] = out
             if len(st.identified) > 5000:
                 st.identified.pop(next(iter(st.identified)))

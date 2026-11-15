@@ -33,6 +33,10 @@ VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 NED_URL = "https://ned.ipac.caltech.edu/cgi-bin/objsearch"
 SIMBAD_EPOCH, GAIA_EPOCH = 2000.0, 2016.0
 IDENT_FAST_MAS = 1000.0  # above this proper motion (mas/yr) a star can have left the small cone: SIMBAD is asked for those in a wide cone
+GAIA_HEDGE_S = 1.0  # the AWS copy is asked as well when the Gaia archive has not answered after this long
+IDENT_DEADLINE_S = (
+    3.0  # a passport waits this long for one catalogue, then shows it as still being asked (the answer is kept for the next ask)
+)
 BRIGHT_MAG = 9.0  # a star brighter than this saturates SPHEREx: the centre of its core is uncertain by several arcseconds
 BRIGHT_RADIUS = 15.0
 IDENT_MAX_MAS = 11000.0  # the fastest star known (Barnard's Star) moves 10.4 arcsec/yr
@@ -275,6 +279,19 @@ def gaia_cloud_rows(ra: float, dec: float, radius_arcsec: float) -> list[dict[st
     return gaia_hats.cone(ra, dec, radius_arcsec / 3600.0)
 
 
+def display_name(main_id: str, aliases: list[str]) -> str:
+    """The name to show: SIMBAD's main identifier without its type prefix, but the primary of a system ("eps Ind A") when SIMBAD names the
+    object by the system ("* eps Ind") and another of its names says it is component A ("GJ 845 A")."""
+    plain = main_id.removeprefix("V* ").removeprefix("* ").removeprefix("NAME ").strip()
+    if len(plain) > 1 and plain[-2] == " " and plain[-1].isupper():
+        return plain  # already a component (eps Ind B)
+    for a in aliases:  # the object has a name of its own as component A of a system ("GJ 845 A"): it is the primary
+        a = a.removeprefix("* ").strip()
+        if len(a) > 2 and a.endswith(" A") and a != plain:
+            return plain + " A"
+    return plain
+
+
 class CatalogueContext:
     """The seven catalogues for a place, asked together, each behind its own breaker, cached for a week (answers 'ok' and 'none' only)."""
 
@@ -313,10 +330,30 @@ class CatalogueContext:
         for base in SIMBAD_BASES:
             try:
                 body = await self._get("simbad", base, {"request": "doQuery", "lang": "adql", "format": "json", "query": adql})
-                return parse_simbad(json.loads(body).get("data") or [], ra, dec, epoch, radius)
+                found = parse_simbad(json.loads(body).get("data") or [], ra, dec, epoch, radius)
+                if found.get("state") == "ok":
+                    aliases = await self._aliases(base, found["name"])
+                    found["aliases"] = aliases
+                    found["display_name"] = display_name(found["name"], aliases)
+                return found
             except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
                 err = e
         raise err or RuntimeError("no SIMBAD mirror")
+
+    async def _aliases(self, base: str, main_id: str) -> list[str]:
+        """The other names SIMBAD has for an object (a few, best effort: the answer does not wait on them)."""
+        q = (
+            "SELECT TOP 40 ident.id FROM ident JOIN basic ON ident.oidref = basic.oid WHERE basic.main_id = '"
+            + main_id.replace("'", "''")
+            + "'"
+        )
+        try:
+            body = await asyncio.wait_for(
+                self._get("simbad", base, {"request": "doQuery", "lang": "adql", "format": "json", "query": q}), 2.0
+            )
+            return [str(r[0]) for r in (json.loads(body).get("data") or [])]
+        except (httpx.HTTPError, BreakerOpenError, ValueError, TimeoutError):
+            return []
 
     async def _gaia(self, ra: float, dec: float, epoch: float, radius: float) -> dict[str, Any]:
         """Gaia DR3 at `epoch`: the stars in a small cone (every star that moves less than a few arcseconds a year) and, in a wide cone, the
@@ -333,39 +370,84 @@ class CatalogueContext:
                 "source_id, ra, dec, pmra, pmdec, parallax, parallax_error, phot_g_mean_mag, phot_bp_mean_mag, phot_rp_mean_mag, ruwe"
             ),
         }
-        err: Exception | None = None
-        for url, table, label in GAIA_TAPS:
-            where = (
-                f"(1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {small:.6f}))) OR "
-                f"(1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {big:.6f})) "
-                f"AND (pmra*pmra + pmdec*pmdec) > {IDENT_FAST_MAS**2:.0f})"
-            )
-            adql = f"SELECT TOP 1500 {cols[table]} FROM {table} WHERE {where}"
-            try:
-                return parse_gaia(await self._tap("gaia", url, adql), ra, dec, epoch, radius, label)
-            except (httpx.HTTPError, BreakerOpenError) as e:
-                err = e
-        try:  # no archive answered: the Parquet copy in AWS (a worker process: it reads files over the network)
+
+        async def archives() -> dict[str, Any]:
+            err: Exception | None = None
+            for url, table, label in GAIA_TAPS:
+                where = (
+                    f"(1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {small:.6f}))) OR "
+                    f"(1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {big:.6f})) "
+                    f"AND (pmra*pmra + pmdec*pmdec) > {IDENT_FAST_MAS**2:.0f})"
+                )
+                adql = f"SELECT TOP 1500 {cols[table]} FROM {table} WHERE {where}"
+                try:
+                    return parse_gaia(await self._tap("gaia", url, adql), ra, dec, epoch, radius, label)
+                except (httpx.HTTPError, BreakerOpenError) as e:
+                    err = e
+            raise err or RuntimeError("no Gaia archive")
+
+        async def cloud() -> dict[str, Any]:  # the Parquet copy in AWS (a worker process: it reads files over the network)
             rows = await cpu.run(gaia_cloud_rows, ra, dec, big * 3600.0)
-        except Exception:
-            raise err or RuntimeError("no Gaia archive") from None
-        return parse_gaia_rows(rows, ra, dec, epoch, radius, "Gaia DR3 on AWS (the archives did not answer)")
+            return parse_gaia_rows(rows, ra, dec, epoch, radius, "Gaia DR3 on AWS (the archive was slow or did not answer)")
+
+        # the archive first; when it has not answered after GAIA_HEDGE_S (or fails) the AWS copy is asked as well, and the first answer wins
+        first = asyncio.ensure_future(archives())
+        try:
+            return await asyncio.wait_for(asyncio.shield(first), GAIA_HEDGE_S)
+        except (httpx.HTTPError, BreakerOpenError, TimeoutError):
+            pass
+        second = asyncio.ensure_future(cloud())
+        pending: set[asyncio.Future[dict[str, Any]]] = {first, second}
+        last: BaseException | None = None
+        try:
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                for t in done:
+                    exc = t.exception()
+                    if exc is None:
+                        return t.result()
+                    last = exc
+        finally:
+            for t in pending:
+                t.cancel()
+        raise last or RuntimeError("no Gaia archive")
 
     async def gaia_at(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0) -> dict[str, Any]:
         """Gaia alone, kept the same way as inside `context`."""
         pos = f"{ra:.4f}_{dec:.4f}_{epoch:.1f}_{radius:.1f}"
         return await self._kept("gaia2_" + pos, lambda: self._gaia(ra, dec, epoch, radius))
 
-    async def identify(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0) -> dict[str, Any]:
+    async def _within(self, task: Awaitable[dict[str, Any]]) -> dict[str, Any]:
+        """A catalogue's answer, or `pending` when it has not come in IDENT_DEADLINE_S (it keeps running; the next ask finds it kept)."""
+        fut = asyncio.ensure_future(task)
+        try:
+            return await asyncio.wait_for(asyncio.shield(fut), IDENT_DEADLINE_S)
+        except TimeoutError:
+            return {"state": "pending", "error": "still being asked"}
+
+    async def identify(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0, only: str | None = None) -> dict[str, Any]:
         """What SIMBAD and Gaia DR3 call the place where a source stands at `epoch`, in the shape of the `identify` route. Positions of the
-        catalogues are carried to that epoch with their proper motions, whatever the star's motion; a catalogue that does not answer is
-        `unavailable`, never `none`."""
-        sm, gm = await asyncio.gather(self.simbad_at(ra, dec, epoch, radius), self.gaia_at(ra, dec, epoch, radius))
+        catalogues are carried to that epoch with their proper motions, whatever the star's motion; SIMBAD and Gaia are asked together, each
+        for at most IDENT_DEADLINE_S (`pending` after that, the answer arrives for the next ask), and a catalogue that fails is
+        `unavailable`, never `none`. `only` = "simbad" or "gaia" asks one of them (the page asks both and shows each as it arrives)."""
+        want_sm, want_gm = only in (None, "simbad"), only in (None, "gaia")
+        sm: dict[str, Any] = {"state": "skipped"}
+        gm: dict[str, Any] = {"state": "skipped"}
+        if want_sm and want_gm:
+            sm, gm = await asyncio.gather(
+                self._within(self.simbad_at(ra, dec, epoch, radius)), self._within(self.gaia_at(ra, dec, epoch, radius))
+            )
+        elif want_sm:
+            sm = await self._within(self.simbad_at(ra, dec, epoch, radius))
+        else:
+            gm = await self._within(self.gaia_at(ra, dec, epoch, radius))
         out: dict[str, Any] = {}
         if sm.get("state") == "ok":
             out["simbad"] = {
                 "state": "ok",
                 "name": sm["name"],
+                "display_name": sm.get("display_name") or sm["name"],
+                "aliases": sm.get("aliases") or [],
                 "type": sm.get("otype"),
                 "sp": sm.get("sptype"),
                 "sep": sm.get("sep"),
@@ -373,7 +455,7 @@ class CatalogueContext:
                 "pmdec": sm.get("pmdec"),
                 **({"note": sm["note"]} if "note" in sm else {}),
             }
-        else:
+        elif sm.get("state") != "skipped":
             out["simbad"] = {k: sm[k] for k in ("state", "error") if k in sm}
         if gm.get("state") == "ok":
             out["gaia"] = {
@@ -381,7 +463,7 @@ class CatalogueContext:
                 for k in ("state", "source_id", "g", "bp_rp", "parallax", "ruwe", "pmra", "pmdec", "sep", "source", "note")
                 if gm.get(k) is not None or k in ("state", "source_id")
             }
-        else:
+        elif gm.get("state") != "skipped":
             out["gaia"] = {k: gm[k] for k in ("state", "error") if k in gm}
         return out
 
