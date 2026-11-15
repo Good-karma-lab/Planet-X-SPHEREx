@@ -78,6 +78,8 @@ const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
 const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2, 4], ice: [4], pah: [4], co2: [5], co: [6] };
 /** a band's name on a tile too small for the full one */
 const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
+/** the room kept at the top of a wall for the title chip and the field chip: no tile is covered by them */
+const WALL_TOP = 46;
 /** what a picture shows where its pixels have not arrived yet */
 const DARK: [number, number, number] = [0, 0, 0];
 const BANDS = [
@@ -1063,8 +1065,8 @@ export function Lab({ route }: { route: Route }) {
           } else if (st.view === 'bands') {
             // the tiles fill the whole picture area (the chips and the title float over it)
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
-            panels = wallLayout(shownBands.length, w, h).map((c0, j) => {
-              const c = c0;
+            panels = wallLayout(shownBands.length, w, h - WALL_TOP).map((c0, j) => {
+              const c = { ...c0, y: c0.y + WALL_TOP };
               const { bd, i } = shownBands[j]!;
               return {
                 x: c.x,
@@ -1089,8 +1091,8 @@ export function Lab({ route }: { route: Route }) {
             });
           } else {
             const shownDets = st.dets.slice().sort();
-            panels = wallLayout(shownDets.length, w, h).map((c0, j) => {
-              const c = c0;
+            panels = wallLayout(shownDets.length, w, h - WALL_TOP).map((c0, j) => {
+              const c = { ...c0, y: c0.y + WALL_TOP };
               const d = shownDets[j]! - 1;
               return {
                 x: c.x,
