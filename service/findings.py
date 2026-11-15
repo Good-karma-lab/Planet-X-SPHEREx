@@ -52,6 +52,7 @@ CATALOGUE_LABEL = {
     "vsx": "VSX (variable stars)",
     "ned": "NED (galaxies)",
     "sbident": "JPL Small-Body Identification",
+    "halo": "Bright star nearby (Gaia G < 10, within 60″)",
 }
 MOVING = (
     "film",
@@ -88,7 +89,7 @@ def want_of(kind: str, ra: float, dec: float, data: dict[str, Any]) -> list[str]
     if kind == "film":
         return ["sbident"]
     near = kind == "browndwarf" and data.get("group") != "known" and abs(ecl_lat(ra, dec)) < ECLIPTIC_BAND
-    return [*CATALOGUES, *(["sbident"] if near or _ref_mjd(kind, data) is not None else [])]
+    return [*CATALOGUES, *(["sbident"] if near or _ref_mjd(kind, data) is not None else []), *(["halo"] if kind == "peak" else [])]
 
 
 def _ref_mjd(kind: str, data: dict[str, Any]) -> float | None:
@@ -103,12 +104,17 @@ def decisive_of(kind: str, ra: float, dec: float, data: dict[str, Any]) -> list[
     if kind == "film":
         return ["sbident"]
     out = ["simbad", "gaia"]
-    if "sbident" in want_of(kind, ra, dec, data):
+    wanted = want_of(kind, ra, dec, data)
+    if "sbident" in wanted:
         out.append("sbident")
+    if "halo" in wanted:
+        out.append("halo")
     return out
 
 
 RESIDUAL_ARCSEC = 3.0
+HALO_ARCSEC = 60.0  # a Gaia star brighter than G 10 this close puts a peak in its halo
+HALO_MAG = 10.0
 GALAXY_TYPES = frozenset(
     {
         "G",
@@ -139,7 +145,7 @@ GALAXY_TYPES = frozenset(
     }
 )
 GALAXY_NAMES = ("ACS-GC", "2MASX", "LEDA", "SDSS")  # catalogues of galaxies: a match to one is a galaxy, never a brown dwarf or a mover
-HIDDEN = ("residual", "galaxy", "below")  # statuses kept out of the leads and the default list
+HIDDEN = ("residual", "galaxy", "below", "halo")  # statuses kept out of the leads and the default list
 
 
 def is_galaxy(name: str | None, typ: str | None) -> bool:
@@ -1073,6 +1079,38 @@ class Findings:
             "n_bodies": max(g.get("n_bodies", 0) for g in got),
         }
 
+    async def bright_neighbour(self, ra: float, dec: float) -> dict[str, Any]:
+        """The brightest Gaia DR3 star (G < 10) that stands within 60″ of the place at the epoch (each moved from 2016 with its proper motion)."""
+        from service.context import GAIA_EPOCH, GAIA_TAPS, gaia_rows, moved, sep_arcsec
+
+        cone = (HALO_ARCSEC + 250.0) / 3600.0  # wide: a fast bright star (Barnard's) has moved up to ~100″ since 2016
+        err: Exception | None = None
+        for url, table, _label in GAIA_TAPS:
+            adql = (
+                f"SELECT TOP 40 source_id, ra, dec, pmra, pmdec, phot_g_mean_mag FROM {table} "
+                f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {cone:.6f})) "
+                f"AND phot_g_mean_mag < {HALO_MAG} ORDER BY phot_g_mean_mag"
+            )
+            try:
+                body = await self.catalogue._tap("gaia", url, adql)
+            except (httpx.HTTPError, BreakerOpenError) as e:
+                err = e
+                continue
+            best: tuple[float, dict[str, Any]] | None = None
+            for r in gaia_rows(body):
+                try:
+                    a, d = moved(
+                        float(r["ra"]), float(r["dec"]), float(r.get("pmra") or 0.0), float(r.get("pmdec") or 0.0), EPOCH - GAIA_EPOCH
+                    )
+                    mag = float(r["phot_g_mean_mag"])
+                except (KeyError, ValueError):
+                    continue
+                sep = sep_arcsec(a, d, ra, dec)
+                if sep <= HALO_ARCSEC and (best is None or mag < best[1]["g"]):
+                    best = (sep, {"state": "ok", "name": f"Gaia DR3 {r['source_id']} (G {mag:.1f})", "sep": round(sep, 1), "g": mag})
+            return best[1] if best else {"state": "none"}
+        raise err or RuntimeError("no Gaia archive")
+
     async def identify_one(self, row: sqlite3.Row) -> None:
         want = want_of(row["kind"], row["ra"], row["dec"], json.loads(row["data"] or "{}"))
         if "sbident" in want:
@@ -1096,6 +1134,12 @@ class Findings:
                 pass  # JPL is resting after failures: the find stays pending and is asked later, no attempt spent
             except (httpx.HTTPError, ValueError) as e:
                 self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": str(e)[:120]})
+        if "halo" in want:
+            try:
+                h = await self.bright_neighbour(row["ra"], row["dec"])
+                self.db.put_ident(row["id"], "halo", h["state"], h.get("name"), h.get("sep"), None, {k: h[k] for k in ("g",) if k in h}, h)
+            except (httpx.HTTPError, BreakerOpenError, ValueError, RuntimeError) as e:
+                self.db.put_ident(row["id"], "halo", "unavailable", None, None, None, {"error": str(e)[:120]})
         if "simbad" in want:
             ctx = await self.catalogue.context(row["ra"], row["dec"], EPOCH, RADIUS)
             for cat in CATALOGUES:
@@ -1148,6 +1192,43 @@ def _pm_agrees(f: dict[str, Any], idents: list[dict[str, Any]]) -> bool:
     return False
 
 
+def _pm_of(i: dict[str, Any]) -> float | None:
+    raw = i.get("raw") or {}
+    if raw.get("pmra") is None or raw.get("pmdec") is None:
+        return None
+    return math.hypot(float(raw["pmra"]), float(raw["pmdec"])) / 1000.0
+
+
+def _motion_identity(f: dict[str, Any], idents: list[dict[str, Any]]) -> None:
+    """For a mover or brown dwarf the name is the catalogue source that moves as it does. SIMBAD at the motion-corrected place (the scan's own
+    answer, or the stored one) wins over a Gaia neighbour; a Gaia row whose motion does not match is marked a neighbour."""
+    if f["kind"] not in ("mover", "browndwarf") or f.get("rate") is None:
+        return
+    rate = f["rate"]
+
+    def agrees(v: float | None) -> bool:
+        return v is not None and abs(v - rate) <= 0.3 * max(rate, 0.5)
+
+    for i in idents:
+        if i["catalogue"] == "gaia" and i["state"] == "ok" and _pm_of(i) is not None and not agrees(_pm_of(i)):
+            i["note"] = "a neighbour: its proper motion does not match the find"
+    sb = next((i for i in idents if i["catalogue"] == "simbad" and i["state"] == "ok" and i.get("name")), None)
+    src = (f["data"].get("source") or {}).get("simbad") or {}
+    if sb is not None and (agrees(_pm_of(sb)) or (_pm_of(sb) is None and src.get("state") == "ok")):
+        f["identity"] = {"name": sb["name"], "catalogue": "SIMBAD", "type": sb.get("type"), "basis": "named at the motion-corrected place"}
+    elif src.get("state") == "ok" and src.get("name"):
+        f["identity"] = {
+            "name": src["name"],
+            "catalogue": "SIMBAD",
+            "type": src.get("otype"),
+            "basis": "named by the scan at the motion-corrected place",
+        }
+    else:
+        g = next((i for i in idents if i["catalogue"] == "gaia" and i["state"] == "ok" and agrees(_pm_of(i))), None)
+        if g is not None:
+            f["identity"] = {"name": g["name"], "catalogue": "Gaia DR3", "type": None, "basis": "same proper motion"}
+
+
 def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
     """`known` (a catalogue or the scan itself names what it is), `unchecked` (catalogues still to answer or that did not answer, and none explains
     it yet) or `unexplained` (every catalogue answered and none explains it)."""
@@ -1184,6 +1265,8 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         known = True
     if known:
         return "known"
+    if kind == "peak" and ok("halo"):
+        return "halo"  # inside the halo of a bright star: its glare, not a body
     if kind == "peak":
         # a peak on a catalogued star is most likely that star's residual in the difference, not a body: said so and kept out of the leads
         for c in ("simbad", "gaia", "twomass", "allwise"):
@@ -1217,6 +1300,10 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         for i in idents
         if i["state"] == "ok"
     ]
+    if status == "halo":
+        h = next((i for i in idents if i["catalogue"] == "halo" and i["state"] == "ok"), None)
+        near = f" ({h['name']}, {h['sep']:.0f}″ away)" if h else ""
+        return f"Near a bright star{near}: inside its halo, so most likely its glare and not a body. Not counted as a lead."
     if status == "below":
         return "The search did not mark this peak ok: it is below its own bar, so it is not a lead. Not counted."
     if status == "galaxy":
@@ -1247,7 +1334,14 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         return text + (f" Named so far: {'; '.join(named[:2])}." if named else "")
     kind = f["kind"]
     if status == "known":
+        ident = f.get("identity")
         who = "; ".join(named[:2]) if named else "a catalogue"
+        if ident and f["kind"] in ("mover", "browndwarf"):
+            who = (
+                f"{ident['catalogue']}: {ident['name']}"
+                + (f" ({ident['type']})" if ident.get("type") else "")
+                + f", which moves like it ({ident['basis']})"
+            )
         base = {
             "mover": "A known object that moves like this: ",
             "browndwarf": "A known brown dwarf: ",
@@ -1307,17 +1401,20 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
                 )
         order = {c: i for i, c in enumerate([*list(CATALOGUES), "sbident"])}
         ids_.sort(key=lambda i: order.get(i["catalogue"], 99))
+        _motion_identity(f, ids_)
         st = status_of(f, ids_)
         f["status"] = st
         f["idents"] = ids_
         f["verdict"] = verdict_of(f, ids_, st)
         items.append(f)
     counts: dict[str, dict[str, int]] = {
-        k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "leads": 0} for k in KINDS
+        k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "halo": 0, "leads": 0}
+        for k in KINDS
     }
     for f in items:
         tally = counts.setdefault(
-            f["kind"], {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "leads": 0}
+            f["kind"],
+            {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "halo": 0, "leads": 0},
         )
         if f["status"] not in HIDDEN:  # a star's residual and a galaxy are not leads: counted apart
             tally["all"] += 1
@@ -1330,12 +1427,12 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         if (not kind or f["kind"] == kind)
         and (
             (f["status"] in HIDDEN) == (status in HIDDEN) and (status not in HIDDEN or f["status"] == status)
-            if status in (None, "all", "residual", "galaxy")
+            if status in (None, "all") or status in HIDDEN
             else f["status"] == status
         )
         and (not place or f["place"] == place)
     ]
-    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5}
+    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
     unavailable = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable")

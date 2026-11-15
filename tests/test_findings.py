@@ -289,20 +289,27 @@ def test_peaks_known_by_jpl_or_a_star_residual() -> None:
 
     peak = {"kind": "peak", "ra": 10.0, "dec": 5.0, "data": {"peak": {"ref_mjd": 61000.0}}}
     old = {"kind": "peak", "ra": 10.0, "dec": 5.0, "data": {"peak": {}}}
-    assert decisive_of("peak", 10.0, 5.0, peak["data"]) == ["simbad", "gaia", "sbident"]
-    assert decisive_of("peak", 10.0, 5.0, old["data"]) == ["simbad", "gaia"]  # no date: JPL is not asked
+    assert decisive_of("peak", 10.0, 5.0, peak["data"]) == ["simbad", "gaia", "sbident", "halo"]
+    assert decisive_of("peak", 10.0, 5.0, old["data"]) == ["simbad", "gaia", "halo"]  # no date: JPL is not asked
     assert status_of(peak, [{"catalogue": "sbident", "state": "ok"}]) == "known"
     star = {"catalogue": "allwise", "state": "ok", "sep": 1.4, "label": "AllWISE", "name": "AllWISE J040313.55+082720.0"}
     got = status_of(old, [star])
     assert got == "residual" and "residual of that star" in verdict_of(old, [star], got)
     far = {**star, "sep": 5.0}
     # an undated peak cannot be compared with the known bodies (JPL), so nothing explaining it is not yet "unexplained"
-    assert status_of(old, [far, {"catalogue": "simbad", "state": "none"}, {"catalogue": "gaia", "state": "none"}]) == "unchecked"
+    assert (
+        status_of(
+            old,
+            [far, {"catalogue": "simbad", "state": "none"}, {"catalogue": "gaia", "state": "none"}, {"catalogue": "halo", "state": "none"}],
+        )
+        == "unchecked"
+    )
     dated_far = [
         far,
         {"catalogue": "simbad", "state": "none"},
         {"catalogue": "gaia", "state": "none"},
         {"catalogue": "sbident", "state": "none"},
+        {"catalogue": "halo", "state": "none"},
     ]
     assert status_of(peak, dated_far) == "unexplained"
 
@@ -471,3 +478,41 @@ def test_peaks_below_the_bar_are_not_leads_and_the_cleanup_removes_old_rows(tmp_
     f.db = db
     assert f.cleanup() == 1 and f.cleanup() == 0
     assert db.db.execute("SELECT COUNT(*) FROM finds").fetchone()[0] == 1
+
+
+def test_halo_peaks_and_motion_identity() -> None:
+    from service.findings import _motion_identity
+
+    peak = {"kind": "peak", "ra": 10.0, "dec": 5.0, "data": {"peak": {"ok": True}}}
+    halo = {"catalogue": "halo", "state": "ok", "name": "Gaia DR3 1 (G 8.2)", "sep": 40.0, "label": "Bright star nearby"}
+    got = status_of(peak, [halo])
+    assert got == "halo" and "inside its halo" in verdict_of(peak, [halo], got)
+    # WISE 0855: SIMBAD names it at the motion-corrected place, Gaia only has a neighbour with another motion
+    bd = {
+        "kind": "browndwarf",
+        "ra": 133.8,
+        "dec": -7.2,
+        "rate": 7.9,
+        "data": {"group": "known", "source": {"simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "Y*"}}},
+    }
+    ids = [
+        {
+            "catalogue": "simbad",
+            "state": "ok",
+            "name": "WISEA J085510.74-071442.5",
+            "type": "BD*",
+            "label": "SIMBAD",
+            "raw": {"pmra": -7790.1, "pmdec": 1492.6},
+        },
+        {
+            "catalogue": "gaia",
+            "state": "ok",
+            "name": "Gaia DR3 5756956644387831296",
+            "label": "Gaia DR3",
+            "raw": {"pmra": 12.0, "pmdec": -3.0},
+        },
+    ]
+    _motion_identity(bd, ids)
+    assert bd["identity"]["name"].startswith("WISEA J0855") and "neighbour" in ids[1]["note"]
+    text = verdict_of(bd, ids, status_of(bd, ids))
+    assert "WISEA J085510" in text and "5756956644387831296" not in text

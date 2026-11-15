@@ -13,6 +13,7 @@ export interface Ident {
   type: string | null;
   detail: Record<string, unknown>;
   raw?: unknown;
+  note?: string;
 }
 export interface Find {
   id: string;
@@ -33,6 +34,7 @@ export interface Find {
   spectrum: { lam: number | null; lam_hi: number | null; flux: number | null; err: number | null; model: number | null }[];
   lightcurve: { label: string; mjd: number | null; flux: number | null; err: number | null }[];
   versions: Record<string, string | null>;
+  identity?: { name: string; catalogue: string; type: string | null; basis: string };
 }
 interface Reply {
   total: number;
@@ -110,6 +112,7 @@ export function titleOf(f: Find): string {
 
 /** The best name any catalogue gave, for the second line of a row. */
 const nameOf = (f: Find) => {
+  if (f.identity) return f.identity.catalogue === 'SIMBAD' ? cleanName(f.identity.name) : f.identity.name;
   const i = f.idents.find((x) => x.state === 'ok' && x.name && x.catalogue !== 'gaia') ?? f.idents.find((x) => x.state === 'ok' && x.name);
   return i?.name ? (i.catalogue === 'simbad' ? cleanName(i.name) : i.name) : '';
 };
@@ -347,7 +350,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
             <tr key={i.catalogue} class={`c-${i.state}`}>
               <td>{i.label}</td>
               <td title={i.name ?? ''}>
-                {i.state === 'ok' ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}${i.catalogue === 'sbident' && i.detail.visits_matched ? ` · at ${i.detail.visits_matched} of ${i.detail.visits_checked} visits` : ''}` : i.state === 'none' ? `nothing within 6″` : i.state === 'unavailable' ? 'did not answer' : 'not asked yet'}
+                {i.state === 'ok' ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}${i.catalogue === 'sbident' && i.detail.visits_matched ? ` · at ${i.detail.visits_matched} of ${i.detail.visits_checked} visits` : ''}${i.note ? ` · ${i.note}` : ''}` : i.state === 'none' ? (i.catalogue === 'halo' ? 'no bright star within 60″' : 'nothing within 6″') : i.state === 'unavailable' ? 'did not answer' : 'not asked yet'}
               </td>
               <td>{i.state === 'ok' && i.sep != null ? `${i.sep.toFixed(1)}″` : ''}</td>
             </tr>
