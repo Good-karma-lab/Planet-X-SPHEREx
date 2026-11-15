@@ -468,7 +468,7 @@ async def run_deep(
                 s_ = stats[ti]
                 n_pts = sum(n for _, n in s_["bydet"].values())
                 at = orbs[ci].sky(fd["mid"], eorbit.earth(fd["mid"]))
-                recs.append({"flux": s_["F"], "err": s_["err"], "sn": s_["sn"], "n": n_pts, "at": at})
+                recs.append({"flux": s_["F"], "err": s_["err"], "sn": s_["sn"], "n": n_pts, "at": at, "mjd": float(fd["mid"])})
             per.append(recs)
         out: dict[int, dict[str, Any]] = {}
         for ti, (ci, _du, _dv) in enumerate(tracks):
@@ -539,8 +539,18 @@ async def run_deep(
                 "flux_mjy": _f(c["flux"]),
                 "err_mjy": _f(c["err"]),
                 "phot_sn": _f(c["psn"], 1),
+                # `ra`, `dec` above are the orbit's place at `ref_mjd` (the search's reference date, the middle field's mean exposure date,
+                # not the middle of the pass); `by_pass` gives the place at each pass's own mean exposure date `mjd`
+                "ref_mjd": round(float(G.tr), 3),
                 "by_pass": [
-                    {"flux_mjy": _f(q["flux"]), "sn": _f(q["sn"], 1), "n": q["n"], "ra": round(q["at"][0], 5), "dec": round(q["at"][1], 5)}
+                    {
+                        "flux_mjy": _f(q["flux"]),
+                        "sn": _f(q["sn"], 1),
+                        "n": q["n"],
+                        "mjd": round(q["mjd"], 3),
+                        "ra": round(q["at"][0], 5),
+                        "dec": round(q["at"][1], 5),
+                    }
                     for q in c["passes"]
                 ],
                 "ok": bool(c.get("ok")),
