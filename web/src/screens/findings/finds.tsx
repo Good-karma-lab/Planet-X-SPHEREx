@@ -36,7 +36,7 @@ export interface Find {
 }
 interface Reply {
   total: number;
-  counts: Record<string, { all: number; unexplained: number; unchecked: number; known: number }>;
+  counts: Record<string, { all: number; unexplained: number; unchecked: number; known: number; leads?: number }>;
   labels: Record<string, string>;
   identification: { pending: number; unavailable: number; unavailable_decisive?: number; unavailable_extras?: number; catalogues: string[] };
   finds: Find[];
@@ -101,8 +101,10 @@ export function titleOf(f: Find): string {
       return `Pair ${(d.pair?.separation_arcsec ?? 0).toFixed(1)}″ apart · flux change ${(f.score ?? 0).toFixed(1)}σ`;
     case 'film':
       return `${(f.rate ?? 0).toFixed(1)}″/h object moving in a pass${d.less_certain ? ' (less certain)' : ''}`;
-    default:
-      return `Planet X peak · ${(d.peak?.d ?? 0).toFixed(0)} au`;
+    default: {
+      const jpl = f.idents.find((i) => i.catalogue === 'sbident' && i.state === 'ok' && i.name);
+      return jpl ? `${String(jpl.name).replace(/^\d+ /, '').replace(/ \(.*\)$/, '')} · ${(d.peak?.d ?? 0).toFixed(1)} au (a known body)` : `Planet X peak · ${(d.peak?.d ?? 0).toFixed(0)} au`;
+    }
   }
 }
 
@@ -374,7 +376,7 @@ export function FindingsView({ wide, leadId, setLeadId }: { wide: boolean; leadI
   const sel = r.finds.find((f) => f.id === leadId);
   const atlas = leadId === ATLAS_LEAD.id;
   const shown = atlas ? undefined : (sel ?? (wide ? rows[0] : undefined));
-  const cnt = (k: string) => (k === 'all' ? r.total : (r.counts[k]?.all ?? 0));
+  const cnt = (k: string) => (k === 'all' ? r.total : k === 'peak' ? (r.counts[k]?.leads ?? r.counts[k]?.all ?? 0) : (r.counts[k]?.all ?? 0));
   let n = 0;
   const list = (
     <section class="card glass leads">

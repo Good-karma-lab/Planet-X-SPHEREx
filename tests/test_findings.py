@@ -439,3 +439,35 @@ def test_a_galaxy_match_is_not_a_brown_dwarf_or_a_mover() -> None:
     assert status_of(real, []) == "known"
     sb = [{"catalogue": "simbad", "state": "ok", "name": "NAME Some Galaxy", "type": "AGN", "label": "SIMBAD", "sep": 0.5}]
     assert status_of({"kind": "mover", "ra": 10.0, "dec": 5.0, "rate": 5.0, "data": {"track": {"check": "none"}}}, sb) == "galaxy"
+
+
+def test_peaks_below_the_bar_are_not_leads_and_the_cleanup_removes_old_rows(tmp_path: Path) -> None:
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+
+    def peak(i: str, ok: bool, ra: float) -> dict[str, Any]:
+        return {
+            "id": i,
+            "kind": "peak",
+            "place": "p",
+            "fov": 18,
+            "ra": ra,
+            "dec": 5.0,
+            "rate": None,
+            "snr": 6.0,
+            "score": 6.0,
+            "chance": None,
+            "data": {"peak": {"ok": ok, "d": 300.0}},
+            "scans": [],
+        }
+
+    db.write_finds([peak("peak:a", True, 10.0), peak("peak:b", False, 20.0)])
+    out = query(db, "peak", "all", None, 10, 0)
+    assert out["counts"]["peak"]["all"] == 1 and out["counts"]["peak"]["below"] == 1 and out["counts"]["peak"]["leads"] == 1
+    assert [f["id"] for f in out["finds"]] == ["peak:a"]
+    assert query(db, "peak", "below", None, 10, 0)["count"] == 1
+    from service.findings import Findings
+
+    f = Findings.__new__(Findings)
+    f.db = db
+    assert f.cleanup() == 1 and f.cleanup() == 0
+    assert db.db.execute("SELECT COUNT(*) FROM finds").fetchone()[0] == 1

@@ -139,7 +139,7 @@ GALAXY_TYPES = frozenset(
     }
 )
 GALAXY_NAMES = ("ACS-GC", "2MASX", "LEDA", "SDSS")  # catalogues of galaxies: a match to one is a galaxy, never a brown dwarf or a mover
-HIDDEN = ("residual", "galaxy")  # statuses kept out of the leads and the default list
+HIDDEN = ("residual", "galaxy", "below")  # statuses kept out of the leads and the default list
 
 
 def is_galaxy(name: str | None, typ: str | None) -> bool:
@@ -880,8 +880,22 @@ class Findings:
         except (OSError, ValueError, KeyError):
             self.targets = []
 
+    def cleanup(self) -> int:
+        """Idempotent, at start: peaks the search itself did not mark ok (kept by an older build) leave the table, with their catalogue rows."""
+        gone = []
+        for r in self.db.db.execute("SELECT id, data FROM finds WHERE kind='peak'").fetchall():
+            if not (json.loads(r["data"] or "{}").get("peak") or {}).get("ok", True):
+                gone.append(r["id"])
+        for i in gone:
+            for t in ("finds", "idents", "positions", "spectra", "lightcurves", "images"):
+                self.db.db.execute(f"DELETE FROM {t} WHERE {'id' if t == 'finds' else 'find_id'}=?", (i,))
+        self.db.db.commit()
+        return len(gone)
+
     def start(self) -> None:
         if self.writer:
+            with contextlib.suppress(Exception):
+                self.cleanup()
             self.tasks = [asyncio.create_task(self.sweep_loop()), asyncio.create_task(self.identify_loop())]
 
     async def stop(self) -> None:
@@ -1145,6 +1159,8 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
     d = f["data"]
     kind = f["kind"]
     known = False
+    if kind == "peak" and not (d.get("peak") or {}).get("ok", True):
+        return "below"  # the search itself did not mark it ok: below its bar, not a lead
     if kind in ("mover", "browndwarf"):
         src = (d.get("source") or {}).get("simbad") or {}
         sb = by.get("simbad", {})
@@ -1201,6 +1217,8 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         for i in idents
         if i["state"] == "ok"
     ]
+    if status == "below":
+        return "The search did not mark this peak ok: it is below its own bar, so it is not a lead. Not counted."
     if status == "galaxy":
         sb = next((i for i in idents if i["catalogue"] == "simbad" and i["state"] == "ok"), None)
         who = f"{sb['name']}" + (f" ({sb['type']})" if sb.get("type") else "") if sb else "a galaxy catalogue"
@@ -1295,13 +1313,17 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         f["verdict"] = verdict_of(f, ids_, st)
         items.append(f)
     counts: dict[str, dict[str, int]] = {
-        k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0} for k in KINDS
+        k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "leads": 0} for k in KINDS
     }
     for f in items:
-        tally = counts.setdefault(f["kind"], {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0})
+        tally = counts.setdefault(
+            f["kind"], {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "leads": 0}
+        )
         if f["status"] not in HIDDEN:  # a star's residual and a galaxy are not leads: counted apart
             tally["all"] += 1
         tally[f["status"]] += 1
+        if f["status"] in ("unexplained", "unchecked"):
+            tally["leads"] += 1  # what is still a lead: not a known body, a galaxy, a star's residual or below the bar
     sel = [
         f
         for f in items
@@ -1313,7 +1335,7 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         )
         and (not place or f["place"] == place)
     ]
-    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4}
+    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
     unavailable = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable")
