@@ -2,10 +2,10 @@ import { useEffect, useState } from 'preact/hooks';
 import type { Health } from '../lib/api';
 import type { Screen } from '../lib/route';
 import './findings/findings.css';
-import { useLive } from './findings/live';
 import { IndexV2 } from './index/IndexV2';
 import { AboutBody } from './about/About';
-import { ATLAS_LEAD, LeadPanel, LeadsList, rankLeads, useLeadParam } from './findings/leads';
+import { FindingsView } from './findings/finds';
+import { useLeadParam } from './findings/leads';
 import { mountTour } from '../ui/Tour';
 import { SearchedCounter, useSearched } from './search/searched';
 
@@ -27,32 +27,18 @@ function useWide() {
 }
 
 function FindingsPage() {
-  const live = useLive();
   const searched = useSearched();
-  const leads = [...rankLeads(live), ATLAS_LEAD];
   const [leadId, setLeadId] = useLeadParam();
   const wide = useWide();
-  const open = leads.find((l) => l.id === leadId);
-  const shown = open ?? (wide ? leads[0] : undefined);
   const all = searched ? searched.reduce((a, f) => a + f.found, 0) : undefined;
   return (
     <>
       <div class="pg-h">
         <h1>Findings</h1>
-        <p class="hint">What the searches find in real SPHEREx exposures. Every number is measured by this system on SPHEREx Level-2 files.</p>
+        <p class="hint">Every find of every searched field, each checked against the catalogues. Every number is measured by this system on SPHEREx Level-2 files.</p>
       </div>
       <SearchedCounter fields={searched} />
-      {wide ? (
-        <div class="fsplit">
-          <LeadsList leads={leads} onOpen={setLeadId} openId={shown?.id ?? null} all={all} />
-          {shown ? <LeadPanel lead={shown} onClose={() => setLeadId(null)} inline /> : <div class="leadpanel glass inline mono-s">reading the searches…</div>}
-        </div>
-      ) : (
-        <>
-          <LeadsList leads={leads} onOpen={setLeadId} openId={open?.id ?? null} all={all} />
-          {open && <LeadPanel lead={open} onClose={() => setLeadId(null)} />}
-        </>
-      )}
+      <FindingsView wide={wide} leadId={leadId} setLeadId={setLeadId} total={all} />
       <p class="fmethod">
         <a href="#/method?sec=validation">How we know it works → Method, validation</a>
       </p>
