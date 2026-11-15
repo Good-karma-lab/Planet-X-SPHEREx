@@ -73,6 +73,15 @@ const SURVEYS: { id: SurveyId; name: string; layer: SkyLayer[]; note: string }[]
 ];
 const SIZES = [2, 5, 10, 20, 60];
 /** the plain word on a layer button (the survey's own name is its tooltip) */
+/** the one line under the globe for each layer: what it is and who made it */
+const LAYER_CAPTION: Record<string, string> = {
+  svs: 'Star map · NASA SVS · Gaia DR2 (ESA/Gaia/DPAC)',
+  dss2: 'Visible · DSS2 · STScI, via CDS',
+  spherex: 'SPHEREx · DR1 all-sky cube · NASA/JPL-Caltech (IRSA)',
+  '2mass': 'Near-infrared · 2MASS · UMass/IPAC-Caltech/NASA/NSF',
+  wise: 'Infrared · AllWISE · NASA/JPL-Caltech/UCLA',
+  dust: 'Dust map · IRAS IRIS · Miville-Deschênes & Lagache',
+};
 const LAYER_WORD: Record<string, string> = { svs: 'Star map', dss2: 'Visible', spherex: 'SPHEREx', '2mass': 'Near-infrared', wise: 'Infrared', dust: 'Dust map' };
 /** the globe zoom limits; above ZOOM_NEAR a pin is an open ring so that the star under it shows */
 const ZOOM_MIN = 0.8;
@@ -822,6 +831,7 @@ export function Globe() {
     // the zoom slider and its buttons: the same zoom as the wheel. With an object selected the globe first turns so that it is in the centre and the zoom is on it; with
     // nothing selected the zoom is on the centre of the picture
     let ztSent = -1;
+    let turnToken = 0;
     const zoomAbout = (k: number) => {
       anim = null;
       const so = live.current.sel;
@@ -846,10 +856,26 @@ export function Globe() {
         clampMap();
       } else {
         const F = basis();
-        if (target) {
-          // turn the globe (about the axis through the centre and the object) so that the object is in the centre
-          const c = frameOf(target[0], target[1], 0).c;
-          setFrame(turnFrame(F, F.c, c));
+        // the selected object, else the aim frame, is turned to the centre (smoothly, 0.35 s), and the zoom is about the centre
+        const goal = target ?? ([aim.get().ra, aim.get().dec] as [number, number]);
+        const c = frameOf(goal[0], goal[1], 0).c;
+        const cosA = Math.max(-1, Math.min(1, dot3(F.c, c)));
+        const th = Math.acos(cosA);
+        if (th > 1e-4) {
+          const token = ++turnToken;
+          const t0 = performance.now();
+          const step = () => {
+            if (token !== turnToken) return;
+            const e = Math.min(1, (performance.now() - t0) / 350);
+            const ee = e * e * (3 - 2 * e);
+            const sa = Math.sin((1 - ee) * th) / Math.sin(th);
+            const sb = Math.sin(ee * th) / Math.sin(th);
+            const v: V3 = [sa * F.c[0] + sb * c[0], sa * F.c[1] + sb * c[1], sa * F.c[2] + sb * c[2]];
+            setFrame(turnFrame(F, F.c, v));
+            dirty.current = true;
+            if (e < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
         }
         view.current.zoom = Math.max(zoomMin(), Math.min(ZOOM_MAX, view.current.zoom * k));
       }
@@ -1183,11 +1209,9 @@ export function Globe() {
               )}
             </div>
           )}
-          {survey === 'svs' && (
-            <div class="map-credit" data-testid="map-credit">
-              {(equiOf('svs') ?? bakedOf('svs'))?.label ?? 'Star map · Gaia (NASA SVS)'} · {(equiOf('svs') ?? bakedOf('svs'))?.credit ?? STAR_MAP_CREDIT}
-            </div>
-          )}
+          <div class="map-credit" data-testid="map-credit">
+            {LAYER_CAPTION[survey]}
+          </div>
           <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
           ★ are test targets.

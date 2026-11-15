@@ -156,3 +156,5 @@
 .zoomctl .zs { position: relative; width: 26px; height: 150px; }
 .zoomctl .zs input { position: absolute; left: 50%; top: 50%; width: 150px; margin: 0; transform: translate(-50%, -50%) rotate(-90deg); accent-color: #5fe3d6; background: transparent; }
 @media (max-height: 560px) { .zoomctl .zs { height: 90px; } .zoomctl .zs input { width: 90px; } }
+
+.map-credit { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: min(520px, calc(100% - 120px)); }
