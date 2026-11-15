@@ -121,9 +121,19 @@ export class FieldClient {
     }
   }
 
-  /** Fetch every wanted part not held yet, all at once; each is handed over as soon as it arrives. */
+  /** Fetch every wanted part not held yet; each is handed over as soon as it arrives. The first pass's picture comes alone first (so
+   *  the sky is on screen at once), then everything else together. */
   private async fetchParts(names: string[]): Promise<void> {
     const todo = names.filter((name) => !this.parts.has(name) && [...this.wanted].some((w) => name.startsWith(w)));
+    const first = todo.filter((name) => name === 'picture_p0');
+    if (first.length && todo.length > 1) {
+      await this.fetchSome(first);
+      return this.fetchSome(todo.filter((name) => name !== 'picture_p0'));
+    }
+    return this.fetchSome(todo);
+  }
+
+  private async fetchSome(todo: string[]): Promise<void> {
     await Promise.all(
       todo.map(async (name) => {
         const p = (async () => {
