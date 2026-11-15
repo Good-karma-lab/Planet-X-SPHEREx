@@ -25,7 +25,7 @@ export type SurveyId = 'svs' | 'dss2' | 'spherex' | '2mass' | 'wise' | 'dust';
 
 export const kept = {
   /** null until the first visit sets it from the aim */
-  view: null as null | { ra: number; dec: number; zoom: number },
+  view: null as null | { ra: number; dec: number; zoom: number; roll?: number },
   /** the star map (NASA SVS) is the default; until the service's baked tiles of it are known the visible-light survey stands in */
   survey: 'svs' as SurveyId,
   proj: 'globe' as 'globe' | 'moll',
