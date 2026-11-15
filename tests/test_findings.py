@@ -20,12 +20,29 @@ def _store(tmp_path: Path) -> tuple[list[dict[str, Any]], dict[str, dict[str, st
     fk = "f" * 24
     rows = [{"key": fk, "kind": "field", "params": {"ra": 269.45, "dec": 4.69, "fov": 20}, "created": 1.0, "complete": True}]
     keys = {fk: {"movers": "m1", "pairs": "p1", "browndwarfs": "b1", "anomalies": "a1"}}
-    track = {"speed": 10.66, "pa": 353.0, "ra_2025_9": 269.4463, "dec_2025_9": 4.7677, "snr": [5.0, None, 7.0], "check": "same", "sigma": 13.2, "mjd": [1.0, 2.0, 3.0]}
+    track = {
+        "speed": 10.66,
+        "pa": 353.0,
+        "ra_2025_9": 269.4463,
+        "dec_2025_9": 4.7677,
+        "snr": [5.0, None, 7.0],
+        "check": "same",
+        "sigma": 13.2,
+        "mjd": [1.0, 2.0, 3.0],
+    }
     pair = {"components": [{"ra": 269.5, "dec": 4.8, "snr": 9.0}, {"ra": 269.5001, "dec": 4.8002, "snr": 8.0}], "change_sigma": 4.4}
-    (tmp_path / "movers" / "m1.json").write_text(json.dumps({"tracks": [track], "pairs": [pair], "passes": 3, "mjd": [1.0, 2.0, 3.0], "chance": {"mean": 0.0, "trials": 20}}))
-    (tmp_path / "browndwarfs" / "b1.json").write_text(json.dumps({"candidates": [{"ra": 269.6, "dec": 4.6, "pm": 2.0, "snr_long": 11.0, "sigma": 5.0}], "known": [], "slow": []}))
-    (tmp_path / "red" / f"{product_key('red', {'field': fk})}.json").write_text(json.dumps({"red": [{"ra": 269.3, "dec": 4.5, "colour": 3.0, "snr_long": 20.0}]}))
-    (tmp_path / "anomalies" / "a1.json").write_text(json.dumps({"anomalies": [{"ra": 269.2, "dec": 4.4, "score": 4.9, "snr": 15.0, "drivers": []}], "threshold": 1.8, "edges": [0.75]}))
+    (tmp_path / "movers" / "m1.json").write_text(
+        json.dumps({"tracks": [track], "pairs": [pair], "passes": 3, "mjd": [1.0, 2.0, 3.0], "chance": {"mean": 0.0, "trials": 20}})
+    )
+    (tmp_path / "browndwarfs" / "b1.json").write_text(
+        json.dumps({"candidates": [{"ra": 269.6, "dec": 4.6, "pm": 2.0, "snr_long": 11.0, "sigma": 5.0}], "known": [], "slow": []})
+    )
+    (tmp_path / "red" / f"{product_key('red', {'field': fk})}.json").write_text(
+        json.dumps({"red": [{"ra": 269.3, "dec": 4.5, "colour": 3.0, "snr_long": 20.0}]})
+    )
+    (tmp_path / "anomalies" / "a1.json").write_text(
+        json.dumps({"anomalies": [{"ra": 269.2, "dec": 4.4, "score": 4.9, "snr": 15.0, "drivers": []}], "threshold": 1.8, "edges": [0.75]})
+    )
     return rows, keys
 
 
@@ -84,4 +101,23 @@ def test_query_status_and_verdict(tmp_path: Path) -> None:
     only = query(db, None, "unexplained", "Barnard's Star", 2, 1)
     assert only["count"] == 4 and len(only["finds"]) == 2
     assert status_of({"kind": "film", "data": {}}, [{"catalogue": "sbident", "state": "ok"}]) == "known"
-    assert "known solar-system body" in verdict_of({"kind": "film"}, [{"catalogue": "sbident", "label": "JPL", "state": "ok", "name": "433 Eros", "type": None, "sep": 3.0}], "known")
+    assert "known solar-system body" in verdict_of(
+        {"kind": "film"}, [{"catalogue": "sbident", "label": "JPL", "state": "ok", "name": "433 Eros", "type": None, "sep": 3.0}], "known"
+    )
+
+
+def test_related_tables_are_replaced_not_duplicated_and_carry_versions(tmp_path: Path) -> None:
+    rows, keys = _store(tmp_path)
+    finds, _ = collect(tmp_path, rows, keys, TARGETS)
+    mover = next(f for f in finds if f["kind"] == "mover")
+    assert len(mover["positions"]) == 0 or mover["versions"]["movers"]
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds(finds)
+    db.write_finds(finds)  # the scans computed again: the same rows, once
+    pair = next(f for f in finds if f["kind"] == "pair")
+    n = db.db.execute("SELECT COUNT(*) FROM lightcurves WHERE find_id=?", (pair["id"],)).fetchone()[0]
+    assert n == len(pair["lightcurve"])
+    db.put_ident(mover["id"], "simbad", "ok", "x", 1.0, "BY*", {}, {"raw": {"a": 1}})
+    out = query(db, "mover", "all", None, 5, 0)["finds"][0]
+    assert out["versions"] and next(i for i in out["idents"] if i["catalogue"] == "simbad")["raw"] == {"raw": {"a": 1}}
+    assert db.db.execute("SELECT value FROM meta WHERE key='schema'").fetchone()[0] == "2"

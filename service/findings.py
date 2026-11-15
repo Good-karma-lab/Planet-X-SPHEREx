@@ -31,7 +31,7 @@ from service.products.store import Store
 from service.products.versions import VERSIONS
 from service.upstream.breaker import Breaker, BreakerOpenError
 
-SCHEMA = 1
+SCHEMA = 2
 KINDS = ("mover", "browndwarf", "red", "anomaly", "pair", "film", "peak")
 KIND_LABEL = {
     "mover": "Mover between passes",
@@ -111,6 +111,7 @@ def collect(
         return _read(p)
 
     def add(f: dict[str, Any]) -> None:
+        f.update(extras(f))
         cur = finds.get(f["id"])
         if cur is None or f.get("fov", 0) > cur.get("fov", 0):
             if cur is not None:
@@ -328,6 +329,78 @@ def collect(
     return list(finds.values()), sig.hexdigest()
 
 
+_PRODUCT = {
+    "mover": "movers",
+    "pair": "movers",
+    "browndwarf": "browndwarfs",
+    "red": "red",
+    "anomaly": "anomalies",
+    "film": "filmsearch",
+    "peak": "distant",
+}
+
+
+def extras(f: dict[str, Any]) -> dict[str, Any]:
+    """What a find carries beside its summary: its positions per pass, its spectrum, its light curves and the product version that produced it."""
+    d, kind = f["data"], f["kind"]
+    pos: list[dict[str, Any]] = []
+    spec: list[dict[str, Any]] = []
+    lc: list[dict[str, Any]] = []
+    if kind == "mover":
+        t = d.get("track") or {}
+        snr = t.get("snr") or []
+        for i, (m, ra, dec) in enumerate(zip(t.get("mjd") or [], t.get("ra") or [], t.get("dec") or [], strict=False)):
+            pos.append(
+                {
+                    "label": f"pass {(t.get('passes') or list(range(99)))[i]}",
+                    "mjd": m,
+                    "ra": ra,
+                    "dec": dec,
+                    "snr": snr[i] if i < len(snr) else None,
+                }
+            )
+    elif kind == "film":
+        t = d.get("track") or {}
+        for p in t.get("pts") or []:
+            pos.append({"label": f"frame {p.get('f')} ({p.get('how')})", "mjd": None, "ra": None, "dec": None, "snr": p.get("z")})
+    elif kind == "anomaly":
+        a = d.get("anomaly") or {}
+        edges = d.get("edges") or []
+        shape, err, model = a.get("shape") or [], a.get("shape_err") or [], a.get("model") or []
+        for i, v in enumerate(shape):
+            lo = edges[i] if i < len(edges) else None
+            hi = edges[i + 1] if i + 1 < len(edges) else None
+            spec.append(
+                {
+                    "lam": lo,
+                    "lam_hi": hi,
+                    "flux": v,
+                    "err": err[i] if i < len(err) else None,
+                    "model": model[i] if i < len(model) else None,
+                    "src": "binned spectrum, anomaly search",
+                }
+            )
+    elif kind == "pair":
+        mjds = d.get("mjd") or []
+        for ci, c in enumerate((d.get("pair") or {}).get("components") or []):
+            errs = c.get("flux_per_pass_err") or []
+            for i, v in enumerate(c.get("flux_per_pass") or []):
+                lc.append(
+                    {
+                        "label": f"component {ci + 1}",
+                        "mjd": mjds[i] if i < len(mjds) else None,
+                        "flux": v,
+                        "err": errs[i] if i < len(errs) else None,
+                    }
+                )
+    elif kind == "peak":
+        for i, q in enumerate((d.get("peak") or {}).get("by_pass") or []):
+            lc.append({"label": "flux per pass", "mjd": None, "flux": q.get("flux_mjy"), "err": None})
+            pos.append({"label": f"pass {i}", "mjd": None, "ra": q.get("ra"), "dec": q.get("dec"), "snr": q.get("sn")})
+    prod = _PRODUCT.get(kind, kind)
+    return {"positions": pos, "spectrum": spec, "lightcurve": lc, "versions": {prod: VERSIONS.get(prod)}}
+
+
 def _red_key(field_key: str) -> str:
     from service.products.store import product_key
 
@@ -374,6 +447,28 @@ class FindingsDB:
             )
             self.db.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '1')")
             self.db.commit()
+        if have < 2:
+            # everything about a find in related tables; the product versions that produced the values; the catalogues' full answers
+            cols = {r[1] for r in self.db.execute("PRAGMA table_info(finds)")}
+            if "versions" not in cols:
+                self.db.execute("ALTER TABLE finds ADD COLUMN versions TEXT")
+            icols = {r[1] for r in self.db.execute("PRAGMA table_info(idents)")}
+            if "raw" not in icols:
+                self.db.execute("ALTER TABLE idents ADD COLUMN raw TEXT")
+            self.db.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS positions (find_id TEXT NOT NULL, idx INTEGER NOT NULL, label TEXT, mjd REAL, ra REAL, dec REAL, snr REAL,
+                    PRIMARY KEY (find_id, idx));
+                CREATE TABLE IF NOT EXISTS spectra (find_id TEXT NOT NULL, idx INTEGER NOT NULL, lam REAL, lam_hi REAL, flux REAL, err REAL, model REAL,
+                    detector TEXT, mjd REAL, flag TEXT, src TEXT, PRIMARY KEY (find_id, idx));
+                CREATE TABLE IF NOT EXISTS lightcurves (find_id TEXT NOT NULL, idx INTEGER NOT NULL, label TEXT, mjd REAL, flux REAL, err REAL,
+                    PRIMARY KEY (find_id, label, idx));
+                CREATE TABLE IF NOT EXISTS images (find_id TEXT NOT NULL, kind TEXT NOT NULL, pass INTEGER NOT NULL DEFAULT 0, path TEXT, sha1 TEXT,
+                    created REAL, PRIMARY KEY (find_id, kind, pass));
+                """
+            )
+            self.db.execute("INSERT OR REPLACE INTO meta VALUES ('schema', '2')")
+            self.db.commit()
 
     def get_meta(self, key: str) -> str | None:
         row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -391,20 +486,73 @@ class FindingsDB:
         for f in finds:
             keep.add(f["id"])
             self.db.execute(
-                "INSERT INTO finds (id, kind, place, fov, ra, dec, epoch, rate, snr, score, chance, data, scans, created, updated) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET place=excluded.place, fov=excluded.fov, ra=excluded.ra, dec=excluded.dec, "
+                "INSERT INTO finds (id, kind, place, fov, ra, dec, epoch, rate, snr, score, chance, data, scans, created, updated, versions) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET versions=excluded.versions,  place=excluded.place, fov=excluded.fov, ra=excluded.ra, dec=excluded.dec, "
                 "rate=excluded.rate, snr=excluded.snr, score=excluded.score, chance=excluded.chance, data=excluded.data, scans=excluded.scans, updated=excluded.updated",
                 (
                     f["id"], f["kind"], f["place"], f["fov"], f["ra"], f["dec"], EPOCH, f["rate"], f["snr"], f["score"], f["chance"],
-                    json.dumps(f["data"], separators=(",", ":")), json.dumps(f["scans"]), now, now,
+                    json.dumps(f["data"], separators=(",", ":")), json.dumps(f["scans"]), now, now, json.dumps(f.get("versions") or {}),
                 ),
             )  # fmt: skip
+            self._write_related(f)
         gone = have - keep
         for i in gone:
             self.db.execute("DELETE FROM finds WHERE id=?", (i,))
             self.db.execute("DELETE FROM idents WHERE find_id=?", (i,))
         self.db.commit()
         return len(keep - have), len(gone)
+
+    def _write_related(self, f: dict[str, Any]) -> None:
+        """The find's positions, spectrum and light curves: replaced, never duplicated, when its scans were computed again."""
+        i = f["id"]
+        for t in ("positions", "spectra", "lightcurves"):
+            self.db.execute(f"DELETE FROM {t} WHERE find_id=?", (i,))
+        self.db.executemany(
+            "INSERT INTO positions VALUES (?,?,?,?,?,?,?)",
+            [(i, k, p.get("label"), p.get("mjd"), p.get("ra"), p.get("dec"), p.get("snr")) for k, p in enumerate(f.get("positions") or [])],
+        )
+        self.db.executemany(
+            "INSERT INTO spectra VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            [
+                (
+                    i,
+                    k,
+                    p.get("lam"),
+                    p.get("lam_hi"),
+                    p.get("flux"),
+                    p.get("err"),
+                    p.get("model"),
+                    p.get("detector"),
+                    p.get("mjd"),
+                    p.get("flag"),
+                    p.get("src"),
+                )
+                for k, p in enumerate(f.get("spectrum") or [])
+            ],
+        )
+        self.db.executemany(
+            "INSERT INTO lightcurves VALUES (?,?,?,?,?,?)",
+            [(i, k, p.get("label"), p.get("mjd"), p.get("flux"), p.get("err")) for k, p in enumerate(f.get("lightcurve") or [])],
+        )
+
+    def related(self, ids: list[str]) -> dict[str, dict[str, list[dict[str, Any]]]]:
+        out: dict[str, dict[str, list[dict[str, Any]]]] = {
+            i: {"positions": [], "spectrum": [], "lightcurve": [], "images": []} for i in ids
+        }
+        for k in range(0, len(ids), 500):
+            chunk = ids[k : k + 500]
+            m = ",".join("?" for _ in chunk)
+            for r in self.db.execute(f"SELECT * FROM positions WHERE find_id IN ({m}) ORDER BY idx", chunk):
+                out[r["find_id"]]["positions"].append({c: r[c] for c in ("label", "mjd", "ra", "dec", "snr")})
+            for r in self.db.execute(f"SELECT * FROM spectra WHERE find_id IN ({m}) ORDER BY idx", chunk):
+                out[r["find_id"]]["spectrum"].append(
+                    {c: r[c] for c in ("lam", "lam_hi", "flux", "err", "model", "detector", "mjd", "flag", "src")}
+                )
+            for r in self.db.execute(f"SELECT * FROM lightcurves WHERE find_id IN ({m}) ORDER BY label, idx", chunk):
+                out[r["find_id"]]["lightcurve"].append({c: r[c] for c in ("label", "mjd", "flux", "err")})
+            for r in self.db.execute(f"SELECT * FROM images WHERE find_id IN ({m}) ORDER BY kind, pass", chunk):
+                out[r["find_id"]]["images"].append({c: r[c] for c in ("kind", "pass", "path", "sha1")})
+        return out
 
     def pending(self, limit: int) -> list[sqlite3.Row]:
         """Finds with a catalogue not yet answered (or that did not answer and may be asked again): the oldest asked first."""
@@ -431,13 +579,32 @@ class FindingsDB:
         return [r for _, r in out[:limit]]
 
     def put_ident(
-        self, find_id: str, catalogue: str, state: str, name: str | None, sep: float | None, typ: str | None, detail: dict[str, Any]
+        self,
+        find_id: str,
+        catalogue: str,
+        state: str,
+        name: str | None,
+        sep: float | None,
+        typ: str | None,
+        detail: dict[str, Any],
+        raw: dict[str, Any] | None = None,
     ) -> None:
         row = self.db.execute("SELECT attempts FROM idents WHERE find_id=? AND catalogue=?", (find_id, catalogue)).fetchone()
         attempts = (int(row[0]) if row else 0) + (1 if state == "unavailable" else 0)
         self.db.execute(
-            "INSERT OR REPLACE INTO idents VALUES (?,?,?,?,?,?,?,?,?)",
-            (find_id, catalogue, state, name, sep, typ, json.dumps(detail, separators=(",", ":")), time.time(), attempts),
+            "INSERT OR REPLACE INTO idents (find_id, catalogue, state, name, sep, type, detail, tried, attempts, raw) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                find_id,
+                catalogue,
+                state,
+                name,
+                sep,
+                typ,
+                json.dumps(detail, separators=(",", ":")),
+                time.time(),
+                attempts,
+                json.dumps(raw, separators=(",", ":")) if raw is not None else None,
+            ),
         )
 
     def idents_of(self, ids: list[str]) -> dict[str, list[dict[str, Any]]]:
@@ -455,6 +622,7 @@ class FindingsDB:
                         "sep": r["sep"],
                         "type": r["type"],
                         "detail": json.loads(r["detail"] or "{}"),
+                        "raw": json.loads(r["raw"]) if r["raw"] else None,
                         "tried": r["tried"],
                         "attempts": r["attempts"],
                     }
@@ -611,7 +779,7 @@ class Findings:
         for cat in CATALOGUES:
             a = ctx.get(cat) or {"state": "unavailable", "error": "no answer"}
             state, name, sep, typ, detail = _ident_from(cat, a)
-            self.db.put_ident(row["id"], cat, state, name, sep, typ, detail)
+            self.db.put_ident(row["id"], cat, state, name, sep, typ, detail, a)
         if row["kind"] in MOVING:
             mjd = self._mjd_of(row)
             if mjd is None:
@@ -620,7 +788,14 @@ class Findings:
                 try:
                     a = await self.sbident(row["ra"], row["dec"], mjd)
                     self.db.put_ident(
-                        row["id"], "sbident", a["state"], a.get("name"), a.get("sep"), None, {k: a[k] for k in ("v", "n_bodies") if k in a}
+                        row["id"],
+                        "sbident",
+                        a["state"],
+                        a.get("name"),
+                        a.get("sep"),
+                        None,
+                        {k: a[k] for k in ("v", "n_bodies") if k in a},
+                        a,
                     )
                 except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
                     self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": str(e)[:120]})
@@ -726,12 +901,14 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
     rows = db.db.execute("SELECT * FROM finds").fetchall()
     ids = [r["id"] for r in rows]
     idents = db.idents_of(ids)
+    rel = db.related(ids)
     items: list[dict[str, Any]] = []
     for r in rows:
         f = {
             "id": r["id"], "kind": r["kind"], "place": r["place"], "fov": r["fov"], "ra": r["ra"], "dec": r["dec"], "epoch": r["epoch"],
             "rate": r["rate"], "snr": r["snr"], "score": r["score"], "chance": r["chance"],
             "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "updated": r["updated"],
+            "versions": json.loads(r["versions"] or "{}"), **rel[r["id"]],
         }  # fmt: skip
         ids_ = idents[r["id"]]
         have = {i["catalogue"] for i in ids_}
