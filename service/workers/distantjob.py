@@ -292,7 +292,7 @@ async def run_distant(
         span_days=round(float(np.ptp(R["tv"])), 2),
     )
     ctx.phase("finding and tuning the candidates")
-    C, thr, null, untuned = await ctx.compute(scan_candidates, R, DV, N, T, R0, t0)
+    C, thr, null, untuned = await ctx.compute(scan_candidates, R, DV, N, T, R0, t0, p["mu_scale"])
     res.update(threshold=round(float(thr), 2), null=[round(q[2], 2) for q in null[:10]])
     res["notes"] += ["a candidate could not be tuned"] * untuned
     measured = C[:MAX_PHOTOMETRY_CANDIDATES]
@@ -315,6 +315,8 @@ async def run_distant(
         phot = await track_photometry(ctx, fr, meter, exps, pno, pk, pv.loaded, pv.sc, tracks, T, R0, t0)
     nctl = [0, 0]
     cands = []
+    bright = await bright_fast_stars(ctx, T, N, exps)
+    over_star = 0
     for ci, c in enumerate(C):
         own = (phot.get("own") or {}).get(ci, {})
         bydet = own.get("bydet", {})
@@ -333,6 +335,9 @@ async def run_distant(
                 nctl[0] += 1
                 nctl[1] += bool(v["sn"] >= edist.SN_MIN)
         ra0, dec0 = T.uv2sky((c["x"] - N / 2) * edist.S, (c["y"] - N / 2) * edist.S)
+        if any(math.hypot((ra0 - a) * math.cos(math.radians(dec0)), dec0 - d) * 3600.0 < STAR_TRACK_ARCSEC for a, d in bright):
+            over_star += 1  # a saturated, fast star's own track leaves residuals along it: not a distant body
+            continue
         ds, kn = c["knob"]
         cands.append(
             {
@@ -356,6 +361,8 @@ async def run_distant(
                 "knob": {"d": [round(float(x), 1) for x in ds], "sn": [round(float(x), 2) for x in kn]},
             }
         )
+    if over_star:
+        res["notes"].append(f"{over_star} peak(s) stood over the own track of a bright, fast star and left out")
     res["candidates"] = cands
     res["candidates_measured"] = len(measured)
     res["control"] = {"measured": nctl[0], "reach_sn5": nctl[1]}
@@ -364,6 +371,25 @@ async def run_distant(
     store.write_part(KIND, key, "bin", blob)
     res["bin_url"] = f"/api/v1/distant/{key}/bin"
     return finish("ok")
+
+
+STAR_TRACK_ARCSEC = 20.0  # a peak this close to a saturated fast star's place (at any visit) is that star's own residual
+
+
+async def bright_fast_stars(ctx: Context, T: edist.Tangent, N: int, exps: list[Exposure]) -> list[tuple[float, float]]:
+    """The places (ra, dec) of the bright, fast Gaia stars of the field at the first, middle and last exposure of the pass (a saturated
+    mover leaves residuals along its own track in the differences; nothing to do with a body at 250-2000 au)."""
+    from service.movers import _carried, gaia_fast_rows
+
+    ra_c, dec_c = T.uv2sky(0.0, 0.0)
+    radius = N * edist.S / 3600.0
+    try:
+        stars = await ctx.compute(gaia_fast_rows, float(ra_c), float(dec_c), radius * 0.8)
+    except Exception:  # Gaia not reachable: no star is claimed
+        return []
+    mjds = sorted(e.mjd0 for e in exps)
+    picks = [mjds[0], mjds[len(mjds) // 2], mjds[-1]] if mjds else []
+    return [_carried(st, m) for st in stars for m in picks]
 
 
 async def scan_blocks(
@@ -400,18 +426,33 @@ async def scan_blocks(
         shutil.rmtree(work, ignore_errors=True)
 
 
+MU_GATE = 5016.0  # the own motion a bound orbit can have at distance d is MU_GATE * mu_scale / d^1.5 arcsec/day (the slider's limit)
+
+
+def inside_gate(mu: tuple[float, float], d: float, mu_scale: float) -> bool:
+    """Whether an own motion (arcsec/day) is one a bound orbit at distance d (au) can have (a 5 % margin for the grid)."""
+    return bool(math.hypot(*mu) <= 1.05 * MU_GATE * mu_scale / d**1.5)
+
+
 def scan_candidates(
-    R: dict[str, Any], DV: list[dict[str, Any]], N: int, T: edist.Tangent, R0: Any, t0: float
+    R: dict[str, Any], DV: list[dict[str, Any]], N: int, T: edist.Tangent, R0: Any, t0: float, mu_scale: float = 1.0
 ) -> tuple[list[dict[str, Any]], float, list[Any], int]:
     """The candidates of a scan, tuned, with the distance range of each (the knob) and the length of its path (a worker process).
     -> (candidates, threshold, the negated sum's best, how many could not be tuned)."""
     C, thr, null = edist.candidates(R)
     untuned = 0
     for c in C:
+        before = (c["x"], c["y"], c["mu"])
         try:
             edist.refine(c, R, DV, N)
         except Exception:  # a candidate that cannot be tuned keeps its grid place
             untuned += 1
+        # the tuning moves the own motion freely: a result outside what a bound orbit of this distance can have is not a result (the gate
+        # the slider shows), the grid hypothesis is kept
+        if not inside_gate(c["mu"], c["d"], mu_scale):
+            c["x"], c["y"], c["mu"] = before
+            c.pop("refined", None)
+            c.pop("sn_unclipped", None)
     for c in C:
         ds, kn = edist.knob(R, DV, c["x"], c["y"])
         inside = ds[kn >= kn.max() - 1.0]
@@ -442,7 +483,7 @@ def slider_arrays(
         "t": [round(float(x), 4) for x in R["tv"]],
         "weights": [round(float(x), 4) for x in (R["wa"] / np.sqrt(w.sum()))],
         "w2": [round(float(x), 4) for x in w],
-        "mu_max": [round(5016.0 * mu_scale / float(d) ** 1.5, 3) for d in dgrid],
+        "mu_max": [round(MU_GATE * mu_scale / float(d) ** 1.5, 3) for d in dgrid],
         "detector": [int(v["k"]) + 1 for v in DV],
         "sg": [round(v["sg"], 4) for v in DV],
     }
