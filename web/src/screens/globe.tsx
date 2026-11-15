@@ -6,6 +6,7 @@ import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, STAR_MAP_FADE_FROM, type SkyLayer } from './globe/sky';
 import { catalogNow, kept, loadCatalog, type Obj, type SurveyId } from './globe/store';
+import { equiOf, onEquiTile } from '../lib/equi';
 import { HIPS, bakedOf, loadManifest, tiles } from '../lib/hips';
 import { KnownList } from './search/known';
 import { drawBodyPath, drawMovingPath, placeAt, type BodyPath, type MovingObject } from './search/path';
@@ -228,7 +229,7 @@ export function Globe() {
   useEffect(() => {
     void loadManifest().then(() => setManifestTick((t) => t + 1));
   }, []);
-  const svsOn = !!bakedOf('svs') && !!HIPS['svs'];
+  const svsOn = (!!bakedOf('svs') && !!HIPS['svs']) || !!equiOf('svs');
   const survey: SurveyId = surveyPick === 'svs' && !svsOn ? 'dss2' : surveyPick;
   const [proj, setProj] = useState<'globe' | 'moll'>(kept.proj);
   const [inside, setInside] = useState(kept.inside);
@@ -337,6 +338,7 @@ export function Globe() {
     ro.observe(c.parentElement!);
     resize();
     const offTile = tiles.onTile(() => (sky.stale = true));
+    const offEqui = onEquiTile(() => (sky.stale = true));
 
     const pastRef = { current: false };
     const R = () => (Math.min(W, H) / 2) * 0.9 * view.current.zoom;
@@ -795,6 +797,7 @@ export function Globe() {
       cancelAnimationFrame(raf);
       ro.disconnect();
       offTile();
+      offEqui();
     };
   }, []);
   const showAreaRef = useRef<() => void>(() => {});
@@ -1013,7 +1016,7 @@ export function Globe() {
           )}
           {survey === 'svs' && (
             <div class="map-credit" data-testid="map-credit">
-              {bakedOf('svs')?.label ?? 'Star map · Gaia (NASA SVS)'} · {bakedOf('svs')?.credit ?? STAR_MAP_CREDIT}
+              {(equiOf('svs') ?? bakedOf('svs'))?.label ?? 'Star map · Gaia (NASA SVS)'} · {(equiOf('svs') ?? bakedOf('svs'))?.credit ?? STAR_MAP_CREDIT}
               {pastMap && ' · zoomed past the star map: showing DSS2'}
             </div>
           )}
