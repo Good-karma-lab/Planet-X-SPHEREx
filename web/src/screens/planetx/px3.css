@@ -628,3 +628,18 @@
     overflow: visible;
   }
 }
+
+.px3-cand.ok {
+  border-left: 3px solid var(--good);
+}
+.pill.ok {
+  color: var(--good);
+  border-color: rgba(79, 227, 161, 0.5);
+}
+.px3-sub {
+  margin: 16px 0 8px;
+  font: 600 11px var(--mono);
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--faint);
+}

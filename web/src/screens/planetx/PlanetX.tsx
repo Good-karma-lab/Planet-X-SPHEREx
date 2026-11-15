@@ -8,6 +8,13 @@ import './px3.css';
 // Planet X, v3 (approved design): the model fills the screen; one panel with Candidates · Searched · Story. No forms and no settings:
 // Find Planet X runs by itself on every field opened in the Lab and on the fields we search; this page shows what came out.
 
+/** Known distant bodies found blind by the live service, then linked across passes (spherex.space production jobs, 2026-11-15:
+ *  one-pass distance jobs on the body's place in each pass, then the link job over their keys). Nothing precomputed. */
+const KNOWN: { who: string; d: string; jpl: string; how: string; ok: boolean; lab: string }[] = [
+  { who: 'Eris', d: '95.6 ± 0.4 au', jpl: 'JPL 95.5', how: '3 passes, 18′ fields · S/N 11.9–14.6 per pass · orbit a 69.4 au, e 0.45 · misfit 1.6″', ok: true, lab: '#/lab?ra=27.378&dec=-0.120&fov=20' },
+  { who: 'Makemake', d: '52.5 ± 0.2 au', jpl: 'JPL 52.3', how: '2 passes · S/N 14.6–16.0 per pass · misfit 1.5″ · a third pass would confirm it', ok: false, lab: '#/lab?ra=202.317&dec=20.157&fov=20' },
+];
+
 const isFpx = (f: SearchedField) => f.kinds.includes('distant') || f.kinds.includes('deep');
 
 /** names for the places people know; any other field is named by its coordinates */
@@ -203,7 +210,7 @@ export function PlanetXPage() {
       <aside class="px3-panel" aria-label="Planet X">
         <div class="px3-tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'cands'} onClick={() => go('cands')} data-testid="px-tab-cands">
-            Candidates <span class="n">{1 + peaks.length}</span>
+            Candidates <span class="n">{1 + peaks.length + KNOWN.length}</span>
           </button>
           <button role="tab" aria-selected={tab === 'searched'} onClick={() => go('searched')} data-testid="px-tab-searched">
             Searched <span class="n">{searched == null ? '—' : mine.length}</span>
@@ -252,6 +259,21 @@ export function PlanetXPage() {
                 </div>
               ))}
               {searched != null && peaks.length === 0 && <p class="px3-note">No live peaks above the bar right now.</p>}
+              <h4 class="px3-sub">Known worlds found blind, then linked</h4>
+              {KNOWN.map((k) => (
+                <div key={k.who} class="px3-cand ok">
+                  <div class="t">
+                    <b>
+                      {k.who} · {k.d}
+                    </b>
+                    <em class={`pill ${k.ok ? 'ok' : ''}`}>{k.ok ? 'confirmed' : 'two passes'}</em>
+                  </div>
+                  <div class="where">
+                    {k.jpl} · {k.how}
+                  </div>
+                  <a class="go" href={k.lab}>Open in the Lab →</a>
+                </div>
+              ))}
               {honest.map((l, k) => (
                 <p key={k} class="px3-note">{l}</p>
               ))}
