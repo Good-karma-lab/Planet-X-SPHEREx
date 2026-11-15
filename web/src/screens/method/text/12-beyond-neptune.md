@@ -82,7 +82,7 @@ The result lists the control S/N values; a confirmed body should stand alone, wi
 
 The browser receives the visit differences (one byte per pixel: 128 plus 25 times the difference in sigma, 0 = no data), the offsets of each visit for 48 distances spaced evenly in the logarithm between the nearest and the farthest distance, the weights, and the highest own motion allowed at each distance. The page shifts and adds the differences for the chosen distance and own motion, divides by the spread of the sum and draws the picture. Three sliders set the distance and the own motion east-west and north-south (as a share of the limit). "Show the noise" does the same on the negated differences. The peaks of the scan are listed, and a click sets the sliders to a peak.
 
-[figure: slider-eris | The sum of one pass of Eris's field at three distances: smeared, in focus at the body's distance, smeared again]
+[figure: slider-eris | Eris, found blind by the live service: each pass alone gives a wide range of distances; three passes linked by one orbit give 95.6 ± 0.4 au (JPL 95.5)]
 
 ## The deep sum of all passes
 
