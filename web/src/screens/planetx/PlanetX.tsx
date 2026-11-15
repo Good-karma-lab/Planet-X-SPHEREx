@@ -55,7 +55,7 @@ const KNOWN_AT: [number, number][] = [[27.3724, -0.114], [26.3287, -0.4364], [27
 /** One Find Planet X peak, as Findings lists it (GET /api/v1/findings, kind peak). A LEAD is a peak above its field's bar that is not a
  *  known body; the same definition the Findings page and the Lab use. */
 interface Known { state?: string; name?: string | null; words?: string; seps?: number[] }
-interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; status?: string; data: { peak?: { d?: number; sn?: number; phot_sn?: number; ok?: boolean; edge?: boolean; d_lo?: number; known?: Known | null } } }
+interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; status?: string; epoch?: number; data: { peak?: { stamp?: string;  d?: number; sn?: number; phot_sn?: number; ok?: boolean; edge?: boolean; d_lo?: number; known?: Known | null } } }
 /** a peak JPL names (data.peak.known from the service, or status 'known'), or one at a live known-body place */
 const isKnown = (f: Peak) => f.status === 'known' || f.data.peak?.known?.state === 'ok' || KNOWN_AT.some((k) => sep(k, [f.ra, f.dec]) < 0.05);
 function usePeaks(): { leads: Peak[]; known: Peak[] } | null {
@@ -137,12 +137,11 @@ export function PlanetXPage() {
 
   const mine = (searched ?? []).filter(isFpx).sort((a, b) => (b.searched_at ?? '').localeCompare(a.searched_at ?? ''));
   /** the warm field a peak lies in (the lab opens it ready), else the peak's own place */
-  const fieldOf = (pk: Peak) => {
-    const f = (searched ?? []).find((x) => sep([x.ra, x.dec], [pk.ra, pk.dec]) < x.fov / 120);
-    // the lead is named in the link, with its own place: the Lab marks it on arrival (pulsing ring, 2′ zoom)
-    const mark = `&find=peak:${pk.ra.toFixed(4)},${pk.dec.toFixed(4)}&find_ra=${pk.ra.toFixed(5)}&find_dec=${pk.dec.toFixed(5)}`;
-    return f ? `${labHref(f)}${mark}` : `#/lab?ra=${pk.ra.toFixed(4)}&dec=${pk.dec.toFixed(4)}&fov=${snap(pk.fov)}${mark}`;
-  };
+  /** a lead opens a 5′ field centred on the lead's own place at its reference date (quick to load), the lead named so the Lab marks it */
+  const fieldOf = (pk: Peak) =>
+    `#/lab?ra=${pk.ra.toFixed(5)}&dec=${pk.dec.toFixed(5)}&fov=5&find=${encodeURIComponent(pk.id)}&find_ra=${pk.ra.toFixed(5)}&find_dec=${pk.dec.toFixed(5)}`;
+  /** the searched field the lead lies in, at its own size (20′ or 60′) */
+  const searchedOf = (pk: Peak) => (searched ?? []).find((x) => sep([x.ra, x.dec], [pk.ra, pk.dec]) < x.fov / 120);
   const nLeads = leads?.length ?? 0;
   const card = (pk: Peak) => (
                 <div key={pk.id} class="px3-cand lead">
@@ -166,7 +165,20 @@ export function PlanetXPage() {
                       ? `${pk.data.peak.known.words[0]!.toUpperCase()}${pk.data.peak.known.words.slice(1)}. JPL’s own place and the search’s agree to ${Math.max(...(pk.data.peak.known.seps ?? [0])).toFixed(1)}″.`
                       : 'A peak above its field’s bar. A lead is not a body yet: it needs one orbit through two or three passes and the check against known bodies.'}
                   </p>
-                  <a class="go" href={fieldOf(pk)}>Open in the Lab →</a>
+                  {pk.data.peak?.stamp && (
+                    <figure class="px3-stamp">
+                      <img src={pk.data.peak.stamp} alt="The deep sum of the passes at the lead's place" loading="lazy" />
+                      <figcaption>deep sum at the lead’s place: where the body would be visible</figcaption>
+                    </figure>
+                  )}
+                  <div class="px3-links">
+                    <a class="go" href={fieldOf(pk)}>Open the lead in the Lab (5′) →</a>
+                    {searchedOf(pk) && (
+                      <a class="go faint" href={labHref(searchedOf(pk)!)}>
+                        the searched field ({snap(searchedOf(pk)!.open.fov)}′)
+                      </a>
+                    )}
+                  </div>
                 </div>
   );
   /** a field's Find Planet X result, from the same peaks Findings lists: its leads, or the known bodies found in it, or nothing */
