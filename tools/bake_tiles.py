@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Baked globe tiles: WebP tiles of 512 pixels in HEALPix NESTED numbering (the layout of HiPS tiles), served as static files.
 
     /tiles/<layer>/Norder{o}/Dir{d}/Npix{i}.webp      d = floor(i / 10000) * 10000
