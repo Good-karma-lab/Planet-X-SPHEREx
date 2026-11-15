@@ -377,6 +377,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             )
         for params in wanted:
             await give_way()
+            skey = st.spectra.key_of(params)
+            if skey not in st.spectra.runs and (st.spectra.dir / f"{skey}.json").is_file():
+                continue  # kept: done (reading the whole spectrum here held the event loop for seconds)
             srun = st.spectra.get(params) or st.spectra.start(params)
             while srun.state == "running":
                 await asyncio.sleep(3.0)

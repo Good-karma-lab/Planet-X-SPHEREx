@@ -110,7 +110,7 @@ def decisive_of(kind: str, ra: float, dec: float, data: dict[str, Any]) -> list[
 
 RESIDUAL_ARCSEC = 3.0
 RADIUS = 6.0  # arcsec: how far from a find a catalogue entry may stand and still be named
-SWEEP_S = 45.0
+SWEEP_S = 120.0  # a sweep reads every product file (each parse holds the GIL): new finds also kick it at once
 RETRY_S = 90.0
 MAX_ATTEMPTS = 8
 RESULT_DIRS = ("movers", "pairs", "browndwarfs", "red", "anomalies")
