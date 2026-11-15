@@ -39,9 +39,23 @@ class LoopWatch:
                 continue
             reported = True
             self.stalls += 1
-            frame = sys._current_frames().get(loop_thread)
-            stack = "".join(traceback.format_list(traceback.extract_stack(frame)[-18:])) if frame is not None else "(no frame)"
-            log.warning("event loop held for %.1f s; the code holding it:\n%s", late, stack)
+            # the loop's own frame shows where it stopped; a stall with no Python frame there is another thread holding the GIL, so
+            # every thread that is running Python is written (innermost frames, the watch's own thread left out)
+            names = {t.ident: t.name for t in threading.enumerate()}
+            parts = []
+            for ident, frame in sys._current_frames().items():
+                if ident == threading.get_ident():
+                    continue
+                inner = traceback.extract_stack(frame)[-8:]
+                if (
+                    ident != loop_thread
+                    and inner
+                    and inner[-1].name in ("wait", "_worker", "select", "poll", "get", "_wait_for_tstate_lock")
+                ):
+                    continue  # an idle pool thread
+                tag = "event loop" if ident == loop_thread else names.get(ident, str(ident))
+                parts.append(f"-- {tag}:\n" + "".join(traceback.format_list(inner)))
+            log.warning("event loop held for %.1f s; the threads running Python:\n%s", late, "\n".join(parts))
 
     def start(self) -> None:
         self._task = asyncio.get_running_loop().create_task(self._tick())
