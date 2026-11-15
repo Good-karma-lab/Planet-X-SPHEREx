@@ -819,22 +819,26 @@ export function Globe() {
       const f = frame;
       if (f && Math.abs(e.clientX - r.left - f.x) < f.s && Math.abs(e.clientY - r.top - f.y) < f.s) showAreaRef.current();
     };
-    // the zoom slider and its buttons: the same zoom as the wheel, about the aim point (the centre of the picture when the aim is out of sight)
+    // the zoom slider and its buttons: the same zoom as the wheel. With an object selected the globe first turns so that it is in the centre and the zoom is on it; with
+    // nothing selected the zoom is on the centre of the picture
     let ztSent = -1;
-    const aimAt = (): [number, number] => {
-      const a = aim.get();
-      const pp = project(a.ra, a.dec, basis());
-      return pp[2] && pp[0] > 0 && pp[0] < W && pp[1] > 0 && pp[1] < H ? [pp[0], pp[1]] : [W / 2, H / 2];
-    };
     const zoomAbout = (k: number) => {
-      const [qx, qy] = aimAt();
       anim = null;
+      const so = live.current.sel;
+      const target = so ? shownPlace(so, live.current.survey, undefined) : null;
       if (live.current.proj === 'moll') {
         const z1 = Math.max(1, Math.min(40, mv.z * k));
         const kz = z1 / mv.z;
-        mv.x = qx - W / 2 - (qx - mcx()) * kz;
-        mv.y = qy - H / 2 - (qy - mcy()) * kz;
+        mv.x = -(W / 2 - mcx()) * kz;
+        mv.y = -(H / 2 - mcy()) * kz;
         mv.z = z1;
+        if (target) {
+          const pp = project(target[0], target[1], basis());
+          if (pp[2]) {
+            mv.x += W / 2 - pp[0];
+            mv.y += H / 2 - pp[1];
+          }
+        }
         if (mv.z <= 1.0001) {
           mv.x = 0;
           mv.y = 0;
@@ -842,11 +846,12 @@ export function Globe() {
         clampMap();
       } else {
         const F = basis();
-        const p = worldOf(F, rayAt(qx, qy, R()));
+        if (target) {
+          // turn the globe (about the axis through the centre and the object) so that the object is in the centre
+          const c = frameOf(target[0], target[1], 0).c;
+          setFrame(turnFrame(F, F.c, c));
+        }
         view.current.zoom = Math.max(zoomMin(), Math.min(ZOOM_MAX, view.current.zoom * k));
-        const sx = (W / 2 - qx) / R();
-        const sy = (H / 2 - qy) / R();
-        if (inn() || sx * sx + sy * sy < 0.97) setFrame(turnFrame(F, worldOf(F, rayAt(qx, qy, R())), p));
       }
       dirty.current = true;
     };
