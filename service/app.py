@@ -162,7 +162,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         )
         st.findings.start()
         st.fpx_known = FpxIdentifier(st.store, cfg.store_dir / "fpx_known")
-        st.fpx_known.start()
+        if not STANDBY:  # one process asks JPL (the standby only reads the kept answers): two would double the rate JPL sees
+            st.fpx_known.start()
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         if st.index is not None:
