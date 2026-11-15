@@ -2412,3 +2412,6 @@ input[type='range']::-moz-range-thumb {
 }
 
 .adesrow { margin-top: 4px; }
+
+/* the timeline's restart marker: the loop starts at the first season and comes back to it */
+.tl-labels span.restart::before { content: '↻'; margin-right: 3px; color: var(--accent); font-size: 10px; }
