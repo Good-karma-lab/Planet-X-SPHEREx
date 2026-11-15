@@ -11,7 +11,6 @@ function Fig({ name, cap, children }: { name: string; cap: string; children: Com
       <div class="box">{children}</div>
       <figcaption>
         <b>{cap}</b>
-        <span>{name}</span>
       </figcaption>
     </figure>
   );
@@ -173,7 +172,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'The raw exposures of one place played in a row: the pixel grid, the wavelength and the brightness change from frame to frame',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <video src={M('raw-exposures.mp4')} poster={M('raw-exposures.jpg')} muted loop playsinline controls preload="none" aria-label="Raw SPHEREx exposures of one place played one after another" />
+        <video class="mf-vid" src={M('raw-exposures.mp4')} poster={M('raw-exposures.jpg')} muted loop playsInline autoPlay preload="metadata" aria-label="Raw SPHEREx exposures of one place played one after another" />
       </Fig>
     ),
   },
@@ -181,7 +180,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'One pass stack coloured by wavelength: each exposure is tinted by its own wavelength, a flat spectrum is white',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <video src={M('spectral-colour.mp4')} poster={M('spectral-colour.jpg')} muted loop playsinline controls preload="none" aria-label="A pass stack coloured by wavelength" />
+        <video class="mf-vid" src={M('spectral-colour.mp4')} poster={M('spectral-colour.jpg')} muted loop playsInline autoPlay preload="metadata" aria-label="A pass stack coloured by wavelength" />
       </Fig>
     ),
   },
