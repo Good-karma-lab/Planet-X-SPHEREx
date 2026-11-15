@@ -414,3 +414,28 @@ def test_identification_summary_splits_deciding_catalogues_from_extras(tmp_path:
     db.db.commit()
     got = query(db, None, "all", None, 10, 0)["identification"]
     assert got["unavailable"] == 2 and got["unavailable_decisive"] == 1 and got["unavailable_extras"] == 1
+
+
+def test_a_galaxy_match_is_not_a_brown_dwarf_or_a_mover() -> None:
+    from service.findings import is_galaxy
+
+    assert is_galaxy("ACS-GC 20063724", None) and is_galaxy("[ABC] x", "G") and not is_galaxy("WISE J0855", "BD*")
+    bd = {
+        "kind": "browndwarf",
+        "ra": 150.1,
+        "dec": 2.2,
+        "rate": 6.9,
+        "data": {"group": "known", "source": {"simbad": {"state": "ok", "name": "ACS-GC 20063724", "otype": "G"}}},
+    }
+    got = status_of(bd, [])
+    assert got == "galaxy" and "a galaxy, not a mover or a brown dwarf" in verdict_of(bd, [], got)
+    real = {
+        "kind": "browndwarf",
+        "ra": 133.8,
+        "dec": -7.2,
+        "rate": 7.9,
+        "data": {"group": "known", "source": {"simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "BD*"}}},
+    }
+    assert status_of(real, []) == "known"
+    sb = [{"catalogue": "simbad", "state": "ok", "name": "NAME Some Galaxy", "type": "AGN", "label": "SIMBAD", "sep": 0.5}]
+    assert status_of({"kind": "mover", "ra": 10.0, "dec": 5.0, "rate": 5.0, "data": {"track": {"check": "none"}}}, sb) == "galaxy"

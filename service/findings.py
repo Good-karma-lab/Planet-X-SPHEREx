@@ -109,6 +109,43 @@ def decisive_of(kind: str, ra: float, dec: float, data: dict[str, Any]) -> list[
 
 
 RESIDUAL_ARCSEC = 3.0
+GALAXY_TYPES = frozenset(
+    {
+        "G",
+        "GiG",
+        "GiC",
+        "GiP",
+        "GiPair",
+        "BiC",
+        "rG",
+        "H2G",
+        "LSB",
+        "bCG",
+        "SBG",
+        "IG",
+        "PoG",
+        "EmG",
+        "Sy1",
+        "Sy2",
+        "SyG",
+        "AGN",
+        "QSO",
+        "Bz",
+        "BLL",
+        "Bla",
+        "LINER",
+        "AG?",
+        "Galaxy",
+    }
+)
+GALAXY_NAMES = ("ACS-GC", "2MASX", "LEDA", "SDSS")  # catalogues of galaxies: a match to one is a galaxy, never a brown dwarf or a mover
+HIDDEN = ("residual", "galaxy")  # statuses kept out of the leads and the default list
+
+
+def is_galaxy(name: str | None, typ: str | None) -> bool:
+    return (typ or "") in GALAXY_TYPES or (name or "").lstrip("[]* ").startswith(GALAXY_NAMES)
+
+
 RADIUS = 6.0  # arcsec: how far from a find a catalogue entry may stand and still be named
 SWEEP_S = 120.0  # a sweep reads every product file (each parse holds the GIL): new finds also kick it at once
 RETRY_S = 90.0
@@ -1108,6 +1145,13 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
     d = f["data"]
     kind = f["kind"]
     known = False
+    if kind in ("mover", "browndwarf"):
+        src = (d.get("source") or {}).get("simbad") or {}
+        sb = by.get("simbad", {})
+        if (sb.get("state") == "ok" and is_galaxy(sb.get("name"), sb.get("type"))) or (
+            src.get("state") == "ok" and is_galaxy(src.get("name"), src.get("otype"))
+        ):
+            return "galaxy"  # SIMBAD calls it a galaxy: the motion claimed is spurious
     if kind == "mover":
         t = d.get("track") or {}
         known = t.get("check") == "same" or bool(t.get("name")) or str(t.get("status", "")).startswith("known") or _pm_agrees(f, idents)
@@ -1157,6 +1201,11 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         for i in idents
         if i["state"] == "ok"
     ]
+    if status == "galaxy":
+        sb = next((i for i in idents if i["catalogue"] == "simbad" and i["state"] == "ok"), None)
+        who = f"{sb['name']}" + (f" ({sb['type']})" if sb.get("type") else "") if sb else "a galaxy catalogue"
+        src = ((f["data"].get("source") or {}).get("simbad") or {}).get("name")
+        return f"Matched to a galaxy ({who if sb else (src or who)}), so the motion claimed is spurious: a galaxy, not a mover or a brown dwarf. Not counted as a find."
     if not idents or all(i["state"] == "pending" for i in idents):
         return "Not yet checked: the catalogues have not been asked yet."
     decisive = decisive_of(f["kind"], f.get("ra") or 0.0, f.get("dec") or 90.0, f.get("data") or {})
@@ -1245,20 +1294,26 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         f["idents"] = ids_
         f["verdict"] = verdict_of(f, ids_, st)
         items.append(f)
-    counts: dict[str, dict[str, int]] = {k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0} for k in KINDS}
+    counts: dict[str, dict[str, int]] = {
+        k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0} for k in KINDS
+    }
     for f in items:
-        tally = counts.setdefault(f["kind"], {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0})
-        if f["status"] != "residual":  # a star's residual is not a lead: counted apart
+        tally = counts.setdefault(f["kind"], {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0})
+        if f["status"] not in HIDDEN:  # a star's residual and a galaxy are not leads: counted apart
             tally["all"] += 1
         tally[f["status"]] += 1
     sel = [
         f
         for f in items
         if (not kind or f["kind"] == kind)
-        and ((status == "residual") == (f["status"] == "residual") if status in (None, "all", "residual") else f["status"] == status)
+        and (
+            (f["status"] in HIDDEN) == (status in HIDDEN) and (status not in HIDDEN or f["status"] == status)
+            if status in (None, "all", "residual", "galaxy")
+            else f["status"] == status
+        )
         and (not place or f["place"] == place)
     ]
-    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3}
+    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
     unavailable = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable")
@@ -1266,7 +1321,7 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
     missing_decisive = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable" and i["catalogue"] in deciding[f["id"]])
     return {
         "count": len(sel),
-        "total": sum(1 for f in items if f["status"] != "residual"),
+        "total": sum(1 for f in items if f["status"] not in HIDDEN),
         "counts": counts,
         "labels": KIND_LABEL,
         "identification": {
