@@ -37,6 +37,6 @@ This is the clock of everything we do. Stars with large proper motions shift bet
 
 ## Data releases
 
-The mission publishes its Level-2 spectral images through NASA's IRSA archive, one file per detector per exposure, and mirrors them in a public cloud bucket. Quick releases (QR) came weekly from July 2025; the first data release, DR1, appeared in November 2026 and covers surveys 1 and 2 reprocessed with one pipeline; QR3 continues weekly with surveys 3 and 4. Our exposure index lists every file of DR1 and QR3 (more than 1.6 million Level-2 files) and is updated hourly from the bucket.
+The mission publishes its Level-2 spectral images through NASA's IRSA archive, one file per detector per exposure, and mirrors them in a public cloud bucket. Quick releases (QR) came weekly from July 2025; the first data release, DR1, appeared in November 2026 and covers surveys 1 and 2 reprocessed with one pipeline; QR3 continues weekly with surveys 3 and 4. Our exposure index lists every file of DR1 and QR3 (more than 1.6 million Level-2 files) and is brought up to date once a day, at 06:00 UTC (part 7).
 
 Source: [IRSA data releases](https://irsa.ipac.caltech.edu/spherex-archive-documentation/spherex-data-releases); the file counts are those of our index (see Data and reading).
