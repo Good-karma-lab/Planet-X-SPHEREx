@@ -181,6 +181,12 @@ def test_findings_peaks_that_are_known_bodies_say_so(tmp_path: Path) -> None:
 
 def test_an_answer_got_is_kept_while_another_lead_waits_for_jpl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(jpl, "GAP_S", 0.0)
+    real_sleep = asyncio.sleep
+
+    async def quick(delay: float, *a: Any) -> None:  # the pauses between the three asks
+        await real_sleep(0)
+
+    monkeypatch.setattr(fpx_known.asyncio, "sleep", quick)
     by_pass = [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]
     meta: dict[str, Any] = {
         "status": "ok",
@@ -196,8 +202,8 @@ def test_an_answer_got_is_kept_while_another_lead_waits_for_jpl(tmp_path: Path, 
     async def flaky(request: httpx.Request) -> httpx.Response:
         if "sb_ident" in str(request.url):
             calls["sb"] += 1
-            if calls["sb"] == 1:
-                return httpx.Response(502, text="Proxy Error")  # JPL's gateway fails the first lead once
+            if calls["sb"] <= 3:
+                return httpx.Response(502, text="Proxy Error")  # JPL's gateway fails the first lead all three times it is asked
         return await good._transport.handle_async_request(request)  # type: ignore[attr-defined]
 
     fpx_known._SB_MEMO.clear()
@@ -272,3 +278,26 @@ def test_the_sweep_keeps_a_residual_and_the_result_stops_calling_it_a_lead(tmp_p
     }
     res = idn.enrich_findings(body)
     assert res["finds"][0]["data"]["peak"]["ok"] is False and res["counts"]["peak"]["unchecked"] == 0
+
+
+def test_a_gateway_failure_of_jpl_is_asked_again_before_a_lead_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_sleep = asyncio.sleep
+
+    async def quick(delay: float, *a: Any) -> None:
+        await real_sleep(0)
+
+    monkeypatch.setattr(fpx_known.asyncio, "sleep", quick)
+    monkeypatch.setattr(jpl, "GAP_S", 0.0)
+    good = fake_jpl()
+    calls = {"sb": 0}
+
+    async def once(request: httpx.Request) -> httpx.Response:
+        if "sb_ident" in str(request.url):
+            calls["sb"] += 1
+            if calls["sb"] == 1:
+                return httpx.Response(502, text="Proxy Error")
+        return await good._transport.handle_async_request(request)  # type: ignore[attr-defined]
+
+    fpx_known._SB_MEMO.clear()
+    out = asyncio.run(fpx_known.identify(httpx.AsyncClient(transport=httpx.MockTransport(once)), PLACES, 83.0, 83.0))
+    assert out["state"] == "ok" and out["name"].startswith("90377 Sedna") and calls["sb"] == 2
