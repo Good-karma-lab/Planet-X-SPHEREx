@@ -7,7 +7,7 @@ Static, no build step: the files in `docs/` (index.html, slides.html, validation
 | `index.html` | home: hero, 30-s video, the 7 slides, one-page summary (what it does, how we validated it, what is new), links, SI line, IRSA acknowledgement |
 | `slides.html` | the 7-slide deck: scroll to read; **Present** (or `?present`, key P) for one slide at a time, ← → / space, Esc, F full screen; `#3` opens slide 3 |
 | `spherex-sky-slides.pdf` | the same deck, 7 pages 16:9 (re-export: headless Chrome `--print-to-pdf` of `slides.html`) |
-| `media/spherex-sky-demo.mp4`, `media/poster.jpg` | **draft video slot**: replace with Sunday's re-recording (same file name); poster = a frame of it |
+| `media/spherex-space-30s.mp4`, `media/spherex-space-30s_poster.jpg` | **draft video slot**: replace with Sunday's re-recording (same file name); poster = a frame of it |
 | `img/` | real screenshots of spherex.space (from `docs/submission/demo/img`) and real SPHEREx frames |
 
 To fill on Sunday: the YouTube link (`#yt` in `index.html`), the new MP4 and poster (`media/`). Everything else is final: the numbers are the
