@@ -948,7 +948,7 @@ export function Lab({ route }: { route: Route }) {
             }
           } else if (st.view === 'bands') {
             // on a phone the status line sits over the bottom of the picture: the tiles leave room for it
-            const wallRes = w < 560 ? 156 : 96;
+            const wallRes = w < 560 ? 156 : 124;
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
             panels = wallLayout(shownBands.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the band buttons below
@@ -975,7 +975,7 @@ export function Lab({ route }: { route: Route }) {
               };
             });
           } else {
-            const wallRes = w < 560 ? 156 : 96;
+            const wallRes = w < 560 ? 156 : 124;
             const shownDets = st.dets.slice().sort();
             panels = wallLayout(shownDets.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the detector buttons below
@@ -1384,6 +1384,8 @@ export function Lab({ route }: { route: Route }) {
           ctx.restore();
         }
       };
+      // the status line floats over the bottom of the picture: a name is kept above it (not cut by it)
+      const statusRoom = !days && st.view !== 'picture' ? 0 : 50;
       const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
         // only the name or number at the ring; the rate, the checks and the rest are on the selected mark and in the Candidates list (the test target keeps its line)
         let lines = [mk.name, ...(mk.kind === 'target' || mk.selected ? mk.lines : [])].filter(Boolean);
@@ -1424,14 +1426,14 @@ export function Lab({ route }: { route: Route }) {
         }
         // a narrow picture: a name pushed away from its own ring would point at the wrong thing, so it is left out (the ring and the list keep it)
         if (box.w < 520 && !mk.selected && mk.kind !== 'target' && Math.abs(ly - ly0) > 6) return;
-        ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2, ly));
+        ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2 - statusRoom, ly));
         // pushed back inside the picture (at its bottom edge) the label can land on another one again: it then goes above that one, and
         // when no room is left only the selected mark and the test target keep their name (the ring and the list carry the rest)
         const clash = () => placed.find((p) => lx < p.x1 && lx + tw > p.x0 && ly < p.y1 && ly + th > p.y0);
         for (let tries = 0; tries < 8; tries++) {
           const hit = clash();
           if (!hit) break;
-          ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2, hit.y0 - th - 2));
+          ly = Math.max(box.y + 2, Math.min(box.y + box.h - th - 2 - statusRoom, hit.y0 - th - 2));
         }
         if (clash() && !mk.selected && mk.kind !== 'target') return;
         placed.push({ x0: lx, y0: ly, x1: lx + tw, y1: ly + th });
@@ -2414,13 +2416,14 @@ export function Lab({ route }: { route: Route }) {
         <div class="vwrap" ref={wrap}>
           <div class="vstage" ref={stageRef}>
             <div
-              class={`vsq ${side < 760 ? 'compact' : ''}`}
+              class={`vsq ${side < 760 ? 'compact' : ''}${view !== 'picture' && film === null ? ' wallv' : ''}`}
               style={{
                 width: `${side}px`, // one square in every view: the frame never moves or grows
                 height: `${side}px`,
                 // whole pixels, so that the 1 px frame is crisp and never one pixel thick in one state and two in another
                 marginLeft: `${Math.max(0, Math.floor((stage.w - side) / 2))}px`,
-                marginTop: `${Math.max(0, Math.floor((stage.h - side) / 2))}px`,
+                // a phone: the picture sits at the top of its stage (centred, it left a band of empty space above it)
+                marginTop: stage.w < 560 ? '0px' : `${Math.max(0, Math.floor((stage.h - side) / 2))}px`,
                 cursor: 'crosshair',
               }}
               onClick={(e) => {
