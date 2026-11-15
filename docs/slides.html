@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPHEREx Sky · 7 slides · Good Karma Lab</title>
+<meta name="description" content="SPHEREx Sky: the 7-slide presentation for NASA Space Apps Challenge 2026, challenge Planet X and SPHEREx.">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+/* Each slide is a 1920×1080 canvas, scaled to fit. Stacked when reading; one at a time in Present mode (← → / space / Esc). */
+.deck{padding:28px 0 60px;display:flex;flex-direction:column;align-items:center;gap:28px}
+.frame{width:min(1180px,calc(100vw - 32px));aspect-ratio:16/9;position:relative;overflow:hidden;border-radius:16px;box-shadow:0 0 0 1px var(--line),0 30px 80px rgba(0,0,0,.5)}
+.slide{position:absolute;left:0;top:0;width:1920px;height:1080px;transform-origin:0 0;background:radial-gradient(1300px 700px at 85% 10%,rgba(95,227,214,.08),transparent 60%),radial-gradient(1000px 600px at 0% 100%,rgba(255,180,84,.06),transparent 60%),#05090d;color:var(--text);font-family:var(--font);padding:96px 112px;display:flex;flex-direction:column}
+.slide .no{position:absolute;right:56px;bottom:40px;font:500 22px var(--mono);color:var(--faint)}
+.slide .brandline{position:absolute;left:112px;bottom:40px;font:500 22px var(--mono);color:var(--faint);letter-spacing:.02em}
+.slide .k{font:500 26px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:22px}
+.slide h1{font-size:104px;font-weight:700;letter-spacing:-.035em;line-height:1.02}
+.slide h2{font-size:66px;font-weight:650;letter-spacing:-.025em;line-height:1.06}
+.slide em{font-style:normal;color:var(--amber)}
+.slide p,.slide li{font-size:33px;line-height:1.42;color:#cddbe0}
+.slide ul{margin:0;padding:0;list-style:none;display:grid;gap:22px}
+.slide li{position:relative;padding-left:44px}
+.slide li::before{content:"";position:absolute;left:4px;top:20px;width:16px;height:16px;border-radius:50%;background:var(--accent)}
+.slide b{color:#fff;font-weight:600}
+.two{display:grid;grid-template-columns:.82fr 1.18fr;gap:64px;align-items:center;flex:1;min-height:0}
+.two > div:last-child{max-height:820px;display:flex;flex-direction:column;align-items:center}
+.two > div:last-child .shot{max-height:780px;max-width:100%}
+.shot{border-radius:20px;overflow:hidden;box-shadow:0 0 0 2px rgba(140,225,240,.18),0 40px 100px rgba(0,0,0,.6);background:#000}
+.shot img{width:100%;height:100%;object-fit:cover}
+.cap{font:24px var(--mono);color:var(--faint);margin-top:14px}
+.chip{display:inline-block;font:500 26px var(--mono);padding:10px 18px;border-radius:999px;border:2px solid rgba(140,225,240,.3);color:#e6f0f3;margin:0 12px 12px 0}
+.chip.ok{border-color:rgba(95,227,214,.6);color:var(--accent)}
+table.v{border-collapse:collapse;width:100%;font-size:30px}
+table.v th{text-align:left;font:500 22px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--faint);padding:0 0 14px}
+table.v td{padding:11px 0;border-top:2px solid rgba(140,225,240,.12);vertical-align:top;color:#cddbe0}
+table.v td:first-child{color:#fff;font-weight:600;width:28%}
+table.v td.r{color:var(--accent);font-family:var(--mono);font-size:27px;width:22%}
+.big{font:700 120px/1 var(--font);letter-spacing:-.03em;color:#fff}
+.url{font:600 64px var(--mono);color:var(--accent)}
+.si{font-size:24px !important;color:var(--faint) !important;line-height:1.4 !important}
+/* present mode */
+body.present{overflow:hidden;background:#000}
+body.present .bar,body.present .hint,body.present .foot{display:none}
+body.present .deck{padding:0;gap:0}
+body.present .frame{position:fixed;inset:0;margin:auto;width:min(100vw,calc(100vh*16/9));height:auto;border-radius:0;box-shadow:none;display:none}
+body.present .frame.cur{display:block}
+.hint{color:var(--faint);font:14px var(--mono);text-align:center}
+.ctr{position:fixed;right:16px;bottom:12px;z-index:20;font:13px var(--mono);color:#66808a;display:none}
+body.present .ctr{display:block}
+@media print{
+  @page{size:1920px 1080px;margin:0}
+  html,body{background:#05090d}
+  .bar,.hint,.foot,.ctr{display:none !important}
+  .deck{padding:0;gap:0;display:block}
+  .frame{width:1920px;height:1080px;aspect-ratio:auto;border-radius:0;box-shadow:none;page-break-after:always;break-after:page}
+  .slide{transform:none !important}
+}
+</style>
+</head>
+<body>
+<header class="bar"><div class="wrap">
+  <a class="brand" href="index.html"><svg width="26" height="26" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="none" stroke="#5fe3d6" stroke-width="2"/><circle cx="21.5" cy="11" r="2.6" fill="#ffb454"/></svg>SPHEREx Sky <small>· Planet X and SPHEREx · 7 slides</small></a>
+  <nav>
+    <button class="btn pri" id="present">▶ Present</button>
+    <a class="btn" href="spherex-sky-slides.pdf">PDF</a>
+    <a class="btn" href="index.html#video">Video (30 s)</a>
+    <a class="btn" href="https://spherex.space">Open the app</a>
+  </nav>
+</div></header>
+
+<p class="hint" style="margin-top:18px">Present: ← → or space to move, Esc to leave, F for full screen</p>
+<main class="deck" id="deck">
+
+<!-- 1 · Title -->
+<div class="frame"><div class="slide">
+  <div class="two" style="grid-template-columns:1fr 1fr">
+    <div>
+      <div class="k">NASA Space Apps Challenge 2026 · Barcelona</div>
+      <h1>SPHEREx Sky</h1>
+      <p style="font-size:46px;margin:26px 0 40px;color:#fff;font-weight:500">Flip through the sky.<br>Spot <em>what moves</em>.</p>
+      <div><span class="chip">Challenge: Planet X and SPHEREx</span><span class="chip">Team: Good Karma Lab</span><span class="chip ok">spherex.space</span></div>
+    </div>
+    <div class="shot" style="aspect-ratio:1;position:relative"><img src="img/barnard_path_spherex_24arcmin.jpg" alt="SPHEREx picture of the sky around Barnard's Star with its real path from 1950 to 2050">
+      <svg viewBox="0 0 100 100" style="position:absolute;inset:0;width:100%;height:100%" aria-hidden="true">
+        <line x1="47.25" y1="85.61" x2="51.14" y2="35.34" stroke="#ffb454" stroke-width=".45"/>
+        <line x1="51.78" y1="26.96" x2="52.78" y2="14.02" stroke="#ffb454" stroke-width=".45" stroke-dasharray="1.2 1"/>
+        <g fill="#ffb454"><circle cx="47.25" cy="85.61" r=".8"/><circle cx="49.35" cy="58.38" r=".8"/><circle cx="49.52" cy="56.15" r=".8"/><circle cx="49.64" cy="54.63" r=".8"/><circle cx="50.02" cy="49.7" r=".8"/><circle cx="50.6" cy="42.3" r=".8"/></g>
+        <circle cx="52.78" cy="14.02" r=".9" fill="#05090d" stroke="#ffb454" stroke-width=".4"/>
+        <circle cx="51.46" cy="31.15" r="4.2" fill="none" stroke="#ffb454" stroke-width=".55"/>
+        <g font-family="IBM Plex Mono" font-size="2.6" fill="#e6f0f3"><text x="50" y="86.4">1950 · POSS-I plate</text><text x="52.2" y="57.2">1988–93 · POSS-II</text><text x="52.7" y="50.5">2000 · 2MASS</text><text x="53.2" y="43.1">2010 · AllWISE</text><text x="55.4" y="14.8">2050</text></g>
+        <g font-family="IBM Plex Sans" fill="#fff"><text x="57.5" y="30.3" font-size="3.3" font-weight="600">Barnard's Star</text><text x="57.5" y="34.4" font-size="2.7" fill="#cddbe0">SPHEREx 2025–26 · 10.4″ a year</text></g>
+      </svg></div>
+  </div>
+  <div class="brandline">Good Karma Lab · Aleksandr Ostapenko</div><div class="no">1 / 7</div>
+</div></div>
+
+<!-- 2 · The problem -->
+<div class="frame"><div class="slide">
+  <div class="k">The challenge</div>
+  <div class="two">
+    <div>
+      <h2>A new sky every six months. Too much for any one person.</h2>
+      <ul style="margin-top:44px">
+        <li>SPHEREx maps the <b>entire sky every six months</b> in <b>102 colours</b> of infrared light.</li>
+        <li>Asteroids, comets, nearby stars and brown dwarfs <b>shift between images</b>. Pluto was found that way.</li>
+        <li>But raw frames show <b>colour flicker, not motion</b>: each exposure sees a star at another wavelength and pixel grid.</li>
+      </ul>
+    </div>
+    <div><div class="shot" style="aspect-ratio:16/9"><img src="img/globe.jpg" alt="The globe of SPHEREx Sky with the Milky Way"></div><div class="cap">spherex.space · the globe on NASA’s star map: 1.6 million SPHEREx exposures to open</div></div>
+  </div>
+  <div class="brandline">SPHEREx Sky</div><div class="no">2 / 7</div>
+</div></div>
+
+<!-- 3 · Watch it move -->
+<div class="frame"><div class="slide">
+  <div class="k">Coordinates in, a little video out</div>
+  <div class="two">
+    <div>
+      <h2>Play the seasons. Watch it <em>move</em>.</h2>
+      <ul style="margin-top:44px">
+        <li>Every season is <b>cleaned, stacked and coloured</b> by its own spectrum, then played 1 → 2 → 3 → 2.</li>
+        <li>Nearby stars and brown dwarfs step between passes: Barnard's Star 10.7 ± 0.8″/yr in a 20′ field, Gaia 10.4 <b>✓</b>.</li>
+        <li><b>ε Indi B</b>, a brown dwarf 12 light-years away, crosses the white stars at 4.7″/yr. <b>Days</b> also show asteroids.</li>
+      </ul>
+    </div>
+    <div><div class="shot" style="aspect-ratio:1"><img src="img/lab-barnard-crop.jpg" alt="The lab on Barnard's Star: the star ringed with its measured motion and the Gaia check"></div><div class="cap">The lab · Barnard's Star 10′ · ringed with its motion and the Gaia check</div></div>
+  </div>
+  <div class="brandline">SPHEREx Sky</div><div class="no">3 / 7</div>
+</div></div>
+
+<!-- 4 · Find Planet X -->
+<div class="frame"><div class="slide">
+  <div class="k">Find Planet X</div>
+  <div class="two">
+    <div>
+      <h2>Too faint for one picture. <em>Add up the orbit.</em></h2>
+      <ul style="margin-top:44px">
+        <li>Exposures added along every orbit a body could have, <b>30–2000 au</b>.</li>
+        <li><b>Eris</b>, found blind and linked over three passes: <b>95.6 ± 0.4 au</b> (JPL 95.5). <b>Makemake</b> 52.5 ± 0.2 au (JPL 52.3). <b>Sedna</b>, V 20.8: a strong lead at 83.0 au (JPL 83.0).</li>
+        <li>No Planet X is claimed yet.</li>
+      </ul>
+    </div>
+    <div><div class="shot" style="aspect-ratio:420/401;width:100%"><img style="width:100%;height:100%;object-fit:cover" src="img/eris_deep_sum_97au.jpg" alt="Eris in focus after adding the SPHEREx exposures along its slow path"></div><div class="cap">Eris · its exposures added along its path · 95.6 ± 0.4 au</div></div>
+  </div>
+  <div class="brandline">SPHEREx Sky</div><div class="no">4 / 7</div>
+</div></div>
+
+<!-- 5 · Anomalies -->
+<div class="frame"><div class="slide">
+  <div class="k">What does not look like a star</div>
+  <div class="two">
+    <div>
+      <h2>The search ranks a <em>brown dwarf</em> first.</h2>
+      <ul style="margin-top:44px">
+        <li>Any dot gives its <b>spectrum in 102 colours</b>; the tool builds the field's ordinary star from them and flags what does not fit.</li>
+        <li>In its field <b>ε Indi B</b> comes out as <b>spectral anomaly 1</b>: a cold brown dwarf glows at the long wavelengths.</li>
+        <li>Every find gets a passport: score, wavelengths, motion. <b>“Anomaly”, never “discovery”.</b></li>
+      </ul>
+    </div>
+    <div><div class="shot" style="aspect-ratio:1200/750"><img src="img/anomaly-crop.jpg" alt="The anomaly search on the ε Indi B field: anomaly 1 is ε Indi B"></div><div class="cap">ε Indi B 20′ · anomaly 1 with its passport</div></div>
+  </div>
+  <div class="brandline">SPHEREx Sky</div><div class="no">5 / 7</div>
+</div></div>
+
+<!-- 6 · Validation -->
+<div class="frame"><div class="slide">
+  <div class="k">Validated on real data</div>
+  <h2 style="margin-bottom:44px">Every number checked against another telescope.</h2>
+  <table class="v">
+    <tr><th>Check</th><th>What we measured</th><th>Result</th></tr>
+    <tr><td>Nearby stars vs ESA Gaia</td><td>Barnard's Star 11.4″/yr (Gaia 10.4) · ε Indi B 4.6″/yr (Gaia 4.7) · WISE 0855 7.9″/yr (SIMBAD 8.2)</td><td class="r">same motion ✓</td></tr>
+    <tr><td>Known asteroids, blind</td><td>6 of 8 known bodies to V 19.1 found blind on a 60′ field; every track a known body</td><td class="r">0 false ✓</td></tr>
+    <tr><td>Bodies beyond Neptune</td><td>Eris 95.6 ± 0.4 au, 3 passes linked (JPL 95.5) · Makemake 52.5 au (JPL 52.3)</td><td class="r">found ✓</td></tr>
+    <tr><td>Chance control</td><td>every search re-run on shuffled data, 20 trials per field</td><td class="r">0.0 / field ✓</td></tr>
+  </table>
+  <p style="font-size:28px;margin-top:34px;color:var(--faint)">Limits: bright stars saturate · asteroids to about V 19 · a lead is not a discovery.</p>
+  <div class="brandline">SPHEREx Sky</div><div class="no">6 / 7</div>
+</div></div>
+
+<!-- 7 · Try it -->
+<div class="frame"><div class="slide">
+  <div class="k">Try it now: free, no account</div>
+  <div class="two" style="grid-template-columns:1.2fr .8fr">
+    <div>
+      <div class="url">spherex.space</div>
+      <p style="margin:28px 0 46px;font-size:38px">Pick any patch of sky. Play it in time. Help spot what moves.</p>
+      <p style="font-size:30px"><b>Code</b> · github.com/Good-karma-lab/Planet-X-SPHEREx (Apache-2.0)<br><b>Team</b> · Good Karma Lab · Aleksandr Ostapenko · Katherine Karmatskikh<br><b>Data</b> · NASA SPHEREx (IRSA) · ESA Gaia DR3 · DSS · 2MASS · WISE</p>
+      <p class="si" style="margin-top:46px">Built with AI coding assistants (Claude Code) under the team's direction. All pictures are computed from real data; no AI-generated images. This work uses SPHEREx data products (JPL and Caltech, funded by NASA). Independent project, not endorsed by NASA.</p>
+    </div>
+    <div class="shot" style="aspect-ratio:1"><img src="img/epsindi_b_sep26.jpg" alt="ε Indi B, the orange-red brown dwarf among white stars, SPHEREx 2026"></div>
+  </div>
+  <div class="brandline">Good Karma Lab · NASA Space Apps Challenge 2026</div><div class="no">7 / 7</div>
+</div></div>
+
+</main>
+<div class="ctr" id="ctr"></div>
+<footer class="foot"><div class="wrap">
+  <p>This publication makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and Space Administration.</p>
+  <p>Screenshots: https://spherex.space on real SPHEREx Level-2 data. Archive plates: Digitized Sky Surveys (STScI). Not affiliated with or endorsed by NASA.</p>
+</div></footer>
+
+<script>
+(() => {
+  const frames = [...document.querySelectorAll('.frame')];
+  const fit = () => frames.forEach(f => { const s = f.querySelector('.slide'); s.style.transform = `scale(${f.clientWidth / 1920})`; });
+  let i = 0;
+  const show = n => { i = Math.max(0, Math.min(frames.length - 1, n)); frames.forEach((f, j) => f.classList.toggle('cur', j === i)); document.getElementById('ctr').textContent = `${i + 1} / ${frames.length}`; fit(); history.replaceState(null, '', '#' + (i + 1)); };
+  const enter = () => { document.body.classList.add('present'); show(i); };
+  const leave = () => { document.body.classList.remove('present'); if (document.fullscreenElement) document.exitFullscreen(); fit(); frames[i].scrollIntoView({ block: 'center' }); };
+  document.getElementById('present').onclick = () => { enter(); document.documentElement.requestFullscreen?.().catch(() => {}); };
+  addEventListener('keydown', e => {
+    const p = document.body.classList.contains('present');
+    if (!p && (e.key === 'p' || e.key === 'P')) return enter();
+    if (!p) return;
+    if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter'].includes(e.key)) { e.preventDefault(); show(i + 1); }
+    else if (['ArrowLeft', 'ArrowUp', 'PageUp', 'Backspace'].includes(e.key)) { e.preventDefault(); show(i - 1); }
+    else if (e.key === 'Home') show(0); else if (e.key === 'End') show(frames.length - 1);
+    else if (e.key === 'Escape') leave();
+    else if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen?.().catch(() => {});
+  });
+  addEventListener('click', e => { if (document.body.classList.contains('present') && !e.target.closest('a,button')) show(i + (e.clientX > innerWidth / 3 ? 1 : -1)); });
+  addEventListener('resize', fit);
+  const q = new URLSearchParams(location.search), h = parseInt(location.hash.slice(1));
+  if (h) i = h - 1;
+  if (q.has('present')) enter();
+  fit();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+/* SPHEREx Sky presentation site: dark, same teal/amber as the app. Static; no build step. */
+:root{
+  --bg:#04080c; --bg1:#08111a; --card:#0d171f; --card2:#111d26; --line:rgba(140,225,240,.14);
+  --text:#e6f0f3; --muted:#a3bcc5; --faint:#7d96a0; --accent:#5fe3d6; --ink:#032420; --amber:#ffb454;
+  --font:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif; --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:17px/1.6 var(--font);-webkit-font-smoothing:antialiased}
+a{color:var(--accent)}
+img{max-width:100%;display:block}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+.bar{position:sticky;top:0;z-index:10;background:rgba(4,8,12,.86);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.bar .wrap{display:flex;align-items:center;gap:14px;height:62px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;color:var(--text);text-decoration:none;white-space:nowrap}
+.brand small{color:var(--muted);font-weight:400;font-size:13px}
+.bar nav{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 16px;border-radius:999px;border:1px solid rgba(230,240,243,.25);color:var(--text);text-decoration:none;font-weight:600;font-size:14.5px;background:none;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:rgba(230,240,243,.5)}
+.btn.pri{background:var(--accent);color:var(--ink);border-color:var(--accent)}
+.eyebrow{font:500 13px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin:0 0 10px}
+h1,h2,h3{margin:0;line-height:1.15;letter-spacing:-.015em}
+.lede{color:var(--muted);font-size:19px;max-width:760px}
+section{padding:72px 0}
+.alt{background:var(--bg1)}
+.mono{font-family:var(--mono)}
+.foot{border-top:1px solid var(--line);padding:36px 0 48px;color:var(--muted);font-size:13.5px}
+.foot p{margin:6px 0;max-width:980px}
+@media (max-width:760px){.bar nav .btn:not(.pri){display:none}.wrap{padding:0 16px}section{padding:52px 0}}

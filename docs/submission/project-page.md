@@ -2,7 +2,7 @@
 
 For the NASA Space Apps 2026 project page of team Good Karma Lab (Local Event: Barcelona). Every claim below is something the deployed
 tool at https://spherex.space does today, and every number is one measured on the live service (the endpoint or the dated report is
-given with it). Fields marked **[fill]** need the team's input.
+given with it). The one field marked **[fill]** is the YouTube link of the final video.
 
 ## Project name
 
@@ -33,13 +33,16 @@ coordinates and sees a series of images of that patch like a short video, in whi
 with its evidence, never a discovery. It matters because SPHEREx's raw frames show no motion to the eye, while blinking survey images
 is how Pluto was found in 1930 and how volunteers have since found thousands of brown dwarfs in WISE images.
 
-## Link to project demo **[fill: the uploaded video or slides]**
+## Link to project demo
 
-A 30-second screen recording of the live tool or the 7 slides (`docs/submission/demo/`, `slides.md`).
+https://good-karma-lab.github.io/Planet-X-SPHEREx/ : the presentation site (the 30-second screen recording of the live tool, the 7
+slides with a Present mode, the PDF and the page of checks), published from the repository's `docs/` once the repository is public
+(`docs/PAGES.md`). Video on YouTube: **[fill: the link after Sunday's upload]**.
 
 ## Link to final project
 
 https://spherex.space: the running tool, no login. Code: https://github.com/Good-karma-lab/Planet-X-SPHEREx (Apache-2.0).
+Presentation: https://good-karma-lab.github.io/Planet-X-SPHEREx/.
 
 ## Detailed project description
 
@@ -82,8 +85,10 @@ Nine orbit, the fields searched and every search's own measured noise bar.
   ε Indi at 10′, 20′ and 60′); in the film search 0.0 at four or more visits and 1.83 per trial at three (12 trials), which is why a
   track needs four visits.
 - Bodies beyond Neptune: Eris, three passes linked by one orbit, 95.6 ± 0.4 au (JPL 95.5); Makemake, two passes linked, 52.5 ± 0.2 au
-  (JPL 52.3, not confirmed by a third pass). One pass alone gives only a wide range of distances (70 to 165 au for Eris's first pass).
-  Live runs on spherex.space, 2026-11-15, keys in the Method page.
+  (JPL 52.3, not confirmed by a third pass); Sedna, a three-pass deep sum, a peak at 83.0 au (JPL 83.0) standing 0.5–0.8″ from JPL's
+  place in every pass, 8.2σ: above the field's noise ceiling (8.07σ) and below its bar (8.48σ), so it is reported as a strong lead, not
+  a detection. One pass alone gives only a wide range of distances (70 to 165 au for Eris's first pass). Live runs on spherex.space,
+  2026-11-15, keys in the Method page.
 
 The Method page (https://spherex.space/#/method) gives every step, formula and number with its source.
 

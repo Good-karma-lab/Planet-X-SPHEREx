@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPHEREx Sky · Good Karma Lab · NASA Space Apps 2026</title>
+<meta name="description" content="SPHEREx Sky: a public web tool that plays NASA SPHEREx sky images in time so anyone can see the sky change and spot what moves. NASA Space Apps Challenge 2026, Planet X and SPHEREx.">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<style>
+.hero{padding:80px 0 56px;background:radial-gradient(1100px 600px at 80% 20%,rgba(95,227,214,.09),transparent 60%),var(--bg)}
+.hero .g{display:grid;grid-template-columns:1.05fr .95fr;gap:56px;align-items:center}
+.hero h1{font-size:clamp(40px,5vw,64px);font-weight:700;letter-spacing:-.03em}
+.hero h1 em{font-style:normal;color:var(--amber)}
+.hero .lede{margin:20px 0 28px}
+.acts{display:flex;flex-wrap:wrap;gap:10px}
+.acts .btn{height:46px;padding:0 20px;font-size:15.5px}
+.pic{border-radius:18px;overflow:hidden;box-shadow:0 0 0 1px var(--line),0 30px 80px rgba(0,0,0,.5)}
+.video{aspect-ratio:16/9;border-radius:18px;overflow:hidden;background:#000;box-shadow:0 0 0 1px var(--line);margin-top:24px}
+.video video{width:100%;height:100%;display:block;background:#000}
+.vnote{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:12px;color:var(--faint);font:13.5px var(--mono)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px;margin-top:32px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+.card h3{font-size:19px;margin-bottom:8px}
+.card p{margin:0;color:var(--muted);font-size:15.5px}
+.card ul{margin:0;padding-left:18px;color:var(--muted);font-size:15.5px}
+.card li{margin:4px 0}
+table.v{width:100%;border-collapse:collapse;margin-top:28px;font-size:15.5px}
+table.v th{text-align:left;font:500 12.5px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--faint);padding:0 12px 10px 0}
+table.v td{padding:13px 12px 13px 0;border-top:1px solid var(--line);vertical-align:top;color:var(--muted)}
+table.v td:first-child{color:var(--text);font-weight:600;width:24%}
+table.v td.r{color:var(--accent);font-family:var(--mono);font-size:14px;white-space:nowrap}
+.limits{margin-top:18px;color:var(--faint);font-size:14.5px}
+.links{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:28px}
+.links a{display:block;text-decoration:none;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px 20px;color:var(--text)}
+.links a:hover{border-color:rgba(95,227,214,.45)}
+.links span{display:block;font:500 12.5px var(--mono);letter-spacing:.05em;text-transform:uppercase;color:var(--accent);margin-bottom:6px}
+.links small{display:block;color:var(--muted);margin-top:4px;font-size:13.5px;overflow-wrap:anywhere}
+.thumbs{display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-top:24px}
+.thumbs a{display:block;aspect-ratio:16/9;border-radius:8px;overflow:hidden;background:#05090d;border:1px solid var(--line);position:relative}
+.thumbs a span{position:absolute;left:8px;bottom:6px;font:12px var(--mono);color:#cfd8e0}
+@media (max-width:900px){.hero .g,.cols{grid-template-columns:1fr}.links{grid-template-columns:1fr 1fr}.thumbs{grid-template-columns:repeat(4,1fr)}}
+</style>
+</head>
+<body>
+<header class="bar"><div class="wrap">
+  <a class="brand" href="#"><svg width="26" height="26" viewBox="0 0 32 32"><circle cx="16" cy="16" r="13" fill="none" stroke="#5fe3d6" stroke-width="2"/><circle cx="21.5" cy="11" r="2.6" fill="#ffb454"/></svg>SPHEREx Sky <small>· Good Karma Lab</small></a>
+  <nav>
+    <a class="btn pri" href="slides.html?present">▶ Present</a>
+    <a class="btn" href="spherex-sky-slides.pdf">PDF</a>
+    <a class="btn" href="#video">Video (30 s)</a>
+    <a class="btn" href="https://spherex.space">Open the app</a>
+  </nav>
+</div></header>
+
+<main>
+<section class="hero">
+  <div class="wrap g">
+    <div>
+      <p class="eyebrow">NASA Space Apps Challenge 2026 · Planet X and SPHEREx</p>
+      <h1>Flip through the sky.<br>Spot <em>what moves</em>.</h1>
+      <p class="lede">Pluto was found by comparing two photographs of the same stars and noticing one dot that had shifted. Since 2025, NASA's SPHEREx has photographed the entire sky every six months in 102 colours of infrared light, far more than anyone can check alone. SPHEREx Sky lets anyone pick a spot, play its images like a short film, and see what moved.</p>
+      <div class="acts">
+        <a class="btn pri" href="https://spherex.space">Open spherex.space</a>
+        <a class="btn" href="slides.html">The 7 slides</a>
+        <a class="btn" href="https://github.com/Good-karma-lab/Planet-X-SPHEREx">Code on GitHub</a>
+      </div>
+    </div>
+    <div class="pic"><img src="img/lab-barnard.jpg" alt="The SPHEREx Sky lab on Barnard's Star: the star ringed with its measured motion and the ESA Gaia check"></div>
+  </div>
+</section>
+
+<section id="video" class="alt">
+  <div class="wrap">
+    <p class="eyebrow">Demo · 30 seconds</p>
+    <h2 style="font-size:36px">See it in 30 seconds.</h2>
+    <div class="video"><video controls playsinline preload="metadata" poster="media/poster.jpg" src="media/spherex-sky-demo.mp4" aria-label="30-second demo of SPHEREx Sky with English subtitles"></video></div>
+    <div class="vnote"><span>Screen recording of spherex.space on real SPHEREx data · English subtitles</span><span>Also on YouTube: <a href="#" id="yt">[link added Sunday]</a></span></div>
+  </div>
+</section>
+
+<section id="slides">
+  <div class="wrap">
+    <p class="eyebrow">Presentation</p>
+    <h2 style="font-size:36px">Seven slides.</h2>
+    <p class="lede" style="margin-top:12px">Present in the browser with the arrow keys, or download the PDF.</p>
+    <div class="thumbs">
+      <a href="slides.html#1" style="background:url(img/barnard_path_spherex_24arcmin.jpg) center/cover"><span>1 · Title</span></a>
+      <a href="slides.html#2" style="background:url(img/globe.jpg) center/cover"><span>2 · Challenge</span></a>
+      <a href="slides.html#3" style="background:url(img/lab-barnard.jpg) center/cover"><span>3 · Move</span></a>
+      <a href="slides.html#4" style="background:url(img/eris_deep_sum_97au.jpg) center/cover"><span>4 · Find Planet X</span></a>
+      <a href="slides.html#5" style="background:url(img/anomaly.jpg) center/cover"><span>5 · Anomaly</span></a>
+      <a href="slides.html#6" style="background:url(img/findings.jpg) center/cover"><span>6 · Validation</span></a>
+      <a href="slides.html#7" style="background:url(img/epsindi_b_sep26.jpg) center/cover"><span>7 · Try it</span></a>
+    </div>
+    <div class="acts" style="margin-top:20px"><a class="btn pri" href="slides.html?present">▶ Present</a><a class="btn" href="spherex-sky-slides.pdf">Download PDF</a></div>
+  </div>
+</section>
+
+<section id="summary" class="alt">
+  <div class="wrap">
+    <p class="eyebrow">One-page summary</p>
+    <h2 style="font-size:36px">What it does for the challenge.</h2>
+    <p class="lede" style="margin-top:12px">The challenge asks for a public web tool that displays SPHEREx images of a patch of sky "like a little video, making it easy to spot moving objects". That is the core of SPHEREx Sky, built on the real Level-2 files from NASA's public archive.</p>
+    <div class="cols">
+      <div class="card"><h3>See the sky change</h3><ul>
+        <li>Type RA/Dec or a name, or spin the globe; field of view 2′ to 60′.</li>
+        <li><b>Months</b>: every pass is cleaned, stacked and coloured by its own spectrum, then played like a film; blink, difference or co-add.</li>
+        <li><b>Days</b>: the visits inside one pass, hours apart, for asteroids.</li>
+        <li>Archive plates (DSS 1950–1999, 2MASS, AllWISE) add decades.</li>
+      </ul></div>
+      <div class="card"><h3>Use all 102 bands</h3><ul>
+        <li>Named bands for people: starlight, water vapour, methane, water ice, dust, CO₂, CO; or the six detectors, each added up on its own.</li>
+        <li>A spectrum for any source, measured on the fly in every exposure.</li>
+        <li>Red sources (3.8–5 µm against 1.1–1.6 µm) and spectral anomalies, each with a passport.</li>
+      </ul></div>
+      <div class="card"><h3>Help find what moves</h3><ul>
+        <li>Nearby stars and brown dwarfs moving between the half-yearly passes, each checked against ESA Gaia DR3.</li>
+        <li><b>Find Planet X</b>: adds the exposures along trial orbits at 30–2000 au. Found blind and linked over three passes, Eris comes out at 95.6 ± 0.4 au (JPL 95.5); Makemake at 52.5 ± 0.2 au from two passes.</li>
+        <li>Also asteroid tracks inside a pass, with known bodies from JPL ringed.</li>
+        <li>Every view lives in the address, so it can be shared or embedded.</li>
+        <li>Free, no account, open source (Apache-2.0).</li>
+      </ul></div>
+    </div>
+
+    <h2 style="font-size:30px;margin-top:56px">How we validated it.</h2>
+    <p style="margin:8px 0 0"><a href="validation.html">Every check with its number and picture →</a></p>
+    <table class="v">
+      <tr><th>Check</th><th>What we measured on real SPHEREx data</th><th>Result</th></tr>
+      <tr><td>Nearby stars vs ESA Gaia</td><td>Live, 5′ fields: Barnard's Star 11.37 ± 0.47″/yr (Gaia DR3 10.39; its saturated core pulls a 5′ field high, a 20′ field gives 10.7 ± 0.8). ε Indi B 4.59 ± 0.49″/yr (Gaia 4.684). WISE 0855−0714, too cold for Gaia, 7.93 ± 0.61″/yr (SIMBAD 8.15).</td><td class="r">same motion ✓</td></tr>
+      <tr><td>Known asteroids, blind</td><td>A 60′ ecliptic field, 24 visits: the search inside a pass finds 6 of the 8 known bodies brighter than V 19.1 without being told; JPL names them, and every track found is a known body.</td><td class="r">6 of 8, 0 false ✓</td></tr>
+      <tr><td>Chance control</td><td>Every search re-run on shuffled data, 20 trials per field: no chance track between passes; inside a pass chance links three visits, never four, so a track needs four.</td><td class="r">0.0 tracks / field</td></tr>
+    </table>
+    <p class="limits">Limits we state: stars brighter than about J = 10.5 saturate and get no SPHEREx spectrum; a track needs three seasons; shifts under about 5″ between the first and last season are not caught; a lead is not a discovery until confirmed.</p>
+
+    <h2 style="font-size:30px;margin-top:56px">What is new.</h2>
+    <div class="cols">
+      <div class="card"><h3>Seasons you can see</h3><p>Exposures at different wavelengths and pixel grids are stacked per season and coloured by SPHEREx's own spectrum, so a star's shift shows, not the flicker of its spectrum.</p></div>
+      <div class="card"><h3>Months and Days, one timeline</h3><p>The same field plays its seasons (nearby stars, brown dwarfs) or the visits inside one pass (asteroids), without reloading.</p></div>
+      <div class="card"><h3>Find Planet X</h3><p>The exposures are added along every orbit a distant body could have; the jump between passes gives its distance. No Planet X is claimed.</p></div>
+      <div class="card"><h3>Honest searches</h3><p>Every mover carries its Gaia verdict, every search a chance control, every anomaly a passport that says why. "Anomaly", never "discovery".</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="links">
+  <div class="wrap">
+    <p class="eyebrow">Links</p>
+    <div class="links">
+      <a href="https://spherex.space"><span>The tool</span>spherex.space<small>free, no account</small></a>
+      <a href="https://spherex.space/#/method"><span>How it works</span>The Method page<small>every step, every check, with live numbers</small></a>
+      <a href="https://github.com/Good-karma-lab/Planet-X-SPHEREx"><span>Code</span>Planet-X-SPHEREx<small>GitHub · Apache-2.0</small></a>
+      <a href="https://www.linkedin.com/in/alexanderostapenko/"><span>Team · Good Karma Lab</span>Aleksandr Ostapenko<small>Team owner · LinkedIn</small></a>
+      <a href="https://www.linkedin.com/in/katherinekarmatskikh/"><span>Team · Good Karma Lab</span>Katherine Karmatskikh<small>Team member · LinkedIn</small></a>
+      <a href="https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/"><span>The challenge</span>Planet X and SPHEREx<small>NASA Space Apps Challenge 2026 · Barcelona Local Event</small></a>
+    </div>
+    <p style="margin-top:28px;color:var(--muted);max-width:900px">We bring 15+ years of software engineering and architecture experience, with expertise in AI, autonomous agents, advanced information retrieval, and delivering solutions from concept to production.</p>
+  </div>
+</section>
+</main>
+
+<footer class="foot"><div class="wrap">
+  <p><b>Use of Super Intelligence (SI):</b> built with AI coding assistants (Anthropic's Claude Code agents) working under the direction of our team; people set the goals, chose between designs and reviewed every result. The images and video are not AI-generated: they are computed from real NASA SPHEREx exposures and archive images.</p>
+  <p>This publication makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and Space Administration.</p>
+  <p>Data: NASA SPHEREx Level-2 via NASA/IPAC IRSA · ESA Gaia DR3 (ESA/Gaia/DPAC) · SIMBAD (CDS) · JPL Horizons · Digitized Sky Surveys (STScI) · 2MASS · AllWISE. Independent project, not affiliated with or endorsed by NASA.</p>
+</div></footer>
+</body>
+</html>
