@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import secrets
 from pathlib import Path
 from typing import Any
 
@@ -37,6 +38,19 @@ async def find_red_async(store: Store, field_key: str, out_dir: Path) -> dict[st
     if path.is_file():
         cached: dict[str, Any] = json.loads(await asyncio.to_thread(path.read_text))
         return cached
+    # one computation per field at a time: the warm runner and a visitor asking together share it (two writers of the same file raced)
+    task = _running.get(key)
+    if task is None:
+        task = asyncio.ensure_future(_compute(store, field_key, out_dir, key))
+        _running[key] = task
+        task.add_done_callback(lambda _t: _running.pop(key, None))
+    return await asyncio.shield(task)
+
+
+_running: dict[str, asyncio.Future[dict[str, Any]]] = {}
+
+
+async def _compute(store: Store, field_key: str, out_dir: Path, key: str) -> dict[str, Any]:
     meta, raws = await asyncio.to_thread(read_parts, store, field_key)
     result = await cpu.run(red_result, field_key, meta, raws)
     return await asyncio.to_thread(keep, result, out_dir, key)
@@ -116,7 +130,7 @@ def red_result(field_key: str, meta: dict[str, Any], raws: list[tuple[bytes, byt
 
 def keep(result: dict[str, Any], out_dir: Path, key: str) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    tmp = out_dir / f"{key}.part"
+    tmp = out_dir / f"{key}.{secrets.token_hex(4)}.part"  # its own file: two writers never share one
     tmp.write_text(json.dumps(result, separators=(",", ":")))
     tmp.replace(out_dir / f"{key}.json")
     return result
