@@ -509,13 +509,13 @@ export function Landing() {
                   role="img"
                   aria-label="A faint orange dot in a noisy field: Eris coming into focus when its exposures are added along its path"
                 >
-                  <span class="lp-badge">Exposures added</span>
+                  <span class="lp-badge">Found blind · 3 passes</span>
                 </div>
                 <div class="lp-body">
                   <span class="lp-kind">Beyond Neptune</span>
                   <h3>Eris, the dwarf planet</h3>
                   <p>
-                    Too faint for one picture. Add the exposures along its slow path and it comes into focus. A planet far beyond
+                    Too faint for one picture. Add the exposures along its slow path and it comes into focus; linking three passes puts it 95.6 ± 0.4 au from the Sun. A planet far beyond
                     Neptune would be found the same way.
                   </p>
                   <span class="lp-go">Run Find Planet X →</span>
