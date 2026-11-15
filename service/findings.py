@@ -66,6 +66,7 @@ IDENT_RANK = {
     "anomaly": 2,
 }  # the order the catalogues are asked in  # bump when the way finds are read or merged changes: the next sweep rewrites them
 SB_VMAG = 21.0  # SPHEREx depth: fainter bodies are not what a find could be
+SB_TIMEOUT_S = 90.0  # JPL Small-Body Identification answers slowly (a field search, every body propagated)
 SB_MATCH_ARCSEC = 15.0
 SB_RATE_TOL = 0.25
 SB_PA_TOL = 30.0
@@ -883,6 +884,9 @@ class Findings:
                     "fov-dec-hwidth": f"{half:.5f}",
                     "vmag-lim": str(SB_VMAG),
                 },
+                timeout=httpx.Timeout(
+                    SB_TIMEOUT_S, connect=10.0
+                ),  # JPL's search of a field often takes 20-60 s, well past the catalogues' 12 s
             )
             r.raise_for_status()
             body: dict[str, Any] = r.json()

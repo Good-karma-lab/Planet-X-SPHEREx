@@ -151,7 +151,7 @@ def _findings_with(body: dict[str, Any]) -> Any:
     from service.upstream.breaker import Breaker
 
     class Client:
-        async def get(self, url: str, params: dict[str, str]) -> _Resp:
+        async def get(self, url: str, params: dict[str, str], **_kw: object) -> _Resp:
             assert params["vmag-lim"] == "21.0"
             return _Resp(body)
 
@@ -281,7 +281,7 @@ def _jpl_by_date(rows_by_mjd: dict[str, list[list[Any]]]) -> Any:
     from service.upstream.breaker import Breaker
 
     class Client:
-        async def get(self, url: str, params: dict[str, str]) -> _Resp:
+        async def get(self, url: str, params: dict[str, str], **_kw: object) -> _Resp:
             day = params["obs-time"][:10]
             return _Resp(_jpl(rows_by_mjd.get(day, [])))
 
