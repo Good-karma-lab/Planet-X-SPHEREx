@@ -79,7 +79,7 @@ const ZOOM_MIN_INSIDE = 1.05;
 const ZOOM_MAX = 400;
 const ZOOM_NEAR = 30;
 /** a catalogue object faster than this (mas/yr) gets its path drawn when selected */
-const PATH_PM = 20;
+const PATH_PM = 50;
 
 /** Demo fields: places where the tool shows something worth seeing, with the view they open in. */
 const DEMOS: { n: string; what: string; ra: number; dec: number; fov: number; film?: number }[] = [
@@ -486,14 +486,16 @@ export function Globe() {
           pins.push({ o: st.sel, x: q[0], y: q[1] });
           pathPin = true;
           if (m > 1) {
+            // a small note at the bottom edge of the frame, never under a label
             ctx.save();
-            ctx.font = `600 11px ${font}`;
+            ctx.font = `500 10px ${font}`;
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#000';
-            ctx.fillStyle = '#9fb6c0';
-            const t = `path ${Math.floor(y0)}→2050, drawn ×${m.toFixed(0)} larger than true`;
-            ctx.strokeText(t, p25[0] + 8, p25[1] + 30);
-            ctx.fillText(t, p25[0] + 8, p25[1] + 30);
+            ctx.fillStyle = '#8fa6b0';
+            ctx.textAlign = 'center';
+            const t = `path ${Math.floor(y0)}→2050 drawn ×${m.toFixed(0)} larger than true`;
+            ctx.strokeText(t, W / 2, H - 8);
+            ctx.fillText(t, W / 2, H - 8);
             ctx.restore();
           }
         }

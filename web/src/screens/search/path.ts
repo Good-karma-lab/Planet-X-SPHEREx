@@ -210,13 +210,43 @@ export function drawMovingPath(
   line(SPHEREX_YEARS[0], SPHEREX_YEARS[1], '#6aff9e', 3.5, []);
   c.font = `600 11px ${opts.font ?? 'ui-monospace, Menlo, monospace'}`;
   c.lineWidth = 3;
+  // labels never land on each other: the name first, then the first year, the last year and the SPHEREx point, then the years between; one that would
+  // cover another is left out (its dot stays)
+  const taken: { x0: number; y0: number; x1: number; y1: number }[] = [];
   const label = (x: number, y: number, t: string, on: boolean) => {
+    const w = c.measureText(t).width;
+    const box = { x0: x + 7, y0: y - 17, x1: x + 7 + w, y1: y - 3 };
+    if (taken.some((q) => box.x0 < q.x1 + 2 && box.x1 > q.x0 - 2 && box.y0 < q.y1 + 1 && box.y1 > q.y0 - 1)) return;
+    taken.push(box);
     c.strokeStyle = '#000';
     c.strokeText(t, x + 7, y - 6);
     c.fillStyle = on ? '#fff' : '#d6e7ed';
     c.fillText(t, x + 7, y - 6);
   };
-  for (const y of opts.imageYears) {
+  // the pin's name is placed before everything else
+  const pin = at(opts.backdropYear);
+  if (pin[2]) {
+    c.lineWidth = 3;
+    label(pin[0] + 8, pin[1] + 14, `${o.name} · ${Math.round(opts.backdropYear)}`, true);
+  }
+  const first = Math.min(...opts.imageYears);
+  const yearsByPriority = [...opts.imageYears].sort((a, b) => (a === first ? -1 : b === first ? 1 : 0));
+  const endLabels = (): void => {
+    for (const y of [2050, SPHEREX_YEARS[0]]) {
+      const s = at(y);
+      if (!s[2]) continue;
+      c.lineWidth = 3;
+      label(s[0], s[1], y === 2050 ? '2050' : 'SPHEREx', false);
+    }
+  };
+  // first year, then the ends, then the middle years
+  const firstS = at(first);
+  if (firstS[2] && opts.imageYears.length) {
+    c.lineWidth = 3;
+    label(firstS[0], firstS[1], String(Math.round(first)), Math.abs(first - opts.backdropYear) < 0.6);
+  }
+  endLabels();
+  for (const y of yearsByPriority) {
     const s = at(y);
     if (!s[2]) continue;
     const on = Math.abs(y - opts.backdropYear) < 0.6;
@@ -228,9 +258,9 @@ export function drawMovingPath(
     c.fill();
     if (on) c.stroke();
     c.lineWidth = 3;
-    label(s[0], s[1], String(Math.round(y)), on);
+    if (y !== first) label(s[0], s[1], String(Math.round(y)), on);
   }
-  // 2050 and the survey's own dates at the ends of their stretches
+  // 2050 and the survey's own dates at the ends of their stretches (their dots; the labels are placed above)
   for (const y of [SPHEREX_YEARS[0], 2050]) {
     const s = at(y);
     if (!s[2]) continue;
@@ -238,7 +268,6 @@ export function drawMovingPath(
     c.beginPath();
     c.arc(s[0], s[1], 3, 0, 7);
     c.fill();
-    label(s[0], s[1], y === 2050 ? '2050' : 'SPHEREx', false);
   }
   // the pin: the place on the date of the backdrop on show
   const p = at(opts.backdropYear);
@@ -250,8 +279,6 @@ export function drawMovingPath(
     c.arc(p[0], p[1], opts.zoomedIn ? 11 : 6.5, 0, 7);
     if (!opts.zoomedIn) c.fill();
     c.stroke();
-    c.lineWidth = 3;
-    label(p[0] + 8, p[1] + 14, `${o.name} · ${Math.round(opts.backdropYear)}`, true);
   }
   c.restore();
 }
