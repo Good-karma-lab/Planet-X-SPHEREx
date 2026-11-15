@@ -137,6 +137,26 @@ so each place on the sky has a fixed direction of own motion for each inclinatio
 
 [figure: p9-orbits | The Solar System with the predicted Planet Nine orbit and the fields searched for it]
 
+## What the search has done
+
+Each row is one run on the live service, with the method that gave it and its key (`/api/v1/distant` for a pass, `/api/v1/link` for the link). Runs are not merged. The scan and photometric signal-to-noise figures are those of each search; we have not measured a completeness.
+
+| Run | Method | Result | Source |
+|---|---|---|---|
+| Eris, pass of July 2025, 18′ field, 40–165 au | one-pass distance search | scan 11.9σ, photometry 9.3σ, distance 70–165 au | live key 5fe287a1cf7b66ba53baadea, 2026-11-15 |
+| Eris, pass of January 2026 | one-pass distance search | scan 14.6σ, photometry 14.2σ, distance 85–111 au | live key 4c25da646369e21eff3f3df7, 2026-11-15 |
+| Eris, pass of July 2026 | one-pass distance search | scan 13.6σ, photometry 10.9σ, distance 47–144 au | live key cc3ed6461aa1f971864801a8, 2026-11-15 |
+| Eris, the three tracks | link of passes, tolerance 6″ | 95.6 ± 0.4 au, a 69.4 au, e 0.45, misfit 1.6″, third pass confirmed | live link of the three keys above, 2026-11-15 |
+| Makemake, pass 1 | one-pass distance search | scan 16.0σ, photometry 10.9σ | live key 54c02b2d2ff66213f303847d, 2026-11-15 |
+| Makemake, pass 2 | one-pass distance search | scan 14.6σ, photometry 10.3σ | live key 15340cf077cd7c68b891a29e, 2026-11-15 |
+| Makemake, the two tracks | link of passes | 52.5 ± 0.2 au, misfit 1.5″, not confirmed (two passes only) | live link of the two keys above, 2026-11-15 |
+
+**Result:** Linking the three Eris tracks with one orbit gives 95.6 ± 0.4 au, with the third pass confirmed by the orbit. Source: live link of keys 5fe287a1…, 4c25da64…, cc3ed646…, 2026-11-15.
+
+**Result:** Each single pass of Eris gives only a wide distance range (70 to 165 au in the first); linking the passes pins the distance. Source: the same live runs.
+
+**Result:** Linking the two Makemake tracks gives 52.5 ± 0.2 au with a misfit of 1.5″; with two passes only, the link is not confirmed by a third. Source: live link of keys 54c02b2d… and 15340cf0…, 2026-11-15.
+
 ## What it can and cannot say
 
 - A run on a known body is called blind when the field was centred on it: the search knew the area but not the place inside it, the distance or the motion.
