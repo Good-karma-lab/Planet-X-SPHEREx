@@ -42,6 +42,42 @@ function Vid({ f, label }: { f: string; label: string }) {
   return <video class="mf-vid" src={M(`live/${f}.mp4`)} poster={M(`live/${f}.jpg`)} muted loop playsInline autoPlay preload="metadata" aria-label={label} />;
 }
 
+/** Eris, found blind and linked by the live service (spherex.space production jobs, 2026-11-15): each pass alone gives a wide range
+ *  of distances; the link of the three passes narrows it to ±0.4 au. Bars on a 40–165 au axis (the range searched). */
+const ERIS_PASSES: [string, number, number, number, number, number][] = [
+  ['20 Jul 2025', 11.9, 9.3, 114.0, 70.5, 165.0],
+  ['9 Jan 2026', 14.6, 14.2, 93.2, 85.3, 111.0],
+  ['17 Jul 2026', 13.6, 10.9, 81.2, 47.1, 143.8],
+];
+function ErisLive() {
+  const x = (d: number) => `${((d - 40) / 125) * 100}%`;
+  const row = (lab: string, sub: string, lo: number, hi: number, best: number, link = false) => (
+    <div class="er-row" key={lab}>
+      <span class="er-l">
+        <b>{lab}</b>
+        <small>{sub}</small>
+      </span>
+      <span class="er-t">
+        <i class={link ? 'link' : ''} style={{ left: x(lo), width: `calc(${x(hi)} - ${x(lo)})` }} />
+        <u style={{ left: x(best) }} />
+      </span>
+      <span class="er-v">{link ? '95.6 ± 0.4 au' : `${best.toFixed(0)} au`}</span>
+    </div>
+  );
+  return (
+    <div class="er">
+      {ERIS_PASSES.map(([d, sn, ph, best, lo, hi]) => row(`pass of ${d}`, `S/N ${sn} · photometry ${ph}`, lo, hi, best))}
+      {row('three passes linked', 'one orbit · a 69.4 au, e 0.45 · misfit 1.6″', 95.2, 96.0, 95.6, true)}
+      <div class="er-axis">
+        {[40, 60, 80, 100, 120, 140, 160].map((d) => (
+          <span key={d} style={{ left: x(d) }}>{d}</span>
+        ))}
+        <em>au</em>
+      </div>
+    </div>
+  );
+}
+
 type Maker = (cap: string) => preact.JSX.Element;
 
 const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => preact.JSX.Element }> = {
@@ -115,19 +151,10 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     ),
   },
   'slider-eris': {
-    cap: 'Eris comes into focus as the distance is swept; the passes added give the deep sum',
+    cap: 'Eris, found blind by the live service: each pass alone gives a wide range of distances; three passes linked by one orbit give 95.6 ± 0.4 au (JPL 95.5)',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <div class="g2">
-          <div>
-            <video src={M('px_focus.mp4')} poster={M('px_focus.jpg')} muted loop playsInline autoPlay />
-            <span class="tagc">distance slider</span>
-          </div>
-          <div>
-            <img src={M('eris_deep_sum_97au.jpg')} alt="Eris, the deep sum of three passes" loading="lazy" />
-            <span class="tagc">deep sum</span>
-          </div>
-        </div>
+        <ErisLive />
       </Fig>
     ),
   },
