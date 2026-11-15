@@ -433,7 +433,7 @@ def stands_for(tr: dict[str, Any], st: dict[str, Any]) -> bool:
 
 def biased_halo(tr: dict[str, Any], st: dict[str, Any]) -> bool:
     """A track of the search through saturated pixels (not a saturated-zone track) whose speed is not the star's own: the halo's
-    centroid."""A track of the search through saturated pixels (not a saturated-zone track) whose speed is not the star's own: the halo's centroid."""
+    centroid."""
     if not tr.get("saturated") or tr.get("source") == "saturated":
         return False
     pm = math.hypot(st["pmra"] or 0.0, st["pmdec"] or 0.0) / 1000.0
