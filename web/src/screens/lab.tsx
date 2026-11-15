@@ -631,7 +631,15 @@ export function Lab({ route }: { route: Route }) {
     findShown.current = key;
     const kind = findId.split(':')[0] ?? '';
     const name =
-      { anomaly: 'Anomaly', mover: 'Mover', track: 'Mover', red: 'Red source', pair: 'Pair', brown_dwarf: 'Brown dwarf', peak: 'Find Planet X lead' }[kind] ?? 'Find';
+      {
+        anomaly: 'Anomaly',
+        mover: 'Mover',
+        track: 'Mover',
+        red: 'Red source',
+        pair: 'Pair',
+        brown_dwarf: 'Brown dwarf',
+        peak: 'Find Planet X lead',
+      }[kind] ?? 'Find';
     // the find's own place when the link gives it (the link then opens the field's own centre); else the link's place is the find's
     const fra = Number(p['find_ra']);
     const fdec = Number(p['find_dec']);
@@ -1865,7 +1873,15 @@ export function Lab({ route }: { route: Route }) {
     const years = 2025.9 - 2000;
     const dec0 = t.dec_2025_9 - (t.v_north * years) / 3600;
     const ra0 = t.ra_2025_9 - (t.v_east * years) / 3600 / Math.cos((t.dec_2025_9 * Math.PI) / 180);
-    setSel({ ra: (ra0 + 360) % 360, dec: dec0, name: name || undefined, pmra: t.v_east * 1000, pmdec: t.v_north * 1000, pmKind: 'measured', pmErr: speedErr(t) * 1000 });
+    setSel({
+      ra: (ra0 + 360) % 360,
+      dec: dec0,
+      name: name || undefined,
+      pmra: t.v_east * 1000,
+      pmdec: t.v_north * 1000,
+      pmKind: 'measured',
+      pmErr: speedErr(t) * 1000,
+    });
     setTab('obj');
   };
 
@@ -1925,7 +1941,10 @@ export function Lab({ route }: { route: Route }) {
     (mv?.result?.tracks ?? []).find((t) => {
       if (!t.ra?.length) return false;
       const cd = Math.cos((t.dec[0]! * Math.PI) / 180);
-      return Math.hypot((t.ra[0]! - x.ra) * cd, t.dec[0]! - x.dec) * 3600 < 4 || Math.hypot((t.ra_2025_9 - x.ra) * cd, t.dec_2025_9 - x.dec) * 3600 < 4;
+      return (
+        Math.hypot((t.ra[0]! - x.ra) * cd, t.dec[0]! - x.dec) * 3600 < 4 ||
+        Math.hypot((t.ra_2025_9 - x.ra) * cd, t.dec_2025_9 - x.dec) * 3600 < 4
+      );
     });
   const pickRed = (k: number) => {
     const x0 = redv?.result?.red[k];
@@ -2159,9 +2178,19 @@ export function Lab({ route }: { route: Route }) {
   /** A click on the picture selects the source there: a test target when one is within 12″ (measured with its motion), else the
    *  brightest pixel within 3 grid pixels of the click in the season shown. */
   // what a click on a pair, a known body or a peak shows in the Object tab: its own numbers (the card belongs to the selection at `key`)
-  const [objCard, setObjCard] = useState<{ key: string; title: string; rows: [string, string][]; links?: { label: string; href: string }[] } | null>(null);
+  const [objCard, setObjCard] = useState<{
+    key: string;
+    title: string;
+    rows: [string, string][];
+    links?: { label: string; href: string }[];
+  } | null>(null);
   const cardKey = (a: number, d: number) => `${a.toFixed(6)},${d.toFixed(6)}`;
-  const openCard = (ra0: number, dec0: number, name: string, card: { title: string; rows: [string, string][]; links?: { label: string; href: string }[] }) => {
+  const openCard = (
+    ra0: number,
+    dec0: number,
+    name: string,
+    card: { title: string; rows: [string, string][]; links?: { label: string; href: string }[] },
+  ) => {
     setSelAn(null);
     setSel({ ra: ra0, dec: dec0, name });
     setObjCard({ key: cardKey(ra0, dec0), ...card });
@@ -2184,7 +2213,12 @@ export function Lab({ route }: { route: Route }) {
       if (!fr || !fr.inside) continue;
       const d = Math.hypot(((fr.x + 0.5) / n) * box.width - lx, ((fr.y + 0.5) / n) * box.height - ly);
       if (d < 18 && (!best || d < best.d))
-        best = { b, d, ra: g.ra0 - ((fr.x + 0.5 - n / 2) * g.step_arcsec) / 3600 / cd, dec: g.dec0 - ((fr.y + 0.5 - n / 2) * g.step_arcsec) / 3600 };
+        best = {
+          b,
+          d,
+          ra: g.ra0 - ((fr.x + 0.5 - n / 2) * g.step_arcsec) / 3600 / cd,
+          dec: g.dec0 - ((fr.y + 0.5 - n / 2) * g.step_arcsec) / 3600,
+        };
     }
     if (!best) return;
     const b = best.b;
@@ -2194,7 +2228,12 @@ export function Lab({ route }: { route: Route }) {
       rows: [
         ['Predicted by', 'JPL Horizons, at the time of this visit'],
         ['Magnitude', b.v != null ? `V ${b.v.toFixed(1)}` : 'not given'],
-        ['In the visits', b.seen.includes(visit) ? 'seen on this visit (the motion map shows it there)' : `predicted here; seen in ${b.seen.length} of the pass's visits`],
+        [
+          'In the visits',
+          b.seen.includes(visit)
+            ? 'seen on this visit (the motion map shows it there)'
+            : `predicted here; seen in ${b.seen.length} of the pass's visits`,
+        ],
       ],
       links: [
         { label: 'JPL', href: `https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}` },
@@ -2204,7 +2243,10 @@ export function Lab({ route }: { route: Route }) {
   };
   /** A peak of the distance search: its card with its numbers, at its place on the picture. */
   const onPeak = (c: DistantCandidate, i: number, r: DistantResult) =>
-    openCard(c.ra, c.dec, `Peak ${i + 1} · ${c.d} au`, { title: `Find Planet X · peak ${i + 1}: a lead, not a discovery`, rows: peakRows(c, r).map(([k, v]) => [k, v] as [string, string]) });
+    openCard(c.ra, c.dec, `Peak ${i + 1} · ${c.d} au`, {
+      title: `Find Planet X · peak ${i + 1}: a lead, not a discovery`,
+      rows: peakRows(c, r).map(([k, v]) => [k, v] as [string, string]),
+    });
   const pick = (e: MouseEvent) => {
     const m = meta;
     if (m && film !== null) return pickBody(e);
@@ -2265,7 +2307,9 @@ export function Lab({ route }: { route: Route }) {
           rows: [
             ['Separation', `${pr.separation_arcsec.toFixed(1)}″`],
             ['Verdict', pr.verdict ?? 'a pair whose relative brightness changed between the passes: the peak seems to move, nothing does'],
-            ...(pr.change_sigma != null ? ([['Largest change between passes', `${pr.change_sigma.toFixed(1)}σ`]] as [string, string][]) : []),
+            ...(pr.change_sigma != null
+              ? ([['Largest change between passes', `${pr.change_sigma.toFixed(1)}σ`]] as [string, string][])
+              : []),
           ],
         });
         return;
@@ -2530,6 +2574,8 @@ export function Lab({ route }: { route: Route }) {
     if (fpxHold || fpxOff || fpx) return;
     if (fpxRuns.some((r) => r.ds.state === 'loading')) return;
     // a search a person cancelled is not started again on this field
+    // a person's cancel stops the whole automatic chain on this field: no later search starts after it
+    if (fpxRuns.some((r) => r.closed())) return;
     const next = fpxRuns.find((r) => r.ds.state === 'idle' && !r.closed());
     if (next) void next.start(null, true);
   });
@@ -2548,7 +2594,17 @@ export function Lab({ route }: { route: Route }) {
       if (run.ds.state !== 'ok') return;
       const r = run.ds.r;
       r.candidates.forEach((c, i) => {
-        if (c.ok) add({ ra: c.ra, dec: c.dec, sn: c.sn, d: c.d, range: `${c.d_lo}–${c.d_hi}`, phot: c.phot_sn ?? null, label: labels[k]!, open: () => onPeak(c, i, r) });
+        if (c.ok)
+          add({
+            ra: c.ra,
+            dec: c.dec,
+            sn: c.sn,
+            d: c.d,
+            range: `${c.d_lo}–${c.d_hi}`,
+            phot: c.phot_sn ?? null,
+            label: labels[k]!,
+            open: () => onPeak(c, i, r),
+          });
       });
     });
     deepCands.forEach((cs, k) =>
@@ -2578,7 +2634,8 @@ export function Lab({ route }: { route: Route }) {
     );
     return out;
   })();
-  const fpxAllOver = FPX_AUTO && fpxRuns.every((r) => (r.ds.state !== 'idle' && r.ds.state !== 'loading') || r.closed());
+  const fpxStopped = fpxRuns.some((r) => r.closed());
+  const fpxAllOver = FPX_AUTO && (fpxStopped || fpxRuns.every((r) => (r.ds.state !== 'idle' && r.ds.state !== 'loading') || r.closed()));
   const deepOn = FPX_AUTO && passes.length >= 3;
   const pxState = (() => {
     if (FPX_AUTO && !fpx) {
@@ -3420,7 +3477,15 @@ export function Lab({ route }: { route: Route }) {
                   {sel && portraitOf(sel, sel.name ?? 'selected source')}
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
                   {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
-                  {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={sel.pmra || sel.pmdec ? 2000 : 2025.9} pmra={sel.pmra ?? 0} pmdec={sel.pmdec ?? 0} />}
+                  {sel && (
+                    <ContextRows
+                      ra={sel.ra}
+                      dec={sel.dec}
+                      epoch={sel.pmra || sel.pmdec ? 2000 : 2025.9}
+                      pmra={sel.pmra ?? 0}
+                      pmdec={sel.pmdec ?? 0}
+                    />
+                  )}
                   {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}
                   {sel && (
                     <div class="xlinks">
@@ -3581,7 +3646,9 @@ export function Lab({ route }: { route: Route }) {
                       {(() => {
                         const tr = trackOfRed(x);
                         if (tr) return ` · moves ${rateText(tr)} (the mover track)`;
-                        return x.moves && x.pmra != null ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr (red-band measurement)` : '';
+                        return x.moves && x.pmra != null
+                          ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr (red-band measurement)`
+                          : '';
                       })()}
                     </span>
                     <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
@@ -3701,7 +3768,8 @@ export function Lab({ route }: { route: Route }) {
                     </div>
                     {fpxLeads.map((l, i) => (
                       <button key={i} class="btn sm leadbtn" onClick={l.open}>
-                        <b>Peak {i + 1}</b> · S/N {l.sn} · {l.d} au{l.range ? ` (${l.range})` : ''} · photometry {l.phot != null ? `${l.phot}σ` : 'n/a'} · {l.label}
+                        <b>Peak {i + 1}</b> · S/N {l.sn} · {l.d} au{l.range ? ` (${l.range})` : ''} · photometry{' '}
+                        {l.phot != null ? `${l.phot}σ` : 'n/a'} · {l.label}
                       </button>
                     ))}
                   </div>
@@ -3738,7 +3806,7 @@ export function Lab({ route }: { route: Route }) {
                         fov={fov}
                         passes={passes.map((q) => q.mjd_mid)}
                         autoRun={[60, 110]}
-                        autoHold={fpxHold || !fpxAllOver}
+                        autoHold={fpxHold || fpxStopped || !fpxAllOver}
                         onState={(x) => {
                           setDeepSt((o) => (o[0] === x.state ? o : [x.state, o[1]]));
                           setDeepFr((o) => (o[0] === x.frac ? o : [x.frac, o[1]]));
@@ -3751,7 +3819,7 @@ export function Lab({ route }: { route: Route }) {
                         fov={fov}
                         passes={passes.map((q) => q.mjd_mid)}
                         autoRun={[250, 800]}
-                        autoHold={fpxHold || !fpxAllOver || !['done', 'none', 'error'].includes(deepSt[0])}
+                        autoHold={fpxHold || fpxStopped || !fpxAllOver || !['done', 'none', 'error'].includes(deepSt[0])}
                         onState={(x) => {
                           setDeepSt((o) => (o[1] === x.state ? o : [o[0], x.state]));
                           setDeepFr((o) => (o[1] === x.frac ? o : [o[0], x.frac]));
