@@ -25,7 +25,7 @@ export interface Find {
   snr: number | null;
   score: number | null;
   chance: number | null;
-  status: 'unexplained' | 'unchecked' | 'known';
+  status: 'unexplained' | 'unchecked' | 'known' | 'residual';
   verdict: string;
   idents: Ident[];
   data: Record<string, any>;
@@ -54,7 +54,12 @@ export function useFinds(): Reply | null {
     const load = () =>
       void fetch('/api/v1/findings?status=all&limit=2000')
         .then((x) => (x.ok ? x.json() : null))
-        .then((d: Reply | null) => !stop && d && setR(d))
+        .then((d: Reply | null) => {
+          if (stop || !d) return;
+          // a Planet X peak the service calls a residual (not a lead: ok false) reads as a residual, not as 'not yet checked'
+          for (const f of d.finds) if (f.kind === 'peak' && (f.data as { peak?: { ok?: boolean } })?.peak?.ok === false && f.status !== 'known') f.status = 'residual';
+          setR(d);
+        })
         .catch(() => {});
     load();
     const t = setInterval(load, 60000);
@@ -307,7 +312,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
       )}
       <h3 class="lp-title">{titleOf(f)}</h3>
       <div class="mono-s">
-        {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} · <b class={f.status === 'known' ? 'st-known' : f.status === 'unchecked' ? 'st-wait' : 'st-un'}>{f.status === 'unchecked' ? 'not yet checked' : f.status}</b>
+        {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} · <b class={f.status === 'known' ? 'st-known' : f.status === 'unchecked' || f.status === 'residual' ? 'st-wait' : 'st-un'}>{f.status === 'unchecked' ? 'not yet checked' : f.status}</b>
       </div>
       <p class="fverdict">{f.verdict}</p>
       <div class="fmedia">
@@ -423,7 +428,7 @@ export function FindingsView({ wide, leadId, setLeadId }: { wide: boolean; leadI
                         {nameOf(f) ? ` · ${nameOf(f)}` : ''}
                       </span>
                     </span>
-                    <span class={`badge ${f.status === 'known' ? 'green' : f.status === 'unchecked' ? '' : 'orange'}`}>{f.status === 'known' ? 'Known' : f.status === 'unchecked' ? 'Not yet checked' : 'Unexplained'}</span>
+                    <span class={`badge ${f.status === 'known' ? 'green' : f.status === 'unchecked' || f.status === 'residual' ? '' : 'orange'}`}>{f.status === 'known' ? 'Known' : f.status === 'unchecked' ? 'Not yet checked' : f.status === 'residual' ? 'Residual' : 'Unexplained'}</span>
                   </button>
                 </li>
               ))}
