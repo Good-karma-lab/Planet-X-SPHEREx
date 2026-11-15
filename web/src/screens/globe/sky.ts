@@ -146,6 +146,9 @@ function loadDust(): void {
 export const STAR_MAP_FADE_FROM = 8000;
 export const STAR_MAP_FADE_TO = 16000;
 
+/** the black point (of 255) some baked layers need on top of what the manifest says: the faint colour of the empty sky of 2MASS */
+const EXTRA_BLACK: Record<string, number> = { '2mass': 16 };
+
 class SkyPainter {
   /** the picture on screen, W×H CSS pixels */
   canvas = document.createElement('canvas');
@@ -295,7 +298,9 @@ class SkyPainter {
           let b1 = 0;
           if (have) {
             const bk = eq ? true : samplers[0]!.lastBaked;
-            const B = eq ? { gain: eq.s.gain, black: eq.s.black } : bk ? bakedOf(l0.id) : undefined;
+            const B0 = eq ? { gain: eq.s.gain, black: eq.s.black } : bk ? bakedOf(l0.id) : undefined;
+            // a baked layer may still want a black point of its own (2MASS's background is a faint maroon, 18 of 255)
+            const B = B0 && { gain: B0.gain, black: Math.max(B0.black, EXTRA_BLACK[l0.id] ?? 0) };
             const bl = B ? B.black : l0.black;
             const gg = B ? (B.gain * 255) / (255 - B.black) : g0;
             r0 = Math.max(0, rgb[0]! - bl) * gg;
