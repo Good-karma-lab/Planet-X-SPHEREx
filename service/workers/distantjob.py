@@ -347,6 +347,8 @@ async def run_distant(
                 "d": round(c["d"], 1),
                 "d_lo": round(c["d_lo"], 1),
                 "d_hi": round(c["d_hi"], 1),
+                # the knob (S/N against distance) is still high at the edge of the range searched: the distance is not bounded there
+                "edge": bool(c["d_hi"] >= p["dmax"] * 0.999 or c["d_lo"] <= p["dmin"] * 1.001),
                 "mu": [round(c["mu"][0], 3), round(c["mu"][1], 3)],
                 "ra": round(float(ra0), 6),
                 "dec": round(float(dec0), 6),

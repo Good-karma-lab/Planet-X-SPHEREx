@@ -638,13 +638,15 @@ export function Lab({ route }: { route: Route }) {
         red: 'Red source',
         pair: 'Pair',
         brown_dwarf: 'Brown dwarf',
+        film: 'Moving object',
         peak: 'Find Planet X lead',
       }[kind] ?? 'Find';
     // the find's own place when the link gives it (the link then opens the field's own centre); else the link's place is the find's
     const fra = Number(p['find_ra']);
     const fdec = Number(p['find_dec']);
     const own = p['find_ra'] != null && p['find_dec'] != null && Number.isFinite(fra) && Number.isFinite(fdec);
-    setSel({ ra: own ? fra : ra, dec: own ? fdec : dec, name });
+    // a film find is a moving body: no variable-star verdict for it
+    setSel({ ra: own ? fra : ra, dec: own ? fdec : dec, name, ...(kind === 'film' ? { moving: { V: null, visits: [] } } : {}) });
   }, [findId, meta, ra, dec, fov, p['find_ra'], p['find_dec']]);
   // when the selected source changed: its ring pulses for a few seconds, so that a click in a list shows where on the picture the thing is
   const selAtRef = useRef(0);

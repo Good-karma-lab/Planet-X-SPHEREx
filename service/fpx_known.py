@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import math
 import time
 from pathlib import Path
@@ -21,6 +22,8 @@ from typing import Any
 import httpx
 
 from service.bodies import HORIZONS, SB_IDENT, _iso, _jd, _sexa_dec, _sexa_ra, horizons_command
+
+log = logging.getLogger("sky.fpx_known")
 
 SLOW_RATE = 15.0  # arcsec/hour: faster is a main-belt or near-Earth body, not what a search at 30-2000 au looks for
 MATCH_ARCSEC = 20.0
@@ -203,7 +206,8 @@ FILE_VERSION = "k1"
 def places_of(kind: str, result: dict[str, Any], c: dict[str, Any]) -> tuple[list[dict[str, Any]], float, float] | None:
     """The places of a lead to look up and the distance range the search gave (None: nothing to look up)."""
     if kind == "deep":
-        info = result.get("passes") or []
+        # a deep result made before it said so itself has the windows of its passes in its plan (time order, as by_pass is)
+        info = result.get("passes") or sorted((result.get("plan") or {}).get("passes") or [], key=lambda i: i.get("pass_mjd0", 0.0))
         by = c.get("by_pass") or []
         if not by or len(by) != len(info):
             return None
@@ -249,19 +253,31 @@ class FpxIdentifier:
         if found is None:
             self.kick_event.set()
         out = dict(result)
-        out["candidates"] = [
-            {**c, "known": (found or {}).get(i, {"state": "pending"})} if i < KNOWN_MAX else c for i, c in enumerate(result["candidates"])
-        ]
+
+        def with_known(i: int, c: dict[str, Any]) -> dict[str, Any]:
+            if i >= KNOWN_MAX or not c.get("ok"):
+                return c  # only the leads (peaks the photometry confirms) are looked up
+            return {**c, "known": (found or {}).get(i, {"state": "pending"})}
+
+        out["candidates"] = [with_known(i, c) for i, c in enumerate(result["candidates"])]
         return out
 
     async def identify_result(self, kind: str, key: str, result: dict[str, Any]) -> bool:
-        """Looks up the leads of one result and keeps the answers when JPL answered for all. -> kept."""
+        """Looks up the leads of one result (the peaks the photometry confirms: ok) and keeps the answers when JPL answered for all.
+        -> kept."""
+        t0 = time.monotonic()
         found: dict[int, dict[str, Any]] = {}
         for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
+            if not c.get("ok"):
+                continue  # a peak the photometry does not confirm is not a lead: nothing to name
             pl = places_of(kind, result, c)
-            if pl is not None:
-                found[i] = {**await identify(self.client, pl[0], pl[1], pl[2], self.limit), "at": [c.get("ra"), c.get("dec"), c.get("d")]}
-        if not found or any(v.get("state") == "unavailable" for v in found.values()):
+            if pl is None:
+                found[i] = {"state": "none", "note": "the result does not say where the passes were"}
+                continue
+            found[i] = {**await identify(self.client, pl[0], pl[1], pl[2], self.limit), "at": [c.get("ra"), c.get("dec"), c.get("d")]}
+        bad = [v.get("state") for v in found.values() if v.get("state") == "unavailable"]
+        log.info("%s %s: %d leads looked up in %.0f s, %d unavailable", kind, key[:8], len(found), time.monotonic() - t0, len(bad))
+        if bad:
             return False
         self.dir.mkdir(parents=True, exist_ok=True)
         tmp = self.path(kind, key).with_suffix(".part")
@@ -273,6 +289,7 @@ class FpxIdentifier:
         """One pass over the finished results without kept answers. -> how many were looked up."""
         n = 0
         rows = await asyncio.to_thread(self.store.listing, KINDS)
+        rows.sort(key=lambda r: (r["kind"] != "deep", -float(r.get("created", 0.0))))  # the deep sums first, the newest first
         for row in rows:
             kind, key = row["kind"], row["key"]
             if not row["complete"] or self.cached(kind, key) is not None or (kind, key) in self.running:
@@ -280,7 +297,7 @@ class FpxIdentifier:
             if time.monotonic() - self.failed_at.get((kind, key), -1e9) < 300.0:
                 continue  # JPL did not answer a moment ago: not again at once
             meta = await asyncio.to_thread(self.store.read_meta, kind, key)
-            if not meta or meta.get("status") != "ok" or not meta.get("candidates"):
+            if not meta or meta.get("status") != "ok" or not any(c.get("ok") for c in meta.get("candidates") or []):
                 continue
             self.running.add((kind, key))
             try:

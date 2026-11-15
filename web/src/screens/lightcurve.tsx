@@ -225,9 +225,11 @@ export function LightCurves({ src, field }: { src: Source; field?: { ra: number;
           A moving body is not a variable: its brightness changes with its distance from the Sun and the Earth and with its phase.
           {m.V != null ? ` JPL predicts V ${m.V.toFixed(1)} for it in this pass.` : ''}
         </div>
-        <div class="mono-s">
-          {m.visits.map((v) => `visit ${v.n}: ${v.how === 'found' ? 'found' : 'recovered'} at S/N ${v.z.toFixed(1)}`).join(' · ')}
-        </div>
+        {m.visits.length > 0 && (
+          <div class="mono-s">
+            {m.visits.map((v) => `visit ${v.n}: ${v.how === 'found' ? 'found' : 'recovered'} at S/N ${v.z.toFixed(1)}`).join(' · ')}
+          </div>
+        )}
       </div>
     );
   }

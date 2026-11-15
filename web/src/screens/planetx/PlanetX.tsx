@@ -54,7 +54,7 @@ const KNOWN_AT: [number, number][] = [[27.3724, -0.114], [26.3287, -0.4364], [27
 
 /** One Find Planet X peak, as Findings lists it (GET /api/v1/findings, kind peak). A LEAD is a peak above its field's bar that is not a
  *  known body; the same definition the Findings page and the Lab use. */
-interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; status?: string; data: { peak?: { d?: number; sn?: number; phot_sn?: number; ok?: boolean; known?: { state: string; name?: string; words?: string; seps?: number[] } } } }
+interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; status?: string; data: { peak?: { d?: number; sn?: number; phot_sn?: number; ok?: boolean; edge?: boolean; d_lo?: number; known?: { state: string; name?: string; words?: string; seps?: number[] } } } }
 function useLeads(): { leads: Peak[]; found: Peak[] } | null {
   const [p, setP] = useState<{ leads: Peak[]; found: Peak[] } | null>(null);
   useEffect(() => {
@@ -149,7 +149,9 @@ export function PlanetXPage() {
                     <b>
                       {pk.data.peak?.known?.state === 'ok' && pk.data.peak.known.name
                         ? `${pk.data.peak.known.name.split('(')[0]!.trim().replace(/^\d+\s+/, '')} (JPL), found blind · ${(pk.data.peak.d ?? 0).toFixed(1)} au`
-                        : `Peak · ${(pk.data.peak?.d ?? 0).toFixed(0)} au`}
+                        : pk.data.peak?.edge
+                          ? `Peak · ${(pk.data.peak.d_lo ?? pk.data.peak.d ?? 0).toFixed(0)} au or farther`
+                          : `Peak · ${(pk.data.peak?.d ?? 0).toFixed(0)} au`}
                       {pk.data.peak?.sn != null ? ` · ${pk.data.peak.sn.toFixed(1)}σ` : ''}
                     </b>
                     <em class="pill lead">{pk.data.peak?.known?.state === 'ok' ? 'known body' : 'lead'}</em>
