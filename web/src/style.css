@@ -2400,11 +2400,6 @@ input[type='range']::-moz-range-thumb {
 /* the portrait's place while its pictures load: the same size as the portrait, so the content below stays where it is */
 .portrait .ph { width: 132px; height: 132px; flex: none; border-radius: 4px; box-shadow: 0 0 0 1px var(--edge-hi); background: #02070a; }
 
-/* a wall (bands or detectors): the status line is one line low over the buttons, so that the last tile is not under it */
-@media (min-width: 761px) {
-  .vsq.wallv .fstatus { bottom: 42px; flex-wrap: nowrap; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
-}
-
 .adesrow { margin-top: 4px; }
 
 /* the timeline's restart marker: the loop starts at the first season and comes back to it */
@@ -2415,18 +2410,10 @@ input[type='range']::-moz-range-thumb {
   .lab .pbody.pobj { min-height: 700px; }
 }
 
-/* a window wider than a phone: the status line and the band buttons stand under the picture, not over its rings */
-@media (min-width: 561px) {
-  .vsq .fstatus { bottom: auto; top: calc(100% + 6px); left: 0; max-width: 100%; }
-  .vsq .fbands { bottom: auto; top: calc(100% + 48px); }
-  .vsq.wallv .fstatus { bottom: auto; top: calc(100% + 6px); white-space: normal; display: flex; }
-}
-
-/* a phone: the status line stands under the picture too (then the band buttons under it), and the stage has the room for all of it */
+/* a phone: the band buttons stand under the picture (it is small), the date stays in its corner */
 @media (max-width: 560px) {
-  .vsq { margin-bottom: calc(var(--below-status, 40px) + var(--below-chips, 70px) + 22px); }
-  .vsq .fstatus { bottom: auto; top: calc(100% + 6px); left: 0; max-width: 100%; }
-  .vsq .fbands { top: calc(100% + var(--below-status, 40px) + 14px); }
+  .vsq { margin-bottom: calc(var(--below-chips, 70px) + 16px); }
+  .vsq .fbands { top: calc(100% + 8px); }
   .lab .vstage { min-height: 0; }
 }
 /* the last row of a panel's body is reachable above the scans tray */
@@ -2441,4 +2428,12 @@ input[type='range']::-moz-range-thumb {
 /* a panel's body that scrolls fades out above the scans tray (a row cut by the edge reads as scrolled, not as covered); the 28 px of padding keeps the last row clear of the fade when scrolled to the end */
 @media (min-width: 861px) {
   .lab .pbody { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); }
+}
+
+/* the band and detector buttons FLOAT over the bottom of the picture on glass, each on its own (no panel behind them); the date of what is shown is a small label in the corner */
+@media (min-width: 561px) {
+  .vsq .fbands.float { background: none; border: 0; box-shadow: none; -webkit-backdrop-filter: none; backdrop-filter: none; padding: 0; gap: 5px; }
+  .vsq .fbands .bchip { background: rgba(6, 12, 18, 0.55); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+  .vsq .fbands .bchip.on { background: rgba(10, 24, 30, 0.7); }
+  .vsq .fstatus { left: 12px; right: auto; bottom: 14px; top: auto; max-width: 42%; padding: 3px 9px; font: 600 12px var(--mono); color: #e6f2f6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; flex-wrap: nowrap; }
 }
