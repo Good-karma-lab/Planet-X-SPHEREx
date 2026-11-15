@@ -336,3 +336,37 @@ def test_wanted_identifications_and_the_best_measurement_of_a_merged_object() ->
     b = {**a, "id": "b", "fov": 5, "rate": 7.9, "score": 12.9, "scans": ["b"], "data": {"source": {"speed_err": 0.6}}}
     m = merge([a, b])
     assert len(m) == 1 and m[0]["rate"] == 7.9 and m[0]["data"]["rate_err"] == 0.6 and m[0]["data"]["best_detection"]["fov"] == 5
+
+
+def test_identification_order_puts_the_few_that_matter_first(tmp_path: Path) -> None:
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+
+    def put(i: str, kind: str, place: str) -> dict[str, Any]:
+        return {
+            "id": i,
+            "kind": kind,
+            "place": place,
+            "fov": 20,
+            "ra": 10.0,
+            "dec": 5.0,
+            "rate": 1.0,
+            "snr": 1.0,
+            "score": 1.0,
+            "chance": None,
+            "data": {},
+            "scans": [],
+        }
+
+    db.write_finds(
+        [
+            put("a1", "anomaly", "Barnard's Star"),
+            put("r1", "red", "far"),
+            put("m1", "mover", "far"),
+            put("p1", "peak", "far"),
+            put("m2", "mover", "Barnard's Star"),
+        ]
+    )
+    order = [r["id"] for r in db.pending(10, frozenset({"Barnard's Star"}))]
+    assert order[:2] == ["m2", "m1"] or set(order[:3]) == {"m1", "m2", "p1"}
+    assert order.index("a1") > order.index("m1") and order.index("r1") > order.index("p1")
+    assert order[-1] == "r1" or order[-2:] == ["a1", "r1"] or order[-2:] == ["r1", "a1"]

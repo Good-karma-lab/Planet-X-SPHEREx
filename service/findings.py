@@ -55,7 +55,16 @@ CATALOGUE_LABEL = {
 MOVING = (
     "film",
 )  # asked of JPL Small-Body Identification: only tracks within one pass move like an asteroid (the movers between passes are stars)
-COLLECT_REV = 6  # bump when the way finds are read or merged changes: the next sweep rewrites them
+COLLECT_REV = 6
+IDENT_RANK = {
+    "peak": 0,
+    "mover": 0,
+    "browndwarf": 0,
+    "film": 0,
+    "pair": 1,
+    "red": 2,
+    "anomaly": 2,
+}  # the order the catalogues are asked in  # bump when the way finds are read or merged changes: the next sweep rewrites them
 SB_VMAG = 21.0  # SPHEREx depth: fainter bodies are not what a find could be
 SB_MATCH_ARCSEC = 15.0
 SB_RATE_TOL = 0.25
@@ -684,11 +693,13 @@ class FindingsDB:
                 out[r["find_id"]]["images"].append({c: r[c] for c in ("kind", "pass", "path", "sha1")})
         return out
 
-    def pending(self, limit: int) -> list[sqlite3.Row]:
-        """Finds with a catalogue not yet answered (or that did not answer and may be asked again): the oldest asked first."""
+    def pending(self, limit: int, targets: frozenset[str] = frozenset()) -> list[sqlite3.Row]:
+        """Finds with a catalogue not yet answered (or that did not answer and may be asked again). The few that matter most are asked first
+        (Find Planet X peaks, movers, brown dwarfs, film tracks, then pairs; the hundreds of anomalies and red sources last), the test targets'
+        before the rest within each rank, and within that the longest waiting."""
         now = time.time()
-        rows = self.db.execute("SELECT id, kind, ra, dec, data FROM finds").fetchall()
-        out: list[tuple[float, sqlite3.Row]] = []
+        rows = self.db.execute("SELECT id, kind, place, ra, dec, data FROM finds").fetchall()
+        out: list[tuple[tuple[int, int, float], sqlite3.Row]] = []
         done = {(r["find_id"], r["catalogue"]): r for r in self.db.execute("SELECT * FROM idents")}
         for r in rows:
             want = want_of(r["kind"], r["ra"], r["dec"], json.loads(r["data"] or "{}"))
@@ -704,7 +715,7 @@ class FindingsDB:
                 ):
                     worst = d["tried"] if worst is None else min(worst, d["tried"])
             if worst is not None:
-                out.append((worst, r))
+                out.append(((IDENT_RANK.get(r["kind"], 2), 0 if r["place"] in targets else 1, worst), r))
         out.sort(key=lambda x: x[0])
         return [r for _, r in out[:limit]]
 
@@ -1003,12 +1014,20 @@ class Findings:
     async def identify_loop(self) -> None:
         while True:
             try:
-                batch = await asyncio.to_thread(self.db.pending, 6)
+                batch = await asyncio.to_thread(self.db.pending, 8, frozenset(t["n"] for t in self.targets))
                 if not batch:
                     await asyncio.sleep(15)
                     continue
-                for row in batch:
-                    await self.identify_one(row)
+                gate = asyncio.Semaphore(4)
+
+                async def one(row: sqlite3.Row, gate: asyncio.Semaphore = gate) -> None:
+                    async with gate:
+                        try:
+                            await self.identify_one(row)
+                        except (httpx.HTTPError, BreakerOpenError, ValueError, OSError):
+                            await asyncio.sleep(1)
+
+                await asyncio.gather(*(one(r) for r in batch))
             except asyncio.CancelledError:
                 raise
             except Exception:
