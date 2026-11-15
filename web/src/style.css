@@ -2417,8 +2417,18 @@ input[type='range']::-moz-range-thumb {
 }
 
 /* a window wider than a phone: the status line and the band buttons stand under the picture, not over its rings */
-@media (min-width: 761px) {
+@media (min-width: 561px) {
   .vsq .fstatus { bottom: auto; top: calc(100% + 6px); left: 0; max-width: 100%; }
   .vsq .fbands { bottom: auto; top: calc(100% + 48px); }
   .vsq.wallv .fstatus { bottom: auto; top: calc(100% + 6px); white-space: normal; display: flex; }
 }
+
+/* a phone: the status line stands under the picture too (then the band buttons under it), and the stage has the room for all of it */
+@media (max-width: 560px) {
+  .vsq { margin-bottom: 156px; }
+  .vsq .fstatus { bottom: auto; top: calc(100% + 6px); left: 0; max-width: 100%; }
+  .vsq .fbands { top: calc(100% + 68px); }
+  .lab .vstage { min-height: 560px; }
+}
+/* the last row of a panel's body is reachable above the scans tray */
+.lab .pbody { padding-bottom: 28px; }

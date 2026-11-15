@@ -292,3 +292,5 @@
 @media (max-width: 900px) {
   .lp-hero { background: linear-gradient(180deg, rgba(3, 8, 15, 0.35), rgba(3, 8, 15, 0.62) 30%, rgba(3, 8, 15, 0.62) 80%, rgba(3, 8, 15, 0.2)); }
 }
+
+.lp-pnow.flip { transform: translate(-100%, -50%); text-align: right; }
