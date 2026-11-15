@@ -1008,7 +1008,7 @@ export function Lab({ route }: { route: Route }) {
             }
           } else if (st.view === 'bands') {
             // on a phone the status line sits over the bottom of the picture: the tiles leave room for it
-            const wallRes = w < 560 ? 156 : 96;
+            const wallRes = 96;
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
             panels = wallLayout(shownBands.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the band buttons below
@@ -1035,7 +1035,7 @@ export function Lab({ route }: { route: Route }) {
               };
             });
           } else {
-            const wallRes = w < 560 ? 156 : 96;
+            const wallRes = 96;
             const shownDets = st.dets.slice().sort();
             panels = wallLayout(shownDets.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the detector buttons below
@@ -1094,7 +1094,7 @@ export function Lab({ route }: { route: Route }) {
     type Mark = {
       ra: number;
       dec: number;
-      kind: 'target' | 'track' | 'anomaly' | 'red' | 'body';
+      kind: 'target' | 'track' | 'anomaly' | 'red' | 'body' | 'pair';
       name: string;
       lines: string[];
       colour: string;
@@ -1232,6 +1232,27 @@ export function Lab({ route }: { route: Route }) {
         }
       }
       const mvv = mvRef.current;
+      // pairs of sources that change in place: a ring (a click on it opens the pair's passport) around the middle of the two, wide enough for both
+      if (st.opts.movers && !days) {
+        const prs = ((mvv as unknown as { pairs?: Pair[] } | null)?.pairs ?? []) as Pair[];
+        prs.forEach((pr, pi) => {
+          const [c0, c1] = pr.components;
+          const [u0, v0] = uvOf(c0.ra, c0.dec);
+          const [u1, v1] = uvOf(c1.ra, c1.dec);
+          const half = (Math.hypot(u0 - u1, v0 - v1) * 0.5 * wcss) || 0;
+          marks.push({
+            ra: (c0.ra + c1.ra) / 2,
+            dec: (c0.dec + c1.dec) / 2,
+            kind: 'pair',
+            name: `Pair ${pi + 1}`,
+            lines: [],
+            colour: '#ff7ac8',
+            fill: '#ffb0dc',
+            rr: Math.max(13, half + 7),
+            dashed: true,
+          });
+        });
+      }
       if (st.opts.movers && mvv?.result && !days) {
         mvv.result.tracks.forEach((t, ti) => {
           const yrs = year - 2025.9;
@@ -1440,7 +1461,7 @@ export function Lab({ route }: { route: Route }) {
           ctx.strokeStyle = '#ffffff';
           ctx.lineWidth = 2.5;
           ctx.beginPath();
-          ctx.arc(x, y, rr + 4 + ph * 22, 0, 2 * Math.PI);
+          ctx.arc(x, y, rr + 3 + ph * Math.max(8, rr * 1.6), 0, 2 * Math.PI);
           ctx.stroke();
           ctx.restore();
         }
@@ -1580,6 +1601,7 @@ export function Lab({ route }: { route: Route }) {
             ctx.fill();
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#000';
+            placed.push({ x0: px + 4, y0: py - 15, x1: px + 34, y1: py - 2 });
             ctx.strokeText(String(yr), px + 5, py - 4);
             ctx.fillStyle = '#e8f6f4';
             ctx.fillText(String(yr), px + 5, py - 4);
@@ -1610,11 +1632,15 @@ export function Lab({ route }: { route: Route }) {
           if (wall) {
             // every tile of a wall carries the same rings as the picture (movers, red sources, anomalies, known bodies, the selected one), without names
             if (mk.ghost) continue;
-            ring(x, y, mk, Math.max(8, Math.min(14, box.w / 22)), mk.kind === 'target');
+            ring(x, y, mk, Math.max(5, Math.min(10, box.w / 26)), mk.kind === 'target');
             continue;
           }
           if (underInset(x, y)) continue;
-          if (!mk.ghost) ring(x, y, mk, mk.rr, mk.kind === 'target');
+          if (!mk.ghost) {
+            ring(x, y, mk, mk.rr, mk.kind === 'target');
+            // a ring is a thing no name is put on
+            placed.push({ x0: x - mk.rr - 2, y0: y - mk.rr - 2, x1: x + mk.rr + 2, y1: y + mk.rr + 2 });
+          }
           pathOf(mk, box, mk.rr, x, y);
         }
         if (!wall)

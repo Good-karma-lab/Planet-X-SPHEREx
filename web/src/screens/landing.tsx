@@ -210,7 +210,8 @@ function PathHero() {
             </span>
           );
         })}
-        <div class="lp-pnow" style={{ left: `${nx + R + 2.4}%`, top: `${ny}%` }}>
+        {/* the card stands on the side of the star with room for it (a narrow picture would cut it off at its right edge) */}
+        <div class={`lp-pnow${nx > 48 ? ' flip' : ''}`} style={{ left: `${nx > 48 ? nx - R - 2.4 : nx + R + 2.4}%`, top: `${ny}%` }}>
           <b>Barnard's Star</b>seen by SPHEREx 2025–26
           <br />
           moves 10.4″ a year (Gaia)
