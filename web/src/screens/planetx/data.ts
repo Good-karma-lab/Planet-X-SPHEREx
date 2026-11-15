@@ -92,14 +92,6 @@ export const RECORDED: Record<string, { verdict: 'ruled out' | 'found' | 'not a 
   },
 };
 
-/** The blind limit of the search against WISE's Planet Nine search (mJy, measured on artificial bodies in 1 degree fields at 250–2000 au). */
-export const DEPTH: { name: string; note: string; mjy: number; colour: string }[] = [
-  { name: 'WISE, Planet Nine search', note: 'W1, 3.4 µm', mjy: 0.065, colour: '#5fe3d6' },
-  { name: 'SPHEREx D4, ecliptic', note: 'all orbits', mjy: 0.047, colour: '#ffb454' },
-  { name: 'SPHEREx D4 + prior', note: 'Planet Nine orbits only', mjy: 0.042, colour: '#ffb454' },
-  { name: 'SPHEREx D4, clean sky', note: 'high latitude', mjy: 0.039, colour: '#ffb454' },
-];
-
 /** Known distant bodies found blind: the proof of the method. */
 export const PROOF: { who: string; what: string; got: string }[] = [
   { who: 'Eris', what: 'V 18.7 · 3 of 3 passes, then the deep sum', got: '95.89 ± 0.54 au (JPL 95.5) · deep sum 20.3σ' },
