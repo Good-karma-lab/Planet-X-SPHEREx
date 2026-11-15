@@ -73,6 +73,27 @@ def _aperture(img: NDArray[np.float64], sig: NDArray[np.float64], x: float, y: f
     return f, e
 
 
+def _offset_from(img: NDArray[np.float64], x: float, y: float, r: float) -> float:
+    """How far (detector pixels' worth of the image's own pixels) the light centroid within 1.5 r of (x, y) lies from (x, y): near zero for
+    a source that stands there, large when the light is a neighbour's wing (the ring around, 2.5 r to 4 r, gives the background)."""
+    n = img.shape[0]
+    w = int(np.ceil(4 * r)) + 1
+    x0, x1 = max(0, int(np.floor(x)) - w), min(n, int(np.floor(x)) + w + 2)
+    y0, y1 = max(0, int(np.floor(y)) - w), min(n, int(np.floor(y)) + w + 2)
+    cut = img[y0:y1, x0:x1]
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    d = np.hypot(xx - x, yy - y)
+    ring = (d > 2.5 * r) & (d < 4 * r) & np.isfinite(cut)
+    inner = (d <= 1.5 * r) & np.isfinite(cut)
+    if ring.sum() < 10 or inner.sum() < 3:
+        return 0.0
+    wgt = np.where(inner, np.maximum(cut - float(np.median(cut[ring])), 0.0), 0.0)
+    tot = float(wgt.sum())
+    if tot <= 0:
+        return 0.0
+    return float(np.hypot(float((wgt * xx).sum()) / tot - x, float((wgt * yy).sum()) / tot - y))
+
+
 def red_sources(
     dets: list[NDArray[np.floating]],
     noise: list[NDArray[np.floating]],
@@ -104,9 +125,7 @@ def red_sources(
             float(np.nanmax(sm_[max(0, y - search) : y + search + 1, max(0, x - search) : x + search + 1])) > 0.3 for sm_ in sats
         ):
             continue  # a saturated core: its short-wavelength light is lost, its colour would be false
-        fl = fs = 0.0
-        vl = vs = 0.0
-        best: tuple[float, bool] | None = None
+        rows: list[list[float]] = []  # per pass: a_l, e_l, a_s, e_s
         where: list[tuple[float, float]] = []
         path: list[tuple[int, float, float]] = []
         for kk, ((lv, ls), (sv, ss), sm_k) in enumerate(zip(passes_long, passes_short, smooth_long, strict=True)):
@@ -121,12 +140,25 @@ def red_sources(
             a_s, e_s = _aperture(sv, ss, px, py, r_ap)
             if not (np.isfinite(a_l) and np.isfinite(a_s)) or e_l <= 0 or e_s <= 0:
                 continue
-            fl += a_l
-            fs += a_s
-            vl += e_l**2
-            vs += e_s**2
+            if a_s / e_s >= 3.0 and _offset_from(sv, px, py, r_ap) > 0.25 * native:
+                a_s = 0.0  # short-wavelength light not centred on the source is a neighbour's (a star beside a cold dwarf), not its own
+            rows.append([a_l, e_l, a_s, e_s])
             where.append((px, py))
             path.append((kk, px, py))
+        # a pass in which the short light is far above what another pass of the same source allows (its 3 sigma limit, twice) is a blend
+        # with a star standing on the source in that pass
+        limits = [3.0 * q[3] / q[0] for q in rows if q[0] > 0 and q[2] / q[3] < 3.0]
+        if limits:
+            cap = 2.0 * min(limits)
+            for q in rows:
+                if q[0] > 0 and q[2] > 0 and q[2] / q[0] > cap:
+                    q[2] = 0.0
+        fl = sum(q[0] for q in rows)
+        fs = sum(q[2] for q in rows)
+        vl = sum(q[1] ** 2 for q in rows)
+        vs = sum(q[3] ** 2 for q in rows)
+        best: tuple[float, bool] | None = None
+        for a_l, e_l, a_s, e_s in rows:
             if a_l / e_l >= 5.0:
                 lim = a_s / e_s < 3.0
                 c = a_l / (3.0 * e_s if lim else a_s)

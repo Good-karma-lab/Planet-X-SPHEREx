@@ -15,7 +15,9 @@ VERSIONS: dict[str, str] = {
     # m8 a saturated centroid track gives way to the saturated-zone track of the star it stands for
     "movers": "m8",
     "anomalies": "a2",  # the spectral anomaly map of a field and the identification of its anomalies; a2: the same passes as the movers
-    "red": "r3",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm. r2: scatter and passes of a moving source; r3: peaks from 4 sigma
+    # red sources of a field: 3.8-5 um against 1.1-1.6 um. r2: scatter and passes of a moving source; r3: peaks from 4 sigma;
+    # r4: short-wavelength light that a neighbour sheds on the source is not the source's (its colour is a limit)
+    "red": "r4",
     # Find Planet X, one pass: distance search, candidates, photometry, slider arrays.
     # d2: the tuned own motion stays inside the gate, no peaks over a bright fast star
     "distant": "d2",
