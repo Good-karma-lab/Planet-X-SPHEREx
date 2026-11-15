@@ -53,7 +53,7 @@ const KNOWN_AT: [number, number][] = [[27.3724, -0.114], [26.3287, -0.4364], [27
 
 /** One Find Planet X peak, as Findings lists it (GET /api/v1/findings, kind peak). A LEAD is a peak above its field's bar that is not a
  *  known body; the same definition the Findings page and the Lab use. */
-interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; data: { peak?: { d?: number; sn?: number; phot_sn?: number } } }
+interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; status?: string; data: { peak?: { d?: number; sn?: number; phot_sn?: number; ok?: boolean } } }
 function useLeads(): Peak[] | null {
   const [p, setP] = useState<Peak[] | null>(null);
   useEffect(() => {
@@ -63,7 +63,9 @@ function useLeads(): Peak[] | null {
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { finds?: (Peak & { kind: string })[] } | null) => {
           if (stop || !d?.finds) return;
-          setP(d.finds.filter((f) => f.kind === 'peak' && !KNOWN_AT.some((k) => sep(k, [f.ra, f.dec]) < 0.05)));
+          // the Findings rule: one peak with ok=true per object; known bodies are not leads (status 'known' from the service; until the service
+          // marks the live Eris and Makemake detections, their places are matched here)
+          setP(d.finds.filter((f) => f.kind === 'peak' && f.data.peak?.ok !== false && f.status !== 'known' && !KNOWN_AT.some((k) => sep(k, [f.ra, f.dec]) < 0.05)));
         })
         .catch(() => {});
     void load();
@@ -203,8 +205,7 @@ export function PlanetXPage() {
         <div class="px3-ov px3-tl">
           <h1>Planet X</h1>
           <div class="px3-st" data-testid="px-stats">
-            <span><b>{searched == null ? '—' : mine.length}</b> fields searched for distant bodies</span>
-            <span><b>{leads == null ? '—' : nLeads}</b> {nLeads === 1 ? 'lead' : 'leads'}</span>
+            <span><b>{leads == null ? '—' : nLeads}</b> {nLeads === 1 ? 'lead' : 'leads'} in <b>{searched == null ? '—' : mine.length}</b> searched places</span>
             <span><b>0</b> confirmed</span>
           </div>
           <div class="px3-chips">
