@@ -12,6 +12,7 @@ import './px3.css';
  *  one-pass distance jobs on the body's place in each pass, then the link job over their keys). Nothing precomputed. */
 const KNOWN: { who: string; d: string; jpl: string; how: string; ok: boolean; lab: string }[] = [
   { who: 'Eris', d: '95.6 ± 0.4 au', jpl: 'JPL 95.5', how: '3 passes, 18′ fields · S/N 11.9–14.6 per pass · orbit a 69.4 au, e 0.45 · misfit 1.6″', ok: true, lab: '#/lab?ra=27.378&dec=-0.120&fov=20' },
+  { who: 'Sedna', d: '83.0 au', jpl: 'JPL 83.0', how: '3 passes, 18′ field, 75–92 au · 6.0 million orbits · sum 8.2σ: above the noise ceiling 8.07σ, below the bar 8.48σ · photometry 7.5σ · 0.5–0.8″ from JPL in every pass', ok: false, lab: '#/lab?ra=61.7725&dec=8.8408&fov=20' },
   { who: 'Makemake', d: '52.5 ± 0.2 au', jpl: 'JPL 52.3', how: '2 passes · S/N 14.6–16.0 per pass · misfit 1.5″ · a third pass would confirm it', ok: false, lab: '#/lab?ra=202.317&dec=20.157&fov=20' },
 ];
 
@@ -317,7 +318,7 @@ export function PlanetXPage() {
                     <b>
                       {k.who} · {k.d}
                     </b>
-                    <em class={`pill ${k.ok ? 'ok' : ''}`}>{k.ok ? 'confirmed' : 'two passes'}</em>
+                    <em class={`pill ${k.ok ? 'ok' : ''}`}>{k.ok ? 'confirmed' : k.who === 'Sedna' ? 'strong lead' : 'two passes'}</em>
                   </div>
                   <div class="where">
                     {k.jpl} · {k.how}
