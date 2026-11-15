@@ -96,10 +96,10 @@ def test_query_status_and_verdict(tmp_path: Path) -> None:
     out = query(db, None, "all", None, 100, 0)
     assert out["total"] == 5 and out["counts"]["mover"]["known"] == 1  # a track Gaia matches is known
     r = next(f for f in out["finds"] if f["id"] == red["id"])
-    assert r["status"] == "unexplained" and "Did not answer: Gaia DR3" in r["verdict"] and "Nothing within 6″ in SIMBAD" in r["verdict"]
+    assert r["status"] == "unchecked" and "Not yet checked" in r["verdict"] and "Did not answer: Gaia DR3" in r["verdict"]
     assert query(db, "red", "known", None, 10, 0)["count"] == 0
-    only = query(db, None, "unexplained", "Barnard's Star", 2, 1)
-    assert only["count"] == 4 and len(only["finds"]) == 2
+    only = query(db, None, "unchecked", "Barnard's Star", 2, 1)
+    assert only["count"] == 4 and len(only["finds"]) == 2 and out["counts"]["red"]["unchecked"] == 1
     assert status_of({"kind": "film", "data": {}}, [{"catalogue": "sbident", "state": "ok"}]) == "known"
     assert "known solar-system body" in verdict_of(
         {"kind": "film"}, [{"catalogue": "sbident", "label": "JPL", "state": "ok", "name": "433 Eros", "type": None, "sep": 3.0}], "known"
@@ -178,6 +178,32 @@ def test_generic_simbad_types_and_pending_answers_explain_nothing() -> None:
 
     assert _ident_from("simbad", {"state": "pending"})[0] == "unavailable"
     red = {"kind": "red", "data": {}}
-    star = [{"catalogue": "simbad", "state": "ok", "type": "Star"}]
-    assert status_of(red, star) == "unexplained"
+    everyone = [{"catalogue": c, "state": "none"} for c in ("gaia", "twomass", "allwise", "vsx", "ned")]
+    star = [{"catalogue": "simbad", "state": "ok", "type": "Star"}, *everyone]
+    assert status_of(red, star) == "unexplained"  # all answered, a bare "Star" explains nothing
+    assert status_of(red, [{"catalogue": "simbad", "state": "ok", "type": "Star"}]) == "unchecked"  # the others not asked yet
     assert status_of(red, [{"catalogue": "simbad", "state": "ok", "type": "Mira"}]) == "known"
+
+
+def test_units_merge_gates_and_motion_agreement(tmp_path: Path) -> None:
+    from service.findings import merge
+
+    rows, keys = _store(tmp_path)
+    bd = {"candidates": [{"ra": 133.8, "dec": -7.2, "pm": 7931.8, "snr_long": 20.0, "sigma": 12.0}], "known": [], "slow": []}
+    (tmp_path / "browndwarfs" / "b1.json").write_text(json.dumps(bd))
+    finds, _ = collect(tmp_path, rows, keys, TARGETS)
+    dwarf = next(f for f in finds if f["kind"] == "browndwarf")
+    assert abs(dwarf["rate"] - 7.9318) < 1e-6  # mas/yr from the scan, ″/yr here
+    # the same object found at two field sizes is one find that lists both detections
+    a = {"id": "x", "kind": "red", "place": "p", "fov": 20, "ra": 10.0, "dec": 5.0, "scans": ["a"], "data": {}, "snr": 5.0, "score": 1.0}
+    b = {**a, "id": "y", "fov": 5, "ra": 10.0 + 1.0 / 3600, "scans": ["b"], "data": {}, "snr": 9.0}
+    far = {**a, "id": "z", "ra": 10.01, "scans": ["c"], "data": {}}
+    merged = merge([a, b, far])
+    assert len(merged) == 2 and sorted(len(m["data"]["detections"]) for m in merged) == [1, 2]
+    two = next(m for m in merged if len(m["data"]["detections"]) == 2)
+    assert two["fov"] == 20 and two["snr"] == 9.0 and two["scans"] == ["a", "b"]
+    # a mover whose proper motion a catalogue source shares is known; before the catalogues answer it is only "unchecked"
+    mover = {"kind": "mover", "rate": 6.92, "data": {"track": {}}}
+    gaia = {"catalogue": "gaia", "state": "ok", "raw": {"pmra": 6500.0, "pmdec": -2300.0}}
+    assert status_of(mover, [gaia]) == "known"
+    assert status_of(mover, []) == "unchecked"

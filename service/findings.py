@@ -55,6 +55,8 @@ CATALOGUE_LABEL = {
 MOVING = (
     "film",
 )  # asked of JPL Small-Body Identification: only tracks within one pass move like an asteroid (the movers between passes are stars)
+FILM_MIN_VISITS = 4
+COLLECT_REV = 2  # bump when the way finds are read or merged changes: the next sweep rewrites them
 SB_VMAG = 21.0  # SPHEREx depth: fainter bodies are not what a find could be
 SB_MATCH_ARCSEC = 15.0
 SB_RATE_TOL = 0.25
@@ -211,7 +213,9 @@ def collect(
                                 "fov": fov,
                                 "ra": cra,
                                 "dec": cdec,
-                                "rate": _f(c.get("pm")),
+                                "rate": (_f(c.get("pm")) or 0.0) / 1000.0
+                                if c.get("pm") is not None
+                                else None,  # the scan gives mas/yr; shown in ″/yr
                                 "snr": _f(c.get("snr_long")),
                                 "score": _f(c.get("sigma")),
                                 "chance": None,
@@ -286,9 +290,13 @@ def collect(
             g = meta.get("grid") or {}
             fr = meta.get("frames") or []
             place = place_name(targets, float(p["ra"]), float(p["dec"]))
+            gate = max(FILM_MIN_VISITS, int((meta.get("control") or {}).get("min_visits_drawn") or 0))
             for i, t in enumerate(meta.get("tracks", [])):
                 pts = t.get("pts") or []
                 if not pts or not g:
+                    continue
+                # only what the film search itself stands behind: verified, seen in at least as many visits as chance never makes
+                if not t.get("verified") or int(t.get("nvis") or t.get("n_found") or t.get("n") or 0) < gate:
                     continue
                 mid = pts[len(pts) // 2]
                 n, step = g["n"], g["step_arcsec"] / 3600.0
@@ -337,7 +345,61 @@ def collect(
                         "scans": [row["key"]],
                     }
                 )
-    return list(finds.values()), sig.hexdigest()
+    sig.update(f"rev{COLLECT_REV}".encode())
+    return merge(list(finds.values())), sig.hexdigest()
+
+
+MERGE_ARCSEC = {"red": 4.0, "anomaly": 4.0, "pair": 6.0, "mover": 6.0, "browndwarf": 6.0, "film": 8.0, "peak": 6.0}
+
+
+def _sep(a: dict[str, Any], b: dict[str, Any]) -> float:
+    c = math.cos(math.radians(a["dec"]))
+    return math.hypot((a["ra"] - b["ra"]) * c, a["dec"] - b["dec"]) * 3600.0
+
+
+def same_object(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """The same object seen twice: within the merge distance at the common epoch and, for the ones that move, at the same rate (30 %)."""
+    if a["kind"] != b["kind"] or _sep(a, b) > MERGE_ARCSEC.get(a["kind"], 5.0):
+        return False
+    ra_, rb_ = a.get("rate"), b.get("rate")
+    if a["kind"] in ("mover", "browndwarf", "film") and ra_ is not None and rb_ is not None:
+        return bool(abs(ra_ - rb_) <= 0.3 * max(ra_, rb_, 0.05))
+    return True
+
+
+def reuse_ids(finds: list[dict[str, Any]], have: list[dict[str, Any]]) -> None:
+    """A find already in the table keeps its id (and so its catalogue answers) when the same object comes out of a new sweep a little moved."""
+    taken: set[str] = set()
+    for f in finds:
+        if any(h["id"] == f["id"] for h in have):
+            taken.add(f["id"])
+    for f in finds:
+        if f["id"] in taken:
+            continue
+        for h in have:
+            if h["id"] not in taken and same_object(h, f):
+                f["id"] = h["id"]
+                taken.add(h["id"])
+                break
+
+
+def merge(finds: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One find per object: detections of the same object (other field size, other scan, other pass) fold into the one seen in the largest field,
+    which lists them all (`data.detections`: place, field size, scans, product version)."""
+    out: list[dict[str, Any]] = []
+    for f in sorted(finds, key=lambda x: -x.get("fov", 0)):
+        det = {"place": f["place"], "fov": f.get("fov"), "scans": f["scans"], "versions": f.get("versions"), "ra": f["ra"], "dec": f["dec"]}
+        host = next((o for o in out if same_object(o, f)), None)
+        if host is None:
+            f["data"]["detections"] = [det]
+            out.append(f)
+        else:
+            host["data"]["detections"].append(det)
+            host["scans"] = sorted(set(host["scans"]) | set(f["scans"]))
+            for k in ("snr", "score"):
+                if (f.get(k) or 0) > (host.get(k) or 0):
+                    host[k] = f[k]
+    return out
 
 
 _PRODUCT = {
@@ -719,6 +781,8 @@ class Findings:
         if sig == self.db.get_meta("sig"):
             return {"added": 0, "removed": 0, "finds": len(finds)}
         async with self.lock:
+            have = await asyncio.to_thread(lambda: [dict(r) for r in self.db.db.execute("SELECT id, kind, ra, dec, rate FROM finds")])
+            reuse_ids(finds, have)
             added, removed = await asyncio.to_thread(self.db.write_finds, finds)
             self.db.set_meta("sig", sig)
         return {"added": added, "removed": removed, "finds": len(finds)}
@@ -866,8 +930,23 @@ def _fnum(v: Any) -> float | None:
 # ---- reading -------------------------------------------------------------------------------------------------------------------------------------
 
 
+def _pm_agrees(f: dict[str, Any], idents: list[dict[str, Any]]) -> bool:
+    """A catalogue source within reach whose proper motion (mas/yr) equals the find's rate (″/yr) to 30 %: the same moving star."""
+    rate = f.get("rate")
+    if rate is None:
+        return False
+    for i in idents:
+        raw = i.get("raw") or {}
+        if i["catalogue"] in ("simbad", "gaia") and i["state"] == "ok" and raw.get("pmra") is not None and raw.get("pmdec") is not None:
+            sp = math.hypot(float(raw["pmra"]), float(raw["pmdec"])) / 1000.0
+            if abs(sp - rate) <= 0.3 * max(rate, 0.5):
+                return True
+    return False
+
+
 def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
-    """`known` (a catalogue names what it is), `unexplained` (the catalogues answered and none does, or not yet asked) per kind."""
+    """`known` (a catalogue or the scan itself names what it is), `unchecked` (catalogues still to answer or that did not answer, and none explains
+    it yet) or `unexplained` (every catalogue answered and none explains it)."""
     by = {i["catalogue"]: i for i in idents}
 
     def ok(c: str) -> bool:
@@ -875,24 +954,24 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
 
     d = f["data"]
     kind = f["kind"]
+    known = False
     if kind == "mover":
         t = d.get("track") or {}
-        if t.get("check") == "same" or t.get("name") or str(t.get("status", "")).startswith("known"):
-            return "known"
-        return "unexplained"
-    if kind == "browndwarf":
-        return (
-            "known"
-            if d.get("group") == "known" or (ok("simbad") and by["simbad"].get("type", "") and "BD" in str(by["simbad"]["type"]))
-            else "unexplained"
-        )
-    if kind == "film":
-        return "known" if ok("sbident") else "unexplained"
-    if kind in ("red", "anomaly"):
+        known = t.get("check") == "same" or bool(t.get("name")) or str(t.get("status", "")).startswith("known") or _pm_agrees(f, idents)
+    elif kind == "browndwarf":
+        known = d.get("group") == "known" or _pm_agrees(f, idents) or (ok("simbad") and "BD" in str(by["simbad"].get("type") or ""))
+    elif kind == "film":
+        known = ok("sbident")
+    elif kind in ("red", "anomaly"):
         # SIMBAD must say what it is: a bare "Star" or "IR" explains neither a red colour nor an odd spectrum
-        return "known" if ok("simbad") and str(by["simbad"].get("type") or "") not in GENERIC_TYPES else "unexplained"
-    if kind == "pair":
-        return "known" if ok("vsx") else "unexplained"
+        known = ok("simbad") and str(by["simbad"].get("type") or "") not in GENERIC_TYPES
+    elif kind == "pair":
+        known = ok("vsx")
+    if known:
+        return "known"
+    want = list(CATALOGUES) + (["sbident"] if kind in MOVING else [])
+    if any(by.get(c, {}).get("state", "pending") in ("pending", "unavailable") for c in want):
+        return "unchecked"
     return "unexplained"
 
 
@@ -907,8 +986,16 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         for i in idents
         if i["state"] == "ok"
     ]
-    if not idents:
-        return "The catalogues have not been asked yet."
+    if not idents or all(i["state"] == "pending" for i in idents):
+        return "Not yet checked: the catalogues have not been asked yet."
+    waiting = [i["label"] for i in idents if i["state"] == "pending"]
+    if status == "unchecked":
+        text = "Not yet checked against every catalogue."
+        if waiting:
+            text += f" Still to answer: {', '.join(waiting)}."
+        if failed:
+            text += f" Did not answer: {', '.join(failed)}."
+        return text + (f" Named so far: {'; '.join(named[:2])}." if named else "")
     kind = f["kind"]
     if status == "known":
         who = "; ".join(named[:2]) if named else "a catalogue"
@@ -971,14 +1058,14 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
                 )
         order = {c: i for i, c in enumerate([*list(CATALOGUES), "sbident"])}
         ids_.sort(key=lambda i: order.get(i["catalogue"], 99))
-        st = status_of(f, [i for i in ids_ if i["state"] != "pending"])
+        st = status_of(f, ids_)
         f["status"] = st
         f["idents"] = ids_
-        f["verdict"] = verdict_of(f, [i for i in ids_ if i["state"] != "pending"], st)
+        f["verdict"] = verdict_of(f, ids_, st)
         items.append(f)
-    counts: dict[str, dict[str, int]] = {k: {"all": 0, "unexplained": 0, "known": 0} for k in KINDS}
+    counts: dict[str, dict[str, int]] = {k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0} for k in KINDS}
     for f in items:
-        tally = counts.setdefault(f["kind"], {"all": 0, "unexplained": 0, "known": 0})
+        tally = counts.setdefault(f["kind"], {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0})
         tally["all"] += 1
         tally[f["status"]] += 1
     sel = [
@@ -988,7 +1075,7 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         and (not status or status == "all" or f["status"] == status)
         and (not place or f["place"] == place)
     ]
-    rank = {"unexplained": 0, "known": 1}
+    rank = {"unexplained": 0, "unchecked": 1, "known": 2}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
     unavailable = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable")
