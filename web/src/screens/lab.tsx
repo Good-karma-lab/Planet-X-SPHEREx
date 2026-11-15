@@ -78,7 +78,7 @@ const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2
 /** a band's name on a tile too small for the full one */
 const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
 /** what a picture shows where its pixels have not arrived yet */
-const DARK: [number, number, number] = [0.03, 0.045, 0.06];
+const DARK: [number, number, number] = [0, 0, 0];
 const BANDS = [
   { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
   {
@@ -468,6 +468,23 @@ export function Lab({ route }: { route: Route }) {
           }[];
         }) => {
           targets.current = d.catalog.filter((o) => o.b);
+          // a small field opened at a catalogue object's J2000 place (from the catalogue, the front page, a finding) is centred where the object is during the SPHEREx
+          // survey: a fast star has moved by arcminutes since 2000 and would be outside the field (WISE 0855 moved 3.5')
+          const cur = parseHash(location.hash);
+          const cra = Number(cur.params['ra']);
+          const cdec = Number(cur.params['dec']);
+          const cfov = Number(cur.params['fov'] ?? 5);
+          if (cur.screen === 'lab' && Number.isFinite(cra) && Number.isFinite(cdec) && cfov <= 10) {
+            for (const o of targets.current) {
+              if (!(o.pmra || o.pmdec)) continue;
+              const near = (a: number, b: number, c: number, e: number) => Math.hypot((a - c) * Math.cos((b * Math.PI) / 180), b - e) * 3600;
+              if (near(o.ra, o.dec, cra, cdec) > 6) continue;
+              const [era, edec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2025.9);
+              if (near(era, edec, o.ra, o.dec) < 20) break;
+              location.replace(formatHash({ screen: 'lab', params: { ...cur.params, ra: era.toFixed(5), dec: edec.toFixed(5) } }));
+              break;
+            }
+          }
         },
       )
       .catch(() => {});
@@ -800,8 +817,13 @@ export function Lab({ route }: { route: Route }) {
         const pl = planeLevels(arr.data as Uint16Array, n, PER_PASS.picture);
         r.setPictureNoise(k, pl.bg, pl.sigma);
       }
+      if (stack === 'dets') {
+        // every detector against the scatter measured in its own picture, so that a tile of the wall shows a source that stands 5 sigma above it
+        const dl = planeLevels(arr.data as Uint16Array, n, PER_PASS.dets);
+        r.setBandNoise(k, dl.bg, dl.sigma, 'dets');
+      }
       if (stack === 'bands') {
-        // every band against its own background and noise, for the colour blend of the picture
+        // every band against its own background and noise, for the colour blend of the picture and the tiles of the bands wall
         const bl = planeLevels(arr.data as Uint16Array, n, PER_PASS.bands);
         r.setBandNoise(k, bl.bg, bl.sigma);
       }

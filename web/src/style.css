@@ -698,6 +698,7 @@ input[type='range']::-moz-range-thumb {
 .vsq {
   position: relative;
   flex: none;
+  background: #000;
 }
 .vsq canvas.vid {
   position: absolute;

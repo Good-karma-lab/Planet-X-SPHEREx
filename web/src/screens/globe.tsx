@@ -3,7 +3,7 @@ import { aim, type AimState } from '../lib/aim';
 import { formatHash } from '../lib/route';
 import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVEY_EPOCH } from '../lib/sky';
 import { icon } from '../ui/icons';
-import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
+import { backdropYear, coldNote, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, STAR_MAP_TO_VISIBLE, type SkyLayer } from './globe/sky';
 import { catalogNow, kept, loadCatalog, type Obj, type SurveyId } from './globe/store';
 import { equiOf, onEquiTile } from '../lib/equi';
@@ -539,7 +539,7 @@ export function Globe() {
             const q = project(ra, dec, b);
             return q[2] ? [p25[0] + m * (q[0] - p25[0]), p25[1] + m * (q[1] - p25[1]), true] : q;
           };
-          drawMovingPath(ctx, pm, mo, { imageYears: years, backdropYear: by, zoomedIn: near, maxJump: W / 2, font });
+          drawMovingPath(ctx, pm, mo, { imageYears: years, backdropYear: by, zoomedIn: near, maxJump: W / 2, font, note: coldNote(st.sel.sp, shownId) });
           const q = pm(...placeAt(mo, by));
           pins.push({ o: st.sel, x: q[0], y: q[1] });
           pathPin = true;
@@ -586,9 +586,11 @@ export function Globe() {
         }
         if (view.current.zoom > 1.5 || st.proj === 'moll' || o === st.sel) {
           ctx.lineWidth = 3;
-          ctx.strokeText(o.n, p[0] + lx, p[1] + 4);
+          const cn = coldNote(o.sp, shownId);
+          const txt = cn ? `${o.n} · ${cn}` : o.n;
+          ctx.strokeText(txt, p[0] + lx, p[1] + 4);
           ctx.fillStyle = '#fff';
-          ctx.fillText(o.n, p[0] + lx, p[1] + 4);
+          ctx.fillText(txt, p[0] + lx, p[1] + 4);
         }
       }
       // aim frame

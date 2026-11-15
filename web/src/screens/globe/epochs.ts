@@ -147,3 +147,10 @@ export function shownPlace(o: Catalogued, survey: string, imgs?: ArchiveImage[] 
   if (o.pmra == null || o.pmdec == null) return [o.ra, o.dec];
   return placeAt({ name: o.n, ra: o.ra, dec: o.dec, pmra: o.pmra, pmdec: o.pmdec }, backdropYear(survey, imgs, fade));
 }
+
+/** A note for a pin on a layer where the object cannot be seen: a Y dwarf (about 250 K) gives no light in visible light, 2MASS, the Gaia star map or the SPHEREx composite's
+ *  three frames; it is a faint red point in WISE only. null when it can show. */
+export function coldNote(sp: string | null | undefined, survey: string): string | null {
+  if (!sp || !/^Y/i.test(sp.trim())) return null;
+  return survey === 'wise' ? null : 'too cold to show here; see Infrared';
+}

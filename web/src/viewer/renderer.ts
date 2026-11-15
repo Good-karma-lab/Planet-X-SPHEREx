@@ -47,6 +47,7 @@ uniform vec4 uBBg[32];         // per pass and band (pass * 8 + band, four to a 
 uniform vec4 uBSg[32];         // ... and its noise (0 = not measured)
 uniform vec3 uPBg[16];         // per pass: background of the colour picture's three channels
 uniform vec3 uPSg[16];         // ... and their noise (0 = not measured)
+uniform int uNorm;             // mode 1 (one layer): measure it against its own background and noise (a tile of the bands or detectors wall)
 uniform vec2 uBN;              // the colour blend's stretch: the noise level where the response turns from linear to logarithmic, and the level that is full scale (both in sigma)
 
 // the colour blend of the bands: every band is measured against its OWN background and noise, so a source that stands 5 sigma above the noise in
@@ -111,6 +112,10 @@ vec4 colourOf(int k) {
       float ref = pow(max(sg.x * uWB[k].x, 1e-9) * max(sg.y, 1e-9) * max(sg.z * uWB[k].y, 1e-9), 1.0 / 3.0);
       vec3 bg = uPBg[k];
       s = vec3(snLaw((r - bg.x) * uWB[k].x / ref), snLaw((g - bg.y) / ref), snLaw((b - bg.z) * uWB[k].y / ref));
+      // bright stars and the halos round them keep the fixed stretch (their colour is the star's, not the faint sources' to bring out): from 150 sigma over the noise
+      // the old law takes over, completely at 1500 sigma
+      float hot = smoothstep(150.0, 1500.0, (g - bg.y) / max(sg.y, 1e-9));
+      if (hot > 0.0) s = mix(s, vec3(law(r * uWB[k].x), law(g), law(b * uWB[k].y)), hot);
     } else {
       s = vec3(law(r * uWB[k].x), law(g), law(b * uWB[k].y));
     }
@@ -138,7 +143,8 @@ vec4 colourOf(int k) {
   }
   float w = val(k, uLayer);
   if (isnan(w)) return vec4(0.0);
-  float l = law(w);
+  float sn = uNorm == 1 ? bandSN(k, uLayer, w) : -1e9;
+  float l = sn > -1e8 ? snLaw(sn) : law(w);
   return vec4(clamp(l * mix(vec3(1.0), uTint, 0.35 * (1.0 - smoothstep(0.6, 0.95, l))), 0.0, 1.0), 1.0);
 }
 
@@ -273,8 +279,7 @@ export class Renderer {
   hi = HI;
   sharp = 16;
   private sn = new Float32Array(32);
-  private bandBg = new Float32Array(128);
-  private bandSg = new Float32Array(128);
+  private noiseOf = new Map<StackName, { bg: Float32Array; sg: Float32Array }>();
   private picBg = new Float32Array(48);
   private picSg = new Float32Array(48);
   private dp = 0.01;
@@ -408,10 +413,15 @@ export class Renderer {
   }
 
   /** Background and noise of each band's picture in a pass (0 noise = not measured), for the colour blend. */
-  setBandNoise(pass: number, bg: number[], sigma: number[]): void {
+  setBandNoise(pass: number, bg: number[], sigma: number[], stack: StackName = 'bands'): void {
+    let n = this.noiseOf.get(stack);
+    if (!n) {
+      n = { bg: new Float32Array(128), sg: new Float32Array(128) };
+      this.noiseOf.set(stack, n);
+    }
     for (let j = 0; j < 8; j++) {
-      this.bandBg[pass * 8 + j] = bg[j] ?? 0;
-      this.bandSg[pass * 8 + j] = sigma[j] ?? 0;
+      n.bg[pass * 8 + j] = bg[j] ?? 0;
+      n.sg[pass * 8 + j] = sigma[j] ?? 0;
     }
   }
 
@@ -535,8 +545,10 @@ export class Renderer {
     gl.uniform1i(this.u('uWhiteCores'), this.whiteCores ? 1 : 0);
     gl.uniform1f(this.u('uSharp'), this.sharp);
     gl.uniform2fv(this.u('uSN'), this.sn);
-    gl.uniform4fv(this.u('uBBg'), this.bandBg);
-    gl.uniform4fv(this.u('uBSg'), this.bandSg);
+    const nz = this.noiseOf.get(p.stack) ?? this.noiseOf.get('bands');
+    gl.uniform4fv(this.u('uBBg'), nz ? nz.bg : new Float32Array(128));
+    gl.uniform4fv(this.u('uBSg'), nz ? nz.sg : new Float32Array(128));
+    gl.uniform1i(this.u('uNorm'), p.stack === 'bands' || p.stack === 'dets' ? 1 : 0);
     gl.uniform3fv(this.u('uPBg'), this.picBg);
     gl.uniform3fv(this.u('uPSg'), this.picSg);
     // the stretch slider moves the knee (4 sigma at its default 0.4), the Trim menu the full-scale level (20000 sigma at its default of 400)
@@ -544,7 +556,7 @@ export class Renderer {
     gl.uniform1f(this.u('uDP'), isFilm ? this.filmDP : this.dp);
     gl.uniform1i(this.u('uLayer'), p.layer ?? 0);
     gl.uniform3fv(this.u('uTint'), new Float32Array(p.tint ?? [1, 1, 1]));
-    gl.uniform3fv(this.u('uNoData'), new Float32Array(p.noData ?? [0.36, 0.4, 0.44]));
+    gl.uniform3fv(this.u('uNoData'), new Float32Array(p.noData ?? [0, 0, 0]));
     gl.uniform1i(this.u('uA'), a);
     gl.uniform1i(this.u('uB'), b);
     gl.uniform1f(this.u('uT'), t);

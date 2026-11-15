@@ -488,8 +488,14 @@ function put(id: string, o: number, i: number, t: Slot): void {
 function evict(): void {
   const now = performance.now();
   const old: { m: Map<number, Slot>; i: number; used: number }[] = [];
-  for (const L of layers.values())
-    for (const m of L.levels) for (const [i, t] of m) if (t && now - t.used > KEEP_MS) old.push({ m, i, used: t.used });
+  // the shallowest baked tiles (the whole sky in a dozen files) are never dropped: coming back to a view, a missing deep tile shows the coarse level at once, not black
+  for (const [id, L] of layers) {
+    const keep = baked.get(id)?.min;
+    L.levels.forEach((m, o) => {
+      if (o === keep) return;
+      for (const [i, t] of m) if (t && now - t.used > KEEP_MS) old.push({ m, i, used: t.used });
+    });
+  }
   old.sort((a, b) => a.used - b.used);
   for (const e of old) {
     if (stored <= CAP * 0.8) break;
