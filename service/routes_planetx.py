@@ -12,14 +12,11 @@ from __future__ import annotations
 import asyncio
 import json
 import math
-import time
 from typing import Any
 
-import httpx
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
-from service import fpx_known
 from service.jobs.scheduler import Job, Priority
 from service.products.store import product_key
 from service.ratelimit import client_id
@@ -90,67 +87,10 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             "job": job.view(),
         }
 
-    jpl = httpx.AsyncClient(timeout=httpx.Timeout(60, connect=10), headers={"User-Agent": "spherex-sky/0.1"})
-    jpl_limit = asyncio.Semaphore(2)
-    known_done: dict[tuple[str, str], dict[int, dict[str, Any]]] = {}
-    known_tasks: dict[tuple[str, str], asyncio.Task[None]] = {}
-    known_wait_s = 3.0
-    known_max = 8
-
-    def places_of(kind: str, result: dict[str, Any], c: dict[str, Any]) -> tuple[list[dict[str, Any]], float, float] | None:
-        """The places of a lead to look up and the distance range the search gave (None: nothing to look up)."""
-        if kind == deepjob.KIND:
-            info = result.get("passes") or []
-            by = c.get("by_pass") or []
-            if not by or len(by) != len(info):
-                return None
-            places = [
-                {"ra": q["ra"], "dec": q["dec"], "mjd": q.get("mjd"), "mjd0": i["pass_mjd0"], "mjd1": i["pass_mjd1"]}
-                for q, i in zip(by, info, strict=True)
-            ]
-            return places, float(c["d"]), float(c["d"])
-        if result.get("t0") is None or c.get("ra") is None:
-            return None
-        return [{"ra": c["ra"], "dec": c["dec"], "mjd": float(result["t0"])}], float(c.get("d_lo", c["d"])), float(c.get("d_hi", c["d"]))
-
-    known_recent: dict[tuple[str, str], tuple[float, dict[int, dict[str, Any]]]] = {}
-
-    async def known_run(kind: str, key: str, result: dict[str, Any]) -> None:
-        found: dict[int, dict[str, Any]] = {}
-        try:
-            for i, c in enumerate((result.get("candidates") or [])[:known_max]):
-                pl = places_of(kind, result, c)
-                if pl is not None:
-                    found[i] = await fpx_known.identify(jpl, pl[0], pl[1], pl[2], jpl_limit)
-        finally:
-            known_tasks.pop((kind, key), None)
-            if found and all(v.get("state") != "unavailable" for v in found.values()):
-                known_done[(kind, key)] = found
-            else:  # a failed answer is said for a minute, never kept
-                known_recent[(kind, key)] = (time.monotonic(), found)
-
-    async def with_known(kind: str, key: str, result: dict[str, Any]) -> dict[str, Any]:
-        """The result with each lead's JPL identification (`known`): a lead that is a known body says so. JPL is asked in the background;
-        what has not come back within a few seconds is `pending` and is there on the next ask."""
-        if not result.get("candidates") or result.get("status") != "ok":
-            return result
-        found = known_done.get((kind, key))
-        if found is None:
-            recent = known_recent.get((kind, key))
-            if recent is not None and time.monotonic() - recent[0] < 60.0:
-                found = recent[1]
-            else:
-                task = known_tasks.get((kind, key))
-                if task is None:
-                    task = asyncio.ensure_future(known_run(kind, key, result))
-                    known_tasks[(kind, key)] = task
-                await asyncio.wait({task}, timeout=known_wait_s)
-                found = known_done.get((kind, key)) or (known_recent[(kind, key)][1] if (kind, key) in known_recent else None)
-        out = dict(result)
-        out["candidates"] = [
-            {**c, "known": (found or {}).get(i, {"state": "pending"})} if i < known_max else c for i, c in enumerate(result["candidates"])
-        ]
-        return out
+    def with_known(kind: str, key: str, result: dict[str, Any]) -> dict[str, Any]:
+        """The result with each lead's JPL identification (`known`), made ahead of time by the identifier sweep (service.fpx_known)."""
+        idn = getattr(st, "fpx_known", None)
+        return idn.annotate(kind, key, result) if idn is not None else result
 
     def done_reply(kind: str, key: str, result: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -206,7 +146,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             }
         key = product_key(distantjob.KIND, params, extra=(distantjob.signature(exps), str(pk)))
         if st.store.is_complete(key):
-            return done_reply(distantjob.KIND, key, await with_known(distantjob.KIND, key, st.store.read_meta(distantjob.KIND, key) or {}))
+            return done_reply(distantjob.KIND, key, with_known(distantjob.KIND, key, st.store.read_meta(distantjob.KIND, key) or {}))
         job = st.scheduler.jobs.get(st.scheduler.by_key.get(key, ""))
         if job is None or job.state in ("error", "cancelled"):
             limited = throttled(request)
@@ -280,7 +220,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         sels = deepjob.selections(st.index, params)
         key = product_key(deepjob.KIND, params, extra=(deepjob.signature(sels),))
         if st.store.is_complete(key):
-            return done_reply(deepjob.KIND, key, await with_known(deepjob.KIND, key, st.store.read_meta(deepjob.KIND, key) or {}))
+            return done_reply(deepjob.KIND, key, with_known(deepjob.KIND, key, st.store.read_meta(deepjob.KIND, key) or {}))
         job = st.scheduler.jobs.get(st.scheduler.by_key.get(key, ""))
         if job is None or job.state in ("error", "cancelled"):
             limited = throttled(request)

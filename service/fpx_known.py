@@ -11,7 +11,11 @@ pass dates: a body that stands within MATCH_ARCSEC of the lead in every pass, at
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import math
+import time
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -29,8 +33,24 @@ def _sep(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
     return math.hypot((ra1 - ra2) * math.cos(math.radians(0.5 * (dec1 + dec2))), dec1 - dec2) * 3600.0
 
 
+_SB_MEMO: dict[
+    tuple[float, float, float, float], list[dict[str, Any]]
+] = {}  # JPL's answer per place, date and box (it takes up to a minute)
+
+
 async def slow_bodies(client: httpx.AsyncClient, ra: float, dec: float, mjd: float, half_deg: float) -> list[dict[str, Any]]:
     """The slow bodies JPL puts in a box around a place at a date: name, V, rate (arcsec/hour), distance from the centre (arcsec)."""
+    memo_key = (round(ra, 3), round(dec, 3), round(mjd, 1), round(half_deg, 2))
+    if memo_key in _SB_MEMO:
+        return _SB_MEMO[memo_key]
+    found = await _slow_bodies(client, ra, dec, mjd, half_deg)
+    if len(_SB_MEMO) > 500:
+        _SB_MEMO.pop(next(iter(_SB_MEMO)))
+    _SB_MEMO[memo_key] = found
+    return found
+
+
+async def _slow_bodies(client: httpx.AsyncClient, ra: float, dec: float, mjd: float, half_deg: float) -> list[dict[str, Any]]:
     r = await client.get(
         SB_IDENT,
         params={
@@ -173,3 +193,119 @@ async def identify(
         f"{'every pass' if len(places) > 1 else 'the pass'}" + (f", at {best['r_au']:.1f} au" if best["r_au"] is not None else "")
     )
     return best
+
+
+KINDS = ("deep", "distant")
+KNOWN_MAX = 8  # leads of a result that are looked up (the strongest first)
+FILE_VERSION = "k1"
+
+
+def places_of(kind: str, result: dict[str, Any], c: dict[str, Any]) -> tuple[list[dict[str, Any]], float, float] | None:
+    """The places of a lead to look up and the distance range the search gave (None: nothing to look up)."""
+    if kind == "deep":
+        info = result.get("passes") or []
+        by = c.get("by_pass") or []
+        if not by or len(by) != len(info):
+            return None
+        places = [
+            {"ra": q["ra"], "dec": q["dec"], "mjd": q.get("mjd"), "mjd0": i["pass_mjd0"], "mjd1": i["pass_mjd1"]}
+            for q, i in zip(by, info, strict=True)
+        ]
+        return places, float(c["d"]), float(c["d"])
+    if result.get("t0") is None or c.get("ra") is None:
+        return None
+    return [{"ra": c["ra"], "dec": c["dec"], "mjd": float(result["t0"])}], float(c.get("d_lo", c["d"])), float(c.get("d_hi", c["d"]))
+
+
+class FpxIdentifier:
+    """The JPL identification of the leads of every finished Find Planet X result, made ahead of time (a sweep over the store, one result at
+    a time, at the lowest rate) and kept on disk, so a page that asks finds it at once. A failed answer (JPL down) is never kept."""
+
+    def __init__(self, store: Any, directory: Path, client: httpx.AsyncClient | None = None, sweep_s: float = 60.0) -> None:
+        self.store = store
+        self.dir = directory
+        self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(90, connect=10), headers={"User-Agent": "spherex-sky/0.1"})
+        self.sweep_s = sweep_s
+        self.kick_event = asyncio.Event()
+        self.task: asyncio.Task[None] | None = None
+        self.limit = asyncio.Semaphore(2)
+        self.failed_at: dict[tuple[str, str], float] = {}
+        self.running: set[tuple[str, str]] = set()
+
+    def path(self, kind: str, key: str) -> Path:
+        return self.dir / f"{kind}-{key}.{FILE_VERSION}.json"
+
+    def cached(self, kind: str, key: str) -> dict[int, dict[str, Any]] | None:
+        p = self.path(kind, key)
+        if not p.is_file():
+            return None
+        return {int(i): v for i, v in json.loads(p.read_text()).items()}
+
+    def annotate(self, kind: str, key: str, result: dict[str, Any]) -> dict[str, Any]:
+        """The result with each lead's `known` (from the kept answers; `pending` while the sweep has not got to it)."""
+        if kind not in KINDS or not result.get("candidates") or result.get("status") != "ok":
+            return result
+        found = self.cached(kind, key)
+        if found is None:
+            self.kick_event.set()
+        out = dict(result)
+        out["candidates"] = [
+            {**c, "known": (found or {}).get(i, {"state": "pending"})} if i < KNOWN_MAX else c for i, c in enumerate(result["candidates"])
+        ]
+        return out
+
+    async def identify_result(self, kind: str, key: str, result: dict[str, Any]) -> bool:
+        """Looks up the leads of one result and keeps the answers when JPL answered for all. -> kept."""
+        found: dict[int, dict[str, Any]] = {}
+        for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
+            pl = places_of(kind, result, c)
+            if pl is not None:
+                found[i] = await identify(self.client, pl[0], pl[1], pl[2], self.limit)
+        if not found or any(v.get("state") == "unavailable" for v in found.values()):
+            return False
+        self.dir.mkdir(parents=True, exist_ok=True)
+        tmp = self.path(kind, key).with_suffix(".part")
+        tmp.write_text(json.dumps({str(i): v for i, v in found.items()}, separators=(",", ":")))
+        tmp.replace(self.path(kind, key))
+        return True
+
+    async def sweep(self) -> int:
+        """One pass over the finished results without kept answers. -> how many were looked up."""
+        n = 0
+        rows = await asyncio.to_thread(self.store.listing, KINDS)
+        for row in rows:
+            kind, key = row["kind"], row["key"]
+            if not row["complete"] or self.cached(kind, key) is not None or (kind, key) in self.running:
+                continue
+            if time.monotonic() - self.failed_at.get((kind, key), -1e9) < 300.0:
+                continue  # JPL did not answer a moment ago: not again at once
+            meta = await asyncio.to_thread(self.store.read_meta, kind, key)
+            if not meta or meta.get("status") != "ok" or not meta.get("candidates"):
+                continue
+            self.running.add((kind, key))
+            try:
+                if await self.identify_result(kind, key, meta):
+                    n += 1
+                else:
+                    self.failed_at[(kind, key)] = time.monotonic()
+            finally:
+                self.running.discard((kind, key))
+        return n
+
+    async def loop(self) -> None:
+        while True:
+            with contextlib.suppress(Exception):
+                await self.sweep()
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self.kick_event.wait(), self.sweep_s)
+            self.kick_event.clear()
+
+    def start(self) -> None:
+        self.task = asyncio.get_running_loop().create_task(self.loop())
+
+    async def stop(self) -> None:
+        if self.task is not None:
+            self.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.task
+        await self.client.aclose()

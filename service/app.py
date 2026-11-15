@@ -30,6 +30,7 @@ from service.config import Config, load
 from service.context import CatalogueContext
 from service.coverage import coverage_payload, index_key
 from service.findings import Findings
+from service.fpx_known import FpxIdentifier
 from service.jobs.scheduler import Priority, Scheduler
 from service.known import Known
 from service.lightcurves import neowise as lc_neowise
@@ -102,6 +103,7 @@ class State:
         self.coverage_lock = asyncio.Lock()
         self.coverage_task: asyncio.Task[None] | None = None
         self.findings: Findings | None = None
+        self.fpx_known: FpxIdentifier | None = None
 
 
 class _NoAnomalies:
@@ -159,6 +161,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.store, cfg.store_dir, st.catalogue, st.movers, st.pairs, st.dwarfs, st.anomalies or _NoAnomalies(), writer=not STANDBY
         )
         st.findings.start()
+        st.fpx_known = FpxIdentifier(st.store, cfg.store_dir / "fpx_known")
+        st.fpx_known.start()
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         if st.index is not None:
@@ -185,6 +189,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             warm_task.cancel()
         if st.findings is not None:
             await st.findings.stop()
+        if st.fpx_known is not None:
+            await st.fpx_known.stop()
         await st.scheduler.stop()
         await st.s3.close()
         await st.hips.close()
