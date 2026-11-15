@@ -160,7 +160,7 @@ export function LightCurves({ src, field }: { src: Source; field?: { ra: number;
   // SPHEREx's own brightness of the source in every pass and detector (the service measures it once the field is finished; until then it says waiting)
   useEffect(() => {
     setBr(null);
-    if (!field) return;
+    if (!field || src.moving) return; // a moving body has no fixed place to measure and no variable-star verdict
     const ctl = new AbortController();
     const q = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6), fov: String(field.fov), field_ra: field.ra.toFixed(6), field_dec: field.dec.toFixed(6), pmra: String(src.pmra ?? 0), pmdec: String(src.pmdec ?? 0) });
     let timer = 0;
@@ -182,6 +182,7 @@ export function LightCurves({ src, field }: { src: Source; field?: { ra: number;
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     setC(null);
+    if (src.moving) return setBusy(false); // ZTF and NEOWISE sit at a fixed place; a moving body is not there
     setBusy(true);
     const ctl = new AbortController();
     const q = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6) });
@@ -215,6 +216,21 @@ export function LightCurves({ src, field }: { src: Source; field?: { ra: number;
         : p.state === 'unavailable'
           ? `${what}: IRSA did not answer`
           : '';
+  if (src.moving) {
+    const m = src.moving;
+    return (
+      <div class="lc">
+        <div class="h2">Brightness</div>
+        <div class="mono-s">
+          A moving body is not a variable: its brightness changes with its distance from the Sun and the Earth and with its phase.
+          {m.V != null ? ` JPL predicts V ${m.V.toFixed(1)} for it in this pass.` : ''}
+        </div>
+        <div class="mono-s">
+          {m.visits.map((v) => `visit ${v.n}: ${v.how === 'found' ? 'found' : 'recovered'} at S/N ${v.z.toFixed(1)}`).join(' · ')}
+        </div>
+      </div>
+    );
+  }
   return (
     <div class="lc">
       <div class="h2">Light curves</div>
