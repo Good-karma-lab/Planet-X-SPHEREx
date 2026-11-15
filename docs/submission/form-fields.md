@@ -9,6 +9,8 @@ checked: the word and character counts below are measured on the texts, so you c
 the page are images only (JPG, PNG, GIF, up to 10 MB); video and documents go in as public links with no login. Save often; only the
 last save is reviewed.
 
+**Proof-read.** Every number in the texts below was checked on 2026-11-15 against the live Method page (the deployed bundle with the consistency fixes): Gaia motions 11.37 ± 0.47 and 10.7 ± 0.8 (Barnard), 4.6 ± 0.5 (ε Indi B, 4.59 ± 0.49 in the Method), 7.93 ± 0.61 (WISE 0855, SIMBAD 8.15), 6 of 8 blind asteroids, chance 0.0 and 1.83, Eris 95.6 ± 0.4 au, Makemake 52.5 ± 0.2 au, Sedna 83.0 au with 8.2σ between 8.07σ and 8.48σ.
+
 ---
 
 ## 1. Project name (2 words, 11 characters)
