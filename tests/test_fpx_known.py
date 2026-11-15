@@ -301,3 +301,18 @@ def test_a_gateway_failure_of_jpl_is_asked_again_before_a_lead_is_unavailable(mo
     fpx_known._SB_MEMO.clear()
     out = asyncio.run(fpx_known.identify(httpx.AsyncClient(transport=httpx.MockTransport(once)), PLACES, 83.0, 83.0))
     assert out["state"] == "ok" and out["name"].startswith("90377 Sedna") and calls["sb"] == 2
+
+
+def test_a_kept_none_answer_is_screened_once_for_the_residual_rule(tmp_path: Path) -> None:
+    by_pass = [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "params": {"dmin": 250.0, "dmax": 2000.0},
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
+        "candidates": [{"d": 1267.5, "d_lo": 1267.5, "d_hi": 2000.0, "ra": 1.0, "dec": 1.0, "ok": True, "by_pass": by_pass}],
+    }
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
+    idn._keep("deep", "k" * 24, {0: {"state": "none", "at": [1.0, 1.0, 1267.5]}})  # kept before the rule existed
+    asyncio.run(idn.sweep())
+    kept = idn.cached("deep", "k" * 24)
+    assert kept is not None and kept[0]["state"] == "residual"

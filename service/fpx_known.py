@@ -334,11 +334,24 @@ class FpxIdentifier:
         whole = True
         asked = 0
         for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
-            if not c.get("ok") or i in found:
+            if not c.get("ok"):
                 continue  # a peak the photometry does not confirm is not a lead: nothing to name
+            if i in found and found[i].get("state") == "none" and not found[i].get("screened"):
+                # an answer kept before the residual rule: JPL named nothing, so the edge and the bright-star halo are checked now
+                pl0 = places_of(kind, result, c)
+                why = edge_reason(result, c) or (await halo_reason(pl0[0]) if pl0 is not None else None)
+                found[i] = (
+                    {"state": "residual", "reason": why, "at": [c.get("ra"), c.get("dec"), c.get("d")]}
+                    if why
+                    else {**found[i], "screened": True}
+                )
+                self._keep(kind, key, found)
+                continue
+            if i in found:
+                continue
             pl = places_of(kind, result, c)
             if pl is None:
-                found[i] = {"state": "none", "note": "the result does not say where the passes were"}
+                found[i] = {"state": "none", "note": "the result does not say where the passes were", "screened": True}
                 self._keep(kind, key, found)
                 continue
             why = edge_reason(result, c) or await halo_reason(pl[0])
@@ -351,7 +364,7 @@ class FpxIdentifier:
             if v.get("state") == "unavailable":
                 whole = False
                 continue
-            found[i] = v
+            found[i] = {**v, "screened": True} if v.get("state") == "none" else v
             self._keep(kind, key, found)
         log.info("%s %s: %d leads asked in %.0f s, complete %s", kind, key[:8], asked, time.monotonic() - t0, whole)
         return whole and bool(found)
@@ -373,7 +386,10 @@ class FpxIdentifier:
                 continue
             have = self.cached(kind, key) or {}
             need = [i for i, c in enumerate(meta["candidates"][:KNOWN_MAX]) if c.get("ok")]
-            if need and all(have.get(i, {}).get("state") in ("ok", "none", "residual") for i in need):
+            if need and all(
+                have.get(i, {}).get("state") in ("ok", "residual") or (have.get(i, {}).get("state") == "none" and have[i].get("screened"))
+                for i in need
+            ):
                 self.complete.add((kind, key))
                 continue
             self.running.add((kind, key))
