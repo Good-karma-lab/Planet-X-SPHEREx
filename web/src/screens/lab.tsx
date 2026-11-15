@@ -14,6 +14,7 @@ import { atEpoch } from '../lib/sky';
 import { FRAME_MS, loadBodies, loadFilm, utc, type Film, type KnownBody } from './film';
 import { NeossatCard } from './neossat';
 import { LightCurves } from './lightcurve';
+import { LeadPassport, type DistantState } from './search/distant';
 import { ObjectGuess, ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
 import { halfToFloat } from '../lib/sxp';
 import { Portrait, type PortraitData } from './portrait';
@@ -3666,6 +3667,25 @@ export function Lab({ route }: { route: Route }) {
                       )}
                     </div>
                   )}
+                  {sel &&
+                    sel.name === 'Find Planet X lead' &&
+                    (() => {
+                      // the lead's own stamp: the pass's visits shifted along its orbit and added (the body shows only so), with its numbers
+                      let best: { ds: Extract<DistantState, { state: 'ok' }>; c: DistantCandidate } | null = null;
+                      let bd = 1e9;
+                      for (const run of fpxRuns) {
+                        const dsr = run.ds;
+                        if (dsr.state !== 'ok') continue;
+                        for (const c of dsr.r.candidates) {
+                          const sep = Math.hypot((c.ra - sel.ra) * Math.cos((sel.dec * Math.PI) / 180), c.dec - sel.dec) * 3600;
+                          if (sep < bd) {
+                            bd = sep;
+                            best = { ds: dsr, c };
+                          }
+                        }
+                      }
+                      return best && bd < 60 ? <LeadPassport ds={best.ds} c={best.c} ra0={ra} dec0={dec} /> : null;
+                    })()}
                   {sel &&
                     portraitOf(
                       sel,

@@ -624,3 +624,138 @@ export function peakRows(c: DistantCandidate, r: DistantResult): [string, string
     ['Reach', 'a blind search reaches about V 20–21; Planet Nine margin 1.4–1.7× only in D4', 'in reflected light'],
   ];
 }
+
+/** The picture of a lead: the visits of its pass shifted along ITS orbit (its distance and own motion) and added, cut round the lead's place; the lead is the point that
+ *  comes into focus. Null when the grid does not hold the place. */
+export function leadStamp(
+  s: Extract<DistantState, { state: 'ok' }>,
+  c: DistantCandidate,
+  ra0: number,
+  dec0: number,
+  half = 18,
+): { size: number; rgba: Uint8ClampedArray; peak: number } | null {
+  const sl = s.r.slider;
+  const n = sl.n;
+  const nn = n * n;
+  // the distance of the slider nearest the lead's, and its own motion in grid pixels per day
+  let di = 0;
+  sl.distances.forEach((d, k) => {
+    if (Math.abs(d - c.d) < Math.abs(sl.distances[di]! - c.d)) di = k;
+  });
+  const sh = sl.offsets_px[di]!;
+  const mu = [c.mu[0] / sl.step, c.mu[1] / sl.step];
+  const out = new Float32Array(nn);
+  const den = new Float32Array(nn);
+  for (let i = 0; i < sl.t.length; i++) {
+    const om = 1 / sl.sg[i]!;
+    const sx = Math.round(sh[i]![0] + mu[0]! * sl.dt[i]!);
+    const sy = Math.round(sh[i]![1] + mu[1]! * sl.dt[i]!);
+    if (Math.abs(sx) >= n || Math.abs(sy) >= n) continue;
+    const base = i * nn;
+    for (let y = Math.max(0, -sy); y < n - Math.max(0, sy); y++) {
+      let o = y * n + Math.max(0, -sx);
+      let q = base + (y + sy) * n + Math.max(0, -sx) + sx;
+      for (let x = Math.max(0, -sx); x < n - Math.max(0, sx); x++, o++, q++) {
+        const v = s.bin[q]!;
+        if (v) {
+          out[o]! += om * ((v - 128) / 25);
+          den[o]! += om * om;
+        }
+      }
+    }
+  }
+  let wmax = 0;
+  for (let p = 0; p < nn; p++) if (den[p]! > wmax) wmax = den[p]!;
+  const sn = new Float32Array(nn);
+  const samp: number[] = [];
+  for (let p = 0; p < nn; p++)
+    if (den[p]! >= 0.6 * wmax) {
+      sn[p] = out[p]! / Math.sqrt(den[p]!);
+      if (p % 9 === 0) samp.push(sn[p]!);
+    }
+  samp.sort((a, b) => a - b);
+  const md = samp[samp.length >> 1] ?? 0;
+  const ad = samp.map((x) => Math.abs(x - md)).sort((a, b) => a - b);
+  const spread = Math.max(1.4826 * (ad[ad.length >> 1] ?? 1), 0.5);
+  // the lead's place in the grid (x grows as RA falls, y with Dec), and the brightest point within 4 pixels of it
+  const px0 = Math.round(n / 2 - ((((c.ra - ra0 + 540) % 360) - 180) * Math.cos((dec0 * Math.PI) / 180) * 3600) / sl.step);
+  const py0 = Math.round(n / 2 + ((c.dec - dec0) * 3600) / sl.step);
+  let bx = px0;
+  let by = py0;
+  let best = -1e9;
+  for (let y = py0 - 4; y <= py0 + 4; y++)
+    for (let x = px0 - 4; x <= px0 + 4; x++) {
+      if (x < 0 || y < 0 || x >= n || y >= n) continue;
+      const v = sn[y * n + x]!;
+      if (v > best) {
+        best = v;
+        bx = x;
+        by = y;
+      }
+    }
+  if (bx < half || by < half || bx >= n - half || by >= n - half) return null;
+  const size = 2 * half + 1;
+  const rgba = new Uint8ClampedArray(size * size * 4);
+  for (let yy = 0; yy < size; yy++)
+    for (let xx = 0; xx < size; xx++) {
+      const p = (by + half - yy) * n + (bx - half + xx);
+      const o4 = (yy * size + xx) * 4;
+      if (den[p]! < 0.6 * wmax) {
+        rgba.set([6, 12, 16, 255], o4);
+        continue;
+      }
+      const t = Math.max(0, Math.min(1, ((sn[p]! - md) / spread) / 8));
+      rgba.set([14 + 241 * t, 18 + 170 * t * t, 24 + 40 * t * t * t, 255], o4);
+    }
+  return { size, rgba, peak: (best - md) / spread };
+}
+
+/** The lead's stamp and numbers for the passport: the summed picture along its orbit, distance, S/N, verdict and the known body. */
+export function LeadPassport({ ds, c, ra0, dec0 }: { ds: Extract<DistantState, { state: 'ok' }>; c: DistantCandidate; ra0: number; dec0: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const st = useMemo(() => leadStamp(ds, c, ra0, dec0), [ds, c, ra0, dec0]);
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv || !st) return;
+    const tmp = document.createElement('canvas');
+    tmp.width = tmp.height = st.size;
+    tmp.getContext('2d')!.putImageData(new ImageData(st.rgba, st.size, st.size), 0, 0);
+    const g = cv.getContext('2d')!;
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = 'high';
+    g.clearRect(0, 0, cv.width, cv.height);
+    g.drawImage(tmp, 0, 0, cv.width, cv.height);
+    g.strokeStyle = 'rgba(95,227,214,.9)';
+    g.lineWidth = 1;
+    const m = cv.width / 2;
+    for (const [x0, y0, x1, y1] of [[m, 4, m, m - 10], [m, m + 10, m, cv.height - 4], [4, m, m - 10, m], [m + 10, m, cv.width - 4, m]] as const) {
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(x1, y1);
+      g.stroke();
+    }
+  }, [st]);
+  const kn = knownName(c.known);
+  const verdict = c.ok
+    ? 'a lead: the photometry along its orbit confirms it'
+    : c.residual
+      ? `not a lead: ${c.residual}`
+      : 'above the bar, but the photometry along its orbit does not confirm it';
+  return (
+    <div class="lead-pass" data-testid="lead-passport">
+      <canvas ref={ref} width={132} height={132} title="The visits of the pass shifted along this lead's orbit and added: the point in the middle is the lead" />
+      <div class="lp-txt">
+        <b>Find Planet X lead · deep sum along its orbit</b>
+        <div>
+          distance {c.d.toFixed(0)} au ({c.d_lo.toFixed(0)}–{c.d_hi.toFixed(0)}){c.edge ? ', not bounded' : ''}
+        </div>
+        <div>
+          S/N {c.sn.toFixed(1)}σ{c.phot_sn != null ? ` · photometry ${c.phot_sn.toFixed(1)}σ` : ''}
+        </div>
+        <div>{verdict}</div>
+        <div>{kn ? `known body: ${kn}` : c.known?.state === 'ok' ? `known body: ${c.known.name}` : 'no known body there'}</div>
+        {!st && <div class="faint">the lead is too near the edge of the grid for a stamp</div>}
+      </div>
+    </div>
+  );
+}
