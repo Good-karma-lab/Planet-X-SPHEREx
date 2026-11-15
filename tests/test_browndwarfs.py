@@ -85,3 +85,29 @@ def test_a_moving_red_source_is_a_track_of_the_movers_view_unless_the_white_stac
     run = bd.DwarfRun("k", "f", state="done", result={"candidates": [dict(c, track=tr, mover=None), again], "known": []})
     got = object.__new__(bd.BrownDwarfs).red_tracks(run)
     assert len(got) == 1 and got[0] is tr
+
+
+def test_a_red_source_the_movers_search_found_too_shows_the_tracks_motion_only() -> None:
+    c = bd.red_movers({"red": [red_row(-8000.0, 0.0)]}, MJDS)[0]
+    t = bd.pseudo_track(c, MJDS)
+    track = {
+        "mjd": MJDS,
+        "ra": t["ra"],
+        "dec": t["dec"],
+        "passes": [0, 1, 2],
+        "snr": [9.0, 8.0, 7.0],
+        "rms_arcsec": 0.4,
+        "speed": 7.2,
+        "pa": 270.0,
+        "v_east": -7.2,
+        "v_north": 0.0,
+        "ra_2025_9": c["ra"],
+        "dec_2025_9": c["dec"],
+        "grade": "mover",
+    }
+    c["mover"] = bd.mover_match(c, [track])
+    bd.adopt_mover(c)
+    assert c["pm"] == 7200.0 and c["pa"] == 270.0 and c["grade"] == "mover"
+    assert c["red_pm"]["pm"] == 8000.0  # the red-band measurement is kept, not shown as the speed
+    again = bd.pseudo_track(c, MJDS)
+    assert math.isclose(again["speed"], 7.2, abs_tol=0.01)

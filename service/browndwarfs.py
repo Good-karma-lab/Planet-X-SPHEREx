@@ -134,7 +134,29 @@ def mover_match(c: dict[str, Any], tracks: list[dict[str, Any]]) -> dict[str, An
         "speed": t["speed"],
         "pa": t["pa"],
         "offset_arcsec": round(best[0], 2),
+        **{
+            k: t[k]
+            for k in ("v_east", "v_north", "ra_2025_9", "dec_2025_9", "speed_err", "sigma", "shift_arcsec", "baseline_years", "grade")
+            if k in t
+        },
     }
+
+
+def adopt_mover(c: dict[str, Any]) -> None:
+    """A red source that the movers search found as well is one star measured twice: the motion of the track (measured on the white
+    stacks of every pass, with the scatter of its places) is the one number shown; the red-band measurement is kept as `red_pm`."""
+    m = c.get("mover")
+    if not m or "v_east" not in m or "ra_2025_9" not in m:
+        return
+    c["red_pm"] = {k: c[k] for k in ("pmra", "pmdec", "pm", "pa", "ra", "dec")}
+    c["pmra"], c["pmdec"] = round(m["v_east"] * 1000.0, 1), round(m["v_north"] * 1000.0, 1)
+    c["pm"] = round(math.hypot(c["pmra"], c["pmdec"]), 1)
+    c["pa"] = m["pa"]
+    c.update({k: m[k] for k in ("speed_err", "sigma", "shift_arcsec", "baseline_years", "grade") if k in m})
+    c["ra"], c["dec"] = m["ra_2025_9"], m["dec_2025_9"]
+    k = EPOCH - 2000.0
+    c["dec_j2000"] = c["dec"] - c["pmdec"] * k / 3.6e6
+    c["ra_j2000"] = (c["ra"] - c["pmra"] * k / 3.6e6 / max(math.cos(math.radians(c["dec"])), 1e-6)) % 360.0
 
 
 def status_of(c: dict[str, Any]) -> str:
@@ -246,6 +268,7 @@ class BrownDwarfs:
             cands = red_movers(red, mjds, [int(p["index"]) for p in meta["passes"]])[:MAX_CHECKED]
             for c in cands:
                 c["mover"] = mover_match(c, tracks)
+                adopt_mover(c)
                 c["gaia_check"] = pseudo_track(c, mjds)
                 c["bands"] = "colour = flux at 3.8–5 µm (D5–D6) / flux at 1.1–1.6 µm (D2)"
             run.result = {
