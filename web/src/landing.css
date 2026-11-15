@@ -296,3 +296,5 @@
 }
 
 .lp-pnow.flip { transform: translate(-100%, -50%); text-align: right; }
+/* a phone: the card beside the ring wraps inside the picture instead of running past its left edge */
+@media (max-width: 560px) { .lp-pnow.flip { white-space: normal; max-width: 40%; } }
