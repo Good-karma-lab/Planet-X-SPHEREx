@@ -28,7 +28,7 @@ of that field back and forth like a blink comparator, coloured by SPHEREx's own 
 star or a brown dwarf visibly moves. Searches start by themselves: tracks through the passes checked against ESA Gaia with a chance
 control, asteroids that hop between the visits of a pass checked against JPL, brown dwarf candidates, red sources and spectral
 anomalies. **Find Planet X** adds exposures along trial distances and motions to look for slow bodies beyond Neptune, and recovers
-Eris and Makemake from their fields without being told their distance. It addresses the challenge directly: any visitor enters
+Eris and Makemake from their fields without being told their distance; Sedna comes out as a strong lead. It addresses the challenge directly: any visitor enters
 coordinates and sees a series of images of that patch like a short video, in which moving objects stand out, and every find is a lead
 with its evidence, never a discovery. It matters because SPHEREx's raw frames show no motion to the eye, while blinking survey images
 is how Pluto was found in 1930 and how volunteers have since found thousands of brown dwarfs in WISE images.
@@ -75,20 +75,21 @@ Nine orbit, the fields searched and every search's own measured noise bar.
 
 **How it was checked (live numbers).**
 
-- Movers against Gaia: Barnard's Star 11.37 ± 0.47 ″/yr in a 5′ field and 10.7 ± 0.8 ″/yr in a 20′ field, Gaia DR3 10.4; ε Indi B 4.59 ±
-  0.49 ″/yr, Gaia 4.684; WISE 0855−0714, found in the red bands, 7.93 ± 0.61 ″/yr, SIMBAD 8.15 (live `/api/v1/movers` and
+- Movers against Gaia: Barnard's Star 11.37 ± 0.47 ″/yr in a 5′ field and 10.7 ± 0.8 ″/yr in a 20′ field, Gaia DR3 10.4; ε Indi B 4.6 ±
+  0.5 ″/yr, Gaia 4.7; WISE 0855−0714, found in the red bands, 7.93 ± 0.61 ″/yr, SIMBAD 8.15 (live `/api/v1/movers` and
   `/api/v1/browndwarfs`, 2026-11-14).
 - Asteroids found blind: on the 60′ ecliptic field of December 2025 the film search recovers 6 of the 8 known bodies brighter than V 19.1
-  that have at least four frames in the film, with no unmatched track (live film `48c5bbb2c5e028b847075c51`, JPL Small-Body
+  that have at least four frames in the film, with no unmatched track in that field (live film `48c5bbb2c5e028b847075c51`, JPL Small-Body
   Identification and Horizons, 2026-11-14).
 - Chance: the same searches with the moving sources at random places make 0.0 tracks per field (20 trials on five 5′ fields and on
   ε Indi at 10′, 20′ and 60′); in the film search 0.0 at four or more visits and 1.83 per trial at three (12 trials), which is why a
   track needs four visits.
 - Bodies beyond Neptune: Eris, three passes linked by one orbit, 95.6 ± 0.4 au (JPL 95.5); Makemake, two passes linked, 52.5 ± 0.2 au
-  (JPL 52.3, not confirmed by a third pass); Sedna, a three-pass deep sum, a peak at 83.0 au (JPL 83.0) standing 0.5–0.8″ from JPL's
-  place in every pass, 8.2σ: above the field's noise ceiling (8.07σ) and below its bar (8.48σ), so it is reported as a strong lead, not
-  a detection. One pass alone gives only a wide range of distances (70 to 165 au for Eris's first pass). Live runs on spherex.space,
-  2026-11-15, keys in the Method page.
+  (JPL 52.3, not confirmed by a third pass). One pass alone gives only a wide range of distances (70 to 165 au for Eris's first pass).
+  Live runs on spherex.space, 2026-11-15, keys in the Method page.
+- Sedna: a blind deep sum of three passes of one field peaks at 83.0 au (JPL 83.0), 0.5 to 0.8 arcseconds from JPL's place in each
+  pass; its 8.2σ is above the noise ceiling (8.07σ) and below the bar (8.48σ), so it is a strong lead and not a formal detection (live
+  run, 2026-11-15).
 
 The Method page (https://spherex.space/#/method) gives every step, formula and number with its source.
 

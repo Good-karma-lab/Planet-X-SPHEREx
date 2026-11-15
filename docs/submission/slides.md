@@ -10,17 +10,17 @@ on the live service (2026-11-14 and 2026-11-15).
    every six months. Asteroids, comets, nearby stars and brown dwarfs shift between images; Pluto was found that way. But raw frames
    show colour flicker, not motion: each exposure sees a star at another wavelength and pixel grid.
 3. **Coordinates in, a little video out.** Every season is cleaned, stacked and coloured by its own spectrum, then played 1 → 2 → 3 → 2.
-   Barnard's Star moves 10.7 ± 0.8″ a year in a 20′ field, Gaia 10.4 ✓. ε Indi B crosses the white stars at 4.6″ a year (Gaia 4.7).
+   Barnard's Star moves 10.7 ± 0.8″ a year in a 20′ field, Gaia 10.4 ✓. ε Indi B crosses the white stars at 4.6 ± 0.5″ a year (Gaia 4.7).
    The Days scale also shows asteroids.
 4. **Find Planet X: too faint for one picture, so add up the orbit.** The exposures are added along every orbit a distant body could
    have, 30–2000 au; the jump between passes gives its distance. Eris, found blind and linked over three passes: 95.6 ± 0.4 au (JPL
-   95.5). Makemake 52.5 ± 0.2 au from two passes (JPL 52.3). No Planet X is claimed: a search that finds nothing does not show that
+   95.5). Makemake 52.5 ± 0.2 au from two passes (JPL 52.3). Sedna, V 20.7, comes out as a strong lead at 83.0 au (JPL 83.0), not a formal detection. No Planet X is claimed: a search that finds nothing does not show that
    nothing is there.
 5. **What does not look like a star.** Any dot gives its spectrum in 102 colours; the tool builds the field's ordinary star from them
    and flags what does not fit. In its field ε Indi B comes out as spectral anomaly 1: a cold brown dwarf glows at the long wavelengths. Every find gets a passport: score, wavelengths, motion. "Anomaly", never "discovery".
 6. **Validated on real data, every number checked against another telescope or catalogue.** Nearby stars against ESA Gaia: Barnard's Star
-   11.4″/yr (Gaia 10.4), ε Indi B 4.6 (Gaia 4.7), WISE 0855 7.9 (SIMBAD 8.2). Known asteroids found blind: 6 of 8 known bodies to V 19.1
-   on a 60′ field, every track a known body, 0 false. Bodies beyond Neptune: Eris 95.6 ± 0.4 au, Makemake 52.5 au. Chance control: every
+   11.4 ± 0.5″/yr at 5′ and 10.7 ± 0.8 at 20′ (Gaia 10.4), ε Indi B 4.6 ± 0.5 (Gaia 4.7), WISE 0855 7.9 (SIMBAD 8.15). Known asteroids found blind: 6 of 8 known bodies to V 19.1
+   on a 60′ field, every track a known body, 0 false in that field. Bodies beyond Neptune: Eris 95.6 ± 0.4 au, Makemake 52.5 au, Sedna 83.0 au (a strong lead). Chance control: every
    search re-run on shuffled data, 0.0 tracks per field in 20 trials. Limits: bright stars saturate, asteroids to about V 19, a lead is
    not a discovery.
 7. **Try it now: free, no account.** spherex.space · code github.com/Good-karma-lab/Planet-X-SPHEREx (Apache-2.0) · team Good Karma

@@ -205,7 +205,7 @@ A track that lies within 30″ of a known body's predicted place (median over th
 
 The film of the 60′ ecliptic field (RA 169.8917, Dec +4.3514; pass 2025-12-02 to 2025-12-20, MJD 61011.71–61029.77; D1–D3, 24 visits, 178 exposures of which 166 were read) was searched blind. Of the 8 known bodies with at least 4 frames inside the film and V ≤ 19.1 the search recovered 6, each matched to JPL positions within 2.5″, and all 6 drawn tracks are matched to a known body.
 
-**Result:** the film search recovers 6 of 8 known bodies blind with 0 unexplained tracks (live service, /api/v1/film/48c5bbb2c5e028b847075c51/tracks, product `filmsearch` version t4, 2026-11-14 21:04 UTC).
+**Result:** the film search recovers 6 of 8 known bodies blind with 0 unexplained tracks in the 60′ December ecliptic field (live service, /api/v1/film/48c5bbb2c5e028b847075c51/tracks, product `filmsearch` version t4, 2026-11-14 21:04 UTC).
 
 | Body | V | Result |
 |---|---|---|
