@@ -154,10 +154,15 @@ async def identify(
     mid = ds[len(ds) // 2]
     # a window means any day of it: the box must hold the body wherever it stands then (a slow body moves under 15 arcsec/hour)
     half = 60.0 / 3600.0 if first.get("mjd") is not None else min(1.5, 0.05 + SLOW_RATE * 12.0 * (ds[-1] - ds[0]) / 3600.0)
-    try:
-        async with sem:
-            bodies = await slow_bodies(client, first["ra"], first["dec"], mid, half)
-    except (httpx.HTTPError, ValueError, KeyError):
+    bodies: list[dict[str, Any]] | None = None
+    for attempt in range(3):  # JPL's gateway fails one request in a few: a second and third ask costs less than an answer thrown away
+        try:
+            async with sem:
+                bodies = await slow_bodies(client, first["ra"], first["dec"], mid, half)
+            break
+        except (httpx.HTTPError, ValueError, KeyError):
+            await asyncio.sleep(3.0 * (attempt + 1))
+    if bodies is None:
         return {"state": "unavailable"}
     best: dict[str, Any] | None = None
     for b in bodies[:MAX_BODIES]:
