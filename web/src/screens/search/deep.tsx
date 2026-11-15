@@ -106,7 +106,8 @@ export function DeepSumPanel({
   useEffect(() => {
     if (!autoRun || autoHold || has !== true || passes.length < 3) return;
     const k = `${ra},${dec},${fov},${autoRun.join('-')}`;
-    if (d.state === 'idle' && started.current !== k) {
+    // a cancelled run is not started again (started keeps the field and range it ran for, with or without the run's suffix)
+    if (d.state === 'idle' && !started.current.startsWith(k)) {
       started.current = k;
       void plan(autoRun[0], autoRun[1]);
     } else if (d.state === 'plan' && started.current === k && d.p.plan.hypotheses <= d.p.limit) {
@@ -157,6 +158,7 @@ export function DeepSumPanel({
       // an automatic run gives way to every person's job
       if (autoRun) q.set('bg', '1');
       const j = await runJob(`/api/v1/deep?${q}`, {
+        bg: !!autoRun,
         cancelled: () => my !== tok.current,
         every: 3000,
         max: 4000,
