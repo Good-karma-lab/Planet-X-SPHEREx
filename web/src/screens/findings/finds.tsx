@@ -289,7 +289,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
     ...(f.snr != null ? ([['S/N', f.snr.toFixed(1)]] as [string, string][]) : []),
     ...(f.score != null ? ([['Score', f.score.toFixed(2)]] as [string, string][]) : []),
     ...(f.chance != null ? ([['Chance', f.kind === 'film' ? `controls: ${f.chance.toFixed(2)} per search at ${f.data.track?.n} visits` : `${f.chance.toFixed(2)} per field`]] as [string, string][]) : []),
-    ['Place', `${formatRA(f.ra)} ${formatDec(f.dec)}`],
+    [f.kind === 'peak' ? "Place at the search's reference date" : 'Place', `${formatRA(f.ra)} ${formatDec(f.dec)}`],
     ['Field', `${f.place} · ${f.fov}′`],
     ...(((f.data.detections?.length ?? 0) > 1) ? ([['Detections', `${f.data.detections.length}: ${f.data.detections.map((d: any) => `${d.fov}′`).join(', ')} fields`]] as [string, string][]) : []),
   ];
