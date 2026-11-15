@@ -249,7 +249,20 @@ function turnFrame(F: Frame, u: V3, v: V3): Frame {
   return { c: rot(F.c), e: rot(F.e), n: rot(F.n) };
 }
 
+/** An address that names a place (#/explore?ra=..&dec=..[&fov=..]) puts the aim there; the view opens on it. Null when it names none. */
+function hashAim(): { ra: number; dec: number } | null {
+  const q = new URLSearchParams(location.hash.split('?')[1] ?? '');
+  const ra = Number(q.get('ra'));
+  const dec = Number(q.get('dec'));
+  if (!q.get('ra') || !q.get('dec') || !Number.isFinite(ra) || !Number.isFinite(dec) || Math.abs(dec) > 90) return null;
+  const fov = Number(q.get('fov'));
+  aim.set({ ra: ((ra % 360) + 360) % 360, dec, ...(SIZES.includes(fov) ? { fov } : {}) }, 'address');
+  return { ra: ((ra % 360) + 360) % 360, dec };
+}
+
 export function Globe() {
+  const linked0 = useRef<{ ra: number; dec: number } | null | undefined>(undefined);
+  if (linked0.current === undefined) linked0.current = hashAim();
   const [catalog, setCatalog] = useState<Obj[]>(catalogNow);
   const [a, setA] = useState<AimState>(aim.get());
   const [surveyPick, setSurvey] = useState<SurveyId>(kept.survey);
@@ -287,7 +300,13 @@ export function Globe() {
   live.current = { survey, proj, inside, a, sel, catalog, bodyPath };
   const dirty = useRef(true);
   // the globe opens wide: a view kept from a deep zoom (a 5′ frame) comes back as about 50° across, centred on the same place (decided once, when it opens)
-  const view = useRef(kept.view ? { ...kept.view, zoom: kept.view.zoom > 8 ? 2.4 : kept.view.zoom } : { ra: a.ra, dec: a.dec, zoom: 1.6 });
+  const view = useRef(
+    linked0.current
+      ? { ra: linked0.current.ra, dec: linked0.current.dec, zoom: 2.4 }
+      : kept.view
+        ? { ...kept.view, zoom: kept.view.zoom > 8 ? 2.4 : kept.view.zoom }
+        : { ra: a.ra, dec: a.dec, zoom: 1.6 },
+  );
   kept.view = view.current;
   const flyRef = useRef<(ra: number, dec: number, spanDeg?: number) => void>(() => {});
 

@@ -39,11 +39,12 @@ let manifest: Promise<boolean> | null = null;
 /** the manifest has been answered (or has failed): whether a layer is there is known */
 let manifestDone = false;
 export const manifestKnown = (): boolean => manifestDone;
-/** Reads the service's manifest of baked tiles once. True when the service has baked layers. */
-export function loadManifest(): Promise<boolean> {
-  manifest ??= fetch('/tiles/manifest.json', { cache: 'no-cache' })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((m: { layers?: Record<string, Partial<Baked> & { frame?: string }> } | null) => {
+type ManifestJson = { layers?: Record<string, Partial<Baked> & { frame?: string }> } | null;
+const MANIFEST_KEY = 'tiles.manifest.v1';
+
+/** Takes the layers a manifest names into use; true when there are baked layers. */
+function applyManifest(m: ManifestJson): boolean {
+
       for (const [id, b0] of Object.entries(m?.layers ?? {})) {
         const b = b0 as typeof b0 & { type?: string; base?: string; gain?: number; black?: number };
         // an equirectangular pyramid (the first star-map bake, svs-eq) is not used: the star map is the HEALPix layer `svs` (tone-mapped, orders 0-6), which the
@@ -63,11 +64,39 @@ export function loadManifest(): Promise<boolean> {
       }
       listeners.forEach((f) => f());
       return baked.size > 0;
-    })
-    .catch(() => false)
-    .finally(() => {
-      manifestDone = true;
-    });
+}
+
+/** Reads the service's manifest of baked tiles once. True when the service has baked layers. The last manifest seen is kept in the browser and used at once (the
+ *  first tiles are on their way before the answer arrives); index.html starts the request before the app's code is in (window.__manifest). */
+export function loadManifest(): Promise<boolean> {
+  manifest ??= (() => {
+    let cached: string | null = null;
+    try {
+      cached = localStorage.getItem(MANIFEST_KEY);
+      if (cached) {
+        applyManifest(JSON.parse(cached) as ManifestJson);
+        manifestDone = true;
+      }
+    } catch {
+      cached = null;
+    }
+    const early = (window as unknown as { __manifest?: Promise<ManifestJson> }).__manifest;
+    return (early ?? fetch('/tiles/manifest.json', { cache: 'no-cache' }).then((r) => (r.ok ? (r.json() as Promise<ManifestJson>) : null)))
+      .then((m) => {
+        if (!m) return baked.size > 0;
+        const text = JSON.stringify(m);
+        try {
+          localStorage.setItem(MANIFEST_KEY, text);
+        } catch {
+          // kept next time
+        }
+        return text === cached ? baked.size > 0 : applyManifest(m);
+      })
+      .catch(() => false)
+      .finally(() => {
+        manifestDone = true;
+      });
+  })();
   return manifest;
 }
 
