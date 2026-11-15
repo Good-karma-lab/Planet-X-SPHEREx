@@ -15,16 +15,20 @@ cd "$ROOT"
 rev="$(git rev-parse --short HEAD)$(git diff --quiet || echo '-dirty')"
 echo "$rev" > web/dist/release.txt
 
+# the hashed assets of earlier builds stay (a tab opened before this release still loads its lazy parts); everything else is replaced
+keep_assets() { rsync -az -e "$SSH" --rsync-path="sudo -u sky rsync" web/dist/assets/ "$HOST:/opt/sky/web/dist/assets/"; }
 if [ "${2:-}" = "--web-only" ]; then
-  rsync -az --delete -e "$SSH" --rsync-path="sudo -u sky rsync" web/dist/ "$HOST:/opt/sky/web/dist/"
+  keep_assets
+  rsync -az --delete --exclude assets -e "$SSH" --rsync-path="sudo -u sky rsync" web/dist/ "$HOST:/opt/sky/web/dist/"
   echo "released web $rev to $HOST (no restart)"
   exit 0
 fi
 
 rsync -az --delete -e "$SSH" --rsync-path="sudo -u sky rsync" \
   --exclude .git --exclude .venv --exclude store --exclude 'web/node_modules' --exclude '__pycache__' --exclude '.pytest_cache' \
-  --exclude '.ruff_cache' --exclude 'web/test-results' --exclude 'web/playwright-report' --exclude '.claude' \
+  --exclude '.ruff_cache' --exclude 'web/test-results' --exclude 'web/playwright-report' --exclude '.claude' --exclude 'web/dist/assets' \
   ./ "$HOST:/opt/sky/"
+keep_assets
 
 INDEX=0; NOW=0
 for a in "${@:2}"; do [ "$a" = "--index" ] && INDEX=1; [ "$a" = "--now" ] && NOW=1; done

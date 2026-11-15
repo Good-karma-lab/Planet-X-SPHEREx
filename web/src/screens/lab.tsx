@@ -578,8 +578,12 @@ export function Lab({ route }: { route: Route }) {
     findShown.current = key;
     const kind = findId.split(':')[0] ?? '';
     const name = { anomaly: 'Anomaly', mover: 'Mover', track: 'Mover', red: 'Red source', pair: 'Pair', brown_dwarf: 'Brown dwarf' }[kind] ?? 'Find';
-    setSel({ ra, dec, name });
-  }, [findId, meta, ra, dec, fov]);
+    // the find's own place when the link gives it (the link then opens the field's own centre); else the link's place is the find's
+    const fra = Number(p['find_ra']);
+    const fdec = Number(p['find_dec']);
+    const own = p['find_ra'] != null && p['find_dec'] != null && Number.isFinite(fra) && Number.isFinite(fdec);
+    setSel({ ra: own ? fra : ra, dec: own ? fdec : dec, name });
+  }, [findId, meta, ra, dec, fov, p['find_ra'], p['find_dec']]);
   // when the selected source changed: its ring pulses for a few seconds, so that a click in a list shows where on the picture the thing is
   const selAtRef = useRef(0);
   useEffect(() => {
@@ -1034,6 +1038,8 @@ export function Lab({ route }: { route: Route }) {
       fill: string;
       rr: number;
       path?: [number, number][];
+      /** its place at the reference epoch (the first season, in Days the first visit): where the speed rings are centred */
+      ref?: [number, number];
       motion?: [number, number];
       dashed?: boolean;
       selected?: boolean;
@@ -1310,13 +1316,18 @@ export function Lab({ route }: { route: Route }) {
         );
       }
       const sl = st.opts.marker ? selRef.current : null;
+      // where a source with a proper motion stands at the reference epoch: the speed rings are centred there and nowhere else, so they never move
+      const refMjd = days && F ? F.meta.frames[0]?.mjd : m?.passes[0]?.mjd_mid;
+      const refYear = refMjd != null ? 2000 + (refMjd - 51544.5) / 365.25 : year;
+      const refPlace = (q: { ra: number; dec: number; pmra?: number; pmdec?: number }): [number, number] =>
+        q.pmra || q.pmdec ? (atEpoch(q.ra, q.dec, q.pmra ?? 0, q.pmdec ?? 0, refYear) as [number, number]) : [q.ra, q.dec];
       let selMark: Mark | null = null;
       if (sl) {
         const [sra, sdec] = sl.pmra || sl.pmdec ? atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, year) : [sl.ra, sl.dec];
         const k = near(sra, sdec, 8);
         if (k) k.selected = true;
         else
-          selMark = { ra: sra, dec: sdec, kind: 'track', name: '', lines: [], colour: '#ffb454', fill: '#ffd08a', rr: 13, selected: true };
+          selMark = { ra: sra, dec: sdec, kind: 'track', name: '', lines: [], colour: '#ffb454', fill: '#ffd08a', rr: 13, selected: true, ref: refPlace(sl) };
       }
       const all = selMark ? [...marks, selMark] : marks;
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
@@ -1573,9 +1584,7 @@ export function Lab({ route }: { route: Route }) {
       // the rings stay where they are on the sky: centred on the place of the object at the first epoch (the first season, or the first visit in
       // Days), never on where the mark is now, so the object is seen travelling across them
       const ref: [number, number] | null = centre
-        ? days && centre.kind === 'target'
-          ? [centre.ra, centre.dec]
-          : ((centre.path?.[0] as [number, number] | undefined) ?? [centre.ra, centre.dec])
+        ? (centre.ref ?? (days && centre.kind === 'target' ? [centre.ra, centre.dec] : ((centre.path?.[0] as [number, number] | undefined) ?? [centre.ra, centre.dec])))
         : null;
       for (const box of rects) {
         const [cu, cv] = ref ? uvOf(ref[0], ref[1]) : [0.5, 0.5];
@@ -2028,6 +2037,23 @@ export function Lab({ route }: { route: Route }) {
     const year = q ? 2000 + (q.mjd_mid - 51544.5) / 365.25 : 2025.9;
     const tol = Math.max(12, (14 / rect.width) * m.grid.n * m.grid.step_arcsec);
     const sep = (ra1: number, de1: number) => Math.hypot((ra1 - cra) * Math.cos((cdec * Math.PI) / 180), de1 - cdec) * 3600;
+    // a test target within the click's reach (12″ or 14 screen pixels) comes first, in a wall tile as on the picture: it opens the identified passport (SIMBAD, Gaia) of the star itself, not the
+    // anomaly record of the same star (a wall tile is small, so its click tolerance below is wide and would otherwise catch it)
+    for (const o of targets.current) {
+      const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, year);
+      if (Math.hypot((tra - cra) * Math.cos((cdec * Math.PI) / 180), tdec - cdec) * 3600 < tol) {
+        setSelAn(null);
+        setSel({
+          ra: o.ra,
+          dec: o.dec,
+          name: o.n,
+          pmra: o.pmra ?? 0,
+          pmdec: o.pmdec ?? 0,
+        });
+        setTab('obj');
+        return;
+      }
+    }
     // a click on an anomaly opens its passport; on a red source, its spectrum
     for (const a of an?.result?.anomalies ?? []) {
       const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
@@ -2041,20 +2067,6 @@ export function Lab({ route }: { route: Route }) {
           ? atEpoch(x.ra_j2000, x.dec_j2000, x.pmra ?? 0, x.pmdec ?? 0, year)
           : [x.ra, x.dec];
       if (sep(rra, rdec) < tol) return pickRed(k);
-    }
-    for (const o of targets.current) {
-      const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, year);
-      if (Math.hypot((tra - cra) * Math.cos((cdec * Math.PI) / 180), tdec - cdec) * 3600 < 12) {
-        setSel({
-          ra: o.ra,
-          dec: o.dec,
-          name: o.n,
-          pmra: o.pmra ?? 0,
-          pmdec: o.pmdec ?? 0,
-        });
-        setTab('obj');
-        return;
-      }
     }
     const pk = pictures.current.has(shown?.pass ?? 0) ? (shown?.pass ?? 0) : (pictures.current.keys().next().value ?? 0);
     const pic = pictures.current.get(pk);
@@ -2163,7 +2175,17 @@ export function Lab({ route }: { route: Route }) {
     if (!meta) return null;
     const k = shown?.pass ?? 0;
     const d = detsData.current.get(k) ?? detsData.current.values().next().value;
-    if (!d) return <div class="mono-s">Portrait: loading the detector pictures…</div>;
+    // the portrait's own space is kept while the detector pictures arrive, so that nothing below it (the scans tray) jumps when it comes
+    if (!d)
+      return (
+        <div class="portrait">
+          <div class="ph" />
+          <div class="pt-key">
+            <b>Portrait · {label}</b>
+            <div>loading the detector pictures…</div>
+          </div>
+        </div>
+      );
     const q = passes.find((x) => x.index === k) ?? passes[0];
     const year = q ? 2000 + (q.mjd_mid - 51544.5) / 365.25 : 2025.9;
     const [pra, pdec] = src.pmra || src.pmdec ? atEpoch(src.ra, src.dec, src.pmra ?? 0, src.pmdec ?? 0, year) : [src.ra, src.dec];

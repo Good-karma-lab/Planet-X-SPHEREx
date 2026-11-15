@@ -32,6 +32,7 @@ from service import cpu
 
 T = TypeVar("T")
 
+BG_HEAVY = 2  # background heavy jobs at once: what they read and compute never buries a person's field
 PERSON_QUIET_S = 60.0
 
 
@@ -254,10 +255,19 @@ class Scheduler:
                     if free <= 0 and not (j.priority == Priority.P0 and free > -2):
                         j.phase = f"waiting for a free worker ({queued.index(j) + 1} ahead)" if j.phase.startswith("waiting") else j.phase
                         continue
-                    # the lowest priority (night scans) waits while anyone uses the site; the background (P2: the warm set, the page's own
-                    # automatic searches) starts whenever a slot is free, because the worker pool keeps a worker free for a person's call
-                    if j.priority >= Priority.P3 and self.person_active():
-                        j.phase = "paused: a person is working"
+                    # a person's job never waits behind background work: the background (P2: the warm set, the page's own automatic
+                    # searches, the post-warm runs) starts only while no person's job is queued or running, and at most BG_HEAVY at a
+                    # time; the lowest priority (night scans) waits while anyone uses the site at all
+                    if j.priority >= Priority.P2 and (
+                        self.person_waiting()
+                        or (j.priority >= Priority.P3 and self.person_active())
+                        or (size == "heavy" and sum(1 for r in self._running(size) if r.priority >= Priority.P2) >= BG_HEAVY)
+                    ):
+                        j.phase = (
+                            "paused: a person is working"
+                            if self.person_waiting() or j.priority >= Priority.P3
+                            else "queued behind other background work"
+                        )
                         continue
                     # a person's job counts only the memory of other people's jobs: the warm set's jobs give way to it at their checkpoints
                     used = self._memory_used(person_only=j.priority <= Priority.P1)
