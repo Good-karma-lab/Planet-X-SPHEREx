@@ -943,6 +943,15 @@ export function Globe() {
       offEqui();
     };
   }, []);
+  // an address changed without a reload (#/explore?ra=..&dec=..): the aim goes there and the globe flies to it
+  useEffect(() => {
+    const onHash = () => {
+      const h = hashAim();
+      if (h) flyRef.current(h.ra, h.dec, 50);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
   const showAreaRef = useRef<() => void>(() => {});
   const northRef = useRef<() => void>(() => {});
   /** switches the camera; the zoom keeps the same angular scale at the centre, within the limits of the new camera */
