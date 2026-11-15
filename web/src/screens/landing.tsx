@@ -290,9 +290,6 @@ function Video() {
               <path d="M8 5v14l11-7z" />
             </svg>
           </span>
-          <span class="lp-video-note">
-            <b>New 30-second film</b> · being recorded on the final app
-          </span>
         </a>
       )}
     </div>
