@@ -406,24 +406,27 @@ async def scan_blocks(
         cuts = prep["cuts"]
         blocks = [(int(a), int(b)) for a, b in itertools.pairwise(cuts) if b > a]
         t0 = time.monotonic()
-        parts: list[Any] = []
+        acc = edist.search_accumulator(prep)
+        done = 0
         left0 = prep["est_s"] / max(1, min(cpu.workers(), len(blocks)))
         ctx.phase(f"scanning distance and own motion: {len(blocks)} blocks, about {left0:.0f} s", 0, len(blocks))
 
         async def one(a: int, b: int) -> None:
             await ctx.checkpoint()  # a background scan gives its workers back block by block while a person's job runs
-            parts.append(await ctx.compute(edist.search_block, work, a, b, prep["wsum"]))
+            nonlocal done
+            edist.search_fold(acc, await ctx.compute(edist.search_block, work, a, b, prep["wsum"]))  # folded in at once: never all held
+            done += 1
             secs = time.monotonic() - t0
-            left = secs / len(parts) * (len(blocks) - len(parts))
+            left = secs / done * (len(blocks) - done)
             ctx.phase(
-                f"scanning distance and own motion: block {len(parts)} of {len(blocks)} ({secs:.0f} s, about {left:.0f} s left)",
-                len(parts),
+                f"scanning distance and own motion: block {done} of {len(blocks)} ({secs:.0f} s, about {left:.0f} s left)",
+                done,
                 len(blocks),
             )
 
         await asyncio.gather(*(one(a, b) for a, b in blocks))
         await ctx.checkpoint()
-        merged: dict[str, Any] = edist.search_merge(prep, parts, time.monotonic() - t0)
+        merged: dict[str, Any] = edist.search_finish(prep, acc, time.monotonic() - t0)
         return merged
     finally:
         shutil.rmtree(work, ignore_errors=True)
