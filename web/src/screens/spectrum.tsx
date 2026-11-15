@@ -591,7 +591,10 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
         <div class="orow">
           <span class="faint">Proper motion</span>
           <span>
-            {pm >= 1000 ? `${(pm / 1000).toFixed(2)} ″/yr` : `${pm.toFixed(0)} mas/yr`} from the catalogue (the lab's own measurement from the exposures is on the picture); the picture follows it on each exposure's date
+            {pm >= 1000 ? `${(pm / 1000).toFixed(2)} ″/yr` : `${pm.toFixed(0)} mas/yr`}
+            {src.pmKind === 'measured'
+              ? `${src.pmErr ? ` ± ${src.pmErr >= 1000 ? (src.pmErr / 1000).toFixed(2) + ' ″/yr' : src.pmErr.toFixed(0) + ' mas/yr'}` : ''} measured by the search from the exposures (no catalogue gave it)`
+              : " from the catalogue; the picture follows it on each exposure's date"}
           </span>
         </div>
       )}

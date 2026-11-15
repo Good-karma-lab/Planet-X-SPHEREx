@@ -1817,7 +1817,7 @@ export function Lab({ route }: { route: Route }) {
     const years = 2025.9 - 2000;
     const dec0 = t.dec_2025_9 - (t.v_north * years) / 3600;
     const ra0 = t.ra_2025_9 - (t.v_east * years) / 3600 / Math.cos((t.dec_2025_9 * Math.PI) / 180);
-    setSel({ ra: (ra0 + 360) % 360, dec: dec0, name: name || undefined, pmra: t.v_east * 1000, pmdec: t.v_north * 1000 });
+    setSel({ ra: (ra0 + 360) % 360, dec: dec0, name: name || undefined, pmra: t.v_east * 1000, pmdec: t.v_north * 1000, pmKind: 'measured', pmErr: speedErr(t) * 1000 });
     setTab('obj');
   };
 
@@ -1867,18 +1867,28 @@ export function Lab({ route }: { route: Route }) {
       } catch {
         /* the service restarts: ask again */
       }
-      await new Promise((res) => setTimeout(res, 4000 * (attempt + 1)));
+      await new Promise((res) => setTimeout(res, 3000 * (attempt + 1)));
       if (my !== anPoll.current) return; // another field was opened meanwhile
     }
     setRedv({ state: 'failed', error: 'the sky service did not answer', result: null });
   };
+  /** The mover track that stands where a red source stands (within 4″ at pass 1): one star has one motion on the page, the track's with its uncertainty. */
+  const trackOfRed = (x: RedRow): Track | undefined =>
+    (mv?.result?.tracks ?? []).find((t) => {
+      if (!t.ra?.length) return false;
+      const cd = Math.cos((t.dec[0]! * Math.PI) / 180);
+      return Math.hypot((t.ra[0]! - x.ra) * cd, t.dec[0]! - x.dec) * 3600 < 4 || Math.hypot((t.ra_2025_9 - x.ra) * cd, t.dec_2025_9 - x.dec) * 3600 < 4;
+    });
   const pickRed = (k: number) => {
+    const x0 = redv?.result?.red[k];
+    const tr = x0 ? trackOfRed(x0) : undefined;
+    if (tr) return pickTrack(tr, `Red source ${k + 1}`);
     const x = redv?.result?.red[k];
     if (!x) return;
     setSelAn(null);
     setSel(
       x.moves && x.ra_j2000 != null && x.dec_j2000 != null
-        ? { ra: x.ra_j2000, dec: x.dec_j2000, pmra: x.pmra, pmdec: x.pmdec, name: `Red source ${k + 1}` }
+        ? { ra: x.ra_j2000, dec: x.dec_j2000, pmra: x.pmra, pmdec: x.pmdec, name: `Red source ${k + 1}`, pmKind: 'measured' }
         : { ra: x.ra, dec: x.dec, name: `Red source ${k + 1}` },
     );
     setTab('obj');
@@ -1886,7 +1896,7 @@ export function Lab({ route }: { route: Route }) {
   const pickAnomaly = (n: number) => {
     const a = an?.result?.anomalies.find((x) => x.n === n);
     if (!a) return;
-    setSel({ ra: a.ra, dec: a.dec, name: `Anomaly ${n}`, pmra: a.pmra || undefined, pmdec: a.pmdec || undefined });
+    setSel({ ra: a.ra, dec: a.dec, name: `Anomaly ${n}`, pmra: a.pmra || undefined, pmdec: a.pmdec || undefined, pmKind: 'measured' });
     setSelAn(n);
     setTab('obj');
   };
@@ -2408,13 +2418,31 @@ export function Lab({ route }: { route: Route }) {
     </label>
   );
   const pct = (f: number | null | undefined) => (f === null || f === undefined ? null : Math.max(0, Math.min(100, Math.round(f * 100))));
+  // a scan that failed can be asked again from its own line
+  const retryOf: Record<string, (() => void) | undefined> = {
+    'Red sources': () => void findRed(),
+    'Spectral anomalies': () => void followAnomalies(true),
+  };
   const srow = (name: string, frac: number | null, right: string, title: string, testid?: string) => (
     <div class="sline" title={title} data-testid={testid}>
       <b>{name}</b>
       <span class={`sprog ${frac === null ? 'busy' : ''}`}>
         <i style={{ width: `${frac === null ? 30 : Math.max(2, frac * 100)}%` }} />
       </span>
-      <span class="sval">{right}</span>
+      <span class="sval">
+        {right}
+        {right.startsWith('failed') && retryOf[name] && (
+          <button
+            class="btn sm mini"
+            onClick={(e) => {
+              e.stopPropagation();
+              retryOf[name]!();
+            }}
+          >
+            Retry
+          </button>
+        )}
+      </span>
     </div>
   );
   const mvr = mv?.result;
@@ -3491,7 +3519,11 @@ export function Lab({ route }: { route: Route }) {
                       {redv.result!.median_colour
                         ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
                         : ''}
-                      {x.moves && x.pmra != null ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr` : ''}
+                      {(() => {
+                        const tr = trackOfRed(x);
+                        if (tr) return ` · moves ${rateText(tr)} (the mover track)`;
+                        return x.moves && x.pmra != null ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr (red-band measurement)` : '';
+                      })()}
                     </span>
                     <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
                   </button>
