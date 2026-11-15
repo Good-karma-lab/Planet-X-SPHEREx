@@ -1,29 +1,55 @@
-# Demo slides: 7 including the title
+# The 7 slides (SPHEREx Space)
 
-The deck is design-review's `slides.html` (and its PDF); the text below is what each slide says, so the files agree. Pictures are
-screenshots of https://spherex.space on real SPHEREx data, and archive plates from the Digitized Sky Surveys. Every number is one measured
-on the live service (2026-11-14 and 2026-11-15).
+The deck is `demo/slides.html` (Present mode: `?present`) with the PDF `demo/spherex-space-slides.pdf`. Seven slides including the title,
+the Space Apps limit. Every number is a live one from www.spherex.space, 2026-11-15. Speaker text: `PITCH_LIVE.md`.
 
-1. **SPHEREx Space. Flip through the sky, spot what moves.** NASA Space Apps Challenge 2026 · Barcelona · challenge "Planet X and
-   SPHEREx" · team Good Karma Lab · spherex.space. Picture: Barnard's Star in the archive plates and in SPHEREx (10.4″ a year).
-2. **The challenge: a new sky every six months, too much for any one person.** SPHEREx maps the whole sky in 102 infrared colours
-   every six months. Asteroids, comets, nearby stars and brown dwarfs shift between images; Pluto was found that way. But raw frames
-   show colour flicker, not motion: each exposure sees a star at another wavelength and pixel grid.
-3. **Coordinates in, a little video out.** Every season is cleaned, stacked and coloured by its own spectrum, then played 1 → 2 → 3 → 2.
-   Barnard's Star moves 10.7 ± 0.8″ a year in a 20′ field, Gaia 10.4 ✓. ε Indi B crosses the white stars at 4.6 ± 0.5″ a year (Gaia 4.7).
-   The Days scale also shows asteroids.
-4. **Find Planet X: too faint for one picture, so add up the orbit.** The exposures are added along every orbit a distant body could
-   have, 30–2000 au; the jump between passes gives its distance. Eris, found blind and linked over three passes: 95.6 ± 0.4 au (JPL
-   95.5). Makemake 52.5 ± 0.2 au from two passes (JPL 52.3). Sedna, V 20.7, comes out as a strong lead at 83.0 au (JPL 83.0), not a formal detection. No Planet X is claimed: a search that finds nothing does not show that
-   nothing is there.
-5. **What does not look like a star.** Any dot gives its spectrum in 102 colours; the tool builds the field's ordinary star from them
-   and flags what does not fit. In its field ε Indi B comes out as spectral anomaly 1: a cold brown dwarf glows at the long wavelengths. Every find gets a passport: score, wavelengths, motion. "Anomaly", never "discovery".
-6. **Validated on real data, every number checked against another telescope or catalogue.** Nearby stars against ESA Gaia: Barnard's Star
-   11.4 ± 0.5″/yr at 5′ and 10.7 ± 0.8 at 20′ (Gaia 10.4), ε Indi B 4.6 ± 0.5 (Gaia 4.7), WISE 0855 7.9 ± 0.6 (SIMBAD 8.15). Known asteroids found blind: 6 of 8 known bodies to V 19.1
-   on a 60′ field, every track a known body, 0 false, in the December 2025 60′ ecliptic field. Bodies beyond Neptune: Eris 95.6 ± 0.4 au, Makemake 52.5 au, Sedna 83.0 au (a strong lead). Chance control: every
-   search re-run on shuffled data, 0.0 tracks per field in 20 trials. Limits: bright stars saturate, asteroids to about V 19, a lead is
-   not a discovery.
-7. **Try it now: free, no account.** spherex.space · code github.com/Good-karma-lab/Planet-X-SPHEREx (Apache-2.0) · team Good Karma
-   Lab: Aleksandr Ostapenko, Katherine Karmatskikh · data: NASA SPHEREx (IRSA), ESA Gaia DR3, DSS, 2MASS, WISE. Built with AI coding
-   assistants (Claude Code) under the team's direction; all pictures are computed from real data; independent project, not endorsed by
-   NASA. This work uses SPHEREx data products (JPL and Caltech, funded by NASA).
+## 0. Title
+- NASA Space Apps Challenge 2026, Barcelona
+- **Planet X and SPHEREx**
+- SPHEREx Space · www.spherex.space
+- Good Karma Lab: Aleksandr Ostapenko, Katherine Karmatskikh
+- Picture: the sky seen from inside our globe, the Milky Way across it (star map: NASA/Goddard SVS).
+
+## 1. A telescope that photographs the whole sky, again and again.
+- SPHEREx is NASA's infrared space telescope, launched on 11 March 2025. It maps the whole sky in 102 infrared colours every six months.
+- The challenge: let anyone pick a place on the sky and watch it change.
+- And use it to look for Planet X.
+- Picture: SPHEREx in orbit (artist's concept), PIA26531, NASA/JPL-Caltech.
+
+## 2. Pluto was found by a dot that moved.
+- 1930, Lowell Observatory: Clyde Tombaugh flips between two photographs of the same stars, taken six days apart.
+- Thousands of stars stand still. One dot jumps: Pluto.
+- Picture: the blink on our own data: Barnard's Star on the 1950 and 1991 plates and on SPHEREx 2026.
+
+## 3. SPHEREx cannot simply be blinked.
+- One 5′ patch around Barnard's Star: 394 exposures in three passes.
+- Every exposure is in another colour, at another roll angle, on another pixel grid.
+- The fastest star in the sky moves 10″ a year: under two pixels.
+- Picture: real raw SPHEREx Level-2 exposures of Barnard's Star, played in a row.
+
+## 4. From flicker to one film.
+- Five pictures of Barnard's field in a row: 1 raw exposures (one colour each, own pixel grid) → 2 cleaned and stacked (passes line up to
+  0.13–0.16″) → 3 coloured (each band keeps its colour) → 4 the film, with the path (motion detected by us) → 5 the passport (a spectrum
+  from every exposure).
+- All 1.63 million exposures indexed, re-indexed daily. Barnard's Star measured at 10.7 ± 0.8″/yr; Gaia says 10.4.
+
+## 5. Three steps. No astronomy degree needed.
+- 01 Pick a patch of sky: spin the globe, type a star's name or its coordinates, or start from our picks.
+- 02 Play it like a film: SPHEREx returns to every spot about every six months. Play the passes, and nearby stars step between them.
+- 03 Check what you see: the path is drawn over the SPHEREx picture. Every mover is checked against ESA Gaia, and any dot gives its
+  spectrum in 102 colours.
+
+## 6. Searching beyond Neptune.
+- We add up exposures along every orbit a body could have.
+- Eris found blind at 95.6 ± 0.4 au; NASA JPL says 95.5.
+- Planet Nine: not found yet, and we say so.
+- www.spherex.space is free, needs no account and is open source.
+- Picture: our Planet X page: the Solar System and the predicted Planet Nine orbits, Eris marked.
+
+## Said aloud, not on the slides
+Backyard Worlds volunteers; the band names; ε Indi B (4.6 ± 0.5″/yr, Gaia 4.7); Makemake (52.5 ± 0.2 au, JPL 52.3); Sedna as a strong
+lead (83.0 au, JPL 83.0); the 394 au candidate ruled out with NEOWISE; 0.0 chance tracks per field; the February 2027 pass.
+
+## Credits on the slides
+Star map: NASA/Goddard SVS Deep Star Maps. SPHEREx illustration: NASA/JPL-Caltech (PIA26531). Archive plates: Digitized Sky Surveys
+(STScI). Every other picture is computed from real SPHEREx data by the tool; none is AI-generated. No NASA logo appears.

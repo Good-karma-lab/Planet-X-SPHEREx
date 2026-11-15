@@ -13,35 +13,27 @@ last save is reviewed.
 
 ---
 
-## 1. Project name (2 words, 11 characters)
+## 1. Project name (2 words, 13 characters)
 
 SPHEREx Space
 
-## 2. High-level project summary (196 words, 1159 characters)
+## 2. High-level project summary (204 words, 1171 characters)
 
-SPHEREx Space shows what NASA's SPHEREx telescope really saw. Pick any place on a globe of the sky and the lab plays the SPHEREx passes
-of that field back and forth like a blink comparator, coloured by SPHEREx's own spectrum: the background stands still, and a nearby
-star or a brown dwarf visibly moves. Searches start by themselves: tracks through the passes checked against ESA Gaia with a chance
-control, asteroids that hop between the visits of a pass checked against JPL, brown dwarf candidates, red sources and spectral
-anomalies. **Find Planet X** adds exposures along trial distances and motions to look for slow bodies beyond Neptune, and recovers
-Eris and Makemake from their fields without being told their distance; Sedna comes out as a strong lead. It addresses the challenge directly: any visitor enters
-coordinates and sees a series of images of that patch like a short video, in which moving objects stand out, and every find is a lead
-with its evidence, never a discovery. It matters because SPHEREx's raw frames show no motion to the eye, while blinking survey images
-is how Pluto was found in 1930 and how volunteers have since found thousands of brown dwarfs in WISE images.
+SPHEREx Space turns NASA's SPHEREx all-sky survey into films anyone can watch. In 1930 Pluto was found by flipping between two photographs and seeing one dot move; SPHEREx photographs the whole sky every six months in 102 colours, but its raw frames cannot be blinked: one small patch has hundreds of exposures, each in another colour, roll and pixel grid. SPHEREx Space indexes all 1,628,230 public SPHEREx files and keeps the index current every day. Pick any place on a globe of the sky, by dragging, by name or by coordinates, and the lab reads that patch's exposures, cleans and stacks each pass, splits it by spectrum and merges it back into one film: the background stands still, and a nearby star or a brown dwarf visibly moves. It detects motion itself (Barnard's Star 10.7 ± 0.8″/yr, ESA Gaia 10.4), finds asteroids inside a pass (checked with NASA JPL), and gives every object a passport with its spectrum measured live in every exposure. **Find Planet X** adds up exposures along trial orbits: without being told where to look it recovers Eris at 95.6 au (JPL 95.5) and Makemake, with Sedna as a strong lead. No Planet X is claimed. Free, no account, open source.
 
 ## 3. Link to project demo
 
-Slides (7 including the title) or a video of 30 seconds or less, as a public link. https://good-karma-lab.github.io/Planet-X-SPHEREx/ (the presentation site: the 30-second video and the 7 slides; live once the repository is public and Pages is on, see `docs/PAGES.md`), or the YouTube link of the video **[fill after the upload]**
-Files: `docs/submission/demo/` (video, PDF of the deck), the deck's text is `docs/submission/slides.md`, the video script
-`docs/submission/video-script.md`. Test the link in a private window.
+https://good-karma-lab.github.io/Planet-X-SPHEREx/
+
+The presentation site: the 30-second video (also on YouTube, linked from the page) and the 7 slides, with a PDF. Live once the repository is public and Pages is on (`docs/PAGES.md`). If Pages is not up in time, paste the YouTube link of the 30-second video here instead. Test the link in a private window.
 
 ## 4. Link to final project
 
-https://spherex.space
+https://www.spherex.space
 
-(The tool runs without login. The code, if you add it in the text, is https://github.com/Good-karma-lab/Planet-X-SPHEREx under Apache-2.0.)
+(The tool runs without login. The code is https://github.com/Good-karma-lab/Planet-X-SPHEREx under Apache-2.0.)
 
-## 5. Detailed project description (889 words, 5030 characters)
+## 5. Detailed project description (958 words, 5392 characters)
 
 **The problem.** SPHEREx maps the whole sky in 102 infrared colours from 0.75 to 5 µm and returns to every place about every six
 months. Each exposure sees a star at another wavelength, roll angle and pixel grid, so stepping through raw frames shows the flicker of
@@ -83,15 +75,17 @@ Nine orbit, the fields searched and every search's own measured noise bar.
   track needs four visits.
 - Bodies beyond Neptune: Eris, three passes linked by one orbit, 95.6 ± 0.4 au (JPL 95.5); Makemake, two passes linked, 52.5 ± 0.2 au
   (JPL 52.3, not confirmed by a third pass). One pass alone gives only a wide range of distances (70 to 165 au for Eris's first pass).
-  Live runs on spherex.space, 2026-11-15, keys in the Method page.
+  Live runs on www.spherex.space, 2026-11-15, keys in the Method page.
 - Sedna: a blind deep sum of three passes of one field peaks at 83.0 au (JPL 83.0), 0.5 to 0.8 arcseconds from JPL's place in each pass; its 8.2σ is above the noise ceiling (8.07σ) and below the bar (8.48σ), so it is a strong lead and not a formal detection (live run, 2026-11-15).
 
-The Method page (https://spherex.space/#/method) gives every step, formula and number with its source.
+The Method page (https://www.spherex.space/#/method) gives every step, formula and number with its source.
 
 **How it works.** A Python service reads only the image rows a field needs from NASA's public SPHEREx bucket on AWS, using an index of
 every Level-2 exposure with its footprint. It cleans (pipeline flags, cosmic rays by a leave-one-out test, streaks and halos; saturated
 cores shown white, never as holes), stacks and registers the exposures and serves versioned products; the browser draws them with
 WebGL. Searches and spectra run in worker processes on the server and their results are kept, so the next visitor sees them at once.
+
+**How it stays current.** Our index holds every SPHEREx Level-2 file with its footprint, 1,628,230 today (DR1 1,179,406 and QR3 448,824, equal to the bucket listing in every period). Every day at 06:00 it re-reads the last five days from IRSA and reconciles the counts with the bucket; a field's address carries a digest of its exposures, so new data re-make only the fields they touch.
 
 **Limits we state.** Find Planet X has found no new body; a peak is a lead until other data confirm it, and the depth of each search is
 its own measured noise bar on that field. Stars that saturate in most exposures get no SPHEREx spectrum; the motion of such a star in a
@@ -148,12 +142,12 @@ globe), pytest, ruff, mypy, vitest and Playwright for checks, Caddy and one Orac
   Karmatskikh (team member). Nobody can be added after the deadline.
 - Challenge: Planet X and SPHEREx.
 - Tick the terms and conditions box and "Confirm all work is original" yourself.
-- Optional images for the page (JPG or PNG, up to 10 MB each): screenshots from `docs/submission/demo/img/` and the figures of the Method page.
+- Optional images for the page (JPG or PNG, up to 10 MB each): the poster frame of the video and screenshots from `docs/submission/demo/img/` and the figures of the Method page.
 
 ## Before pressing Submit
 
 - [ ] The demo link and the final project link open in a private window without login.
 - [ ] The repository is public if the README or the text links to it.
 - [ ] No NASA logo, flag or mission identifier in any generated picture or the video.
-- [ ] Texts match the live tool: the Method page (https://spherex.space/#/method) holds every number with its source.
+- [ ] Texts match the live tool: the Method page (https://www.spherex.space/#/method) holds every number with its source.
 - [ ] Press Submit before the Barcelona local deadline, and again check that the status says submitted.
