@@ -10,6 +10,12 @@
   </head>
   <body>
     <div id="app"></div>
+    <script>
+      // the tile manifest is asked for before the app's code has loaded, so that the first tiles of the sky are on their way as soon as it runs
+      window.__manifest = fetch('/tiles/manifest.json', { cache: 'no-cache' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .catch(function () { return null; });
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
