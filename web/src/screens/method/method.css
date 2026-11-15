@@ -87,7 +87,7 @@
 /* figures */
 .mf-fig { margin: 26px 0 8px; }
 .mf-fig .box { border-radius: 14px; overflow: hidden; border: 1px solid var(--edge-soft); background: #000; position: relative; }
-.mf-fig .box > img { width: 100%; }
+.mf-fig .box > img, .mf-fig .box > video { width: 100%; display: block; }
 .mf-fig figcaption { display: flex; justify-content: space-between; gap: 16px; margin-top: 8px; font: 12.5px var(--mono); color: var(--faint); }
 .mf-fig figcaption b { color: var(--muted); font-weight: 500; }
 .g3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; background: var(--edge-soft); }

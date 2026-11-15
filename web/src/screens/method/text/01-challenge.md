@@ -10,13 +10,24 @@ The page names five places to try: Barnard's Star, ε Indi B, WISE 0855−0714 a
 
 Source: [challenge page](https://www.spaceappschallenge.org/2026/challenges/planet-x-and-spherex/), last published 13 November 2026.
 
+## Where the optional items are
+
+- **The 102 bands:** the named bands and the walls of bands and detectors.
+- **Spectra on the fly:** a click on any source measures its spectrum in every exposure that covers it.
+- **Adding or subtracting images from different times:** the Difference view between passes.
+- **Field of view:** sizes from 2′ to 60′ and the speed rings that say which motions each size keeps.
+- **Gaia and WISE overlays:** the Gaia check of every track and the archive images (DSS2, 2MASS and AllWISE W1) on the timeline.
+- **Coordinates in the address:** the address holds the whole state of a view, so a view is a link.
+- **Contamination flags:** the artifact mask and the flags under the pointer.
+- **New data releases:** the exposure index follows the public bucket, so a new release appears without a change of the tool.
+
 ## How we read it
 
 We read the task as a test of one thing: a person who knows nothing about the field must be able to open a place and see an object that nobody pointed out. If the program can also find such objects, that is a bonus. Four promises follow from this and every step on this page serves one of them.
 
 - **Anyone, quickly.** A first-time visitor sees a moving picture within seconds, without choosing settings and without reading.
 - **Change is seen by eye.** The background stands still, so the only thing that changes is what really changed. This is the reason for every cleaning step: a cosmic-ray hit, a streak or a halo spike that blinks would be a false discovery for the viewer.
-- **Every time scale has a moving picture.** Years, days, hours and the faintest bodies each have their own view (see What we do and why).
+- **Every time scale has a moving picture.** Years, days and the faintest bodies each have their own view (see What we do and why).
 - **The program helps, honestly.** A track is drawn only when a search found it, it carries its evidence, and it is called a lead, never a discovery.
 
 ## How this page is organised

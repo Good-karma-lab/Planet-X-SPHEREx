@@ -10,6 +10,7 @@ Every search on this site has a depth and a set of conditions under which it wor
 
 ## Limits of the searches
 
+- A run on a known body is called blind when the field was centred on it: the search knew the area but not the place inside it, the distance or the motion.
 - The film search recovered 6 of the 8 known bodies brighter than V 19.1 that have at least four frames in the ecliptic film; none of the 17 fainter bodies in that film was recovered, so its limit there is about V 19 (live run on spherex.space, 2026-11-14).
 - A track in the film search needs at least four visits, because chance alone makes 1.83 tracks per trial at three visits and 0.0 at four or more (12 trials, same film).
 - The search between passes needs at least three passes; a track of only three passes whose faintest member is below S/N 15 is counted and not drawn.

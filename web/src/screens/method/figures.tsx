@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import filmDates from './film-dates.json';
 import { Model } from '../planetx/model';
-import { DEPTH } from '../planetx/data';
 
 /** The figures of the Method page, by the name a text gives them in `[figure: name | caption]`. Every picture is a real product of the service. */
 
@@ -217,24 +216,19 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
       </Fig>
     ),
   },
-  'depth-vs-wise': {
-    cap: 'The faintest body found blind at 3 µm: SPHEREx D4 against the WISE Planet Nine search (mJy, lower is deeper)',
+  'raw-exposures': {
+    cap: 'The raw exposures of one place played in a row: the pixel grid, the wavelength and the brightness change from frame to frame',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <div class="depthbars">
-          {DEPTH.map((d) => (
-            <div key={d.name} class="db">
-              <span class="dn">
-                {d.name}
-                <em>{d.note}</em>
-              </span>
-              <span class="dt">
-                <i style={{ width: `${(d.mjy / 0.07) * 100}%`, background: d.colour }} />
-              </span>
-              <b>{d.mjy.toFixed(3)}</b>
-            </div>
-          ))}
-        </div>
+        <video src={M('raw-exposures.mp4')} poster={M('raw-exposures.jpg')} muted loop playsinline controls preload="none" aria-label="Raw SPHEREx exposures of one place played one after another" />
+      </Fig>
+    ),
+  },
+  'spectral-colour': {
+    cap: 'One pass stack coloured by wavelength: each exposure is tinted by its own wavelength, a flat spectrum is white',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <video src={M('spectral-colour.mp4')} poster={M('spectral-colour.jpg')} muted loop playsinline controls preload="none" aria-label="A pass stack coloured by wavelength" />
       </Fig>
     ),
   },

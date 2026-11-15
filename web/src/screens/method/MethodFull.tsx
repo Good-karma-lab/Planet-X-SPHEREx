@@ -73,8 +73,6 @@ const CHECKS: [string, string, string, string, string][] = [
   ['Asteroids · JPL', 'Found blind, Dec 2025', '6 of 8', 'to V 19.1 · 0 false tracks', 'film/sky_06.jpg'],
   ['Chance control', 'Shuffled data', NUM.chance, 'chance tracks per field', 'barnard_difference.jpg'],
   ['Nearby star · Gaia, 20′ field', "Barnard's Star", '10.7 ± 0.8″/yr', 'Gaia DR3 10.4 · live /movers', 'barnard_5arcmin_aug25.jpg'],
-  ['Planet X candidate · NEOWISE', '394 au candidate', 'ruled out', 'NEOWISE would show it at 13.6σ', ''],
-  ['Spectra · 2MASS, WISE', 'A field star', 'within 3 %', 'J 0.99 · H 1.02 · Ks 1.03 · W1 0.985', 'spectrum-crop.jpg'],
 ];
 
 function Validation() {
@@ -110,8 +108,6 @@ function Validation() {
               ['Known asteroids, blind', '6 of 8', 'JPL sb_ident + Horizons · /film, 60′, 24 visits'],
               ['Chance tracks', `${NUM.chance} / field`, '20 shuffled trials · film: 0.0 at ≥ 4 visits, 12 trials'],
               ["Barnard's Star motion, 20′", '10.7 ± 0.8″/yr', 'Gaia DR3 10.4″/yr · /movers, 20′'],
-              ['394 au candidate', 'ruled out', 'NEOWISE −0.0005 ± 0.0031 mJy where 13.6σ expected'],
-              ['Spectrum vs catalogues', 'within 3 %', '2MASS and AllWISE · 357 of 385 exposures'],
             ].map(([a, b, c]) => (
               <tr key={a}>
                 <td>{a}</td>
@@ -136,10 +132,10 @@ function Limits() {
         <b>Asteroids to about V 19.</b> Fainter known bodies are not recovered inside a pass yet; a track needs four visits.
       </div>
       <div>
-        <b>Find Planet X has a depth.</b> 0.039–0.047 mJy at 3 µm; below that, finding nothing proves nothing.
+        <b>Find Planet X has a depth.</b> It is the measured noise bar of the search on that field, shown with every result; below it, finding nothing proves nothing.
       </div>
       <div>
-        <b>A lead is not a discovery.</b> It needs the link of passes, the known-body check and, for a body seen at 3 µm, the NEOWISE check.
+        <b>A lead is not a discovery.</b> It needs the link of passes and the known-body check.
       </div>
     </div>
   );

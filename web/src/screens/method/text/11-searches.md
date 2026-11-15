@@ -15,6 +15,8 @@ Four rules hold for all of them. A named object only decides the centre of the f
 
 ## Sources in a field
 
+A saturated zone is one source because the peaks on its flat top come in dozens and would link into false tracks. We use sources only where every detector of the white frame covers every pass, otherwise a different set of exposures at the edge looks like motion. The linking tolerance of 2.5 arcseconds leaves room for parallax, and the search runs only on cleaned stacks, because a single-exposure hit would blink in the stack.
+
 The searches work on the white stack of each pass, the picture made of the detectors the field has in common (see the part on stacks). Before anything is linked we list the point sources of every pass.
 
 ```
@@ -132,6 +134,8 @@ Asteroids and comets move too fast for any stack: in each visit they stand somew
 
 ### Frames
 
+Each exposure is smoothed to point-source size before the median of its visit is taken, because one object lands on different pixels in the exposures of a visit and a median of unsmoothed images would lose it. Frames of one detector are aligned, because a residual shift of a few tenths of a grid point leaves every star as a bright-and-dark pair. We do not apply the leave-one-out cosmic-ray test to the film, because it would take a bright fast mover for a hit, and we keep OUTLIER pixels because the pipeline flags asteroid pixels with that bit.
+
 ```
 exposures: detectors D1–D3; flagged pixels dropped except OUTLIER (the pipeline sets that flag on asteroids)
 film grid: step = max(3.075″, field size / 600) (6″ for 60′)
@@ -230,7 +234,7 @@ For every film we ask which known asteroids and comets should be in it, so that 
 candidates: JPL Small-Body Identification at the middle of the pass, over the field widened by 40 ″/h × half the pass
             (at most 3° half-width); V ≤ 20.5; kept when the straight-line track over the pass comes within 0.15° of the field
             (at most 200 bodies, brightest first); 3I/ATLAS is always asked of Horizons, since the Identification does not list it
-positions:  JPL Horizons, geocentric, at the time of every frame (the telescope is 700 km up: 1″ of parallax at 1 au)
+positions:  JPL Horizons, geocentric, at the time of every frame (the telescope is about 7000 km from the Earth's centre: about 5″ of parallax at 2 au)
 expected:   the frames whose grid holds the predicted position
 seen:       an expected frame counts as seen when the motion map shows z ≥ 4 within 2 grid points of the predicted place
 stack:      Σ z / √N over the expected frames at the predicted pixel; chance = the same sum at four places 20 grid points

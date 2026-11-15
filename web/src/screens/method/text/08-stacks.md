@@ -8,6 +8,8 @@ Before an exposure enters a stack we remove its background and mask what cannot 
 
 ### Background
 
+We subtract the background of every exposure on its own because the Level-2 image is not corrected for zodiacal light: the diffuse light that remains includes the dust glow of the solar system, which changes with the viewing geometry from one exposure to the next. We do not use the separate zodiacal-light plane of the file, and we apply no flat-fielding, background model or PSF matching beyond what the SPHEREx pipeline already did.
+
 - **Per exposure:** we subtract the clipped median of the usable pixels of the window: the median, then three rounds of a 3σ clip (σ is 1.4826 times the median absolute deviation) and a new median.
 - **By wavelength, from 10′ up:** in fields of 10′ and larger we also subtract what depends on wavelength alone. The usable pixels are divided into 40 bins of equal count by their own wavelength, and the clipped median of each bin is subtracted (a bin needs at least 10 pixels, and the exposure at least 400). The helium airglow line at 1.083 µm is a stripe across D1 that this step removes.
 - **ZODI:** the zodiacal-light plane of the file is not used for pictures; the two subtractions above remove the smooth sky.
@@ -66,7 +68,9 @@ Source: the band table of the service (`data/bands.json`).
 
 ## Cosmic-ray test
 
-A cosmic-ray hit is present in one exposure and nothing is at that sky place in the others. Hits are small (137 of 160 traces cover one pixel), unflagged and of any brightness (up to 600 MJy/sr in wide fields). They are sharper than a star in D4–D6 but not in D1–D3, and more frequent in the long-wavelength detectors (of 195 rejected pixels, D4 35, D5 40, D6 117). The usual image-based detector L.A.Cosmic (astroscrappy) was tested and rejected: with a pixel this large it flags 32 thousand star pixels per exposure in D1–D3.
+A cosmic-ray hit is present in one exposure and nothing is at that sky place in the others. Hits are small, often a single pixel, unflagged and of any brightness. They are sharper than a star in D4–D6 but not in D1–D3, where a star centred on a pixel also puts most of its light into one pixel, so sharpness cannot tell them apart. An image-based detector of single exposures (L.A.Cosmic) cannot tell a star from a hit with a pixel this large, and we do not use it.
+
+Two conditions are needed, not one. Eight sigma above the others alone would reject star cores, because with a pixel this large a star legitimately differs between neighbouring exposures; the pixel must also be several times brighter than anything the others show at that place. A real source is protected on top of that: its flux changes with the wavelength of each exposure, and a hit on top of a source would not stay that low. The wavelength background comes first, otherwise the helium stripe of D1 lands among the outliers. A rejected pixel is not filled: its place keeps the values of the other exposures.
 
 Our test is a leave-one-out comparison. For every exposure of a (pass, detector) we compute the stack of all the other exposures and ask, pixel by pixel, whether this exposure alone sees something the others do not:
 
@@ -88,6 +92,8 @@ Because the rejected deposits leave the sums at once, the exposures tested after
 ## Streaks and halos
 
 ### Streaks of one visit
+
+The reference of this test is the 30th percentile of the visits, not their median, because a streak can be present in almost half of them. Three guards keep real things: source cores are exempt, a wing counts only if it changes by more than twice its own value, and regions smaller than 16 pixels are ignored, so an asteroid seen in one visit stays.
 
 Some D5 and D6 visits of ε Indi B carry a faint streak (0.1–0.2 MJy/sr, 3–4 pixels wide, more than 25 long) along the row toward ε Indi A that the pipeline does not flag. The leave-one-out test does not see it, because all exposures of a visit carry it. So, in every (pass, detector) with at least 3 visits, we compare each visit with a reference made of the other visits and drop regions that only one visit has:
 
@@ -128,6 +134,8 @@ Computed over all detectors, a detector with only 3–4 exposures would turn iso
 
 ### White frame
 
+In practice the detectors differ between fields. For ε Indi B the first pass has 5 exposures in D1 and 5 in D4, and the fourth pass has none in either (it has 24 in D2, 36 in D3, 24 in D5 and 36 in D6), so its white frame is made of D2, D3, D5 and D6; Barnard's Star has all six. A detector with a handful of exposures is left out because one flagged pixel would turn a far spot white, and the wavelength mix would change between passes (Source: docs/validation/2026-11-14-m3-field.md).
+
 The white frame of a pass is the mean of the detector stacks over CDET, the detectors that have at least 4 exposures in every pass. Otherwise the wavelength mix would change between passes and the whole field would breathe. A pixel has a value only where every CDET detector has one.
 
 [figure: wall-detectors | The six detector stacks of one pass side by side, with the detectors of the white frame]
@@ -158,6 +166,8 @@ The passes are months apart, and the pointing of SPHEREx is good but not perfect
 
 ## Field sizes and grid rule
 
+What a field size is for: an object that stays in the frame for a year moves at most half the field per year, so a 60′ field keeps objects that move up to 30′ per year, while a small field shows what is slow; a very small field has few reference stars to register on. The grid is coarser at 60′ because a finer one would hold more than a screen shows.
+
 A field is one of five sizes. The grid step is 1.5375″ up to 20′ and 3.075″ at 60′, and the grid side is a multiple of 4 grid pixels, that is a whole number of detector pixels.
 
 | Field | Grid step | Grid size | Visit test | Wavelength background |
@@ -185,6 +195,8 @@ A field is admitted to the job queue with a memory estimate of 400 MB plus 132 f
 **Result:** a cold build of the 7′ field of Barnard's Star took 30 s (reading 2 s, computing 28 s) and of ε Indi B 49 s (reading 16 s, computing 32 s); a field already built opens in 2 ms to 1.7 s on the server (Source: docs/validation/2026-11-14-m3-field.md and docs/PROGRESS.md, state of 2026-11-14).
 
 ## Validation of the stacks
+
+We validate on two fields chosen to differ: Barnard's Star is bright, saturated and in a dense field, and ε Indi B is faint, unsaturated and in an empty field, so no step is tuned to one object. The motion of a target below is measured on its place in each pass: we fit a Moffat profile with a robust loss to the unsaturated wings within 8 pixels of the star (12 around a saturated core), leave out TRANSIENT and SUR_ERROR pixels, convert through the WCS and take the median over the pass. A saturated core has no centre to measure, so its wings give it.
 
 We validate the stacks on real exposures of the two test fields where the answer is known from catalogues: Barnard's Star and ε Indi B, each at 7′ over all passes. The report is `docs/validation/2026-11-14-m3-field.md`.
 

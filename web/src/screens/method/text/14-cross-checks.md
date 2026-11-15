@@ -2,6 +2,10 @@
 
 We never trust a result of our own alone. Every track is compared with Gaia DR3, every asteroid with JPL's predictions, every spectrum with 2MASS and WISE, and a lead can be followed in other surveys' light curves, missions and archival images. This part describes each of those cross-checks and the files we give out, with the data source of each. The agreement we obtain is in Validation and dated measurements.
 
+## The globe
+
+The globe is the entrance to the survey. Its backgrounds are the dust map, DSS2, 2MASS, WISE and the SPHEREx cube; its coverage layer counts exposures in HEALPix cells of order 3 (768 cells, each about 7.3° across) and puts an exposure in the cell of its centre. A cell is teal where DR1 exposures exist and blue where only QR3 ones do, with opacity on a log scale of the count.
+
 ## Gaia DR3 and the release switch
 
 Gaia DR3 is the reference for every motion we measure: a track between passes is checked against Gaia stars moved to each pass date, an identification asks Gaia for the nearest star, and the cross-match returns its sources.
@@ -23,7 +27,7 @@ The Gaia release is one setting. The environment variables `SKY_GAIA_TABLE` (def
 
 A track that no star explains may be a known asteroid or comet. We ask JPL, never a copy of ours, and a JPL that does not answer is said to be unavailable, never an empty list.
 
-For a film (the visits of one pass) we ask JPL Small-Body Identification (`sb_ident`) for the bodies that cross the field during the pass, at the middle of the pass, over the field widened by how far a fast main-belt body (40″/h) moves in half the pass, up to 3°, with V ≤ 20.5 (SPHEREx sees about V 20 in one visit). We keep the bodies whose straight-line track comes within 0.15° of the field and the 200 brightest. For each we ask JPL Horizons for the geocentric place at the time of every frame (SPHEREx flies 700 km up, so the parallax of a body 1 au away is about 1″, under a fifth of a detector pixel). Three tries, then the body is left out. Comets are asked with their nearest apparition's orbit. The interstellar comet 3I/ATLAS, which Small-Body Identification does not list, is always asked of Horizons directly and kept when it is in the field.
+For a film (the visits of one pass) we ask JPL Small-Body Identification (`sb_ident`) for the bodies that cross the field during the pass, at the middle of the pass, over the field widened by how far a fast main-belt body (40″/h) moves in half the pass, up to 3°, with V ≤ 20.5 (SPHEREx sees about V 20 in one visit). We keep the bodies whose straight-line track comes within 0.15° of the field and the 200 brightest. For each we ask JPL Horizons for the geocentric place at the time of every frame (SPHEREx is about 7000 km from the Earth's centre, so the parallax of a body 2 au away is about 5″, under a detector pixel). Three tries, then the body is left out. Comets are asked with their nearest apparition's orbit. The interstellar comet 3I/ATLAS, which Small-Body Identification does not list, is always asked of Horizons directly and kept when it is in the field.
 
 A body's expected visits are the frames whose grid holds its predicted place. The film's own motion map shows a body on a visit when z reaches 4 within two grid pixels of the predicted place. The visits stacked along the track give the body's significance (the sum of z over the square root of the number of visits at the predicted pixels), and the same stack at four places 20 grid pixels aside gives the chance level.
 

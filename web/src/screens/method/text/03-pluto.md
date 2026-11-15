@@ -22,13 +22,14 @@ Pluto turned out to be about 0.002 Earth masses, far too small to disturb Neptun
 
 Sources: Lowell exhibit and APS News above; the announcement is the Lowell Observatory Observation Circular of 13 March 1930 ([V. M. Slipher, reprinted in JRASC 24, 282](https://ui.adsabs.harvard.edu/abs/1930JRASC..24..282S/abstract)); Tombaugh's own account is the [1946 leaflet of the Astronomical Society of the Pacific](https://ui.adsabs.harvard.edu/abs/1946ASPL....5...73T/abstract); Pluto's mass from [NASA](https://science.nasa.gov/dwarf-planets/pluto/facts/) (about one sixth of the Moon's mass).
 
+The plate pair with Pluto arrowed in each panel can be seen at [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Pluto_discovery_plates.png) and in the [Lowell Observatory Archives](https://collectionslowellobservatory.omeka.net/items/show/1247); the Archives ask for written permission for public use of the plates, so we link to them and do not reproduce them.
+
 ## Our blink
 
 The idea carries over directly. A blink needs two things: a stable background and a change of position over a known time. We build the first and show the second at three time scales.
 
 - **Years.** For each pass we make one clean picture of the sky and blink the passes in the order 1, 2, 3, 2. A star with proper motion swings back and forth while everything else stands still. Barnard's Star moves by about 10 arcseconds a year.
 - **Days.** Within a pass we make one picture per visit and blink the visits. An asteroid hops from visit to visit.
-- **Hours.** Within a visit each exposure is a frame, which catches the fastest movers.
 
 [figure: blink-pluto | The blink idea on our own plates: the same patch in 1950, 1991 and 2026, one star moving]
 
