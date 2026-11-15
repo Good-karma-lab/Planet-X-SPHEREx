@@ -30,8 +30,8 @@ control, asteroids that hop between the visits of a pass checked against JPL, br
 anomalies. **Find Planet X** adds exposures along trial distances and motions to look for slow bodies beyond Neptune, and recovers
 Eris and Makemake from their fields without being told their distance. It addresses the challenge directly: any visitor enters
 coordinates and sees a series of images of that patch like a short video, in which moving objects stand out, and every find is a lead
-with its evidence, never a discovery. It matters because SPHEREx's raw frames show no motion to the eye, and an honest, public blink
-of the whole survey is how volunteers found Pluto's successors, brown dwarfs and comets in other surveys.
+with its evidence, never a discovery. It matters because SPHEREx's raw frames show no motion to the eye, while blinking survey images
+is how Pluto was found in 1930 and how volunteers have since found thousands of brown dwarfs in WISE images.
 
 ## Link to project demo **[fill: the uploaded video or slides]**
 
