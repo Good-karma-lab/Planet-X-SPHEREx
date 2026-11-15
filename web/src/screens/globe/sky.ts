@@ -114,6 +114,8 @@ interface Pass {
   samplers: Sampler[];
   /** pixels this pass painted (a pass of a new survey that has nothing yet leaves the picture on show alone) */
   painted: number;
+  /** pixels of the view this pass could paint at all (the disc of the globe, the map's ellipse, the whole picture inside) */
+  total: number;
 }
 
 /** The all-sky dust map: one equirectangular picture of the whole sky (RA to the right, Dec down), loaded once. */
@@ -186,7 +188,7 @@ class SkyPainter {
     const R = view.proj === 'globe' ? view.R : mw(view) / 5;
     // the SPHEREx backdrop is three frames of the cube: one sampler per colour
     const samplers = dustPic ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
-    return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0 };
+    return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0, total: 0 };
   }
 
   /** Paints rows until the deadline; true when the pass is done. */
@@ -236,6 +238,7 @@ class SkyPainter {
           z = zz * b.c[2] + sy * b.n[2];
           ra = Math.atan2(vy, vx) / D2R;
         }
+        p.total++;
         const zc = z > 1 ? 1 : z < -1 ? -1 : z;
         if (gal) {
           const g = toGalactic(ra, zc);
@@ -292,12 +295,24 @@ class SkyPainter {
   /** The new pixels over the previous picture, moved and scaled to the new view. */
   /** the survey on show: a picture is carried over to a new view only while it is the same survey (no half-old, half-new picture after a switch) */
   private shownKey = '';
+  private switchKey = '';
+  private switchSince = 0;
 
   private finish(p: Pass): void {
     const v = p.view;
     const key = p.layer.map((l) => l.id).join('+');
     const same = key === this.shownKey;
     if (!same && p.painted === 0) return; // nothing of the new survey yet: the picture on show stays
+    // a new survey replaces the picture on show only once it covers (nearly) all of the view, or after 5 s whatever it covers (a survey with gaps
+    // in the sky): until then the previous layer stays, not a patchwork of the two over an empty backdrop
+    if (!same && this.shown) {
+      this.switchSince = this.switchKey === key ? this.switchSince : performance.now();
+      this.switchKey = key;
+      if (p.painted < 0.96 * p.total && performance.now() - this.switchSince < 5000) {
+        this.stale = true;
+        return;
+      }
+    }
     this.shownKey = key;
     const sc = this.scratch;
     sc.width = p.sw;
