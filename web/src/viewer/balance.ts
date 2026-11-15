@@ -107,3 +107,28 @@ export function passLevels(data: Uint16Array, n: number, planes: number): { bg: 
   const dev = v.map((x) => Math.abs(x - bg)).sort((a, b) => a - b);
   return { bg, sigma: 1.4826 * dev[dev.length >> 1]!, p995: v[Math.floor(0.995 * (v.length - 1))]!, p999: v[Math.floor(0.999 * (v.length - 1))]! };
 }
+
+/** Background (median) and noise (1.4826 × MAD) of each of `planes` n×n float16 planes taken on its own (a plane with no data has noise 0). */
+export function planeLevels(data: Uint16Array, n: number, planes: number): { bg: number[]; sigma: number[] } {
+  const N = n * n;
+  const bg: number[] = [];
+  const sigma: number[] = [];
+  for (let c = 0; c < planes; c++) {
+    const v: number[] = [];
+    for (let i = 0; i < N; i += 3) {
+      const x = halfToFloat(data[c * N + i]!);
+      if (Number.isFinite(x)) v.push(x);
+    }
+    if (v.length < 100) {
+      bg.push(0);
+      sigma.push(0);
+      continue;
+    }
+    v.sort((a, b) => a - b);
+    const m = v[v.length >> 1]!;
+    const dev = v.map((x) => Math.abs(x - m)).sort((a, b) => a - b);
+    bg.push(m);
+    sigma.push(Math.max(1e-6, 1.4826 * dev[dev.length >> 1]!));
+  }
+  return { bg, sigma };
+}

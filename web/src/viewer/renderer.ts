@@ -43,6 +43,21 @@ uniform int uWhiteCores;       // a saturated core is drawn white (1) or as no d
 uniform float uSharp;          // Sharpen amount (0 = off)
 uniform vec2 uSN[16];          // per pass: background and noise of the pass's white light (mean of its layers)
 uniform float uDP;             // one detector pixel in uv units
+uniform vec4 uBBg[32];         // per pass and band (pass * 8 + band, four to a vec4): background of the band's picture
+uniform vec4 uBSg[32];         // ... and its noise (0 = not measured)
+uniform vec3 uPBg[16];         // per pass: background of the colour picture's three channels
+uniform vec3 uPSg[16];         // ... and their noise (0 = not measured)
+uniform vec2 uBN;              // the colour blend's stretch: the noise level where the response turns from linear to logarithmic, and the level that is full scale (both in sigma)
+
+// the colour blend of the bands: every band is measured against its OWN background and noise, so a source that stands 5 sigma above the noise in
+// any band shows in that band's colour (a Y dwarf in D5-D6 is as visible as a star in D1), and noise in every band is equally dark and so neutral
+float bandSN(int k, int j, float v) {
+  int i = k * 8 + j;
+  float sg = uBSg[i >> 2][i & 3];
+  return sg > 0.0 ? (v - uBBg[i >> 2][i & 3]) / sg : -1e9;
+}
+float snLaw(float x) { x = max(x - 2.0, 0.0);   // the first 2 sigma are noise: dark
+  return clamp(asinh(x / uBN.x) / asinh(uBN.y / uBN.x), 0.0, 1.0); }
 
 float law(float x) { return clamp(asinh((x - uLo) / uSoft) / asinh((uHi - uLo) / uSoft), 0.0, 1.0); }
 
@@ -88,7 +103,17 @@ vec4 colourOf(int k) {
   if (uMode == 0) {
     float r = val(k, 0), g = val(k, 1), b = val(k, 2);
     if (isnan(r) || isnan(g) || isnan(b)) return vec4(0.0);
-    vec3 s = vec3(law(r * uWB[k].x), law(g), law(b * uWB[k].y));
+    vec3 s;
+    vec3 sg = uPSg[k];
+    if (sg.y > 0.0) {
+      // against the noise of the picture itself: the channels are balanced on the field's stars (as before) and measured in units of the one noise they share,
+      // so a source that stands 5 sigma above it shows in the colour of its channels (a Y dwarf in D5-D6 as well as a star in D1) and noise stays dark and neutral
+      float ref = pow(max(sg.x * uWB[k].x, 1e-9) * max(sg.y, 1e-9) * max(sg.z * uWB[k].y, 1e-9), 1.0 / 3.0);
+      vec3 bg = uPBg[k];
+      s = vec3(snLaw((r - bg.x) * uWB[k].x / ref), snLaw((g - bg.y) / ref), snLaw((b - bg.z) * uWB[k].y / ref));
+    } else {
+      s = vec3(law(r * uWB[k].x), law(g), law(b * uWB[k].y));
+    }
     float l = dot(s, vec3(0.3333));
     float fade = 1.0 - smoothstep(0.55, 0.9, l);          // no colour boost on very bright pixels (wings of saturated cores)
     float faint = smoothstep(0.04, 0.16, l);               // nor at the noise level: noise keeps its natural (weak) colour
@@ -102,7 +127,8 @@ vec4 colourOf(int k) {
       if ((uBandMask & (1 << j)) == 0) continue;
       float v = val(k, j);
       if (isnan(v)) continue;
-      float l = law(v);
+      float sn = bandSN(k, j, v);
+      float l = sn > -1e8 ? snLaw(sn) : law(v);
       acc = 1.0 - (1.0 - acc) * (1.0 - l * uHues[j]);   // screen blend of the bands' colours
       sum += v; n++;
     }
@@ -247,6 +273,10 @@ export class Renderer {
   hi = HI;
   sharp = 16;
   private sn = new Float32Array(32);
+  private bandBg = new Float32Array(128);
+  private bandSg = new Float32Array(128);
+  private picBg = new Float32Array(48);
+  private picSg = new Float32Array(48);
   private dp = 0.01;
   soft = SOFT;
 
@@ -377,6 +407,22 @@ export class Renderer {
     this.sn[2 * pass + 1] = sigma;
   }
 
+  /** Background and noise of each band's picture in a pass (0 noise = not measured), for the colour blend. */
+  setBandNoise(pass: number, bg: number[], sigma: number[]): void {
+    for (let j = 0; j < 8; j++) {
+      this.bandBg[pass * 8 + j] = bg[j] ?? 0;
+      this.bandSg[pass * 8 + j] = sigma[j] ?? 0;
+    }
+  }
+
+  /** Background and noise of the three channels of a pass's colour picture. */
+  setPictureNoise(pass: number, bg: number[], sigma: number[]): void {
+    for (let c = 0; c < 3; c++) {
+      this.picBg[pass * 3 + c] = bg[c] ?? 0;
+      this.picSg[pass * 3 + c] = sigma[c] ?? 0;
+    }
+  }
+
   setDetectorPixel(gridPixels: number): void {
     this.dp = this.n ? gridPixels / this.n : 0.01;
     this.dpGrid = gridPixels;
@@ -489,6 +535,12 @@ export class Renderer {
     gl.uniform1i(this.u('uWhiteCores'), this.whiteCores ? 1 : 0);
     gl.uniform1f(this.u('uSharp'), this.sharp);
     gl.uniform2fv(this.u('uSN'), this.sn);
+    gl.uniform4fv(this.u('uBBg'), this.bandBg);
+    gl.uniform4fv(this.u('uBSg'), this.bandSg);
+    gl.uniform3fv(this.u('uPBg'), this.picBg);
+    gl.uniform3fv(this.u('uPSg'), this.picSg);
+    // the stretch slider moves the knee (4 sigma at its default 0.4), the Trim menu the full-scale level (20000 sigma at its default of 400)
+    gl.uniform2f(this.u('uBN'), (4 * this.soft) / SOFT, (20000 * this.hi) / HI);
     gl.uniform1f(this.u('uDP'), isFilm ? this.filmDP : this.dp);
     gl.uniform1i(this.u('uLayer'), p.layer ?? 0);
     gl.uniform3fv(this.u('uTint'), new Float32Array(p.tint ?? [1, 1, 1]));
