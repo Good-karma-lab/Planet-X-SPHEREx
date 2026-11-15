@@ -2988,7 +2988,7 @@ export function Lab({ route }: { route: Route }) {
                   {sel && portraitOf(sel, sel.name ?? 'selected source')}
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
                   {sel && <ContextRows ra={sel.ra} dec={sel.dec} epoch={2000} pmra={sel.pmra ?? 0} pmdec={sel.pmdec ?? 0} />}
-                  {sel && <LightCurves src={sel} />}
+                  {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}
                   {sel && (
                     <div class="xlinks">
                       <span class="faint">Look it up:</span>
