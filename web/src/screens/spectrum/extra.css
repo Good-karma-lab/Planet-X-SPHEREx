@@ -29,3 +29,4 @@
 .obj-guess { margin-top: 8px; font: 500 12px var(--font); color: var(--ink); line-height: 1.4; }
 .portrait .pt-key { min-width: 0; }
 .portrait .pt-key .obj-guess { white-space: normal; }
+.obj-seen { margin-top: 6px; font: 500 11.5px var(--font); color: var(--muted); line-height: 1.4; }
