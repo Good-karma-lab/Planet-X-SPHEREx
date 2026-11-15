@@ -76,6 +76,8 @@ const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
 const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2, 4], ice: [4], pah: [4], co2: [5], co: [6] };
 /** a band's name on a tile too small for the full one */
 const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
+/** what a picture shows where its pixels have not arrived yet */
+const DARK: [number, number, number] = [0.03, 0.045, 0.06];
 const BANDS = [
   { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
   {
@@ -669,6 +671,7 @@ export function Lab({ route }: { route: Route }) {
     speed,
     stretch,
     film,
+    loading: false,
     meta: null as FieldMeta | null,
     prov: { ra0: ra, dec0: dec, step_arcsec: 1.5375, n: 4 },
   });
@@ -683,6 +686,8 @@ export function Lab({ route }: { route: Route }) {
     speed,
     stretch,
     film,
+    // the field is still being read: the part of the picture that has not arrived is dark, not a flat grey slab (grey is for sky the survey does not cover)
+    loading: phase !== '',
     meta,
     // the grid the service builds for this field (engine/grid.py), known before the field is finished: marks during a cold load
     prov: (() => {
@@ -1007,6 +1012,7 @@ export function Lab({ route }: { route: Route }) {
                     bandMask: mask,
                     hues: BANDS.map((bd) => hslRgb(bd.hue)),
                     mono: st.opts.mono,
+                    noData: st.loading ? DARK : undefined,
                     time: timeMode,
                     diffLayer: 0,
                   }
@@ -1017,6 +1023,7 @@ export function Lab({ route }: { route: Route }) {
                     h,
                     stack,
                     mode: stack === 'picture' && !st.opts.mono ? 'colour' : 'layer',
+                    noData: st.loading ? DARK : undefined,
                     time: timeMode,
                     diffLayer: 0,
                   },
