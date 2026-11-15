@@ -178,6 +178,8 @@ function PathHero() {
   const [mx, my] = at(ts);
   const inCore = Math.hypot(mx - nx, my - ny) < R;
   const last = EPOCHS.filter((e) => e.t <= ts + 0.3 && e.lab).pop();
+  // the dot is in the SPHEREx years (inside the ring): the card and the ring light up, the strongest highlight of the path
+  const nowHit = Math.abs(ts - NOW) < 3;
   const sub = Math.abs(ts - NOW) < 3 ? 'SPHEREx' : ts > 2027 ? 'the future' : last ? last.sub : '';
   return (
     <figure class="lp-live-fig">
@@ -199,7 +201,8 @@ function PathHero() {
               <circle key={e.t} cx={x} cy={y} r="0.75" fill="#ffb454" />
             );
           })}
-          <circle cx={nx} cy={ny} r={R} fill="none" stroke="#ffb454" stroke-width="0.5" />
+          {nowHit && <circle cx={nx} cy={ny} r={R + 0.9} fill="none" stroke="#ffd9a0" stroke-width="1.4" opacity="0.35" />}
+          <circle cx={nx} cy={ny} r={R} fill="none" stroke={nowHit ? '#ffe2b8' : '#ffb454'} stroke-width={nowHit ? 0.9 : 0.5} />
           {!inCore && ts > 1950.5 && <circle cx={mx} cy={my} r="1.1" fill="#fff" stroke="#ffb454" stroke-width="0.4" />}
         </svg>
         {EPOCHS.filter((e) => e.lab).map((e) => {
@@ -211,7 +214,7 @@ function PathHero() {
           );
         })}
         {/* the card stands on the side of the star with room for it (a narrow picture would cut it off at its right edge) */}
-        <div class={`lp-pnow${nx > 48 ? ' flip' : ''}`} style={{ left: `${nx > 48 ? nx - R - 2.4 : nx + R + 2.4}%`, top: `${ny}%` }}>
+        <div class={`lp-pnow${nx > 48 ? ' flip' : ''}${nowHit ? ' hit' : ''}`} style={{ left: `${nx > 48 ? nx - R - 2.4 : nx + R + 2.4}%`, top: `${ny}%` }}>
           <b>Barnard's Star</b>seen by SPHEREx 2025–26
           <br />
           moves 10.4″ a year (Gaia)
