@@ -25,7 +25,7 @@ export interface Find {
   snr: number | null;
   score: number | null;
   chance: number | null;
-  status: 'unexplained' | 'known';
+  status: 'unexplained' | 'unchecked' | 'known';
   verdict: string;
   idents: Ident[];
   data: Record<string, any>;
@@ -36,7 +36,7 @@ export interface Find {
 }
 interface Reply {
   total: number;
-  counts: Record<string, { all: number; unexplained: number; known: number }>;
+  counts: Record<string, { all: number; unexplained: number; unchecked: number; known: number }>;
   labels: Record<string, string>;
   identification: { pending: number; unavailable: number; catalogues: string[] };
   finds: Find[];
@@ -255,7 +255,14 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [inline, onClose]);
-  const lab = formatHash({ screen: 'lab', params: { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id } });
+  // the Lab opens the FIELD the searches ran on (its own centre and size: the warm one), with the find's id and place to highlight
+  const fp = f.data.field_params as { ra: number; dec: number; fov: number } | undefined;
+  const lab = formatHash({
+    screen: 'lab',
+    params: fp
+      ? { ra: fp.ra.toFixed(5), dec: fp.dec.toFixed(5), fov: String(fp.fov), find: f.id, find_ra: f.ra.toFixed(5), find_dec: f.dec.toFixed(5) }
+      : { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id },
+  });
   const json = () => encodeURIComponent(JSON.stringify({ ...f, note: 'a lead, not a discovery', exported: new Date().toISOString() }, null, 2));
   const spec = f.spectrum.filter((s) => s.lam != null && s.flux != null).map((s) => ({ x: ((s.lam as number) + (s.lam_hi ?? (s.lam as number))) / 2, y: s.flux as number, e: s.err, m: s.model }));
   const curves = [...new Set(f.lightcurve.map((p) => p.label))];
@@ -266,6 +273,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
     ...(f.chance != null ? ([['Chance', `${f.chance.toFixed(2)} per field`]] as [string, string][]) : []),
     ['Place', `${formatRA(f.ra)} ${formatDec(f.dec)}`],
     ['Field', `${f.place} · ${f.fov}′`],
+    ...(((f.data.detections?.length ?? 0) > 1) ? ([['Detections', `${f.data.detections.length}: ${f.data.detections.map((d: any) => `${d.fov}′`).join(', ')} fields`]] as [string, string][]) : []),
   ];
   return (
     <aside class={`leadpanel glass fdetail${inline ? ' inline' : ''}`} role={inline ? 'region' : 'dialog'} aria-label="Find report">
@@ -276,7 +284,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
       )}
       <h3 class="lp-title">{titleOf(f)}</h3>
       <div class="mono-s">
-        {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} · <b class={f.status === 'known' ? 'st-known' : 'st-un'}>{f.status}</b>
+        {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} · <b class={f.status === 'known' ? 'st-known' : f.status === 'unchecked' ? 'st-wait' : 'st-un'}>{f.status === 'unchecked' ? 'not yet checked' : f.status}</b>
       </div>
       <p class="fverdict">{f.verdict}</p>
       <div class="fmedia">
@@ -339,7 +347,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
 export function FindingsView({ wide, leadId, setLeadId, total }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void; total?: number }) {
   const r = useFinds();
   const [kind, setKind] = useState<string>('all');
-  const [stat, setStat] = useState<'all' | 'unexplained' | 'known'>('all');
+  const [stat, setStat] = useState<'all' | 'unexplained' | 'unchecked' | 'known'>('all');
   if (!r) return <div class="mono-s">reading the findings…</div>;
   const rows = r.finds.filter((f) => (kind === 'all' || f.kind === kind) && (stat === 'all' || f.status === stat));
   const sel = r.finds.find((f) => f.id === leadId);
@@ -357,9 +365,9 @@ export function FindingsView({ wide, leadId, setLeadId, total }: { wide: boolean
         ))}
       </div>
       <div class="fkinds fstat" role="group" aria-label="Status">
-        {(['all', 'unexplained', 'known'] as const).map((s) => (
+        {(['all', 'unexplained', 'unchecked', 'known'] as const).map((s) => (
           <button key={s} class={stat === s ? 'on' : ''} onClick={() => setStat(s)}>
-            {s === 'all' ? 'Any' : s === 'unexplained' ? 'Unexplained' : 'Known'}
+            {s === 'all' ? 'Any' : s === 'unexplained' ? 'Unexplained' : s === 'unchecked' ? 'Not yet checked' : 'Known'}
           </button>
         ))}
       </div>
@@ -388,7 +396,7 @@ export function FindingsView({ wide, leadId, setLeadId, total }: { wide: boolean
                         {nameOf(f) ? ` · ${nameOf(f)}` : ''}
                       </span>
                     </span>
-                    <span class={`badge ${f.status === 'known' ? 'green' : 'orange'}`}>{f.status === 'known' ? 'Known' : 'Unexplained'}</span>
+                    <span class={`badge ${f.status === 'known' ? 'green' : f.status === 'unchecked' ? '' : 'orange'}`}>{f.status === 'known' ? 'Known' : f.status === 'unchecked' ? 'Not yet checked' : 'Unexplained'}</span>
                   </button>
                 </li>
               ))}
