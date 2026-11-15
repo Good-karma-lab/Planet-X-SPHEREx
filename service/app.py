@@ -675,6 +675,19 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         z, nw = await asyncio.gather(part("ztf", lc_ztf), part("neowise", lc_neowise))
         return {"ztf": z, "neowise": nw}
 
+    @app.get(f"{API_PREFIX}/resolve")
+    async def resolve(name: str = Query(..., min_length=1, max_length=80)) -> Any:
+        """Where SIMBAD puts a name (the globe's catalogue search for a star the snapshot lacks): 404 when SIMBAD does not know it."""
+        if st.catalogue is None:
+            raise HTTPException(503, "the catalogues are not ready")
+        try:
+            found = await st.catalogue.resolve(name)
+        except RuntimeError as e:
+            raise HTTPException(503, str(e)) from e
+        if found is None:
+            raise HTTPException(404, f"SIMBAD does not know {name!r}")
+        return JSONResponse(found, headers={"Cache-Control": "public, max-age=86400"})
+
     @app.get(f"{API_PREFIX}/identify")
     async def identify(
         ra: float = Query(..., ge=0, lt=360),

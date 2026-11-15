@@ -385,6 +385,41 @@ class CatalogueContext:
                     left.cancel()
         raise err or RuntimeError("no SIMBAD mirror")
 
+    async def resolve(self, name: str) -> dict[str, Any] | None:
+        """Where SIMBAD puts a name ("Sirius", "α Cen", "Barnard's Star"): its main identifier, place (J2000, ICRS), proper motion and
+        type; None when SIMBAD does not know it. Both mirrors are asked in turn, each with its own breaker."""
+        ids = name_variants(name)
+        if not ids:
+            return None
+        listed = ", ".join("'" + i.replace("'", "''") + "'" for i in ids)
+        adql = (
+            "SELECT TOP 1 b.main_id, b.ra, b.dec, b.pmra, b.pmdec, b.otype FROM ident AS i JOIN basic AS b ON i.oidref = b.oid "
+            f"WHERE i.id IN ({listed})"
+        )
+        err: Exception | None = None
+        for which, base in (("simbad", SIMBAD_BASES[0]), ("simbad2", SIMBAD_BASES[1])):
+            try:
+                body = await asyncio.wait_for(
+                    self._get(which, base, {"request": "doQuery", "lang": "adql", "format": "json", "query": adql}), RESOLVE_S
+                )
+            except (httpx.HTTPError, BreakerOpenError, TimeoutError) as e:
+                err = e
+                continue
+            rows = json.loads(body).get("data") or []
+            if not rows or rows[0][1] is None:
+                return None
+            main_id, ra, dec, pmra, pmdec, otype = rows[0]
+            return {
+                "name": main_id,
+                "display_name": display_name(main_id, [name]),
+                "ra": ra,
+                "dec": dec,
+                "pmra": pmra,
+                "pmdec": pmdec,
+                "otype": otype,
+            }
+        raise RuntimeError(f"SIMBAD did not answer: {err}")
+
     async def _aliases(self, base: str, main_id: str, which: str = "simbad") -> list[str]:
         """The other names SIMBAD has for an object (a few, best effort: the answer does not wait on them)."""
         q = (
@@ -664,3 +699,73 @@ class CatalogueContext:
 
     async def close(self) -> None:
         await self.client.aclose()
+
+
+RESOLVE_S = 5.0
+_GREEK = {
+    "α": "alf",
+    "β": "bet",
+    "γ": "gam",
+    "δ": "del",
+    "ε": "eps",
+    "ζ": "zet",
+    "η": "eta",
+    "θ": "tet",
+    "ι": "iot",
+    "κ": "kap",
+    "λ": "lam",
+    "μ": "mu.",
+    "ν": "nu.",
+    "ξ": "ksi",
+    "ο": "omi",
+    "π": "pi.",
+    "ρ": "rho",
+    "σ": "sig",
+    "τ": "tau",
+    "υ": "ups",
+    "φ": "phi",
+    "χ": "chi",
+    "ψ": "psi",
+    "ω": "ome",
+}
+_GREEK_WORDS = {
+    "alpha": "alf",
+    "beta": "bet",
+    "gamma": "gam",
+    "delta": "del",
+    "epsilon": "eps",
+    "zeta": "zet",
+    "theta": "tet",
+    "iota": "iot",
+    "kappa": "kap",
+    "lambda": "lam",
+    "mu": "mu.",
+    "nu": "nu.",
+    "xi": "ksi",
+    "omicron": "omi",
+    "pi": "pi.",
+    "sigma": "sig",
+    "upsilon": "ups",
+    "omega": "ome",
+}
+
+
+def name_variants(name: str) -> list[str]:
+    """The forms of a name SIMBAD's identifier table may hold: as typed, with a Greek letter as SIMBAD writes it (α Cen -> alf Cen),
+    and with the NAME / star prefixes."""
+    q = " ".join(name.replace("\u2032", "'").split())[:80]
+    if not q:
+        return []
+    forms = [q]
+    words = q.split(" ")
+    first = words[0]
+    if first and first[0] in _GREEK:
+        forms.append(" ".join([_GREEK[first[0]] + first[1:], *words[1:]]))
+    elif first.lower() in _GREEK_WORDS:
+        forms.append(" ".join([_GREEK_WORDS[first.lower()], *words[1:]]))
+    out: list[str] = []
+    for f in forms:
+        for v in (f, "NAME " + f, "* " + f):
+            if v not in out:
+                out.append(v)
+    return out
