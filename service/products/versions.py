@@ -18,7 +18,7 @@ VERSIONS: dict[str, str] = {
     "deep": "m1",  # Find Planet X, the sum of passes along one orbit
     "link": "l1",  # Find Planet X, the link of passes by one orbit
     "filmsearch": "t4",  # the unknown movers of a film; t4: every candidate verified, orbit links from 3 sigma
-    "browndwarfs": "bd2",  # moving red sources the catalogues do not explain; known brown dwarfs listed apart, with counts
+    "browndwarfs": "bd3",  # moving red sources the catalogues do not explain; known brown dwarfs listed apart, with counts. bd3: a source the movers search found too shows the track's motion and place
     "searched": "s1",  # the list of searched places (/api/v1/searched)
 }
 
