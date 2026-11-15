@@ -76,6 +76,8 @@ const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
 const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2, 4], ice: [4], pah: [4], co2: [5], co: [6] };
 /** a band's name on a tile too small for the full one */
 const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
+/** what a picture shows where its pixels have not arrived yet */
+const DARK: [number, number, number] = [0.03, 0.045, 0.06];
 const BANDS = [
   { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
   {
@@ -669,6 +671,7 @@ export function Lab({ route }: { route: Route }) {
     speed,
     stretch,
     film,
+    loading: false,
     meta: null as FieldMeta | null,
     prov: { ra0: ra, dec0: dec, step_arcsec: 1.5375, n: 4 },
   });
@@ -683,6 +686,8 @@ export function Lab({ route }: { route: Route }) {
     speed,
     stretch,
     film,
+    // the field is still being read: the part of the picture that has not arrived is dark, not a flat grey slab (grey is for sky the survey does not cover)
+    loading: phase !== '',
     meta,
     // the grid the service builds for this field (engine/grid.py), known before the field is finished: marks during a cold load
     prov: (() => {
@@ -1007,6 +1012,7 @@ export function Lab({ route }: { route: Route }) {
                     bandMask: mask,
                     hues: BANDS.map((bd) => hslRgb(bd.hue)),
                     mono: st.opts.mono,
+                    noData: st.loading ? DARK : undefined,
                     time: timeMode,
                     diffLayer: 0,
                   }
@@ -1017,6 +1023,7 @@ export function Lab({ route }: { route: Route }) {
                     h,
                     stack,
                     mode: stack === 'picture' && !st.opts.mono ? 'colour' : 'layer',
+                    noData: st.loading ? DARK : undefined,
                     time: timeMode,
                     diffLayer: 0,
                   },
@@ -1540,6 +1547,28 @@ export function Lab({ route }: { route: Route }) {
         }
         if (clash() && !mk.selected && mk.kind !== 'target') return;
         placed.push({ x0: lx, y0: ly, x1: lx + tw, y1: ly + th });
+        // a label pushed away from its ring (past other labels) is tied to it by a thin leader line
+        {
+          const nx = Math.max(lx, Math.min(x, lx + tw));
+          const ny = Math.max(ly, Math.min(y, ly + th));
+          const d = Math.hypot(nx - x, ny - y);
+          if (d > rr + 20) {
+            const ux = (nx - x) / d;
+            const uy = (ny - y) / d;
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(x + ux * (rr + 2), y + uy * (rr + 2));
+            ctx.lineTo(nx - ux * 3, ny - uy * 3);
+            ctx.lineWidth = 2.6;
+            ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+            ctx.stroke();
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = mk.colour;
+            ctx.globalAlpha = 0.85;
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
         lines.forEach((l, i) => {
           ctx.font = i ? '500 10.5px ui-monospace, Menlo, monospace' : '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
           ctx.lineWidth = 3;

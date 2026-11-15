@@ -100,7 +100,7 @@
 .map-ui.map-bar .fld { display: flex; align-items: center; gap: 5px; margin: 0; }
 .map-ui.map-bar .fld > span { color: var(--faint); font: 600 9.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
 .map-ui.map-bar .fld .inp.coord { width: 112px; min-width: 0; font: 500 12px var(--mono); font-variant-numeric: tabular-nums; padding: 5px 6px; }
-.map-ui.map-bar .fld .fovsel { width: 62px; padding: 5px 4px; font: 500 12px var(--mono); }
+.map-ui.map-bar .fld .fovsel { display: block; box-sizing: border-box; width: 62px; height: 26px; padding: 0 6px; font: 500 12px var(--mono); text-transform: none; letter-spacing: 0; text-align: center; text-align-last: center; line-height: 24px; }
 .map-ui.map-bar > .seg { align-self: center; }
 
 .screen { overflow: hidden; }

@@ -68,8 +68,8 @@ export function Tour({ auto = true }: { auto?: boolean }) {
   useEffect(() => {
     const on = () => setK(0);
     window.addEventListener('spherex:tour', on);
-    // only on the globe itself: the front page (landing) is never taken over by the tour
-    if (auto && !seen() && /^#\/(globe|explore)$/.test(location.hash.replace(/\?.*/, ''))) {
+    // only on the bare globe: the front page (landing) and a link that names a place or an object (#/explore?ra=..) are never taken over by the tour
+    if (auto && !seen() && /^#\/(globe|explore)$/.test(location.hash)) {
       const t = setTimeout(() => setK(0), 2500);
       return () => {
         clearTimeout(t);

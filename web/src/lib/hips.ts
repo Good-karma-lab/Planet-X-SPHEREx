@@ -39,11 +39,12 @@ let manifest: Promise<boolean> | null = null;
 /** the manifest has been answered (or has failed): whether a layer is there is known */
 let manifestDone = false;
 export const manifestKnown = (): boolean => manifestDone;
-/** Reads the service's manifest of baked tiles once. True when the service has baked layers. */
-export function loadManifest(): Promise<boolean> {
-  manifest ??= fetch('/tiles/manifest.json', { cache: 'no-cache' })
-    .then((r) => (r.ok ? r.json() : null))
-    .then((m: { layers?: Record<string, Partial<Baked> & { frame?: string }> } | null) => {
+type ManifestJson = { layers?: Record<string, Partial<Baked> & { frame?: string }> } | null;
+const MANIFEST_KEY = 'tiles.manifest.v1';
+
+/** Takes the layers a manifest names into use; true when there are baked layers. */
+function applyManifest(m: ManifestJson): boolean {
+
       for (const [id, b0] of Object.entries(m?.layers ?? {})) {
         const b = b0 as typeof b0 & { type?: string; base?: string; gain?: number; black?: number };
         // an equirectangular pyramid (the first star-map bake, svs-eq) is not used: the star map is the HEALPix layer `svs` (tone-mapped, orders 0-6), which the
@@ -63,11 +64,39 @@ export function loadManifest(): Promise<boolean> {
       }
       listeners.forEach((f) => f());
       return baked.size > 0;
-    })
-    .catch(() => false)
-    .finally(() => {
-      manifestDone = true;
-    });
+}
+
+/** Reads the service's manifest of baked tiles once. True when the service has baked layers. The last manifest seen is kept in the browser and used at once (the
+ *  first tiles are on their way before the answer arrives); index.html starts the request before the app's code is in (window.__manifest). */
+export function loadManifest(): Promise<boolean> {
+  manifest ??= (() => {
+    let cached: string | null = null;
+    try {
+      cached = localStorage.getItem(MANIFEST_KEY);
+      if (cached) {
+        applyManifest(JSON.parse(cached) as ManifestJson);
+        manifestDone = true;
+      }
+    } catch {
+      cached = null;
+    }
+    const early = (window as unknown as { __manifest?: Promise<ManifestJson> }).__manifest;
+    return (early ?? fetch('/tiles/manifest.json', { cache: 'no-cache' }).then((r) => (r.ok ? (r.json() as Promise<ManifestJson>) : null)))
+      .then((m) => {
+        if (!m) return baked.size > 0;
+        const text = JSON.stringify(m);
+        try {
+          localStorage.setItem(MANIFEST_KEY, text);
+        } catch {
+          // kept next time
+        }
+        return text === cached ? baked.size > 0 : applyManifest(m);
+      })
+      .catch(() => false)
+      .finally(() => {
+        manifestDone = true;
+      });
+  })();
   return manifest;
 }
 
@@ -386,8 +415,37 @@ function softenCells(d: Uint8ClampedArray, w: number, h: number): void {
     }
 }
 
+/** The SPHEREx all-sky cube (its frames spx*) has no data in the saturated core of a very bright star: the texels are black, ringed by the wings in the three colours. A black
+ *  texel with bright texels on all four sides within a few texels is such a core, and it is white (a saturated core is white everywhere on the site). */
+function fillCores(d: Uint8ClampedArray, w: number, h: number): void {
+  const R = 10;
+  const hole = (i: number) => d[i * 4]! + d[i * 4 + 1]! + d[i * 4 + 2]! <= 3;
+  const bright = (i: number) => Math.max(d[i * 4]!, d[i * 4 + 1]!, d[i * 4 + 2]!) > 40;
+  const fill: number[] = [];
+  for (let y = R; y < h - R; y++)
+    for (let x = R; x < w - R; x++) {
+      const i = y * w + x;
+      if (!hole(i)) continue;
+      let ok = 0;
+      for (let k = 1; k <= R && !(ok & 1); k++) if (bright(i - k)) ok |= 1;
+      if (!(ok & 1)) continue;
+      for (let k = 1; k <= R && !(ok & 2); k++) if (bright(i + k)) ok |= 2;
+      if (!(ok & 2)) continue;
+      for (let k = 1; k <= R && !(ok & 4); k++) if (bright(i - k * w)) ok |= 4;
+      if (!(ok & 4)) continue;
+      for (let k = 1; k <= R && !(ok & 8); k++) if (bright(i + k * w)) ok |= 8;
+      if (ok === 15) fill.push(i);
+    }
+  for (const i of fill) {
+    d[i * 4] = 255;
+    d[i * 4 + 1] = 255;
+    d[i * 4 + 2] = 255;
+    d[i * 4 + 3] = 255;
+  }
+}
+
 let decoder: HTMLCanvasElement | null = null;
-async function decode(b: Blob, allsky = false, fromBaked = false): Promise<Tile> {
+async function decode(b: Blob, allsky = false, fromBaked = false, cores = false): Promise<Tile> {
   const bm = await createImageBitmap(b);
   decoder ??= document.createElement('canvas');
   decoder.width = bm.width;
@@ -399,13 +457,14 @@ async function decode(b: Blob, allsky = false, fromBaked = false): Promise<Tile>
   bm.close();
   const img = x.getImageData(0, 0, w, h);
   if (allsky) softenCells(img.data, w, h);
+  if (cores) fillCores(img.data, w, h);
   return { w, h, d: img.data, used: performance.now(), baked: fromBaked };
 }
 
 function start(key: string, q: Want): void {
   inflight.add(key);
   fetchTile(q.id, q.o, q.i)
-    .then(({ g, baked: bk }) => (g === 'missing' ? null : decode(g, q.o === ALLSKY, bk)))
+    .then(({ g, baked: bk }) => (g === 'missing' ? null : decode(g, q.o === ALLSKY, bk, q.id.startsWith('spx'))))
     .then((t) => put(q.id, q.o, q.i, t))
     .catch(() => failed.set(key, performance.now()))
     .finally(() => {

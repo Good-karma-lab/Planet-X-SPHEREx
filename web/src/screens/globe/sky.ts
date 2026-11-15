@@ -347,7 +347,8 @@ class SkyPainter {
 
   /** The new pixels over the previous picture, moved and scaled to the new view. */
   /** the survey on show: a picture is carried over to a new view only while it is the same survey (no half-old, half-new picture after a switch) */
-  private shownKey = '';
+  /** the layers of the picture on show (ids joined with +): the pins stand on the date of THIS picture, not of the layer just asked for */
+  shownKey = '';
   private switchKey = '';
   private switchSince = 0;
 
