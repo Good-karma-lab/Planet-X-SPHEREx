@@ -40,6 +40,7 @@ SAME_ARCSEC = 3.0
 GAIA_EPOCH_YEAR = 2016.0
 SAT_THRESHOLD = 0.3
 NEAR_ARCSEC = 6.0
+PAIR_ARCSEC = 4.0  # a static star within this of the first and of the last place of a track: the light moves between two stars
 PM_MIN = 2.0  # mas/yr
 STILL_FRACTION = 0.3  # a star moving less than this share of the track's rate explains nothing
 CHECK_AGAIN_S = 60.0
@@ -277,7 +278,40 @@ class Movers:
                 t["check"] = "still"
                 t["gaia"] = {"source_id": str(s["source_id"]), "pm": round(pm, 3), "offset_arcsec": round(sep, 2)}
                 return
+        # the light moves between two static stars (a variable star in a close pair, or two stars whose brightness ratio changed): a static
+        # Gaia star stands at the track's first place and a different one at its last (found in their own small cones: a fast track's
+        # middle is far from where its Gaia-epoch cone looks)
+        try:
+            ends = [await self._static_near(t, k, years[k]) for k in (0, len(t["ra"]) - 1)]
+        except (BreakerOpenError, httpx.HTTPError, ValueError, KeyError):
+            t["check"] = "pending"
+            return
+        if ends[0] is not None and ends[1] is not None and ends[0][0]["source_id"] != ends[1][0]["source_id"]:
+            t["check"] = "still"
+            t["gaia"] = {
+                "source_id": str(ends[0][0]["source_id"]),
+                "pair": [str(ends[0][0]["source_id"]), str(ends[1][0]["source_id"])],
+                "pm": round(max(ends[0][1], ends[1][1]), 3),
+                "offset_arcsec": round(max(ends[0][2], ends[1][2]), 2),
+            }
+            return
         t["check"] = "none"
+
+    async def _static_near(self, t: dict[str, Any], k: int, year: float) -> tuple[dict[str, Any], float, float] | None:
+        """The nearest Gaia star within PAIR_ARCSEC of the track's place in pass `k` that hardly moves (less than STILL_FRACTION of the
+        track's rate): (star, its proper motion in arcsec/yr, separation)."""
+        best: tuple[dict[str, Any], float, float] | None = None
+        for s in await self._gaia_near(t["ra"][k], t["dec"][k], PAIR_ARCSEC + 2.0):
+            pm = math.hypot(s["pmra"] or 0.0, s["pmdec"] or 0.0) / 1000.0
+            if pm >= STILL_FRACTION * t["speed"]:
+                continue
+            dy = year - GAIA_EPOCH
+            d = s["dec"] + (s["pmdec"] or 0.0) * dy / 3.6e6
+            a = s["ra"] + (s["pmra"] or 0.0) * dy / 3.6e6 / math.cos(math.radians(d))
+            sep = math.hypot((a - t["ra"][k]) * math.cos(math.radians(d)), d - t["dec"][k]) * 3600.0
+            if sep <= PAIR_ARCSEC and (best is None or sep < best[2]):
+                best = (s, pm, sep)
+        return best
 
     async def check_track(self, t: dict[str, Any]) -> None:
         """The Gaia verdict of a track (positions at every pass: mjd, ra, dec; rate: v_east, v_north, speed): sets check and gaia."""

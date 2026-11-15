@@ -19,6 +19,7 @@ The columns we use are `source_id`, `ra`, `dec`, `pmra`, `pmdec`, `parallax`, `p
 | a track is explained (`same`) | a Gaia star with a proper motion of at least 2 mas/yr stays within 3″ of the track at every pass date |
 | search cone | 6″ plus 0.2 times the track's speed times the years between the first pass and Gaia's epoch, centred on the track moved to Gaia's epoch |
 | a static star (`still`) | a Gaia star within 6″ of the track's middle place that moves less than 30 % of the track's rate: the motion is a centroid effect |
+| a pair (`still`) | a static Gaia star (less than 30 % of the track's rate) within 4″ of the track's first place and a different one within 4″ of its last place: the light moves between two stars, as when one star of a close pair varies |
 | none | no Gaia star near the track |
 
 The Gaia release is one setting. The environment variables `SKY_GAIA_TABLE` (default `gaiadr3.gaia_source`), `SKY_GAIA_EPOCH` (default 2016.0), `SKY_GAIA_NAME` (default "Gaia DR3") and `SKY_GAIA_TAP` name the table, the epoch of its positions, the label shown to the visitor and the archive; a table with the same column names works with no code change. A readiness check (`GET /api/v1/gaia/readiness`) asks the ESA archive whether a new release's schema exists with the columns above and whether a HATS copy is listed, and answers with the three settings to apply; it changes nothing. The Parquet cone search reads the DR3 files only, so a new release is read through the archive until its own Parquet root is checked.
