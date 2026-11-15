@@ -38,7 +38,9 @@ export async function runJob(
     const s = stateOf(j);
     if (s === 'error' || s === 'cancelled') throw new Error(j.error || 'the search failed');
     if (s === 'done' || s === 'ok') return j;
-    await sleep(hooks.every ?? 2000);
+    // a running search is asked again every 5 s at most often, and not at all while the tab is hidden (it keeps running on the service)
+    await sleep(Math.max(5000, hooks.every ?? 5000));
+    while (typeof document !== 'undefined' && document.hidden && !hooks.cancelled()) await sleep(2000);
   }
   throw new Error('the search took too long');
 }

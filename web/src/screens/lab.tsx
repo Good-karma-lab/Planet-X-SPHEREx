@@ -350,7 +350,10 @@ export function Lab({ route }: { route: Route }) {
   const ra = Number(p['ra']);
   const dec = Number(p['dec']);
   const valid = Number.isFinite(ra) && Number.isFinite(dec);
-  const fov = SIZES.includes(Number(p['fov'])) ? Number(p['fov']) : 5;
+  // the nearest of the five sizes (a link with fov=18, the size a distance search reads, opens the 20′ field)
+  const fovAsked = Number(p['fov']);
+  const fov =
+    Number.isFinite(fovAsked) && fovAsked > 0 ? SIZES.reduce((a, b) => (Math.abs(b - fovAsked) < Math.abs(a - fovAsked) ? b : a)) : 5;
   const view: View = (['picture', 'bands', 'det'] as const).find((v) => v === p['view']) ?? 'picture';
   const time: Time = (['loop', 'diff', 'sum'] as const).find((v) => v === p['time']) ?? 'loop';
   const film = p['film'] ? Number(p['film']) : null;
@@ -1754,7 +1757,13 @@ export function Lab({ route }: { route: Route }) {
   const downloadAdes = async (t: Track, i: number) => {
     setAdesNote('Building the ADES report…');
     try {
-      const observations = t.mjd.map((m, k) => ({ mjd_utc: m, ra: t.ra[k]!, dec: t.dec[k]!, rms_ra_arcsec: Math.max(0.05, t.rms_arcsec), rms_dec_arcsec: Math.max(0.05, t.rms_arcsec) }));
+      const observations = t.mjd.map((m, k) => ({
+        mjd_utc: m,
+        ra: t.ra[k]!,
+        dec: t.dec[k]!,
+        rms_ra_arcsec: Math.max(0.05, t.rms_arcsec),
+        rms_dec_arcsec: Math.max(0.05, t.rms_arcsec),
+      }));
       const r = await fetch('/api/v1/export/ades', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -1779,7 +1788,11 @@ export function Lab({ route }: { route: Route }) {
         a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 4000);
       }
-      setAdesNote(d.ready ? 'ADES report saved: ready for the MPC.' : `ADES report saved, not ready to send: ${[...d.problems, ...d.notes].join('; ')}`);
+      setAdesNote(
+        d.ready
+          ? 'ADES report saved: ready for the MPC.'
+          : `ADES report saved, not ready to send: ${[...d.problems, ...d.notes].join('; ')}`,
+      );
     } catch {
       setAdesNote('The ADES report could not be built.');
     }
@@ -1826,14 +1839,23 @@ export function Lab({ route }: { route: Route }) {
       anPoll.current++;
     };
   }, [ra, dec, fov, valid, meta]);
+  // the red sources of the field: a failed answer (a 5xx, a restart) is asked again a few times before the tray says failed
   const findRed = async () => {
     setRedv({ state: 'waiting', error: 'busy', result: null });
-    try {
-      const r = await fetch(`/api/v1/red?ra=${ra}&dec=${dec}&fov=${fov}`, { cache: 'no-store' });
-      setRedv(r.ok ? ((await r.json()) as RedView) : { state: 'failed', error: `the sky service answered ${r.status}`, result: null });
-    } catch (e) {
-      setRedv({ state: 'failed', error: String(e), result: null });
+    const my = anPoll.current;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      try {
+        const r = await fetch(`/api/v1/red?ra=${ra}&dec=${dec}&fov=${fov}`, { cache: 'no-store' });
+        if (r.ok) return setRedv((await r.json()) as RedView);
+        if (r.status < 500 && r.status !== 429)
+          return setRedv({ state: 'failed', error: `the sky service answered ${r.status}`, result: null });
+      } catch {
+        /* the service restarts: ask again */
+      }
+      await new Promise((res) => setTimeout(res, 4000 * (attempt + 1)));
+      if (my !== anPoll.current) return; // another field was opened meanwhile
     }
+    setRedv({ state: 'failed', error: 'the sky service did not answer', result: null });
   };
   const pickRed = (k: number) => {
     const x = redv?.result?.red[k];
@@ -3236,13 +3258,19 @@ export function Lab({ route }: { route: Route }) {
               <section class="psec fsec">
                 <div class="fsh">Movers between passes</div>
                 <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
-                {(mv?.result?.tracks ?? []).filter((t) => t.mjd.length >= 2).map((t, i) => (
-                  <div class="adesrow" key={i}>
-                    <button class="mini" onClick={() => void downloadAdes(t, i)} title="The positions of this mover in every pass as an MPC ADES report (nothing is sent; the file says what is missing before it could be)">
-                      MPC ADES · {trackNames[i] || `track ${i + 1}`}
-                    </button>
-                  </div>
-                ))}
+                {(mv?.result?.tracks ?? [])
+                  .filter((t) => t.mjd.length >= 2)
+                  .map((t, i) => (
+                    <div class="adesrow" key={i}>
+                      <button
+                        class="mini"
+                        onClick={() => void downloadAdes(t, i)}
+                        title="The positions of this mover in every pass as an MPC ADES report (nothing is sent; the file says what is missing before it could be)"
+                      >
+                        MPC ADES · {trackNames[i] || `track ${i + 1}`}
+                      </button>
+                    </div>
+                  ))}
                 {adesNote && <div class="ssum">{adesNote}</div>}
               </section>
               <section class="psec fsec">
