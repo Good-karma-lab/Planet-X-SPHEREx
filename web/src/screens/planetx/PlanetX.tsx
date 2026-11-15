@@ -27,6 +27,10 @@ const PLACES: [string, number, number][] = [
   ['394 au candidate place', 60.94, 8.39],
   ['Sedna', 61.773, 8.841],
   ['Eris', 27.378, -0.12],
+  ['Eris', 26.325, -0.431],
+  ['Eris', 27.503, 0.149],
+  ['Makemake', 199.876, 21.43],
+  ['Makemake', 202.317, 20.157],
   ['RW Aurigae', 76.957, 30.401],
   ['R Draconis', 248.168, 66.755],
 ];
@@ -39,7 +43,40 @@ function nameOf(f: SearchedField): string {
   const hit = PLACES.find(([, ra, dec]) => sep([ra, dec], [f.ra, f.dec]) < 0.15);
   return hit ? hit[0] : `RA ${f.ra.toFixed(2)} · Dec ${fmtDec(f.dec)}`;
 }
-const labHref = (f: SearchedField) => `#/lab?ra=${f.open.ra}&dec=${f.open.dec}&fov=${f.open.fov}`;
+/** the lab's field sizes; a link uses the smallest that holds the searched field */
+const SIZES = [2, 5, 10, 20, 60];
+const snap = (fov: number) => SIZES.find((s) => s >= fov - 0.5) ?? 60;
+const labHref = (f: SearchedField) => `#/lab?ra=${f.open.ra}&dec=${f.open.dec}&fov=${snap(f.open.fov)}`;
+
+/** Where the live service's Eris and Makemake detections stand in each pass: a Find Planet X peak this close is that known body. */
+const KNOWN_AT: [number, number][] = [[27.3724, -0.114], [26.3287, -0.4364], [27.5024, 0.1488], [199.9413, 21.4873], [202.3119, 20.1508]];
+
+/** One Find Planet X peak, as Findings lists it (GET /api/v1/findings, kind peak). A LEAD is a peak above its field's bar that is not a
+ *  known body; the same definition the Findings page and the Lab use. */
+interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; status?: string; data: { peak?: { d?: number; sn?: number; phot_sn?: number; ok?: boolean } } }
+function useLeads(): Peak[] | null {
+  const [p, setP] = useState<Peak[] | null>(null);
+  useEffect(() => {
+    let stop = false;
+    const load = () =>
+      fetch('/api/v1/findings?status=all&limit=2000&kind=peak')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: { finds?: (Peak & { kind: string })[] } | null) => {
+          if (stop || !d?.finds) return;
+          // the Findings rule: one peak with ok=true per object; known bodies are not leads (status 'known' from the service; until the service
+          // marks the live Eris and Makemake detections, their places are matched here)
+          setP(d.finds.filter((f) => f.kind === 'peak' && f.data.peak?.ok !== false && f.status !== 'known' && !KNOWN_AT.some((k) => sep(k, [f.ra, f.dec]) < 0.05)));
+        })
+        .catch(() => {});
+    void load();
+    const t = setInterval(load, 60000);
+    return () => {
+      stop = true;
+      clearInterval(t);
+    };
+  }, []);
+  return p;
+}
 const hhmm = (s?: string) => (s ? `${s.slice(0, 10)} ${s.slice(11, 16)} UTC` : '');
 
 function useHonest(): string[] {
@@ -80,6 +117,7 @@ const CH: Chapter[] = [
 export function PlanetXPage() {
   const searched = useSearched(true);
   const honest = useHonest();
+  const leads = useLeads();
   const [tab, setTab] = useState<'cands' | 'searched' | 'story'>('cands');
   const [chapter, setChapter] = useState(-1);
   const [layers, setLayersState] = useState<Layers>(ALL);
@@ -91,15 +129,28 @@ export function PlanetXPage() {
   const scene = useRef<PxScene | null>(null);
 
   const mine = (searched ?? []).filter(isFpx).sort((a, b) => (b.searched_at ?? '').localeCompare(a.searched_at ?? ''));
-  const peaks = mine.filter((f) => f.best && f.best.kind === 'peak');
-  const fields: PxField[] = mine.map((f) => ({
+  /** the warm field a peak lies in (the lab opens it ready), else the peak's own place */
+  const fieldOf = (pk: Peak) => {
+    const f = (searched ?? []).find((x) => sep([x.ra, x.dec], [pk.ra, pk.dec]) < x.fov / 120);
+    return f ? labHref(f) : `#/lab?ra=${pk.ra.toFixed(4)}&dec=${pk.dec.toFixed(4)}&fov=${snap(pk.fov)}`;
+  };
+  const nLeads = leads?.length ?? 0;
+  // one label per place on the model (the newest search of it)
+  const seen = new Set<string>();
+  const onModel = mine.filter((f) => {
+    const n = nameOf(f);
+    if (seen.has(n)) return false;
+    seen.add(n);
+    return true;
+  });
+  const fields: PxField[] = onModel.map((f) => ({
     key: f.key,
     ra: f.ra,
     dec: f.dec,
     name: nameOf(f),
-    best: f.best ? f.best.label : f.state === 'running' ? 'running' : 'nothing above the bar',
+    best: /^(Eris|Makemake)$/.test(nameOf(f)) ? 'known body, found blind' : f.best ? f.best.label : f.state === 'running' ? 'running' : 'nothing above the bar',
     href: labHref(f),
-    lead: !!(f.best && f.best.kind === 'peak'),
+    lead: !!(f.best && f.best.kind === 'peak') && !/^(Eris|Makemake)$/.test(nameOf(f)),
   }));
   const fieldSig = fields.map((f) => f.key + f.best).join('|');
 
@@ -154,8 +205,7 @@ export function PlanetXPage() {
         <div class="px3-ov px3-tl">
           <h1>Planet X</h1>
           <div class="px3-st" data-testid="px-stats">
-            <span><b>{searched == null ? '—' : mine.length}</b> fields searched for distant bodies</span>
-            <span><b>{searched == null ? '—' : peaks.length}</b> {peaks.length === 1 ? 'lead' : 'leads'}</span>
+            <span><b>{leads == null ? '—' : nLeads}</b> {nLeads === 1 ? 'lead' : 'leads'} in <b>{searched == null ? '—' : mine.length}</b> searched places</span>
             <span><b>0</b> confirmed</span>
           </div>
           <div class="px3-chips">
@@ -203,14 +253,13 @@ export function PlanetXPage() {
         <div class="px3-ov px3-credit">
           <span class="px3-hint">drag to turn · scroll to zoom</span>
           <span class="px3-hint touch">two fingers to turn and zoom</span>
-          Orbits: JPL · Planet Nine: Brown &amp; Batygin 2021 · textures: Solar System Scope (CC BY 4.0) · sky: 2MASS · bodies enlarged
         </div>
       </section>
 
       <aside class="px3-panel" aria-label="Planet X">
         <div class="px3-tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'cands'} onClick={() => go('cands')} data-testid="px-tab-cands">
-            Candidates <span class="n">{1 + peaks.length + KNOWN.length}</span>
+            Candidates <span class="n">{leads == null ? '—' : nLeads}</span>
           </button>
           <button role="tab" aria-selected={tab === 'searched'} onClick={() => go('searched')} data-testid="px-tab-searched">
             Searched <span class="n">{searched == null ? '—' : mine.length}</span>
@@ -222,6 +271,25 @@ export function PlanetXPage() {
         <div class="px3-body">
           {tab === 'cands' && (
             <div data-testid="px-cands">
+              <h4 class="px3-sub">Leads · {leads == null ? '…' : nLeads}</h4>
+              {(leads ?? []).map((pk) => (
+                <div key={pk.id} class="px3-cand lead">
+                  <div class="t">
+                    <b>
+                      Peak · {(pk.data.peak?.d ?? 0).toFixed(0)} au{pk.data.peak?.sn != null ? ` · ${pk.data.peak.sn.toFixed(1)}σ` : ''}
+                    </b>
+                    <em class="pill lead">lead</em>
+                  </div>
+                  <div class="where">
+                    {PLACES.find(([, ra, dec]) => sep([ra, dec], [pk.ra, pk.dec]) < 0.3)?.[0] ?? pk.place} · RA {pk.ra.toFixed(2)} · Dec {fmtDec(pk.dec)}
+                    {pk.data.peak?.phot_sn != null ? ` · photometry ${pk.data.peak.phot_sn.toFixed(1)}σ` : ''}
+                  </div>
+                  <p>A peak above its field’s bar. A lead is not a body yet: it needs one orbit through two or three passes and the check against known bodies.</p>
+                  <a class="go" href={fieldOf(pk)}>Open in the Lab →</a>
+                </div>
+              ))}
+              {leads != null && nLeads === 0 && <p class="px3-note">No leads above the bar right now.</p>}
+              <h4 class="px3-sub">Ruled out</h4>
               <div class="px3-cand rej" onMouseEnter={() => scene.current?.highlight(mine.find((f) => nameOf(f) === 'Ecliptic D4 field')?.key ?? null)} onMouseLeave={() => scene.current?.highlight(null)}>
                 <div class="t">
                   <b>{rec.title}</b>
@@ -242,23 +310,6 @@ export function PlanetXPage() {
                   </table>
                 )}
               </div>
-              {peaks.map((f) => (
-                <div key={f.key} class="px3-cand lead" onMouseEnter={() => scene.current?.highlight(f.key)} onMouseLeave={() => scene.current?.highlight(null)}>
-                  <div class="t">
-                    <b>
-                      {f.best!.label}
-                      {f.best!.sn != null ? ` · ${f.best!.sn.toFixed(1)}σ` : ''}
-                    </b>
-                    <em class="pill lead">lead</em>
-                  </div>
-                  <div class="where">
-                    {nameOf(f)} · RA {f.ra.toFixed(2)} · Dec {fmtDec(f.dec)} · {f.fov}′
-                  </div>
-                  <p>A peak in the deep sum of the passes. A peak is a lead: it needs a closed orbit across the passes and the check against known bodies before it counts.</p>
-                  <a class="go" href={labHref(f)}>Open in the Lab →</a>
-                </div>
-              ))}
-              {searched != null && peaks.length === 0 && <p class="px3-note">No live peaks above the bar right now.</p>}
               <h4 class="px3-sub">Known worlds found blind, then linked</h4>
               {KNOWN.map((k) => (
                 <div key={k.who} class="px3-cand ok">
@@ -315,18 +366,19 @@ export function PlanetXPage() {
                     </span>
                     <span class="eye">◉ on the model</span>
                   </button>
-                  {chapter === i && <div class="in">{body(i, mine.length, peaks)}</div>}
+                  {chapter === i && <div class="in">{body(i, mine.length, leads ?? [])}</div>}
                 </div>
               ))}
             </div>
           )}
         </div>
+        <div class="px3-foot">Orbits: JPL · Planet Nine: Brown &amp; Batygin 2021 · textures: Solar System Scope (CC BY 4.0) · sky: 2MASS · bodies enlarged</div>
       </aside>
     </div>
   );
 }
 
-function body(i: number, nFields: number, peaks: SearchedField[]) {
+function body(i: number, nFields: number, peaks: Peak[]) {
   if (i === 0)
     return (
       <>
@@ -383,7 +435,7 @@ function body(i: number, nFields: number, peaks: SearchedField[]) {
         Find Planet X has run on <b>{nFields}</b> {nFields === 1 ? 'field' : 'fields'} so far, every one opened in the Lab or searched by us, shown on the model as lines of sight.{' '}
         {peaks.length ? (
           <>
-            The strongest result is a lead: <b>{peaks[0]!.best!.label}</b>, which needs a closed orbit across the passes before it counts.
+            There {peaks.length === 1 ? 'is' : 'are'} <b>{peaks.length}</b> {peaks.length === 1 ? 'lead' : 'leads'}: peaks above the bar that are not known bodies, each needing one orbit through the passes before it counts.
           </>
         ) : (
           'No peak passes the bar right now.'

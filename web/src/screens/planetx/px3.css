@@ -584,10 +584,8 @@
     font-size: 11px;
   }
   .px3-chips {
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    flex-wrap: wrap;
     max-width: calc(100vw - 48px);
-    scrollbar-width: none;
   }
   .px3-chip {
     flex: none;
@@ -642,4 +640,14 @@
   letter-spacing: 0.07em;
   text-transform: uppercase;
   color: var(--faint);
+}
+
+.px3-foot {
+  padding: 8px 16px 10px;
+  border-top: 1px solid var(--edge-soft);
+  font: 10.5px/1.45 var(--mono);
+  color: rgba(214, 231, 237, 0.5);
+}
+.px3-credit {
+  max-width: none;
 }
