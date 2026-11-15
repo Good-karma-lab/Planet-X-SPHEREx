@@ -73,8 +73,6 @@ const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
 ];
 
 /** the detectors whose range holds a band (D1 0.75–1.11, D2 1.11–1.64, D3 1.64–2.42, D4 2.42–3.82, D5 3.82–4.42, D6 4.42–5.00 µm) */
-/** the room under the picture for the status line and the band buttons, px */
-const BELOW = 90;
 const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2, 4], ice: [4], pah: [4], co2: [5], co: [6] };
 /** a band's name on a tile too small for the full one */
 const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
@@ -722,8 +720,7 @@ export function Lab({ route }: { route: Route }) {
       const w = Math.max(160, Math.floor(el.clientWidth));
       const h = Math.max(160, Math.floor(el.clientHeight));
       setStage({ w, h });
-      // under the square: the status line and the band buttons (they used to float over the picture and covered its rings)
-      setSide(Math.min(w, h - (w >= 561 ? BELOW : 0)));
+      setSide(Math.min(w, h));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -1022,11 +1019,10 @@ export function Lab({ route }: { route: Route }) {
               panels.push({ ...panels[0]!, ...inset });
             }
           } else if (st.view === 'bands') {
-            // on a phone the status line sits over the bottom of the picture: the tiles leave room for it
-            const wallRes = 96;
+            // the tiles fill the whole picture area (the chips and the title float over it)
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
-            panels = wallLayout(shownBands.length, w, h - wallRes).map((c0, j) => {
-              const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the band buttons below
+            panels = wallLayout(shownBands.length, w, h).map((c0, j) => {
+              const c = c0;
               const { bd, i } = shownBands[j]!;
               return {
                 x: c.x,
@@ -1050,10 +1046,9 @@ export function Lab({ route }: { route: Route }) {
               };
             });
           } else {
-            const wallRes = 96;
             const shownDets = st.dets.slice().sort();
-            panels = wallLayout(shownDets.length, w, h - wallRes).map((c0, j) => {
-              const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the detector buttons below
+            panels = wallLayout(shownDets.length, w, h).map((c0, j) => {
+              const c = c0;
               const d = shownDets[j]! - 1;
               return {
                 x: c.x,
@@ -1081,7 +1076,7 @@ export function Lab({ route }: { route: Route }) {
             if (q.label)
               out.push({
                 x: q.x,
-                y: q.y + q.h - 20,
+                y: q.y + 4,
                 w: q.w,
                 text: q.label,
                 short: q.short,
@@ -1626,7 +1621,7 @@ export function Lab({ route }: { route: Route }) {
       };
       const wall = !days && st.view !== 'picture';
       const underInset = (x: number, y: number) =>
-        (!!inset && x > inset.x - 4 && y > inset.y - 4 && x < inset.x + inset.w + 4 && y < inset.y + inset.h + 4) || (!wall && y < 46); // nor under the title row floating over the top of the picture
+        (!!inset && x > inset.x - 4 && y > inset.y - 4 && x < inset.x + inset.w + 4 && y < inset.y + inset.h + 4) || (!wall && y < 46) || (!wall && y > hcss - 46); // nor under the title row floating over the top of the picture, nor in the band of the chips and the date at its bottom
       ctx.save();
       for (const box of rects) {
         if (wall) {
@@ -2536,6 +2531,9 @@ export function Lab({ route }: { route: Route }) {
               : '') +
           (Math.abs(beta) > 25 ? ' · far from the ecliptic: few asteroids expected here' : '') +
           (opts.motion ? ' · motion only' : '');
+  // the line over the picture is only the date of what is shown (the time bar has the rest; the full line is its tooltip)
+  const dateLabel = time === 'sum' ? 'all seasons' : passMeta ? season(passMeta.mjd_mid) : phase || '';
+  const daysShort = filmData ? `visit ${visit + 1} of ${nVisits} · ${utc(filmData.meta.frames[visit]?.mjd ?? 0)}` : daysStatus;
   const passMjd = (passes.find((q) => q.index === (shown?.pass ?? 0)) ?? passes[0])?.mjd_mid;
   const toDays = () => {
     setFrame(null);
@@ -2785,12 +2783,13 @@ export function Lab({ route }: { route: Route }) {
             <div
               class={`vsq ${side < 760 ? 'compact' : ''}${view !== 'picture' && film === null ? ' wallv' : ''}`}
               style={{
-                width: `${side}px`, // one square in every view: the frame never moves or grows
-                height: `${side}px`,
+                // a picture is one square in every month and band (the frame never moves or grows); a wall of tiles takes the whole stage, which it fills with the largest squares
+                width: `${wallView && stage.w >= 561 ? stage.w : side}px`,
+                height: `${wallView && stage.w >= 561 ? stage.h : side}px`,
                 // whole pixels, so that the 1 px frame is crisp and never one pixel thick in one state and two in another
-                marginLeft: `${Math.max(0, Math.floor((stage.w - side) / 2))}px`,
+                marginLeft: wallView && stage.w >= 561 ? '0px' : `${Math.max(0, Math.floor((stage.w - side) / 2))}px`,
                 // a phone: the picture sits at the top of its stage (centred, it left a band of empty space above it)
-                marginTop: stage.w < 560 ? '0px' : `${Math.max(0, Math.floor((stage.h - side - BELOW) / 2))}px`,
+                marginTop: stage.w < 560 || wallView ? '0px' : `${Math.max(0, Math.floor((stage.h - side) / 2))}px`,
                 cursor: 'crosshair',
               }}
               onClick={(e) => {
@@ -2947,8 +2946,8 @@ export function Lab({ route }: { route: Route }) {
                       : film === null && view === 'det' && !dets.length
                         ? 'No detector chosen: switch one on (or ALL)'
                         : film !== null
-                          ? daysStatus
-                          : status)}
+                          ? daysShort
+                          : dateLabel)}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
                     <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter
