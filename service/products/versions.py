@@ -14,7 +14,9 @@ VERSIONS: dict[str, str] = {
     "movers": "m7",  # the search between passes and its Gaia check; m5 motion grade, m6 names of saturated stars, m7 pair shifts rejected
     "anomalies": "a2",  # the spectral anomaly map of a field and the identification of its anomalies; a2: the same passes as the movers
     "red": "r3",  # red sources of a field: 3.8–5 µm against 1.1–1.6 µm. r2: scatter and passes of a moving source; r3: peaks from 4 sigma
-    "distant": "d1",  # Find Planet X, one pass: distance search, candidates, photometry, slider arrays
+    # Find Planet X, one pass: distance search, candidates, photometry, slider arrays.
+    # d2: the tuned own motion stays inside the gate, no peaks over a bright fast star
+    "distant": "d2",
     "deep": "m1",  # Find Planet X, the sum of passes along one orbit
     "link": "l1",  # Find Planet X, the link of passes by one orbit
     "filmsearch": "t4",  # the unknown movers of a film; t4: every candidate verified, orbit links from 3 sigma
