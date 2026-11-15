@@ -215,3 +215,60 @@ def test_an_answer_got_is_kept_while_another_lead_waits_for_jpl(tmp_path: Path, 
         assert kept is not None and set(kept) == {0, 1}
 
     asyncio.run(go())
+
+
+def test_a_peak_at_the_edge_of_the_range_or_in_a_bright_stars_halo_is_a_residual_not_a_lead(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    result: dict[str, Any] = {"params": {"dmin": 250.0, "dmax": 2000.0}}
+    assert fpx_known.edge_reason(result, {"d_lo": 1267.5, "d_hi": 2000.0}) is not None  # WISE 0855: strong all the way to the edge
+    assert fpx_known.edge_reason(result, {"d_lo": 600.0, "d_hi": 700.0}) is None
+    assert (
+        fpx_known.edge_reason({"params": {"dmin": 30.0, "dmax": 300.0}}, {"d_lo": 30.0, "d_hi": 40.0}) is not None
+    )  # Barnard: "30 au or farther"
+    from service.upstream import gaia_hats
+
+    star = {"ra": 77.0, "dec": 30.5, "pmra": 0.0, "pmdec": 0.0, "phot_g_mean_mag": 10.4}
+    monkeypatch.setattr(gaia_hats, "cone", lambda ra, dec, r: [star])
+    place = {"ra": 77.0 + 10 / 3600.0, "dec": 30.5, "mjd": 61000.0, "mjd0": 60990.0, "mjd1": 61010.0}  # 10 arcsec from the star
+    assert "star" in str(asyncio.run(fpx_known.halo_reason([place])))
+    far = dict(place, ra=77.0 + 200 / 3600.0)
+    assert asyncio.run(fpx_known.halo_reason([far])) is None
+    faint = dict(star, phot_g_mean_mag=15.0)
+    monkeypatch.setattr(gaia_hats, "cone", lambda ra, dec, r: [faint])
+    assert asyncio.run(fpx_known.halo_reason([place])) is None
+
+
+def test_the_sweep_keeps_a_residual_and_the_result_stops_calling_it_a_lead(tmp_path: Path) -> None:
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "params": {"dmin": 250.0, "dmax": 2000.0},
+        "t0": 61000.0,
+        "candidates": [{"ok": True, "d": 1267.5, "d_lo": 1267.5, "d_hi": 2000.0, "ra": 133.74, "dec": -7.35, "sn": 10.3}],
+    }
+
+    class OneDistant(FakeStore):
+        def listing(self, kinds: tuple[str, ...]) -> list[dict[str, object]]:
+            return [{"key": "d" * 24, "kind": "distant", "complete": True, "params": {}}]
+
+    idn = fpx_known.FpxIdentifier(OneDistant(meta), tmp_path, client=fake_jpl())
+    assert asyncio.run(idn.sweep()) == 1
+    out = idn.annotate("distant", "d" * 24, meta)["candidates"][0]
+    assert out["ok"] is False and out["known"]["state"] == "residual" and "edge" in out["residual"]
+    body: dict[str, Any] = {
+        "counts": {"peak": {"all": 1, "unexplained": 0, "unchecked": 1, "known": 0}},
+        "finds": [
+            {
+                "id": "peak:1",
+                "kind": "peak",
+                "ra": 133.74,
+                "dec": -7.35,
+                "status": "unchecked",
+                "verdict": "",
+                "scans": ["d" * 24],
+                "data": {"search": "distant", "peak": {"ok": True}},
+            }
+        ],
+    }
+    res = idn.enrich_findings(body)
+    assert res["finds"][0]["data"]["peak"]["ok"] is False and res["counts"]["peak"]["unchecked"] == 0
