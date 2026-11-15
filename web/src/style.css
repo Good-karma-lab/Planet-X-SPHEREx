@@ -2384,7 +2384,6 @@ input[type='range']::-moz-range-thumb {
 .vsq .panel-empty.small { place-items: start center; padding: 6px 4px; }
 .vsq .panel-empty.small span { font-size: 9.5px; line-height: 1.25; padding: 3px 5px; max-width: 96%; }
 /* a screen under 860 px high: the panel keeps its fixed layout (tabs, a scrolling body, the scans tray in its own region at the bottom: nothing above it can push it); the tray starts folded to one line there */
-}
 
 /* the scans never reflow while a count or a % changes: fixed columns, digits of one width */
 .sbar .sline { grid-template-columns: minmax(0, 1fr) 64px 84px; }

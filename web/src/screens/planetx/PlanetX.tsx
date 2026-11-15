@@ -50,13 +50,16 @@ const snap = (fov: number) => SIZES.find((s) => s >= fov - 0.5) ?? 60;
 const labHref = (f: SearchedField) => `#/lab?ra=${f.open.ra}&dec=${f.open.dec}&fov=${snap(f.open.fov)}`;
 
 /** Where the live service's Eris and Makemake detections stand in each pass: a Find Planet X peak this close is that known body. */
-const KNOWN_AT: [number, number][] = [[27.3724, -0.114], [26.3287, -0.4364], [27.5024, 0.1488], [199.9413, 21.4873], [202.3119, 20.1508]];
+const KNOWN_AT: [number, number][] = [[27.3724, -0.114], [26.3287, -0.4364], [27.5024, 0.1488], [199.9413, 21.4873], [202.3119, 20.1508], [61.86, 8.84]];
 
 /** One Find Planet X peak, as Findings lists it (GET /api/v1/findings, kind peak). A LEAD is a peak above its field's bar that is not a
  *  known body; the same definition the Findings page and the Lab use. */
-interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; status?: string; data: { peak?: { d?: number; sn?: number; phot_sn?: number; ok?: boolean; known?: { state: string; name?: string; words?: string; seps?: number[] } } } }
-function useLeads(): { leads: Peak[]; found: Peak[] } | null {
-  const [p, setP] = useState<{ leads: Peak[]; found: Peak[] } | null>(null);
+interface Known { state?: string; name?: string | null; words?: string; seps?: number[] }
+interface Peak { id: string; ra: number; dec: number; fov: number; place: string; snr: number | null; status?: string; data: { peak?: { d?: number; sn?: number; phot_sn?: number; ok?: boolean; known?: Known | null } } }
+/** a peak JPL names (data.peak.known from the service, or status 'known'), or one at a live known-body place */
+const isKnown = (f: Peak) => f.status === 'known' || f.data.peak?.known?.state === 'ok' || KNOWN_AT.some((k) => sep(k, [f.ra, f.dec]) < 0.05);
+function usePeaks(): { leads: Peak[]; known: Peak[] } | null {
+  const [p, setP] = useState<{ leads: Peak[]; known: Peak[] } | null>(null);
   useEffect(() => {
     let stop = false;
     const load = () =>
@@ -66,10 +69,8 @@ function useLeads(): { leads: Peak[]; found: Peak[] } | null {
           if (stop || !d?.finds) return;
           // the Findings rule: one peak with ok=true per object; known bodies are not leads (status 'known' from the service; until the service
           // marks the live Eris and Makemake detections, their places are matched here)
-          const peaks = d.finds.filter((f) => f.kind === 'peak' && f.data.peak?.ok !== false);
-          const isKnown = (f: Peak) => f.status === 'known' || KNOWN_AT.some((k) => sep(k, [f.ra, f.dec]) < 0.05);
-          // a peak JPL names (Sedna) is listed as a known body found blind, not as a lead
-          setP({ leads: peaks.filter((f) => !isKnown(f)), found: peaks.filter((f) => isKnown(f) && f.data.peak?.known?.state === 'ok') });
+          const ok = d.finds.filter((f) => f.kind === 'peak' && f.data.peak?.ok !== false);
+          setP({ leads: ok.filter((f) => !isKnown(f)), known: ok.filter(isKnown) });
         })
         .catch(() => {});
     void load();
@@ -121,9 +122,9 @@ const CH: Chapter[] = [
 export function PlanetXPage() {
   const searched = useSearched(true);
   const honest = useHonest();
-  const both = useLeads();
-  const leads = both ? both.leads : null;
-  const found = both ? both.found : [];
+  const pk = usePeaks();
+  const leads = pk?.leads ?? null;
+  const knownPeaks = pk?.known ?? [];
   const [tab, setTab] = useState<'cands' | 'searched' | 'story'>('cands');
   const [chapter, setChapter] = useState(-1);
   const [layers, setLayersState] = useState<Layers>(ALL);
@@ -304,12 +305,6 @@ export function PlanetXPage() {
             <div data-testid="px-cands">
               <h4 class="px3-sub">Leads · {leads == null ? '…' : nLeads}</h4>
               {(leads ?? []).map(card)}
-              {found.length > 0 && (
-                <>
-                  <h4 class="px3-sub">Known bodies, found blind · {found.length}</h4>
-                  {found.map(card)}
-                </>
-              )}
               {leads != null && nLeads === 0 && <p class="px3-note">No leads above the bar right now.</p>}
               <h4 class="px3-sub">Ruled out</h4>
               <div class="px3-cand rej" onMouseEnter={() => scene.current?.highlight(mine.find((f) => nameOf(f) === 'Ecliptic D4 field')?.key ?? null)} onMouseLeave={() => scene.current?.highlight(null)}>
@@ -347,6 +342,20 @@ export function PlanetXPage() {
                   <a class="go" href={k.lab}>Open in the Lab →</a>
                 </div>
               ))}
+              {knownPeaks
+                .filter((f) => f.data.peak?.known?.name && !KNOWN.some((k) => f.data.peak!.known!.name!.includes(k.who)))
+                .map((f) => (
+                  <div key={f.id} class="px3-cand ok">
+                    <div class="t">
+                      <b>
+                        {f.data.peak!.known!.name} · {(f.data.peak?.d ?? 0).toFixed(0)} au
+                      </b>
+                      <em class="pill ok">named by JPL</em>
+                    </div>
+                    <div class="where">{f.data.peak!.known!.words ?? `RA ${f.ra.toFixed(2)} · Dec ${fmtDec(f.dec)}`}</div>
+                    <a class="go" href={fieldOf(f)}>Open in the Lab →</a>
+                  </div>
+                ))}
               {honest.map((l, k) => (
                 <p key={k} class="px3-note">{l}</p>
               ))}
