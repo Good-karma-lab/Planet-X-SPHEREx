@@ -1,8 +1,5 @@
 import '../planetx/planetx.css';
-import { useEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
-import filmDates from './film-dates.json';
-import { Model } from '../planetx/model';
 
 /** The figures of the Method page, by the name a text gives them in `[figure: name | caption]`. Every picture is a real product of the service. */
 
@@ -40,66 +37,19 @@ function Row({ items, cols }: { items: { src: string; alt: string; tag?: string;
   );
 }
 
-/** The Days film of the 60′ ecliptic field, December 2025: the 24 real visit pictures; it plays only while it is on screen. */
-function FilmPlayer() {
-  const [k, setK] = useState(0);
-  const [play, setPlay] = useState(true);
-  const [seen, setSeen] = useState(false);
-  const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const el = box.current;
-    if (!el || typeof IntersectionObserver === 'undefined') {
-      setSeen(true);
-      return;
-    }
-    const io = new IntersectionObserver((e) => setSeen(e.some((x) => x.isIntersecting)), { threshold: 0.2 });
-    io.observe(el);
-    return () => io.disconnect();
-  }, []);
-  useEffect(() => {
-    if (!play || !seen || matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    const t = setInterval(() => setK((v) => (v + 1) % filmDates.length), 500);
-    return () => clearInterval(t);
-  }, [play, seen]);
-  return (
-    <div class="player" ref={box}>
-      <div class="pic">
-        <img src={M(`film/sky_${String(k).padStart(2, '0')}.jpg`)} alt={`Days film, ecliptic field, visit ${k + 1} of ${filmDates.length}`} />
-        <span class="tagc">{filmDates[k]} UTC</span>
-      </div>
-      <div class="side">
-        <b>Days film · Dec 2025</b>
-        <br />
-        60′ ecliptic field, {filmDates.length} visits hours apart. The stars stand still; the asteroids hop.
-        <div class="tl">
-          {filmDates.map((_, i) => (
-            <i key={i} class={i === k ? 'on' : ''} onClick={() => { setPlay(false); setK(i); }} />
-          ))}
-        </div>
-        <div class="ctl">
-          <button onClick={() => setPlay(!play)}>{play ? 'Pause' : 'Play'}</button>
-          <button
-            onClick={() => {
-              setPlay(false);
-              setK((v) => (v + 1) % filmDates.length);
-            }}
-          >
-            Step
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+/** A short muted loop recorded from spherex.space (every number in it is the live site's), with its poster. */
+function Vid({ f, label }: { f: string; label: string }) {
+  return <video class="mf-vid" src={M(`live/${f}.mp4`)} poster={M(`live/${f}.jpg`)} muted loop playsInline autoPlay preload="metadata" aria-label={label} />;
 }
 
 type Maker = (cap: string) => preact.JSX.Element;
 
 const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => preact.JSX.Element }> = {
   'wall-detectors': {
-    cap: 'The six detectors side by side, one field · Barnard’s Star',
+    cap: 'The six detectors side by side on Barnard’s Star, the passes playing: the star jumps the same way in all of them',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <img src={M('barnard_wall_detectors.jpg')} alt="The six SPHEREx detectors side by side on Barnard's Star" loading="lazy" />
+        <Vid f="wall-detectors" label='The six SPHEREx detectors side by side on Barnard’s Star, playing through the passes' />
       </Fig>
     ),
   },
@@ -118,17 +68,10 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     ),
   },
   'blink-pluto': {
-    cap: 'Barnard’s Star field in 1950, 1991 and 2026: the same idea Tombaugh used',
+    cap: 'The blink idea on our own plates: Barnard’s field in 1950, 1991 and 2026, one star moving',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Row
-          cols={3}
-          items={[
-            { src: 'blink_1950_poss1.jpg', alt: "Barnard's Star field, 1950", year: '1950', sub: 'POSS-I plate' },
-            { src: 'blink_1991_poss2.jpg', alt: "Barnard's Star field, 1991", year: '1991', sub: 'POSS-II plate' },
-            { src: 'blink_2026_spherex.jpg', alt: "Barnard's Star field, 2026", year: '2026', sub: 'SPHEREx' },
-          ]}
-        />
+        <Vid f="blink-pluto" label='Barnard’s Star field in 1950, 1991 and 2026 blinked' />
       </Fig>
     ),
   },
@@ -148,41 +91,26 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     ),
   },
   'raw-to-video': {
-    cap: 'Barnard’s Star field: from the exposures of one pass to the difference between passes',
+    cap: 'From the raw exposures to a film: raw frames, the stack of the passes, colour by wavelength, then the passes played',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <div class="steps">
-          {[
-            ['1', 'one pass, stacked', 'barnard_5arcmin_aug25.jpg'],
-            ['2', 'passes added, coloured by spectrum', 'barnard_coadd.jpg'],
-            ['3', 'the same field in named bands', 'barnard_wall_of_bands.jpg'],
-            ['4', 'difference of two passes', 'barnard_difference.jpg'],
-          ].map(([n, s, f]) => (
-            <div key={n}>
-              <img src={M(f!)} alt={s} loading="lazy" />
-              <span class="tagc">
-                <b>{n}</b>
-                {s}
-              </span>
-            </div>
-          ))}
-        </div>
+        <Vid f="raw-to-video" label='Raw exposures, the stack, the coloured stack and the passes as a film' />
       </Fig>
     ),
   },
   'spectrum-source': {
-    cap: 'The spectrum of a field star: one point per exposure, coloured by detector',
+    cap: 'A click on a star: its spectrum is measured in every exposure that covers it, point by point, coloured by detector',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <img src={M('spectrum-crop.jpg')} alt="The spectrum of a field star, points by detector" loading="lazy" />
+        <Vid f="spectrum-source" label='The spectrum of a field star filling in point by point' />
       </Fig>
     ),
   },
   'film-ecliptic-dec2025': {
-    cap: 'The film search on real visits',
+    cap: 'The Days film of the 60′ ecliptic field, December 2025: the visits hours apart, the known asteroids ringed and named',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <FilmPlayer />
+        <Vid f="film-ecliptic-dec2025" label='The Days film of the ecliptic field with the asteroid tracks' />
       </Fig>
     ),
   },
@@ -204,12 +132,10 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     ),
   },
   'p9-orbits': {
-    cap: 'The Solar System with the predicted Planet Nine orbit and the fields searched for it',
+    cap: 'The Solar System with the published range of Planet Nine orbits and the fields searched for it',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <div class="p9model">
-          <Model />
-        </div>
+        <Vid f="p9-orbits" label='The Planet X model slowly turning' />
         <a class="p9link" href="#/planetx">
           Open the Planet X page →
         </a>
@@ -233,10 +159,66 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     ),
   },
   'anomaly-map': {
-    cap: 'The ε Indi B field: anomaly 1 is the brown dwarf',
+    cap: 'The ε Indi B field: the anomalies and red sources ringed in the picture and listed with their scores',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <img src={M('anomaly-crop.jpg')} alt="Anomaly map of the epsilon Indi B field" loading="lazy" />
+        <Vid f="anomaly-map" label='The anomaly map of the epsilon Indi B field' />
+      </Fig>
+    ),
+  },
+  'difference': {
+    cap: 'The difference of passes: what moved shows as a pair of colours, what stayed cancels out',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <Vid f="difference" label='The difference view of Barnard’s Star' />
+      </Fig>
+    ),
+  },
+  'archive-images': {
+    cap: 'Archive images over time: the photographic plates and the infrared surveys before SPHEREx, in the same field',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <Vid f="archive-over-time" label='Archive images of Barnard’s field played in time order' />
+      </Fig>
+    ),
+  },
+  'object-portrait': {
+    cap: 'A click on an object: its portrait, position, proper motion and what the catalogues know',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <Vid f="object-portrait" label='The object card of Barnard’s Star' />
+      </Fig>
+    ),
+  },
+  'field-size': {
+    cap: 'The same place at 2′, 5′, 10′, 20′ and 60′: one click changes how much sky the lab reads',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <Vid f="field-size-zoom" label='Barnard’s Star field from 2 to 60 arcminutes' />
+      </Fig>
+    ),
+  },
+  'epsindi-pendulum': {
+    cap: 'ε Indi B in the pendulum: the orange-red brown dwarf steps between the four passes',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <Vid f="epsindi-pendulum" label='Epsilon Indi B stepping between passes' />
+      </Fig>
+    ),
+  },
+  'epsindi-bands': {
+    cap: 'ε Indi B in named bands: water, methane, ice, dust, CO₂ and CO side by side',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <Vid f="epsindi-bands" label='Epsilon Indi B in the named bands' />
+      </Fig>
+    ),
+  },
+  'epsindi-wall': {
+    cap: 'ε Indi B on the six detectors: the brown dwarf is brightest at the long wavelengths',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <Vid f="epsindi-wall" label='Epsilon Indi B on the six detectors' />
       </Fig>
     ),
   },

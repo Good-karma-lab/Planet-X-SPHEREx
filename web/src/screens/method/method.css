@@ -181,3 +181,11 @@ table.v td.n { font-family: var(--mono); color: var(--ink); white-space: nowrap;
 .depthbars .dt i { display: block; height: 100%; border-radius: 6px; }
 .depthbars b { font: 600 13px var(--mono); text-align: right; color: var(--ink); }
 @media (max-width: 820px) { .depthbars .db { grid-template-columns: 1fr 70px; } .depthbars .dt { grid-column: 1 / -1; order: 3; } }
+
+/* the live recordings */
+.mf-fig video.mf-vid {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #000;
+}
