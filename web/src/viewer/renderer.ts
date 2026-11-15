@@ -198,11 +198,31 @@ vec3 satCore(int k) {
 
 vec3 passColour(int k) {
   cq = uv;
-  float sat = texture(uSat, vec3(uv, float(satK(k)))).r;
-  if (sat > 0.5) return uWhiteCores == 1 ? vec3(1.0) : satCore(k);  // a saturated core is white or the star's colour at full scale, never a hole
+  float sat = max(texture(uSat, vec3(uv, float(satK(k)))).r, isnan(raw(k, 0, uv)) ? 1.0 : 0.0);
+  // the mask of saturated pixels is a grid of detector pixels, several picture pixels wide: read hard it makes a square. A saturated core is a smooth disc:
+  // the mask is blurred over about a detector pixel and the core fades in over its edge
+  float sm = sat;
+  if (uDP > 0.0) {
+    float a = 0.0;
+    float w = 0.0;
+    for (int j = -2; j <= 2; j++)
+      for (int i = -2; i <= 2; i++) {
+        vec2 o = vec2(float(i), float(j)) * 0.5;
+        float g = exp(-dot(o, o) * 1.1);
+        vec2 q = uv + o * uDP;
+        // a saturated pixel, or one with no data (the detector's overflow leaves holes round a core): both are part of the core
+        a += g * max(texture(uSat, vec3(q, float(satK(k)))).r, isnan(raw(k, 0, q)) ? 1.0 : 0.0);
+        w += g;
+      }
+    sm = a / w;
+  }
+  float core = smoothstep(0.22, 0.58, sm);
+  if (core >= 1.0) return uWhiteCores == 1 ? vec3(1.0) : satCore(k);  // a saturated core is white or the star's colour at full scale, never a hole
   G = sharpGain(k);
   vec4 c = colourOf(k);
-  return c.a > 0.5 ? c.rgb : uNoData;
+  vec3 base = c.a > 0.5 ? c.rgb : (core > 0.2 ? vec3(1.0) : uNoData);   // no data inside the fade of a core is part of the core, not a black pixel
+  if (core <= 0.0) return base;
+  return mix(base, uWhiteCores == 1 ? vec3(1.0) : satCore(k), core);
 }
 
 vec3 diffColour(int k) {

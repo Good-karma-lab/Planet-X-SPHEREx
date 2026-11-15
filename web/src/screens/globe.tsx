@@ -73,6 +73,15 @@ const SURVEYS: { id: SurveyId; name: string; layer: SkyLayer[]; note: string }[]
 ];
 const SIZES = [2, 5, 10, 20, 60];
 /** the plain word on a layer button (the survey's own name is its tooltip) */
+/** the one line under the globe for each layer: what it is and who made it */
+const LAYER_CAPTION: Record<string, string> = {
+  svs: 'Star map · NASA SVS · Gaia DR2 (ESA/Gaia/DPAC)',
+  dss2: 'Visible · DSS2 · STScI, via CDS',
+  spherex: 'SPHEREx · DR1 all-sky cube · NASA/JPL-Caltech (IRSA)',
+  '2mass': 'Near-infrared · 2MASS · UMass/IPAC-Caltech/NASA/NSF',
+  wise: 'Infrared · AllWISE · NASA/JPL-Caltech/UCLA',
+  dust: 'Dust map · IRAS IRIS · Miville-Deschênes & Lagache',
+};
 const LAYER_WORD: Record<string, string> = { svs: 'Star map', dss2: 'Visible', spherex: 'SPHEREx', '2mass': 'Near-infrared', wise: 'Infrared', dust: 'Dust map' };
 /** the globe zoom limits; above ZOOM_NEAR a pin is an open ring so that the star under it shows */
 const ZOOM_MIN = 0.8;
@@ -279,6 +288,9 @@ export function Globe() {
   // zoomed in past the resolution of the star map: DSS2 is faded in over it, and the credit line says so
   // zoomed past what the star map holds the layer itself changes to Visible (as if chosen by hand) and back when zoomed out again; a layer chosen by hand is never changed
   const autoVisible = useRef(false);
+  // the zoom slider: its position (0 = the widest view, 1 = the deepest) follows wheel and pinch; the globe's effect fills the API
+  const [zt, setZt] = useState(0.3);
+  const zoomApi = useRef<{ set: (t: number) => void; by: (k: number) => void }>({ set: () => {}, by: () => {} });
   const [catOpen, setCatOpen] = useState(kept.catOpen);
   const [filter, setFilter] = useState(kept.filter);
   const [query, setQuery] = useState(kept.query);
@@ -397,6 +409,7 @@ export function Globe() {
     const zoomMin = () => (inn() ? ZOOM_MIN_INSIDE : ZOOM_MIN);
     // the Mollweide map: zoom and the shift of its centre (it zooms and pans like the globe turns)
     const mv = { z: 1, x: 0, y: 0 };
+    let syncZt = (): void => {};
     const mw = () => Math.min(W - 20, (H - 20) * 2) * mv.z;
     const mcx = () => W / 2 + mv.x;
     const mcy = () => H / 2 + mv.y;
@@ -642,6 +655,7 @@ export function Globe() {
       }
       // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
       const st = live.current;
+      syncZt();
       if (st.proj === 'globe') {
         if (st.survey === 'svs' && R() > STAR_MAP_TO_VISIBLE && HIPS['dss2']) {
           autoVisible.current = true;
@@ -813,6 +827,77 @@ export function Globe() {
       const r = c.getBoundingClientRect();
       const f = frame;
       if (f && Math.abs(e.clientX - r.left - f.x) < f.s && Math.abs(e.clientY - r.top - f.y) < f.s) showAreaRef.current();
+    };
+    // the zoom slider and its buttons: the same zoom as the wheel. With an object selected the globe first turns so that it is in the centre and the zoom is on it; with
+    // nothing selected the zoom is on the centre of the picture
+    let ztSent = -1;
+    let turnToken = 0;
+    const zoomAbout = (k: number) => {
+      anim = null;
+      const so = live.current.sel;
+      const target = so ? shownPlace(so, live.current.survey, undefined) : null;
+      if (live.current.proj === 'moll') {
+        const z1 = Math.max(1, Math.min(40, mv.z * k));
+        const kz = z1 / mv.z;
+        mv.x = -(W / 2 - mcx()) * kz;
+        mv.y = -(H / 2 - mcy()) * kz;
+        mv.z = z1;
+        if (target) {
+          const pp = project(target[0], target[1], basis());
+          if (pp[2]) {
+            mv.x += W / 2 - pp[0];
+            mv.y += H / 2 - pp[1];
+          }
+        }
+        if (mv.z <= 1.0001) {
+          mv.x = 0;
+          mv.y = 0;
+        }
+        clampMap();
+      } else {
+        const F = basis();
+        // the selected object, else the aim frame, is turned to the centre (smoothly, 0.35 s), and the zoom is about the centre
+        const goal = target ?? ([aim.get().ra, aim.get().dec] as [number, number]);
+        const c = frameOf(goal[0], goal[1], 0).c;
+        const cosA = Math.max(-1, Math.min(1, dot3(F.c, c)));
+        const th = Math.acos(cosA);
+        if (th > 1e-4) {
+          const token = ++turnToken;
+          const t0 = performance.now();
+          const step = () => {
+            if (token !== turnToken) return;
+            const e = Math.min(1, (performance.now() - t0) / 350);
+            const ee = e * e * (3 - 2 * e);
+            const sa = Math.sin((1 - ee) * th) / Math.sin(th);
+            const sb = Math.sin(ee * th) / Math.sin(th);
+            const v: V3 = [sa * F.c[0] + sb * c[0], sa * F.c[1] + sb * c[1], sa * F.c[2] + sb * c[2]];
+            setFrame(turnFrame(F, F.c, v));
+            dirty.current = true;
+            if (e < 1) requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        }
+        view.current.zoom = Math.max(zoomMin(), Math.min(ZOOM_MAX, view.current.zoom * k));
+      }
+      dirty.current = true;
+    };
+    const ztNow = (): number => {
+      const [lo, hi, z] = live.current.proj === 'moll' ? [1, 40, mv.z] : [zoomMin(), ZOOM_MAX, view.current.zoom];
+      return Math.max(0, Math.min(1, Math.log(z / lo) / Math.log(hi / lo)));
+    };
+    zoomApi.current = {
+      by: (k) => zoomAbout(k),
+      set: (t) => {
+        const [lo, hi, z] = live.current.proj === 'moll' ? [1, 40, mv.z] : [zoomMin(), ZOOM_MAX, view.current.zoom];
+        zoomAbout((lo * (hi / lo) ** t) / z);
+      },
+    };
+    syncZt = () => {
+      const t = ztNow();
+      if (Math.abs(t - ztSent) > 0.003) {
+        ztSent = t;
+        setZt(t);
+      }
     };
     c.onwheel = (e) => {
       e.preventDefault();
@@ -1001,6 +1086,24 @@ export function Globe() {
     <div class="screen">
       <div class="globe-wrap">
         <canvas ref={cv} aria-label="Sky globe" data-testid="sky" />
+        <div class="zoomctl dark-glass" role="group" aria-label="Zoom" data-testid="zoom-slider">
+          <button aria-label="Zoom in" title="Zoom in" onClick={() => zoomApi.current.by(1.5)}>
+            +
+          </button>
+          <div class="zs">
+            <input
+              type="range"
+              min="0"
+              max="1000"
+              value={Math.round(zt * 1000)}
+              aria-label="Zoom, from the whole sphere to the deepest view"
+              onInput={(e) => zoomApi.current.set(Number((e.target as HTMLInputElement).value) / 1000)}
+            />
+          </div>
+          <button aria-label="Zoom out" title="Zoom out" onClick={() => zoomApi.current.by(1 / 1.5)}>
+            −
+          </button>
+        </div>
         <div class="map-ui map-bar" data-testid="map-bar">
           <div class="aimrow dark-glass" role="group" aria-label="Aim">
             <label class="fld" for="gRa">
@@ -1106,11 +1209,9 @@ export function Globe() {
               )}
             </div>
           )}
-          {survey === 'svs' && (
-            <div class="map-credit" data-testid="map-credit">
-              {(equiOf('svs') ?? bakedOf('svs'))?.label ?? 'Star map · Gaia (NASA SVS)'} · {(equiOf('svs') ?? bakedOf('svs'))?.credit ?? STAR_MAP_CREDIT}
-            </div>
-          )}
+          <div class="map-credit" data-testid="map-credit">
+            {LAYER_CAPTION[survey]}
+          </div>
           <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
           ★ are test targets.
