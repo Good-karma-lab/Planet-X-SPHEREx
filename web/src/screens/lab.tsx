@@ -1,3 +1,4 @@
+import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
 import { FieldClient, mjdToDate, type FieldMeta } from '../lib/field';
@@ -13,7 +14,7 @@ import { atEpoch } from '../lib/sky';
 import { FRAME_MS, loadBodies, loadFilm, utc, type Film, type KnownBody } from './film';
 import { NeossatCard } from './neossat';
 import { LightCurves } from './lightcurve';
-import { ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
+import { ObjectGuess, ObjectTab, Passport, SpectrumTab, driverWords, type AnomalyField, type Source } from './spectrum';
 import { halfToFloat } from '../lib/sxp';
 import { Portrait, type PortraitData } from './portrait';
 import {
@@ -2514,7 +2515,7 @@ export function Lab({ route }: { route: Route }) {
     return ` · ${o.n} was ${r >= 60 ? `${(r / 60).toFixed(1)}′` : `${r.toFixed(0)}″`} ${dir} of its 2025 place`;
   }
   /** The portrait of a source at (ra, dec) [J2000 with motion] from the detector stacks of the season shown. */
-  const portraitOf = (src: { ra: number; dec: number; pmra?: number; pmdec?: number }, label: string) => {
+  const portraitOf = (src: { ra: number; dec: number; pmra?: number; pmdec?: number }, label: string, aside?: ComponentChildren) => {
     void portraitTick;
     if (!meta) return null;
     const k = shown?.pass ?? 0;
@@ -2547,7 +2548,7 @@ export function Lab({ route }: { route: Route }) {
       rgb: pic && pic.n === d.n ? pic.rgb : undefined,
       wb: wbq ? { kr: wbq.kr, kb: wbq.kb } : undefined,
     };
-    return <Portrait data={data} x={gx} y={gy} label={label} />;
+    return <Portrait data={data} x={gx} y={gy} label={label} aside={aside} />;
   };
   const half = fov / 120;
   const inField = targets.current.find((o) => {
@@ -3561,7 +3562,7 @@ export function Lab({ route }: { route: Route }) {
                       )}
                     </div>
                   )}
-                  {sel && portraitOf(sel, sel.name ?? 'selected source')}
+                  {sel && portraitOf(sel, sel.name ?? 'selected source', <ObjectGuess src={sel} />)}
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
                   {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
                   {sel && (
