@@ -350,6 +350,45 @@ function MoversRows({
   );
 }
 
+const identCache = new Map<string, string | null>();
+
+/** The catalogue name of each mover track (SIMBAD's display name, as the passport's heading has it), asked once per place: undefined while asked or when there is none. */
+function useIdentNames(tracks: Track[]): (string | undefined)[] {
+  const key = tracks.map((t) => `${t.ra_2025_9.toFixed(5)},${t.dec_2025_9.toFixed(5)}`).join(';');
+  const [, tick] = useState(0);
+  useEffect(() => {
+    let stop = false;
+    void (async () => {
+      for (const t of tracks) {
+        const k = `${t.ra_2025_9.toFixed(5)},${t.dec_2025_9.toFixed(5)}`;
+        if (identCache.has(k)) continue;
+        for (let n = 0; n < 6 && !stop; n++) {
+          try {
+            const r = await fetch(`/api/v1/context?ra=${t.ra_2025_9.toFixed(6)}&dec=${t.dec_2025_9.toFixed(6)}&epoch=2025.9&radius=6`);
+            if (r.ok) {
+              const c = (await r.json()) as { simbad?: { state: string; name?: string; display_name?: string } };
+              if (c.simbad?.state === 'pending') {
+                await new Promise((res) => setTimeout(res, 2000));
+                continue;
+              }
+              identCache.set(k, c.simbad?.state === 'ok' ? (c.simbad.display_name ?? c.simbad.name ?? null) : null);
+            }
+          } catch {
+            /* asked again when the tracks change */
+          }
+          break;
+        }
+        if (stop) return;
+        tick((x) => x + 1);
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [key]);
+  return tracks.map((t) => identCache.get(`${t.ra_2025_9.toFixed(5)},${t.dec_2025_9.toFixed(5)}`) ?? undefined);
+}
+
 export function Lab({ route }: { route: Route }) {
   const p = route.params;
   const ra = Number(p['ra']);
@@ -1760,12 +1799,14 @@ export function Lab({ route }: { route: Route }) {
       stop = true;
     };
   }, [ra, dec, fov, valid, meta]);
-  const trackNames = (mv?.result?.tracks ?? []).map((t) => {
+  // the names of the movers in the lists come from the same identification as the passport's heading (/context at the track's place in 2025.9)
+  const identNames = useIdentNames(mv?.result?.tracks ?? []);
+  const trackNames = (mv?.result?.tracks ?? []).map((t, ti) => {
     for (const o of targets.current) {
       const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2025.9);
       if (Math.hypot((tra - t.ra_2025_9) * Math.cos((tdec * Math.PI) / 180), tdec - t.dec_2025_9) * 3600 < 12) return o.n;
     }
-    return t.gaia ? `Gaia DR3 ${t.gaia.source_id}` : '';
+    return identNames[ti] ?? (t.gaia ? `Gaia DR3 ${t.gaia.source_id}` : '');
   });
   // a mover's positions in every pass as an MPC ADES report: built by the service, saved as a file; what the MPC would still need is said (nothing is sent anywhere)
   const [adesNote, setAdesNote] = useState('');
