@@ -165,6 +165,8 @@ class SkyPainter {
 
   /** One frame of work. `moving`: the view is changing, paint a coarse picture now. Returns true when the picture changed. */
   frame(view: SkyView, layer: SkyLayer[], moving: boolean): boolean {
+    // the star map before the manifest has said where it is: nothing to paint yet
+    if (layer[0]!.id === 'svs' && !equiOf('svs') && !HIPS['svs']) return false;
     if (moving) {
       this.pass = null;
       this.stale = true;

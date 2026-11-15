@@ -7,7 +7,7 @@ import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage }
 import { sky, STAR_MAP_FADE_FROM, type SkyLayer } from './globe/sky';
 import { catalogNow, kept, loadCatalog, type Obj, type SurveyId } from './globe/store';
 import { equiOf, onEquiTile } from '../lib/equi';
-import { HIPS, bakedOf, loadManifest, tiles } from '../lib/hips';
+import { HIPS, bakedOf, loadManifest, manifestKnown, tiles } from '../lib/hips';
 import { KnownList } from './search/known';
 import { drawBodyPath, drawMovingPath, placeAt, type BodyPath, type MovingObject } from './search/path';
 import './globe/globe.css';
@@ -230,7 +230,8 @@ export function Globe() {
     void loadManifest().then(() => setManifestTick((t) => t + 1));
   }, []);
   const svsOn = (!!bakedOf('svs') && !!HIPS['svs']) || !!equiOf('svs');
-  const survey: SurveyId = surveyPick === 'svs' && !svsOn ? 'dss2' : surveyPick;
+  // until the manifest has answered, the star map waits (a dark sky), not DSS2 that is then replaced; if it has none, DSS2 stands in
+  const survey: SurveyId = surveyPick === 'svs' && !svsOn && manifestKnown() ? 'dss2' : surveyPick;
   const [proj, setProj] = useState<'globe' | 'moll'>(kept.proj);
   const [inside, setInside] = useState(kept.inside);
   // zoomed in past the resolution of the star map: DSS2 is faded in over it, and the credit line says so

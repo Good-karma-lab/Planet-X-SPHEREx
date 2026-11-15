@@ -37,6 +37,9 @@ const baked = new Map<string, Baked>();
 /** the baked layers of the service, once the manifest has been read (null: not read yet or none) */
 export const bakedOf = (id: string): Baked | undefined => baked.get(id);
 let manifest: Promise<boolean> | null = null;
+/** the manifest has been answered (or has failed): whether a layer is there is known */
+let manifestDone = false;
+export const manifestKnown = (): boolean => manifestDone;
 /** Reads the service's manifest of baked tiles once. True when the service has baked layers. */
 export function loadManifest(): Promise<boolean> {
   manifest ??= fetch('/tiles/manifest.json', { cache: 'no-cache' })
@@ -77,7 +80,10 @@ export function loadManifest(): Promise<boolean> {
       listeners.forEach((f) => f());
       return baked.size > 0;
     })
-    .catch(() => false);
+    .catch(() => false)
+    .finally(() => {
+      manifestDone = true;
+    });
   return manifest;
 }
 
