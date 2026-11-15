@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import heapq
 import itertools
+import time
 from collections.abc import Callable
 from concurrent.futures import Executor
 from contextvars import ContextVar
@@ -28,6 +29,8 @@ _workers = 1
 _gate: _Gate | None = None
 
 
+PERSON_LOW_CAP = 2  # background calls at most while a person is at the page
+PERSON_RECENT_S = 20.0  # a person's call this recent counts as a person at the page
 LOW = 2  # priorities from this one on (the warm runner, maintenance) are "background": they never take the workers kept free for people
 
 
@@ -45,11 +48,20 @@ class _Gate:
         self.low_cap = max(1, workers - r)
         self.used = 0
         self.used_low = 0
+        self.person_at = -1e9  # when a person's call last came in
         self.waiting: list[tuple[int, int, bool, asyncio.Future[None]]] = []
         self.seq = itertools.count()
 
+    def _cap(self) -> int:
+        """The background's share: all but the reserve while nobody is at the page; while a person's call waits or came in the last
+        PERSON_RECENT_S, at most PERSON_LOW_CAP, so a person's field gets nearly every worker as the background calls finish."""
+        person_waits = any(not low and not f.done() for _, _, low, f in self.waiting)
+        if person_waits or time.monotonic() - self.person_at < PERSON_RECENT_S:
+            return min(self.low_cap, PERSON_LOW_CAP)
+        return self.low_cap
+
     def _can(self, low: bool) -> bool:
-        return self.used < self.total and (not low or self.used_low < self.low_cap)
+        return self.used < self.total and (not low or self.used_low < self._cap())
 
     def _take(self, low: bool) -> None:
         self.used += 1
@@ -58,6 +70,8 @@ class _Gate:
     async def acquire(self, priority: int) -> bool:
         """Wait for a place; -> whether the call counts as background (hand it back to `release`)."""
         low = priority >= LOW
+        if not low:
+            self.person_at = time.monotonic()
         fut: asyncio.Future[None] = asyncio.get_running_loop().create_future()
         heapq.heappush(self.waiting, (priority, next(self.seq), low, fut))
         self._grant()  # a place may be free for this call even when background calls wait for theirs
@@ -82,7 +96,7 @@ class _Gate:
             _, _, low, fut = item
             if fut.done():
                 continue
-            if low and self.used_low >= self.low_cap:
+            if low and self.used_low >= self._cap():
                 skipped.append(item)
                 continue
             self._take(low)
@@ -95,7 +109,7 @@ class _Gate:
             "free": self.total - self.used,
             "waiting": sum(1 for _, _, _, f in self.waiting if not f.done()),
             "background": self.used_low,
-            "background_cap": self.low_cap,
+            "background_cap": self._cap(),
         }
 
 
