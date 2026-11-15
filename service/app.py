@@ -252,7 +252,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         async def fn(ctx: Any) -> dict[str, Any]:
             return await filmjob.run_film(ctx, index, files, store, params, wl)
 
-        return st.scheduler.submit(filmjob.KIND, key, params, fn, priority, "heavy", 1500)
+        return st.scheduler.submit(filmjob.KIND, key, params, fn, priority, "heavy", fieldjob.film_memory_mb(float(params["fov"])))
 
     def warm_key(f: WarmField) -> tuple[str, dict[str, Any]] | None:
         """The product key of a warm field or film (None for a film with no exposures)."""
@@ -417,7 +417,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             async def fn(ctx: Any) -> dict[str, Any]:
                 return await filmsearchjob.run_filmsearch(ctx, index, files, store, fkey, params, wl)
 
-            job = st.scheduler.submit(filmsearchjob.KIND, skey, params, fn, Priority.P2, "heavy", 1500)
+            job = st.scheduler.submit(
+                filmsearchjob.KIND, skey, params, fn, Priority.P2, "heavy", fieldjob.film_memory_mb(float(params["fov"]))
+            )
         while job.state not in ("done", "error", "cancelled"):
             await asyncio.sleep(3.0)
 

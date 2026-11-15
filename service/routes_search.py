@@ -17,6 +17,7 @@ from service.context import CatalogueContext
 from service.jobs.scheduler import Priority
 from service.products.store import product_key
 from service.workers import filmjob, filmsearchjob
+from service.workers.fieldjob import film_memory_mb
 
 API_PREFIX = "/api/v1"
 RETRY_AFTER_S = 120.0  # a failed search is searched again by a request after this long
@@ -65,7 +66,7 @@ def make_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             async def fn(ctx: Any) -> dict[str, Any]:
                 return await filmsearchjob.run_filmsearch(ctx, index, files, store, film_key, params, wl)
 
-            job = st.scheduler.submit(filmsearchjob.KIND, key, params, fn, Priority.P1, "heavy", 1500)
+            job = st.scheduler.submit(filmsearchjob.KIND, key, params, fn, Priority.P1, "heavy", film_memory_mb(float(params["fov"])))
         if job.state == "error":
             return {"state": "error", "phase": job.phase, "error": job.error, "tracks": [], "control": None}
         return {"state": "running", "phase": job.phase, "done": job.done, "total": job.total, "error": None, "tracks": [], "control": None}

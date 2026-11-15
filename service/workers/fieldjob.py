@@ -83,6 +83,13 @@ def memory_estimate_mb(fov: float) -> int:
     return int(400 + 6 * n * n * 4 * 22 / 1e6)  # a detector group plus the band sums and the pass layers
 
 
+def film_memory_mb(fov: float) -> int:
+    """What a film or a film search of a field holds at its peak (every visit's frame and the workers' parts): a 60' film with a film
+    search and the field's other searches took the service to its 13 GB limit, so the scheduler counts the big ones at their size and
+    starts a second one only when the first leaves room."""
+    return 5000 if fov >= 40 else 2500 if fov >= 15 else 1500
+
+
 def _f16(a: np.ndarray) -> np.ndarray:
     return np.asarray(a, np.float32).astype(np.float16)
 
