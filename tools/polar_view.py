@@ -14,7 +14,7 @@ yy, xx = np.mgrid[0:S, 0:S]
 dx, dy = (xx - S / 2 + 0.5) / (S / 2), (S / 2 - yy - 0.5) / (S / 2)
 r = np.hypot(dx, dy)
 az = np.degrees(np.arctan2(dy, dx)) % 360.0
-dec = 90.0 - r * R
+dec = (90.0 - r * R) * (-1.0 if len(sys.argv) > 5 and sys.argv[5] == "south" else 1.0)
 ok = r <= 1.0
 
 
