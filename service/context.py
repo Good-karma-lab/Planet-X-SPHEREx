@@ -32,6 +32,7 @@ IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 NED_URL = "https://ned.ipac.caltech.edu/cgi-bin/objsearch"
 SIMBAD_EPOCH, GAIA_EPOCH = 2000.0, 2016.0
+SIMBAD_HEDGE_S = 1.0  # the second SIMBAD mirror is asked as well when the first has not answered by then
 IDENT_FAST_MAS = 1000.0  # above this proper motion (mas/yr) a star can have left the small cone: SIMBAD is asked for those in a wide cone
 BRIGHT_MAG = 9.0  # a star brighter than this saturates SPHEREx: the centre of its core is uncertain by several arcseconds
 BRIGHT_RADIUS = 15.0
@@ -280,7 +281,7 @@ class CatalogueContext:
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(DEADLINE_S, connect=4.0), headers={"User-Agent": "spherex-sky/0.1"})
-        self.breakers = {k: Breaker(k) for k in ("simbad", "gaia", "irsa", "vizier", "ned")}
+        self.breakers = {k: Breaker(k) for k in ("simbad", "simbad2", "gaia", "irsa", "vizier", "ned")}
         self.cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
 
     async def _get(self, which: str, url: str, params: dict[str, str] | None = None, form: bool = False) -> str:
@@ -309,13 +310,33 @@ class CatalogueContext:
             f"AND (b.pmra*b.pmra + b.pmdec*b.pmdec) > {IDENT_FAST_MAS**2:.0f})) "
             "AND (b.otype IS NULL OR b.otype NOT IN ('Pl', 'Pl?', 'PlG', 'PlG?'))"
         )
+        async def ask(which: str, base: str) -> dict[str, Any]:
+            body = await self._get(which, base, {"request": "doQuery", "lang": "adql", "format": "json", "query": adql})
+            return parse_simbad(json.loads(body).get("data") or [], ra, dec, epoch, radius)
+
+        # Two mirrors, each with its own breaker: the second is asked as well when the first fails or has not answered within a second, and
+        # the first answer wins, so one mirror being down or slow never costs the name.
+        first = asyncio.create_task(ask("simbad", SIMBAD_BASES[0]))
+        second: asyncio.Task[dict[str, Any]] | None = None
+        running: set[asyncio.Task[dict[str, Any]]] = {first}
         err: Exception | None = None
-        for base in SIMBAD_BASES:
-            try:
-                body = await self._get("simbad", base, {"request": "doQuery", "lang": "adql", "format": "json", "query": adql})
-                return parse_simbad(json.loads(body).get("data") or [], ra, dec, epoch, radius)
-            except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
-                err = e
+        try:
+            while running:
+                done, running = await asyncio.wait(
+                    running, timeout=SIMBAD_HEDGE_S if second is None else None, return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in done:
+                    try:
+                        return t.result()
+                    except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
+                        err = e
+                if second is None:
+                    second = asyncio.create_task(ask("simbad2", SIMBAD_BASES[1]))
+                    running.add(second)
+        finally:
+            for left in (first, second):
+                if left is not None and not left.done():
+                    left.cancel()
         raise err or RuntimeError("no SIMBAD mirror")
 
     async def _gaia(self, ra: float, dec: float, epoch: float, radius: float) -> dict[str, Any]:

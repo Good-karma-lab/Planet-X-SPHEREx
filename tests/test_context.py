@@ -132,3 +132,40 @@ def test_a_fast_star_is_found_where_it_stands_at_the_epoch_not_where_it_was_cata
 
 def test_a_wide_gaia_answer_without_the_star_is_none_but_a_failed_query_is_not() -> None:
     assert ctx.parse_gaia_rows([], 10.0, 10.0, 2025.9, 6.0, "x") == {"state": "none", "source": "x"}
+
+
+def _simbad_json(name: str) -> str:
+    row = [name, 10.0, 20.0, 0.0, 0.0, 1.0, "*", "K5V", 5, 4.7, None, None]
+    return '{"data": [' + str(row).replace("'", '"').replace("None", "null") + "]}"
+
+
+def _run_simbad(behaviour: dict[str, Any]) -> dict[str, Any]:
+    async def go() -> dict[str, Any]:
+        c = ctx.CatalogueContext(client=httpx.AsyncClient())
+        calls: list[str] = []
+
+        async def fake(which: str, url: str, params: dict[str, str] | None = None, form: bool = False) -> str:
+            calls.append(which)
+            kind = behaviour[which]
+            if kind == "down":
+                raise httpx.ConnectError("down")
+            if kind == "slow":
+                await asyncio.sleep(30)
+            return _simbad_json(f"star from {which}")
+
+        c._get = fake  # type: ignore[method-assign]
+        ctx.SIMBAD_HEDGE_S = 0.05
+        out = await c._simbad(10.0, 20.0, 2000.0, 6.0)
+        out["calls"] = calls
+        return out
+
+    return asyncio.run(go())
+
+
+def test_simbad_second_mirror_answers_when_the_first_is_down_or_slow() -> None:
+    down = _run_simbad({"simbad": "down", "simbad2": "ok"})
+    assert down["name"] == "star from simbad2" and down["calls"] == ["simbad", "simbad2"]
+    slow = _run_simbad({"simbad": "slow", "simbad2": "ok"})
+    assert slow["name"] == "star from simbad2"
+    fine = _run_simbad({"simbad": "ok", "simbad2": "down"})
+    assert fine["name"] == "star from simbad" and fine["calls"] == ["simbad"]
