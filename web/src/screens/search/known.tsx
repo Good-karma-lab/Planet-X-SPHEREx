@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { icon } from '../../ui/icons';
 import { fetchBodyPath, todayText, type BodyPath, type SmallBody } from './path';
 
 interface Page {
@@ -57,7 +58,13 @@ export function KnownList({
   onOpen,
   selected,
   today,
+  query = '',
+  onCount,
 }: {
+  /** the drawer's search text: when set, the list shows the bodies of that name instead of a page of all of them */
+  query?: string;
+  /** how many bodies the list shows (for the drawer's total) */
+  onCount?: (n: number) => void;
   onShow: (p: BodyPath) => void;
   onOpen: (b: SmallBody, c: Crossing) => void;
   /** spkid of the body shown on the map */
@@ -70,7 +77,11 @@ export function KnownList({
   const [name, setName] = useState('');
   const [busy, setBusy] = useState<number | null>(null);
   const [note, setNote] = useState('');
-  const a = useKnown(kind, page, name);
+  const asked = query || name;
+  const a = useKnown(kind, page, asked);
+  useEffect(() => {
+    onCount?.(a.state === 'ok' ? (asked ? a.page.rows.length : a.page.count) : 0);
+  }, [a, asked]);
   const timer = useRef<number>(0);
   if (a.state === 'absent') return null;
   const pages = a.state === 'ok' ? Math.max(1, Math.ceil(a.page.count / PER)) : 1;
@@ -126,7 +137,7 @@ export function KnownList({
             </button>
           ))}
         </div>
-        <input
+        {!query && <input
           class="known-q"
           type="search"
           placeholder="Name or number"
@@ -139,7 +150,7 @@ export function KnownList({
               setPage(0);
             }, 450);
           }}
-        />
+        />}
         <div class="mono-s">Real orbits and sizes from the JPL Small-Body Database. A body is not at a fixed place: its path since April 2025 is drawn on the map.</div>
       </div>
       {note && <div class="mono-s known-note">{note}</div>}
@@ -155,7 +166,7 @@ export function KnownList({
           ))}
         </div>
       )}
-      {a.state === 'ok' && !a.page.rows.length && !a.page.candidates && name && <div class="empty">No body of that name.</div>}
+      {a.state === 'ok' && !a.page.rows.length && !a.page.candidates && asked && <div class="empty">No comet or asteroid named “{asked}”.</div>}
       {a.state === 'ok' &&
         a.page.rows.map((r) => {
           const on = selected === r.spkid;
@@ -167,15 +178,9 @@ export function KnownList({
                 </span>
                 <span class="badge orange">{r.class ?? r.kind}</span>
               </div>
-              <div class="co">
-                {r.H != null ? `H ${r.H} · ` : ''}
-                {r.diameter ? `diameter ${r.diameter} km` : 'size unknown'}
-                {r.albedo ? ` · albedo ${r.albedo}` : ''}
-              </div>
-              <div class="mv">
-                <span>
-                  orbit: a {r.a} au · e {r.e} · i {r.i}°{r.q ? ` · perihelion ${r.q} au` : ''}
-                </span>
+              <div class="meta" title={`orbit: a ${r.a} au · e ${r.e} · i ${r.i}°${r.q ? ` · perihelion ${r.q} au` : ''}`}>
+                <span class="co">{r.H != null ? `H ${r.H}` : ''}{r.diameter ? ` · ${r.diameter} km` : ''}</span>
+                <span class="mv">a {r.a} au · e {r.e} · i {r.i}°</span>
               </div>
               {on && today && (
                 <div class="mv">
@@ -184,22 +189,26 @@ export function KnownList({
               )}
               <div class="gobtns">
                 <button
-                  class="btn sm"
+                  class="btn sm primary go ico"
+                  title={busy === r.spkid ? 'Asking JPL…' : 'Show on map: its path since April 2025'}
+                  aria-label={`Show ${r.full_name} on the map`}
                   onClick={(e) => {
                     e.stopPropagation();
                     void show(r);
                   }}
                 >
-                  {busy === r.spkid ? 'Asking JPL…' : 'Show on map'}
+                  <span dangerouslySetInnerHTML={{ __html: icon('target', 16) }} style={{ display: 'contents' }} />
                 </button>
                 <button
-                  class="btn sm"
+                  class="btn sm go ico"
+                  title="Open in lab: the day it is in the most exposures"
+                  aria-label={`Open ${r.full_name} in the lab`}
                   onClick={(e) => {
                     e.stopPropagation();
                     void open(r);
                   }}
                 >
-                  Open in lab
+                  <span dangerouslySetInnerHTML={{ __html: icon('chart-line-up', 16) }} style={{ display: 'contents' }} />
                 </button>
                 <a
                   class="btn sm"
