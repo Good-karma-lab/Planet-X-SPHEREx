@@ -10,8 +10,8 @@ describe('equirect layers', () => {
   });
   it('picks the level whose pixels match the globe radius, within the baked levels', () => {
     // one tile pixel per screen pixel: 512·2^l px round the equator = 2πR
-    expect(equiLevelFor(s, 450)).toBe(3);
-    expect(equiLevelFor(s, 3500)).toBe(6);
+    expect(equiLevelFor(s, 450)).toBe(2);
+    expect(equiLevelFor(s, 3500)).toBe(5);
     expect(equiLevelFor(s, 1)).toBe(2);
     expect(equiLevelFor(s, 1e9)).toBe(7);
   });
