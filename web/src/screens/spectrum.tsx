@@ -528,9 +528,19 @@ function useIdentify(src: Source | null): Identified | null | 'asking' {
       simbad: c.simbad && { state: c.simbad.state, name: c.simbad.name, type: c.simbad.otype, sp: c.simbad.sptype ?? null, sep: c.simbad.sep },
       gaia: c.gaia,
     });
-    fetch(`/api/v1/context?${cq}`, { signal: ctl.signal })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((c) => setV(fromContext(c)))
+    // a catalogue not in yet comes back `pending`: ask again every 2 s, up to 20 s, showing each answer as it lands
+    const pendingIn = (c: { simbad?: { state: string }; gaia?: { state: string } }) => c.simbad?.state === 'pending' || c.gaia?.state === 'pending';
+    const ask = async (n: number): Promise<void> => {
+      const r = await fetch(`/api/v1/context?${cq}`, { signal: ctl.signal });
+      if (!r.ok) throw new Error(String(r.status));
+      const c = await r.json();
+      setV(fromContext(c));
+      if (pendingIn(c) && n < 10) {
+        await new Promise((res) => setTimeout(res, 2000));
+        if (!ctl.signal.aborted) await ask(n + 1);
+      }
+    };
+    ask(0)
       .catch((e) => {
         if (ctl.signal.aborted) return;
         // the service has no context route: the older lookup (J2000 place and proper motion)
@@ -556,7 +566,7 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
     <div class="okv">
       <div class="orow">
         <span class="faint">Name</span>
-        <span>{src.name ?? (sb?.state === 'ok' ? sb.name : id === 'asking' ? 'asking SIMBAD…' : 'no catalogue name here')}</span>
+        <span>{src.name ?? (sb?.state === 'ok' ? sb.name : id === 'asking' || sb?.state === 'pending' ? 'asking SIMBAD…' : 'no catalogue name here')}</span>
       </div>
       <div class="orow">
         <span class="faint">Position</span>
@@ -582,7 +592,9 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
               ? `${sb.name}${sb.type ? ` · ${sb.type}` : ''}${sb.sp ? ` · ${sb.sp}` : ''} (${sb.sep}″)`
               : sb?.state === 'none'
                 ? 'nothing within 6″'
-                : 'not reachable'}
+                : sb?.state === 'pending'
+                  ? 'asking…'
+                  : 'not reachable'}
         </span>
       </div>
       <div class="orow">
@@ -594,7 +606,9 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
               ? `${ga.source_id}${ga.g != null ? ` · G ${ga.g}` : ''}${ga.bp_rp != null ? ` · BP−RP ${ga.bp_rp}` : ''}${ga.parallax != null ? ` · parallax ${ga.parallax} mas` : ''}${ga.ruwe != null ? ` · RUWE ${ga.ruwe}` : ''}`
               : ga?.state === 'none'
                 ? 'nothing within 6″'
-                : 'not reachable'}
+                : ga?.state === 'pending'
+                  ? 'asking…'
+                  : 'not reachable'}
         </span>
       </div>
       {plx !== null && (
