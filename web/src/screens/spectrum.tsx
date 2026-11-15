@@ -24,6 +24,17 @@ interface SpecView {
 const DET_HUE = [270, 220, 175, 95, 40, 5];
 
 /** Follows one spectrum as it is measured: the points arrive in pieces (`since` = points already held). */
+
+/** Gaia's values as people read them: G and BP−RP to 0.01 mag, the parallax to 0.01 mas (with its error when known), RUWE to 0.01. */
+function gaiaLine(ga: { source_id?: string; g?: number | null; bp_rp?: number | null; parallax?: number | null; ruwe?: number | null; parallax_error?: number | null }): string {
+  const parts = [String(ga.source_id ?? '')];
+  if (ga.g != null) parts.push(`G ${ga.g.toFixed(2)}`);
+  if (ga.bp_rp != null) parts.push(`BP−RP ${ga.bp_rp.toFixed(2)}`);
+  if (ga.parallax != null) parts.push(`parallax ${ga.parallax.toFixed(2)}${ga.parallax_error != null ? ` ± ${ga.parallax_error.toFixed(2)}` : ''} mas`);
+  if (ga.ruwe != null) parts.push(`RUWE ${ga.ruwe.toFixed(2)}`);
+  return parts.join(' · ');
+}
+
 export function useSpectrum(src: Source | null): {
   view: SpecView | null;
   points: SpecPoint[];
@@ -500,6 +511,7 @@ interface Identified {
     bp_rp?: number | null;
     parallax?: number | null;
     ruwe?: number | null;
+    parallax_error?: number | null;
     error?: string;
   };
 }
@@ -528,9 +540,19 @@ function useIdentify(src: Source | null): Identified | null | 'asking' {
       simbad: c.simbad && { state: c.simbad.state, name: c.simbad.name, type: c.simbad.otype, sp: c.simbad.sptype ?? null, sep: c.simbad.sep },
       gaia: c.gaia,
     });
-    fetch(`/api/v1/context?${cq}`, { signal: ctl.signal })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((c) => setV(fromContext(c)))
+    // a catalogue not in yet comes back `pending`: ask again every 2 s, up to 20 s, showing each answer as it lands
+    const pendingIn = (c: { simbad?: { state: string }; gaia?: { state: string } }) => c.simbad?.state === 'pending' || c.gaia?.state === 'pending';
+    const ask = async (n: number): Promise<void> => {
+      const r = await fetch(`/api/v1/context?${cq}`, { signal: ctl.signal });
+      if (!r.ok) throw new Error(String(r.status));
+      const c = await r.json();
+      setV(fromContext(c));
+      if (pendingIn(c) && n < 10) {
+        await new Promise((res) => setTimeout(res, 2000));
+        if (!ctl.signal.aborted) await ask(n + 1);
+      }
+    };
+    ask(0)
       .catch((e) => {
         if (ctl.signal.aborted) return;
         // the service has no context route: the older lookup (J2000 place and proper motion)
@@ -556,7 +578,7 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
     <div class="okv">
       <div class="orow">
         <span class="faint">Name</span>
-        <span>{src.name ?? (sb?.state === 'ok' ? sb.name : id === 'asking' ? 'asking SIMBAD…' : 'no catalogue name here')}</span>
+        <span>{src.name ?? (sb?.state === 'ok' ? sb.name : id === 'asking' || sb?.state === 'pending' ? 'asking SIMBAD…' : 'no catalogue name here')}</span>
       </div>
       <div class="orow">
         <span class="faint">Position</span>
@@ -582,7 +604,9 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
               ? `${sb.name}${sb.type ? ` · ${sb.type}` : ''}${sb.sp ? ` · ${sb.sp}` : ''} (${sb.sep}″)`
               : sb?.state === 'none'
                 ? 'nothing within 6″'
-                : 'not reachable'}
+                : sb?.state === 'pending'
+                  ? 'asking…'
+                  : 'not reachable'}
         </span>
       </div>
       <div class="orow">
@@ -591,10 +615,12 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
           {id === 'asking'
             ? 'asking…'
             : ga?.state === 'ok'
-              ? `${ga.source_id}${ga.g != null ? ` · G ${ga.g}` : ''}${ga.bp_rp != null ? ` · BP−RP ${ga.bp_rp}` : ''}${ga.parallax != null ? ` · parallax ${ga.parallax} mas` : ''}${ga.ruwe != null ? ` · RUWE ${ga.ruwe}` : ''}`
+              ? gaiaLine(ga)
               : ga?.state === 'none'
                 ? 'nothing within 6″'
-                : 'not reachable'}
+                : ga?.state === 'pending'
+                  ? 'asking…'
+                  : 'not reachable'}
         </span>
       </div>
       {plx !== null && (
@@ -634,7 +660,7 @@ export interface Anomaly {
   resid_z: (number | null)[];
   identified?: {
     simbad?: { state: string; name?: string; type?: string; sp?: string | null; sep?: number };
-    gaia?: { state: string; source_id?: string; g?: number | null; bp_rp?: number | null; parallax?: number | null; ruwe?: number | null };
+    gaia?: { state: string; source_id?: string; g?: number | null; bp_rp?: number | null; parallax?: number | null; ruwe?: number | null; parallax_error?: number | null };
   };
 }
 
@@ -767,7 +793,7 @@ export function Passport({ a, f }: { a: Anomaly; f: AnomalyField }) {
           <span class="faint">Gaia DR3</span>
           <span>
             {ga?.state === 'ok'
-              ? `${ga.source_id}${ga.g != null ? ` · G ${ga.g}` : ''}${ga.bp_rp != null ? ` · BP−RP ${ga.bp_rp}` : ''}${ga.parallax != null ? ` · parallax ${ga.parallax} mas` : ''}${ga.ruwe != null ? ` · RUWE ${ga.ruwe}` : ''}`
+              ? gaiaLine(ga)
               : ga?.state === 'none'
                 ? 'nothing within 6″'
                 : 'not reachable'}

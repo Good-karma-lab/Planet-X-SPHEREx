@@ -3,7 +3,7 @@ import './search.css';
 
 /** One catalogue's answer inside /api/v1/context: ok (with the fields of that catalogue), none (it answered: nothing here) or unavailable. */
 interface Part {
-  state: 'ok' | 'none' | 'unavailable';
+  state: 'ok' | 'none' | 'unavailable' | 'pending';
   error?: string;
   sep?: number | null;
   [k: string]: unknown;
@@ -24,6 +24,11 @@ export interface ContextReply {
   ned?: Part;
 }
 
+/** A catalogue's answer not in yet comes back `pending` (the service keeps asking and keeps the answer): the page asks again every 2 s, up to 20 s, and shows each answer as it lands. */
+export const REPOLL_MS = 2000;
+export const REPOLL_MAX = 10;
+export const hasPending = (r: ContextReply): boolean => Object.values(r).some((p) => typeof p === 'object' && p !== null && (p as Part).state === 'pending');
+
 type Ask = { state: 'loading' } | { state: 'absent' } | { state: 'error'; error: string } | { state: 'ok'; reply: ContextReply };
 
 /** What the catalogues know about a place at an epoch. `absent`: the service has no such route yet (the component then renders nothing). */
@@ -33,15 +38,20 @@ export function useContext(ra: number, dec: number, epoch = 2025.9, radius = 6):
     setA({ state: 'loading' });
     const ctl = new AbortController();
     const q = new URLSearchParams({ ra: ra.toFixed(6), dec: dec.toFixed(6), epoch: String(epoch), radius: String(radius) });
-    fetch(`/api/v1/context?${q}`, { signal: ctl.signal })
-      .then(async (r) => {
-        if (r.status === 404) return setA({ state: 'absent' });
-        if (!r.ok) throw new Error(`service answered ${r.status}`);
-        setA({ state: 'ok', reply: (await r.json()) as ContextReply });
-      })
-      .catch((e) => {
-        if (!ctl.signal.aborted) setA({ state: 'error', error: String(e.message ?? e) });
-      });
+    const ask = async (n: number): Promise<void> => {
+      const r = await fetch(`/api/v1/context?${q}`, { signal: ctl.signal });
+      if (r.status === 404) return setA({ state: 'absent' });
+      if (!r.ok) throw new Error(`service answered ${r.status}`);
+      const reply = (await r.json()) as ContextReply;
+      setA({ state: 'ok', reply });
+      if (hasPending(reply) && n < REPOLL_MAX) {
+        await new Promise((res) => setTimeout(res, REPOLL_MS));
+        if (!ctl.signal.aborted) await ask(n + 1);
+      }
+    };
+    ask(0).catch((e) => {
+      if (!ctl.signal.aborted) setA({ state: 'error', error: String(e.message ?? e) });
+    });
     return () => ctl.abort();
   }, [ra, dec, epoch, radius]);
   return a;
@@ -172,6 +182,9 @@ export function ContextRows({
                   "IRSA's catalogue service did not answer; these come from the AllWISE catalogue on AWS (cloud Parquet), which carries the 2MASS magnitudes";
               } else if (fromCloud?.state === 'none') {
                 text = `nothing within ${radius}″ · from the AllWISE copy on AWS`;
+              } else if (p?.state === 'pending') {
+                text = 'asking…';
+                tip = 'the catalogue has not answered yet: this page asks again';
               } else if (p?.state === 'unavailable') {
                 text = 'did not answer';
                 tip = p.error;
