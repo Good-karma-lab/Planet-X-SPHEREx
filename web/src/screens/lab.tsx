@@ -1547,6 +1547,28 @@ export function Lab({ route }: { route: Route }) {
         }
         if (clash() && !mk.selected && mk.kind !== 'target') return;
         placed.push({ x0: lx, y0: ly, x1: lx + tw, y1: ly + th });
+        // a label pushed away from its ring (past other labels) is tied to it by a thin leader line
+        {
+          const nx = Math.max(lx, Math.min(x, lx + tw));
+          const ny = Math.max(ly, Math.min(y, ly + th));
+          const d = Math.hypot(nx - x, ny - y);
+          if (d > rr + 20) {
+            const ux = (nx - x) / d;
+            const uy = (ny - y) / d;
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(x + ux * (rr + 2), y + uy * (rr + 2));
+            ctx.lineTo(nx - ux * 3, ny - uy * 3);
+            ctx.lineWidth = 2.6;
+            ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+            ctx.stroke();
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = mk.colour;
+            ctx.globalAlpha = 0.85;
+            ctx.stroke();
+            ctx.restore();
+          }
+        }
         lines.forEach((l, i) => {
           ctx.font = i ? '500 10.5px ui-monospace, Menlo, monospace' : '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
           ctx.lineWidth = 3;
