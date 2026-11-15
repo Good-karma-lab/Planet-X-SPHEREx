@@ -817,8 +817,13 @@ export function Lab({ route }: { route: Route }) {
         const pl = planeLevels(arr.data as Uint16Array, n, PER_PASS.picture);
         r.setPictureNoise(k, pl.bg, pl.sigma);
       }
+      if (stack === 'dets') {
+        // every detector against the scatter measured in its own picture, so that a tile of the wall shows a source that stands 5 sigma above it
+        const dl = planeLevels(arr.data as Uint16Array, n, PER_PASS.dets);
+        r.setBandNoise(k, dl.bg, dl.sigma, 'dets');
+      }
       if (stack === 'bands') {
-        // every band against its own background and noise, for the colour blend of the picture
+        // every band against its own background and noise, for the colour blend of the picture and the tiles of the bands wall
         const bl = planeLevels(arr.data as Uint16Array, n, PER_PASS.bands);
         r.setBandNoise(k, bl.bg, bl.sigma);
       }
