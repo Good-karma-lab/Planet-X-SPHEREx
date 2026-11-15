@@ -9,7 +9,7 @@
 | IRSA TAP (`spherex.artifact`, `spherex.plane`) | the index of every Level-2 exposure and its footprint | https://irsa.ipac.caltech.edu/docs/program_interface/TAP.html |
 | SPHEREx DR1 all-sky cube (HiPS, IRSA) | the globe's SPHEREx background (three frames: 0.91, 1.86, 4.50 µm) | https://irsa.ipac.caltech.edu/data/hips/SPHEREx/spherex_allsky_cube |
 | IRSA HiPS mirror: DSS2, 2MASS, AllWISE, IRIS | globe backgrounds; archive images of a field (DSS2 red, 2MASS Ks, AllWISE W1) | https://irsa.ipac.caltech.edu/data/hips/list |
-| 2MASS Point Source Catalog, AllWISE (IRSA TAP) | the catalogue check of a spectrum | https://irsa.ipac.caltech.edu/docs/program_interface/TAP.html |
+| 2MASS Point Source Catalog, AllWISE (IRSA TAP; IRSA's cloud Parquet copy `nasa-irsa-wise` when the service does not answer) | the catalogue check of a spectrum, the reference photometry of a saturated star | https://irsa.ipac.caltech.edu/docs/program_interface/TAP.html |
 | NEOWISE single exposures (IRSA TAP), ZTF light curves (IRSA) | light curves of a clicked source | https://irsa.ipac.caltech.edu/Missions/wise.html · https://irsa.ipac.caltech.edu/Missions/ztf.html |
 | SPHEREx 3I/ATLAS exposure table (IRSA) | the 3I/ATLAS demo film | https://irsa.ipac.caltech.edu/data/SPHEREx/docs/comet3iatlas/ |
 | JPL Small-Body Identification and Horizons | known bodies predicted in a film, their place on every visit | https://ssd-api.jpl.nasa.gov/doc/sb_ident.html · https://ssd.jpl.nasa.gov/horizons/ |
@@ -18,7 +18,7 @@
 
 | Agency | Data | Use | Link |
 |---|---|---|---|
-| ESA | Gaia DR3 (Gaia archive TAP) | the check of every track found between seasons; names, parallaxes and distances in the Object card and the anomaly passport; the pointing refit of the NEOSSat frame | https://www.cosmos.esa.int/web/gaia/dr3 |
+| ESA | Gaia DR3 (Gaia archive TAP; the public Parquet copy at STScI/MAST on AWS when the archive does not answer) | the check of every track found between seasons; names, parallaxes and distances in the Object card and the anomaly passport; the pointing refit of the NEOSSat frame | https://www.cosmos.esa.int/web/gaia/dr3 |
 | CSA | NEOSSat frame of 3I/ATLAS, 14 Dec 2025 (Canadian Astronomy Data Centre) | a second space agency's view of the comet SPHEREx saw that day | https://www.cadc-ccda.hia-iha.nrc-cnrc.gc.ca/en/neossat/ |
 
 ## Other data and services
@@ -26,7 +26,9 @@
 | Source | Use | Link |
 |---|---|---|
 | SVO Filter Profile Service | 2MASS and WISE filter curves | https://svo2.cab.inta-csic.es/theory/fps/ |
-| SIMBAD (CDS, Strasbourg) | the five test targets and the globe's catalogue of 4,100 objects (dated snapshot); names and types of clicked sources and anomalies | https://simbad.cds.unistra.fr/simbad/ |
+| SIMBAD, VizieR (CDS, Strasbourg), NED (IPAC) | the five test targets; names and types of clicked sources and anomalies; the catalogue context of a place | https://simbad.cds.unistra.fr/simbad/ |
+| Minor Planet Center | observatory code 288 (SPHEREx) and the ADES format of the exported positions | https://www.minorplanetcenter.net/ |
+| IRAS and AKARI (IRSA) | the far-infrared field of the Planet Nine search of Phan et al. 2025 | https://irsa.ipac.caltech.edu/Missions/iras.html · https://irsa.ipac.caltech.edu/Missions/akari.html |
 
 ## References
 
