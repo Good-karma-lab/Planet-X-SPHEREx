@@ -9,5 +9,5 @@ is needed. It leads with what moves between the passes and with Find Planet X.
 | 0–7 s | Lab, Barnard's Star 20′, half speed: the passes one after another; the star ringed with its measured rate and the Gaia check | Barnard's Star, pass by pass: the search finds it moving, 10.7″ a year; Gaia agrees. |
 | 7–13 s | Lab, ε Indi B 20′: the brown dwarf moving among white stars; Findings: "known brown dwarf, recovered" | A cold brown dwarf, ε Indi B, found moving and red. |
 | 13–21 s | Planet X page: the Solar System with the predicted orbit; "Run Find Planet X in the Lab" | Find Planet X: every orbit from 30 to 2000 au, summed over the passes. |
-| 21–27 s | Lab, Find Planet X running and its result: Sedna / Eris found blind; the ruled-out 394 au peak | It finds Sedna and Eris blind. Our best Planet Nine peak: ruled out by NEOWISE. |
+| 21–27 s | Planet X page: Eris found blind and linked over three passes; the ruled-out 394 au peak | It finds Eris blind: 95.6 au, three passes linked. Our best Planet Nine peak: ruled out by NEOWISE. |
 | 27–30 s | Title card: SPHEREx Sky · spherex.space | SPHEREx Sky — see the sky move. spherex.space |

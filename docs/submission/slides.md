@@ -10,8 +10,9 @@ Pictures are screenshots of https://spherex.space on real SPHEREx data (`demo/sl
    against Gaia, with a chance control (0.0 tracks per field). Archive images add 1985–2010.
 4. **Brown dwarfs.** Moving and red at 3.8–5 µm: WISE 0855−0714 and ε Indi B come out as known brown dwarfs, recovered. The anomaly
    search ranks ε Indi B first by far (score 13.8 against 2.6).
-5. **Find Planet X.** Every orbit from 30 to 2000 au, in one pass or summed over all of them. Found blind: Eris (95.9 au), Makemake
-   (52.4 au), Sedna (82.9 au, V 20.8).
+5. **Find Planet X.** Every orbit from 30 to 2000 au, in one pass or summed over all of them. Found blind on the live site: Eris at
+   95.6 ± 0.4 au, linked over 3 passes (JPL 95.5); Makemake at 52.5 ± 0.2 au over 2 passes (not confirmed). Each search states its own
+   measured noise bar.
 6. **Honest results.** Our best Planet Nine peak (394 au) is ruled out: NEOWISE along its orbit gives nothing where it would stand at
    13.6σ. No new body found. Data: NASA SPHEREx Level-2 (IRSA, AWS), NEOWISE, ESA Gaia DR3, JPL, DSS2, 2MASS, AllWISE.
 7. **Try it.** spherex.space · code on GitHub (Apache-2.0) · built with AI coding assistants under the team's direction (SI statement).

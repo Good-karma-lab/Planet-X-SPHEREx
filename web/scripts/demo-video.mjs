@@ -71,9 +71,9 @@ await page.waitForTimeout(8500);
 mark('planetx-end');
 
 // 4. what it found: known worlds found blind, and the best Planet Nine peak ruled out
-await page.getByText(/known worlds found blind/i).last().scrollIntoViewIfNeeded();
+await page.getByText(/Known worlds found blind/i).last().scrollIntoViewIfNeeded().catch(() => {});
 await page.waitForTimeout(1500);
-await subtitle('It finds Sedna and Eris blind. Our best Planet Nine peak: ruled out by NEOWISE.');
+await subtitle('It finds Eris blind: 95.6 au, three passes linked. Our best Planet Nine peak: ruled out by NEOWISE.');
 mark('results');
 await page.waitForTimeout(7000);
 mark('results-end');
