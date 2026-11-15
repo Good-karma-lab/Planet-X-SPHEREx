@@ -376,7 +376,10 @@ export function FindingsView({ wide, leadId, setLeadId }: { wide: boolean; leadI
   const sel = r.finds.find((f) => f.id === leadId);
   const atlas = leadId === ATLAS_LEAD.id;
   const shown = atlas ? undefined : (sel ?? (wide ? rows[0] : undefined));
-  const cnt = (k: string) => (k === 'all' ? r.total : k === 'peak' ? (r.counts[k]?.leads ?? r.counts[k]?.all ?? 0) : (r.counts[k]?.all ?? 0));
+  // the Planet X leads counted from the peaks themselves, after the service's JPL and residual verdicts (the Planet X page's rule: a peak still
+  // ok and not a known body); the count the service sends is made before those verdicts
+  const peakLeads = r.finds.filter((f) => f.kind === 'peak' && (f.data as { peak?: { ok?: boolean } })?.peak?.ok !== false && f.status !== 'known').length;
+  const cnt = (k: string) => (k === 'all' ? r.total : k === 'peak' ? peakLeads : (r.counts[k]?.all ?? 0));
   let n = 0;
   const list = (
     <section class="card glass leads">
