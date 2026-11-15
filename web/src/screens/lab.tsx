@@ -3277,9 +3277,9 @@ export function Lab({ route }: { route: Route }) {
               {(
                 [
                   ['ctl', 'Controls'],
-                  ['cand', 'Candidates'],
                   ['obj', 'Object'],
                   ['spec', 'Spectrum'],
+                  ['cand', 'Candidates'],
                 ] as const
               ).map(([k, n]) => (
                 <button key={k} class={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
