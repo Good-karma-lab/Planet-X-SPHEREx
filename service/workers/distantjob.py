@@ -31,6 +31,7 @@ from engine import distant as edist
 from engine import orbit as eorbit
 from indexer.store import Exposure, Index
 from service import cpu
+from service.fpx_known import leans_to_an_edge
 from service.jobs.scheduler import Context
 from service.products.store import Store
 from service.reader.calib import WavelengthMaps
@@ -327,6 +328,9 @@ async def run_distant(
             and sn >= edist.SN_MIN
             and all(f > 0 for f, n in bydet.values() if n >= 4)
             and c["path"] >= 12.0
+            and not leans_to_an_edge(
+                c["d_lo"], c["d_hi"], p["dmin"], p["dmax"]
+            )  # a static source (the signal grows to an edge), not a lead
         )
         ctl = []
         for v in (phot.get("ctl") or {}).get(ci, []):
@@ -348,7 +352,7 @@ async def run_distant(
                 "d_lo": round(c["d_lo"], 1),
                 "d_hi": round(c["d_hi"], 1),
                 # the knob (S/N against distance) is still high at the edge of the range searched: the distance is not bounded there
-                "edge": bool(c["d_hi"] >= p["dmax"] * 0.999 or c["d_lo"] <= p["dmin"] * 1.001),
+                "edge": leans_to_an_edge(c["d_lo"], c["d_hi"], p["dmin"], p["dmax"]),
                 "mu": [round(c["mu"][0], 3), round(c["mu"][1], 3)],
                 "ra": round(float(ra0), 6),
                 "dec": round(float(dec0), 6),

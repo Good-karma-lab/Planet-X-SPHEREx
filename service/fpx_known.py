@@ -204,6 +204,8 @@ async def identify(
     return best
 
 
+HALO_ARCSEC = 30.0  # a peak this close to a bright star is that star's halo or saturation residual (a G < 12 star saturates and bleeds)
+HALO_G = 12.0
 KINDS = ("deep", "distant")
 KNOWN_MAX = 8  # leads of a result that are looked up (the strongest first)
 FILE_VERSION = "k1"
@@ -225,6 +227,46 @@ def places_of(kind: str, result: dict[str, Any], c: dict[str, Any]) -> tuple[lis
     if result.get("t0") is None or c.get("ra") is None:
         return None
     return [{"ra": c["ra"], "dec": c["dec"], "mjd": float(result["t0"])}], float(c.get("d_lo", c["d"])), float(c.get("d_hi", c["d"]))
+
+
+def leans_to_an_edge(lo: float | None, hi: float | None, dmin: float | None, dmax: float | None) -> bool:
+    """The signal keeps growing towards one end of the searched distances (the peak's range touches that end and is far from the other):
+    a static or very slow source looks like that. A range that spans everything is a pass that cannot tell distances: not this."""
+    if lo is None or hi is None or not dmin or not dmax:
+        return False
+    return bool((hi >= 0.999 * dmax and lo >= 1.5 * dmin) or (lo <= 1.001 * dmin and hi <= dmax / 1.5))
+
+
+def edge_reason(result: dict[str, Any], c: dict[str, Any]) -> str | None:
+    """A one-pass peak whose signal grows towards the edge of the searched distances: its distance is not measured (a static source, a
+    variable star's residual), and a distance at the edge is no lead."""
+    par = result.get("params") or {}
+    if leans_to_an_edge(c.get("d_lo"), c.get("d_hi"), par.get("dmin"), par.get("dmax")):
+        return "its signal keeps growing to the edge of the searched distances: the distance is not measured (a static source, not a body)"
+    return None
+
+
+async def halo_reason(places: list[dict[str, Any]]) -> str | None:
+    """A bright star (G < HALO_G, carried to the date of each pass) within HALO_ARCSEC of the peak in any pass: the peak is its halo or the
+    residual of its saturation, not a body. Gaia is read from the Parquet copy (an answer that fails says nothing)."""
+    from service.movers import _carried
+    from service.upstream import gaia_hats
+
+    first = places[0]
+    try:
+        rows = await asyncio.to_thread(gaia_hats.cone, first["ra"], first["dec"], 120.0 / 3600.0)
+    except Exception:
+        return None
+    for st in rows:
+        g = st.get("phot_g_mean_mag")
+        if g is None or g >= HALO_G:
+            continue
+        for pl in places:
+            m = pl["mjd"] if pl.get("mjd") is not None else 0.5 * (float(pl["mjd0"]) + float(pl["mjd1"]))
+            a, d = _carried(st, float(m))
+            if _sep(pl["ra"], pl["dec"], a, d) <= HALO_ARCSEC:
+                return f"it stands within {HALO_ARCSEC:.0f}\u2033 of a G = {float(g):.1f} star: the star's halo, not a body"
+    return None
 
 
 class FpxIdentifier:
@@ -265,7 +307,10 @@ class FpxIdentifier:
         def with_known(i: int, c: dict[str, Any]) -> dict[str, Any]:
             if i >= KNOWN_MAX or not c.get("ok"):
                 return c  # only the leads (peaks the photometry confirms) are looked up
-            return {**c, "known": (found or {}).get(i, {"state": "pending"})}
+            known = (found or {}).get(i, {"state": "pending"})
+            if known.get("state") == "residual":  # not a lead: the halo of a bright star, or no measured distance
+                return {**c, "known": known, "ok": False, "residual": known.get("reason")}
+            return {**c, "known": known}
 
         out["candidates"] = [with_known(i, c) for i, c in enumerate(result["candidates"])]
         return out
@@ -280,7 +325,7 @@ class FpxIdentifier:
         """Looks up the leads of one result, strongest first, and keeps each definite answer as it comes (JPL's gateway fails one request
         in a few: an answer already got is never asked again). -> every lead has its answer."""
         t0 = time.monotonic()
-        found = {i: v for i, v in (self.cached(kind, key) or {}).items() if v.get("state") in ("ok", "none")}
+        found = {i: v for i, v in (self.cached(kind, key) or {}).items() if v.get("state") in ("ok", "none", "residual")}
         whole = True
         asked = 0
         for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
@@ -289,6 +334,11 @@ class FpxIdentifier:
             pl = places_of(kind, result, c)
             if pl is None:
                 found[i] = {"state": "none", "note": "the result does not say where the passes were"}
+                self._keep(kind, key, found)
+                continue
+            why = edge_reason(result, c) or await halo_reason(pl[0])
+            if why:
+                found[i] = {"state": "residual", "reason": why, "at": [c.get("ra"), c.get("dec"), c.get("d")]}
                 self._keep(kind, key, found)
                 continue
             asked += 1
@@ -318,7 +368,7 @@ class FpxIdentifier:
                 continue
             have = self.cached(kind, key) or {}
             need = [i for i, c in enumerate(meta["candidates"][:KNOWN_MAX]) if c.get("ok")]
-            if need and all(have.get(i, {}).get("state") in ("ok", "none") for i in need):
+            if need and all(have.get(i, {}).get("state") in ("ok", "none", "residual") for i in need):
                 self.complete.add((kind, key))
                 continue
             self.running.add((kind, key))
@@ -354,6 +404,7 @@ class FpxIdentifier:
         """The Findings answer with the JPL identification on its Find Planet X peaks: a peak that is a known body reads
         'this is Sedna (JPL), found blind' and counts as known."""
         changed = 0
+        gone = 0
         for f in body.get("finds", []):
             if f.get("kind") != "peak":
                 continue
@@ -371,6 +422,16 @@ class FpxIdentifier:
                         if f.get("status") != "known":
                             changed += 1
                         f["status"], f["verdict"] = "known", v["words"][0].upper() + v["words"][1:] + "."
+                    elif v.get("state") == "residual":
+                        pk["ok"] = False  # not a lead: the pages' lead rule (ok peaks) drops it
+                        f["verdict"] = "A residual, not a lead: " + str(v.get("reason"))
+                        gone += 1
+        if gone and isinstance(body.get("counts", {}).get("peak"), dict):
+            c = body["counts"]["peak"]  # the residuals are not leads: they leave the counts of what is open
+            for k in ("unexplained", "unchecked"):
+                take = min(gone, c.get(k, 0))
+                c[k] = c.get(k, 0) - take
+                gone -= take
         if changed and isinstance(body.get("counts", {}).get("peak"), dict):
             c = body["counts"]["peak"]
             c["known"] = c.get("known", 0) + changed

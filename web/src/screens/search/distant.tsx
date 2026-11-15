@@ -22,6 +22,8 @@ export interface DistantCandidate {
   known?: KnownBody;
   /** the distance is not bounded: the S/N is still high at the edge of the range searched */
   edge?: boolean;
+  /** why a peak above the bar is not a lead: a bright star's halo, or a signal that grows to the edge of the searched distances (a static source) */
+  residual?: string;
   sn: number;
   d: number;
   d_lo: number;
@@ -578,6 +580,14 @@ export function DistantLines({ r }: { r: DistantResult }) {
             ? `${plural(r.candidates.length, 'peak')} above the bar, none confirmed by the photometry · not a lead`
             : 'nothing above the bar · nothing marked',
       )}
+      {r.candidates.some((c) => c.residual) &&
+        L(
+          `${plural(r.candidates.filter((c) => c.residual).length, 'peak')} above the bar left out as residuals (a bright star's halo, or a signal that grows to the edge of the searched distances): not leads`,
+          r.candidates
+            .filter((c) => c.residual)
+            .map((c) => `${c.d} au · S/N ${c.sn}: ${c.residual}`)
+            .join('\n'),
+        )}
       {L(
         `${r.control.measured} control tracks · ${r.control.reach_sn5} reach S/N 5`,
         'Photometry on the exposures along the track and on control tracks aside.',
