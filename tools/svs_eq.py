@@ -314,6 +314,85 @@ def stage_healpix(work: Path, exr4k: Path, out: Path, layer: str, lo: int, hi: i
     print("HEALPIX_DONE", flush=True)
 
 
+STAR_ABOVE = 0.05  # linear light
+
+
+def _pool_tile(args: tuple[str, str, int, int, float]) -> int:
+    from PIL import Image
+
+    root_s, layer, order, i, w = args
+    root = Path(root_s) / layer
+    dest = root / f"Norder{order}" / f"Dir{i // 10000 * 10000}" / f"Npix{i}.webp"
+    if dest.exists():
+        return 0
+    mosaic = np.zeros((2 * TILE, 2 * TILE, 3), np.float32)
+    for q in range(4):  # child 4i + q: bit 0 selects the half of the rows, bit 1 the half of the columns
+        c = 4 * i + q
+        p = root / f"Norder{order + 1}" / f"Dir{c // 10000 * 10000}" / f"Npix{c}.webp"
+        if p.exists():
+            a = np.asarray(Image.open(p).convert("RGB")).astype(np.float32) / 255.0
+            mosaic[(q & 1) * TILE : (q & 1) * TILE + TILE, (q >> 1) * TILE : (q >> 1) * TILE + TILE] = np.where(
+                a <= 0.04045, a / 12.92, np.power((a + 0.055) / 1.055, 2.4)
+            )
+    blk = mosaic.reshape(TILE, 2, TILE, 2, 3)
+    mean, peak = blk.mean(axis=(1, 3)), blk.max(axis=(1, 3))
+    # the area mean, plus `w` of what a child stands out above that mean by more than STAR_ABOVE (a star: it must not dilute over six
+    # orders; the sky's grain and the diffuse light stand out by less and are left at their mean, so the background does not rise)
+    lin = mean + w * np.maximum(peak - mean - STAR_ABOVE, 0.0)
+    rgb = np.clip(np.rint(srgb_encode(np.clip(lin, 0.0, 1.0)) * 255.0), 0, 255).astype(np.uint8)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".part")
+    Image.fromarray(rgb, "RGB").save(tmp, "WEBP", quality=92, method=4)
+    tmp.replace(dest)
+    return dest.stat().st_size
+
+
+def stage_pyramid(root: Path, layer: str, top: int, weight: float, workers: int) -> None:
+    """Every coarser order of a HEALPix layer from the next finer one (the standard HiPS way: the four children area-averaged in linear light,
+    `weight` of the way to their maximum so the stars stay), starting from the order `top`: no coarse order samples the equirect map."""
+    for order in range(top - 1, -1, -1):
+        n = 12 * 4**order
+        t0 = time.time()
+        with mp.Pool(workers) as pool:
+            sizes = pool.map(_pool_tile, [(str(root), layer, order, i, weight) for i in range(n)], chunksize=16)
+        print(f"order {order}: {n} tiles, {sum(sizes) / 1e6:.0f} MB, {time.time() - t0:.0f} s", flush=True)
+    print("POOL_DONE", flush=True)
+
+
+def _mix_tile(args: tuple[str, str, str, int, int, float, float]) -> int:
+    from astropy import units as u
+    from astropy_healpix import healpix_to_lonlat
+    from PIL import Image
+
+    nasa_root, pool_root, out_root, order, i, start, full = args
+    rel = f"Norder{order}/Dir{i // 10000 * 10000}/Npix{i}.webp"
+    idx = i * 4**9 + _hp_offsets().ravel()
+    _, lat = healpix_to_lonlat(idx, 2 ** (order + 9), order="nested")
+    dec = np.abs(lat.to_value(u.deg)).reshape(TILE, TILE, 1)
+    w = np.clip((dec - start) / (full - start), 0.0, 1.0)
+    w = (w * w * (3 - 2 * w)).astype(np.float32)
+    a = np.asarray(Image.open(Path(nasa_root) / rel).convert("RGB")).astype(np.float32)
+    b = np.asarray(Image.open(Path(pool_root) / rel).convert("RGB")).astype(np.float32)
+    rgb = np.clip(np.rint(a * (1 - w) + b * w), 0, 255).astype(np.uint8)
+    dest = Path(out_root) / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    Image.fromarray(rgb, "RGB").save(dest, "WEBP", quality=92, method=4)
+    return dest.stat().st_size
+
+
+def stage_mix(nasa_root: Path, pool_root: Path, out_root: Path, hi_order: int, start: float, full: float, workers: int) -> None:
+    """The overview orders (0..hi_order): NASA's 4k look away from the poles, the pooled pyramid (no squeezed stars) towards them, the mix
+    growing from `start` to `full` degrees of |declination|."""
+    for order in range(0, hi_order + 1):
+        n = 12 * 4**order
+        with mp.Pool(workers) as pool:
+            sizes = pool.map(
+                _mix_tile, [(str(nasa_root), str(pool_root), str(out_root), order, i, start, full) for i in range(n)], chunksize=8
+            )
+        print(f"order {order}: {n} tiles, {sum(sizes) / 1e6:.0f} MB", flush=True)
+    print("MIX_DONE", flush=True)
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[1]
     if cmd == "lin":
@@ -333,6 +412,18 @@ def main(argv: list[str]) -> int:
             json.loads(Path(argv[8]).read_text()),
             int(__import__("os").environ.get("BAKE_WORKERS", "6")),
         )
+    elif cmd == "mix":
+        stage_mix(
+            Path(argv[2]),
+            Path(argv[3]),
+            Path(argv[4]),
+            int(argv[5]),
+            float(argv[6]),
+            float(argv[7]),
+            int(__import__("os").environ.get("BAKE_WORKERS", "6")),
+        )
+    elif cmd == "pyramid":
+        stage_pyramid(Path(argv[2]), argv[3], int(argv[4]), float(argv[5]), int(__import__("os").environ.get("BAKE_WORKERS", "6")))
     elif cmd == "tiles":
         stage_tiles(
             Path(argv[2]),
