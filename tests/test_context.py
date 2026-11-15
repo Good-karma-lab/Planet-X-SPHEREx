@@ -227,3 +227,27 @@ def test_context_within_answers_in_time_with_the_slow_catalogues_pending() -> No
         assert full["twomass"] == {"state": "none"} and full["complete"] is True
 
     asyncio.run(go())
+
+
+def test_simbad_j_magnitude_stands_in_for_2mass_when_irsa_does_not_answer() -> None:
+    async def go() -> dict[str, Any]:
+        c = ctx.CatalogueContext(client=httpx.AsyncClient())
+
+        async def simbad(*a: Any, **k: Any) -> dict[str, Any]:
+            return {"state": "ok", "name": "NAME Barnard's star", "sep": 1.2, "j": 5.24, "pmra": -797.8, "pmdec": 10326.0}
+
+        async def gaia(*a: Any, **k: Any) -> dict[str, Any]:
+            return {"state": "ok", "pmra": -797.8, "pmdec": 10326.0}
+
+        async def none(*a: Any, **k: Any) -> dict[str, Any]:
+            return {"state": "none"}
+
+        async def irsa(part: str, *a: Any, **k: Any) -> dict[str, Any]:
+            return {"state": "unavailable", "error": "502"} if part == "twomass" else {"state": "none"}
+
+        c._simbad, c._gaia, c._vsx, c._ned, c._irsa = simbad, gaia, none, none, irsa  # type: ignore[method-assign]
+        return await c.context(269.45, 4.69, 2025.9, 6.0)
+
+    out = asyncio.run(go())
+    assert out["twomass"]["state"] == "ok" and out["twomass"]["J"] == 5.24 and "SIMBAD" in out["twomass"]["via"]
+    assert out["allwise"] == {"state": "none"}
