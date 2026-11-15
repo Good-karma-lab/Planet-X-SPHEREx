@@ -100,7 +100,7 @@ export function titleOf(f: Find): string {
     case 'pair':
       return `Pair ${(d.pair?.separation_arcsec ?? 0).toFixed(1)}″ apart · flux change ${(f.score ?? 0).toFixed(1)}σ`;
     case 'film':
-      return `${(f.rate ?? 0).toFixed(1)}″/h object moving in a pass`;
+      return `${(f.rate ?? 0).toFixed(1)}″/h object moving in a pass${d.less_certain ? ' (less certain)' : ''}`;
     default:
       return `Planet X peak · ${(d.peak?.d ?? 0).toFixed(0)} au`;
   }
@@ -288,7 +288,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
     ...(f.rate != null ? ([[f.kind === 'film' ? 'Rate' : 'Rate', `${f.rate.toFixed(2)} ${f.kind === 'film' ? '″/h' : '″/yr'}`]] as [string, string][]) : []),
     ...(f.snr != null ? ([['S/N', f.snr.toFixed(1)]] as [string, string][]) : []),
     ...(f.score != null ? ([['Score', f.score.toFixed(2)]] as [string, string][]) : []),
-    ...(f.chance != null ? ([['Chance', `${f.chance.toFixed(2)} per field`]] as [string, string][]) : []),
+    ...(f.chance != null ? ([['Chance', f.kind === 'film' ? `controls: ${f.chance.toFixed(2)} per search at ${f.data.track?.n} visits` : `${f.chance.toFixed(2)} per field`]] as [string, string][]) : []),
     ['Place', `${formatRA(f.ra)} ${formatDec(f.dec)}`],
     ['Field', `${f.place} · ${f.fov}′`],
     ...(((f.data.detections?.length ?? 0) > 1) ? ([['Detections', `${f.data.detections.length}: ${f.data.detections.map((d: any) => `${d.fov}′`).join(', ')} fields`]] as [string, string][]) : []),

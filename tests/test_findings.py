@@ -207,3 +207,37 @@ def test_units_merge_gates_and_motion_agreement(tmp_path: Path) -> None:
     gaia = {"catalogue": "gaia", "state": "ok", "raw": {"pmra": 6500.0, "pmdec": -2300.0}}
     assert status_of(mover, [gaia]) == "known"
     assert status_of(mover, []) == "unchecked"
+
+
+def test_film_tracks_all_listed_with_their_own_control(tmp_path: Path) -> None:
+    key = "ab" + "c" * 22
+    d = tmp_path / "products" / "filmsearch"
+    from service.products.versions import VERSIONS
+
+    mdir = d / VERSIONS["filmsearch"] / key[:2] / key
+    mdir.mkdir(parents=True)
+    pts = [{"f": 0, "x": 10.0, "y": 10.0, "z": 6.0}]
+    orbit = {
+        "n": 5,
+        "n_found": 3,
+        "n_recovered": 2,
+        "rate": 3.0,
+        "pa": 90.0,
+        "method": "orbit",
+        "verified": True,
+        "z_together": 9.0,
+        "pts": pts,
+    }
+    line = {"n": 4, "n_found": 4, "rate": 9.0, "pa": 80.0, "method": "line", "verified": False, "z_together": 6.0, "pts": pts}
+    meta = {
+        "tracks": [orbit, line],
+        "grid": {"ra0": 10.0, "dec0": 5.0, "step_arcsec": 3.0, "n": 20},
+        "frames": [{"mjd": 61000.0}],
+        "control": {"chance": {"5": 0.04}, "line_chance": {}},
+    }
+    (mdir / "meta.json").write_text(json.dumps(meta))
+    rows = [{"key": key, "kind": "filmsearch", "params": {"ra": 10.0, "dec": 5.0, "fov": 60}, "created": 1.0, "complete": True}]
+    finds, _ = collect(tmp_path, rows, {}, TARGETS)
+    by = {f["data"]["track"]["method"]: f for f in finds}
+    assert len(finds) == 2 and by["orbit"]["chance"] == 0.04 and not by["orbit"]["data"]["less_certain"]
+    assert by["line"]["data"]["less_certain"] and by["line"]["chance"] == 0.0
