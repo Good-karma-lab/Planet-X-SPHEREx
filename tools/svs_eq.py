@@ -166,6 +166,109 @@ def stage_overview(exr4k: Path, work: Path, out: Path, layer: str, cfg: dict) ->
     print("OVERVIEW_DONE", flush=True)
 
 
+def _hp_offsets() -> np.ndarray:
+    r = np.arange(TILE)
+
+    def spread(v: np.ndarray) -> np.ndarray:
+        v = v.astype(np.int64) & 0xFFFF
+        v = (v | (v << 8)) & 0x00FF00FF
+        v = (v | (v << 4)) & 0x0F0F0F0F
+        v = (v | (v << 2)) & 0x33333333
+        v = (v | (v << 1)) & 0x55555555
+        return v
+
+    return spread(r)[:, None] + 2 * spread(r)[None, :]
+
+
+# the equirect level whose pixel is about as large as the HEALPix pixel of each order (6.4 arcsec x 2^(6 - order)): the map is sampled
+# from the level that is already the area mean at that scale, so a coarse order never aliases the fine map
+HP_LEVEL = {0: 3, 1: 4, 2: 5, 3: 6, 4: 7, 5: 7, 6: 7}
+HP_NASA_MAX_ORDER = 2  # orders up to this one are NASA's 4k map (the overview look: big bright stars); finer ones come from the 64k map
+
+_H: dict = {}
+
+
+def _hp_init(work: str, nasa: str, order: int, out: str, layer: str, cfg: dict) -> None:
+    lvl = HP_LEVEL[order]
+    _H.update(
+        order=order,
+        out=Path(out),
+        layer=layer,
+        cfg=cfg,
+        off=_hp_offsets(),
+        nasa=None if order > HP_NASA_MAX_ORDER else np.load(nasa),
+        img=None if order <= HP_NASA_MAX_ORDER else np.memmap(Path(work) / f"L{lvl}.f16", dtype=np.float16, mode="r", shape=shape_of(lvl)),
+    )
+
+
+def _hp_tile(i: int) -> int:
+    from astropy import units as u
+    from astropy_healpix import healpix_to_lonlat
+    from PIL import Image
+
+    h = _H
+    order = h["order"]
+    dest = h["out"] / h["layer"] / f"Norder{order}" / f"Dir{i // 10000 * 10000}" / f"Npix{i}.webp"
+    if dest.exists():
+        return 0
+    idx = i * 4**9 + h["off"].ravel()
+    lon, lat = healpix_to_lonlat(idx, 2 ** (order + 9), order="nested")
+    ra, dec = lon.to_value(u.deg), lat.to_value(u.deg)
+    src = h["nasa"] if h["nasa"] is not None else h["img"]
+    hh, ww = src.shape[0], src.shape[1]
+    x = ra / 360.0 * ww - 0.5
+    y = (90.0 - dec) / 180.0 * hh - 0.5
+    x0 = np.floor(x).astype(np.int64)
+    y0 = np.floor(y).astype(np.int64)
+    fx = (x - x0).astype(np.float32)[:, None]
+    fy = (y - y0).astype(np.float32)[:, None]
+    xa, xb = x0 % ww, (x0 + 1) % ww  # RA wraps
+    ya, yb = np.clip(y0, 0, hh - 1), np.clip(y0 + 1, 0, hh - 1)  # the poles: the rows are clamped (the row at the pole is the mean over RA)
+    lin = (
+        src[ya, xa].astype(np.float32) * (1 - fx) * (1 - fy)
+        + src[ya, xb].astype(np.float32) * fx * (1 - fy)
+        + src[yb, xa].astype(np.float32) * (1 - fx) * fy
+        + src[yb, xb].astype(np.float32) * fx * fy
+    ).reshape(TILE, TILE, 3)
+    if h["nasa"] is not None:
+        enc = srgb_encode(np.clip(lin, 0.0, 1.0)) * 255.0
+        rng = np.random.default_rng(i)
+        noise = rng.random(enc.shape, dtype=np.float32) - rng.random(enc.shape, dtype=np.float32)
+        rgb = np.clip(np.rint(enc + noise), 0, 255).astype(np.uint8)
+    else:
+        rgb = tone(np.maximum(lin, 0.0), h["cfg"], order * 100003 + i)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(".part")
+    Image.fromarray(rgb, "RGB").save(tmp, "WEBP", quality=int(h["cfg"].get("quality", 92)), method=4)
+    tmp.replace(dest)
+    return dest.stat().st_size
+
+
+def stage_healpix(work: Path, exr4k: Path, out: Path, layer: str, lo: int, hi: int, cfg: dict, workers: int) -> None:
+    """The same tone-mapped star map as a HEALPix NESTED pyramid of 512 px WebP tiles (equal area: no pole problem). Orders <= HP_NASA_MAX_ORDER
+    are NASA's 4k map, finer ones the 64k map in linear light (x k, soft top, dither), exactly as the equirect pyramid."""
+    import OpenEXR
+
+    nasa = work / "nasa4k_lin.npy"
+    if not nasa.exists():
+        f = OpenEXR.File(str(exr4k))
+        ch = f.channels()
+        pix = ch["RGB"].pixels if "RGB" in ch else np.stack([ch[c].pixels for c in "RGB"], -1)
+        lin = np.clip(pix.astype(np.float32), 0.0, 1.0)
+        w = lin.shape[1]
+        np.save(nasa, lin[:, (w // 2 - 1 - np.arange(w)) % w])  # RA turned to the layer's orientation (0 h at the left, increasing right)
+    for order in range(lo, hi + 1):
+        n = 12 * 4**order
+        t0, total = time.time(), 0
+        with mp.Pool(workers, _hp_init, (str(work), str(nasa), order, str(out), layer, cfg)) as pool:
+            for k, sz in enumerate(pool.imap_unordered(_hp_tile, range(n), chunksize=8), 1):
+                total += sz or 0
+                if k % 4000 == 0:
+                    print(f"  order {order}: {k}/{n} {total / 1e6:.0f} MB {time.time() - t0:.0f} s", flush=True)
+        print(f"order {order}: {n} tiles, {total / 1e6:.0f} MB, {time.time() - t0:.0f} s", flush=True)
+    print("HEALPIX_DONE", flush=True)
+
+
 def main(argv: list[str]) -> int:
     cmd = argv[1]
     if cmd == "lin":
@@ -174,6 +277,17 @@ def main(argv: list[str]) -> int:
         stage_pyr(Path(argv[2]))
     elif cmd == "overview":
         stage_overview(Path(argv[2]), Path(argv[3]), Path(argv[4]), argv[5], json.loads(Path(argv[6]).read_text()))
+    elif cmd == "healpix":
+        stage_healpix(
+            Path(argv[2]),
+            Path(argv[3]),
+            Path(argv[4]),
+            argv[5],
+            int(argv[6]),
+            int(argv[7]),
+            json.loads(Path(argv[8]).read_text()),
+            int(__import__("os").environ.get("BAKE_WORKERS", "6")),
+        )
     elif cmd == "tiles":
         stage_tiles(
             Path(argv[2]),
