@@ -1460,8 +1460,16 @@ export function Lab({ route }: { route: Route }) {
           return [box.x + u * box.w, box.y + v * box.h] as const;
         });
         const span = pts.length > 1 ? Math.hypot(pts[pts.length - 1]![0] - pts[0]![0], pts[pts.length - 1]![1] - pts[0]![1]) : 0;
+        // the white core of a bright star is wider than its ring: no path is drawn through it (the path starts outside, and an arrow-like line is
+        // never seen crossing the core)
+        const clipR = Math.max(rr + 3, mk.kind === 'target' || mk.kind === 'track' ? 24 : rr + 3);
         if (span > 2.5 * rr) {
           // a path long enough to leave the ring: the places on the seasons' dates, joined
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(box.x, box.y, box.w, box.h);
+          ctx.arc(x, y, clipR, 0, 2 * Math.PI, true);
+          ctx.clip('evenodd');
           ctx.setLineDash([3, 3]);
           ctx.lineWidth = 3;
           ctx.strokeStyle = 'rgba(0,0,0,0.55)';
@@ -1478,6 +1486,7 @@ export function Lab({ route }: { route: Route }) {
             ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
             ctx.fill();
           }
+          ctx.restore();
         }
         if (mk.motion && !days) {
           // the motion over the decades (2000 to 2050) as a dashed line with year ticks, never inside the ring: the trajectory
@@ -1495,7 +1504,7 @@ export function Lab({ route }: { route: Route }) {
           ctx.save();
           ctx.beginPath();
           ctx.rect(box.x, box.y, box.w, box.h);
-          ctx.arc(x, y, rr + 3, 0, 2 * Math.PI, true); // outside the ring only
+          ctx.arc(x, y, clipR, 0, 2 * Math.PI, true); // outside the ring and the white core only
           ctx.clip('evenodd');
           ctx.setLineDash([5, 4]);
           ctx.lineWidth = 3;
@@ -1509,7 +1518,7 @@ export function Lab({ route }: { route: Route }) {
           ctx.setLineDash([]);
           ctx.font = '600 10px ui-monospace, Menlo, monospace';
           for (const [yr, px, py] of pts) {
-            if (Math.hypot(px - x, py - y) < rr + 8) continue;
+            if (Math.hypot(px - x, py - y) < clipR + 5) continue;
             if (px > x && Math.abs(py - y) < 30) continue; // where the object's own label stands
             ctx.fillStyle = mk.colour;
             ctx.beginPath();
@@ -3217,7 +3226,7 @@ export function Lab({ route }: { route: Route }) {
             </div>
           )}
           {tab === 'obj' && (
-            <div class="pbody">
+            <div class="pbody pobj">
               {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                 <>
                   {(() => {
