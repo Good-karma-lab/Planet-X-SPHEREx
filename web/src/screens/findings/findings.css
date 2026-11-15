@@ -73,3 +73,4 @@
 .fver { margin-top: 12px; }
 @media (max-width: 600px) { .ftab.cat td:first-child { white-space: normal; } .fblink .fthumb { width: 100% !important; height: auto !important; aspect-ratio: 1; } }
 .st-wait { color: var(--muted); }
+@media (max-width: 1099px) { .leads { max-width: none; } }
