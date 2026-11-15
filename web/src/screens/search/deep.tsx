@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { about, progressText, runJob, useProduct, type JobView } from './jobs';
 import './search.css';
+import { knownName, type KnownBody } from './distant';
 
 export interface DeepCandidate {
+  known?: KnownBody;
   sn: number;
   phot_sn: number | null;
   d: number;
@@ -359,10 +361,11 @@ function DeepResultView({
             >
               <b>Peak {i + 1}</b> · sum S/N {c.sn} · photometry {c.phot_sn != null ? `${c.phot_sn}σ` : 'n/a'} · {c.d} au
               {c.ok ? ' · above the threshold' : ''}
+              {knownName(c.known) ? ` · ${knownName(c.known)}` : ''}
             </button>
             {d.sel === i && (
               <div class="mono-s" style="margin:2px 0 8px 8px">
-                {c.ra.toFixed(4)} {c.dec.toFixed(4)} (middle pass) · own motion {c.mu[0]}, {c.mu[1]} ″/day
+                {c.ra.toFixed(4)} {c.dec.toFixed(4)} (at the search’s reference date) · own motion {c.mu[0]}, {c.mu[1]} ″/day
                 {c.flux_mjy != null ? ` · ${c.flux_mjy} ± ${c.err_mjy} mJy` : ''}
                 <br />
                 {c.by_pass

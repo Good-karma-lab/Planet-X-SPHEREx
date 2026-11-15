@@ -4,10 +4,19 @@ from __future__ import annotations
 
 import asyncio
 import json
+from pathlib import Path
+from typing import Any
 
 import httpx
+import pytest
 
 from service import fpx_known
+
+
+@pytest.fixture(autouse=True)
+def _fresh_memo() -> None:
+    fpx_known._SB_MEMO.clear()
+
 
 # the blind lead of the live run: its places at each pass's own date and Sedna's JPL places there (0.8″, 0.5″, 0.8″ away)
 PLACES = [
@@ -74,3 +83,84 @@ def test_jpl_down_is_unavailable_not_none() -> None:
     out = asyncio.run(fpx_known.identify(httpx.AsyncClient(transport=httpx.MockTransport(boom)), PLACES, 83.0, 83.0))
     assert out == {"state": "unavailable"}
     json.dumps(out)
+
+
+class FakeStore:
+    def __init__(self, meta: dict[str, Any]) -> None:
+        self.meta = meta
+
+    def listing(self, kinds: tuple[str, ...]) -> list[dict[str, object]]:
+        return [{"key": "k" * 24, "kind": "deep", "complete": True, "params": {}}]
+
+    def read_meta(self, kind: str, key: str) -> dict[str, Any]:
+        return self.meta
+
+
+def test_the_sweep_identifies_a_finished_result_ahead_of_time_and_keeps_the_answer(tmp_path: Path) -> None:
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
+        "candidates": [
+            {"d": 83.0, "ra": 60.7125, "dec": 8.6082, "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]}
+        ],
+    }
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
+
+    async def go() -> None:
+        first = idn.annotate("deep", "k" * 24, meta)  # nothing kept yet: pending, and the sweep is asked to run
+        assert first["candidates"][0]["known"] == {"state": "pending"} and idn.kick_event.is_set()
+        assert await idn.sweep() == 1
+        again = idn.annotate("deep", "k" * 24, meta)
+        k = again["candidates"][0]["known"]
+        assert k["state"] == "ok" and k["words"].startswith("this is Sedna (JPL), found blind")
+        assert await idn.sweep() == 0  # kept: not asked of JPL again
+
+    asyncio.run(go())
+    assert len(list(tmp_path.glob("*.json"))) == 1
+
+
+def test_a_failed_answer_is_not_kept(tmp_path: Path) -> None:
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
+        "candidates": [{"d": 83.0, "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]}],
+    }
+
+    def boom(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, text="Proxy Error")
+
+    fpx_known._SB_MEMO.clear()
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)))
+    assert asyncio.run(idn.sweep()) == 0 and not list(tmp_path.glob("*.json"))
+
+
+def test_findings_peaks_that_are_known_bodies_say_so(tmp_path: Path) -> None:
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
+        "candidates": [
+            {"d": 83.0, "ra": 60.712549, "dec": 8.608244, "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]}
+        ],
+    }
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
+    asyncio.run(idn.sweep())
+    body: dict[str, Any] = {
+        "counts": {"peak": {"all": 1, "unexplained": 0, "unchecked": 1, "known": 0}},
+        "finds": [
+            {
+                "id": "peak:1",
+                "kind": "peak",
+                "ra": 60.712549,
+                "dec": 8.608244,
+                "status": "unchecked",
+                "verdict": "",
+                "scans": ["k" * 24],
+                "data": {"search": "deep", "peak": {"d": 83.0}},
+            }
+        ],
+    }
+    out = idn.enrich_findings(body)
+    f = out["finds"][0]
+    assert f["status"] == "known" and f["verdict"].startswith("This is Sedna (JPL), found blind")
+    assert f["data"]["peak"]["known"]["name"].startswith("90377 Sedna")
+    assert out["counts"]["peak"] == {"all": 1, "unexplained": 0, "unchecked": 0, "known": 1}

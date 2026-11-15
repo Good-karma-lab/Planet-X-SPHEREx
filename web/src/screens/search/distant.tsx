@@ -2,7 +2,24 @@ import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { about, runJob, progressText, useProduct } from './jobs';
 import './search.css';
 
+/** JPL's identification of a lead (service/fpx_known.py): a body that stands where the lead stands in every pass, at its distance. */
+export interface KnownBody {
+  state: 'ok' | 'none' | 'pending' | 'unavailable';
+  name?: string;
+  words?: string;
+  seps?: number[];
+  V?: number | null;
+  r_au?: number | null;
+}
+/** "Sedna (JPL), found blind" from the identification, or null. */
+export function knownName(k: KnownBody | undefined): string | null {
+  if (k?.state !== 'ok' || !k.name) return null;
+  const short = k.name.split('(')[0]!.trim().replace(/^\d+\s+/, '');
+  return `${short} (JPL), found blind`;
+}
+
 export interface DistantCandidate {
+  known?: KnownBody;
   sn: number;
   d: number;
   d_lo: number;
@@ -470,8 +487,11 @@ export function DistantPanel({
                 onPick?.(c, i, ds.r);
               }}
             >
-              <b>Peak {i + 1}</b> · S/N {c.sn} · {c.d} au ({c.d_lo}–{c.d_hi}) · photometry {c.phot_sn != null ? `${c.phot_sn}σ` : 'n/a'}
+              <b>Peak {i + 1}</b> · S/N {c.sn} ·{' '}
+              {ds.r.n_hypotheses < 10 ? `${c.d} au (one orbit tried: the distance is not measured)` : `${c.d} au (${c.d_lo}–${c.d_hi})`} · photometry{' '}
+              {c.phot_sn != null ? `${c.phot_sn}σ` : 'n/a'}
               {c.ok ? ' · confirmed' : ''}
+              {knownName(c.known) ? ` · ${knownName(c.known)}` : ''}
             </button>
           ))}
         </>
@@ -551,7 +571,7 @@ export function DistantLines({ r }: { r: DistantResult }) {
       )}
       {L(
         r.candidates.filter((c) => c.ok).length
-          ? `${plural(r.candidates.filter((c) => c.ok).length, 'lead')} (peaks the photometry confirms) · a lead, not a discovery`
+          ? `${plural(r.candidates.filter((c) => c.ok).length, 'lead')} (peaks the photometry confirms${r.n_hypotheses < 10 ? `, of the ${r.n_hypotheses} ${r.n_hypotheses === 1 ? 'orbit' : 'orbits'} this pass can test` : ''}) · a lead, not a discovery`
           : r.candidates.length
             ? `${plural(r.candidates.length, 'peak')} above the bar, none confirmed by the photometry · not a lead`
             : 'nothing above the bar · nothing marked',
