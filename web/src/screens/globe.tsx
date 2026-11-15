@@ -4,7 +4,7 @@ import { formatHash } from '../lib/route';
 import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVEY_EPOCH } from '../lib/sky';
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
-import { sky, STAR_MAP_FADE_FROM, type SkyLayer } from './globe/sky';
+import { sky, STAR_MAP_FADE_FROM, starMapFade, type SkyLayer } from './globe/sky';
 import { catalogNow, kept, loadCatalog, type Obj, type SurveyId } from './globe/store';
 import { equiOf, onEquiTile } from '../lib/equi';
 import { HIPS, bakedOf, loadManifest, manifestKnown, tiles } from '../lib/hips';
@@ -265,6 +265,7 @@ export function Globe() {
   const [inside, setInside] = useState(kept.inside);
   // zoomed in past the resolution of the star map: DSS2 is faded in over it, and the credit line says so
   const [pastMap, setPastMap] = useState(false);
+  const fadeRef = useRef(0);
   const [catOpen, setCatOpen] = useState(kept.catOpen);
   const [filter, setFilter] = useState(kept.filter);
   const [query, setQuery] = useState(kept.query);
@@ -494,6 +495,9 @@ export function Globe() {
       else ctx.ellipse(mcx(), mcy(), mw() / 2, mw() / 4, 0, 0, 7);
       ctx.stroke();
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
+      // zoomed past the star map DSS2 shows over it: the pins and the path stand on the DSS2 plate's date, not on Gaia's
+      const fade = st.proj === 'globe' ? starMapFade(R()) : 0;
+      fadeRef.current = fade;
       pins = [];
       if (st.bodyPath) drawBodyPath(ctx, (ra, dec) => project(ra, dec, b), st.bodyPath, W / 2, font);
       // the selected object's path: from its earliest archive image to 2050, a dot at every image date, the SPHEREx stretch, and its
@@ -502,7 +506,7 @@ export function Globe() {
       const mo = st.sel && moving(st.sel);
       if (st.sel && mo) {
         const imgs = imageDates(st.sel.n, st.sel.ra, st.sel.dec) ?? [];
-        const by = backdropYear(st.survey, imgs);
+        const by = backdropYear(st.survey, imgs, fade);
         // a dot at the middle of the calendar year of each image, so that its label reads the year the image was taken
         const years = imgs.map((x) => Math.floor(x.year) + 0.499);
         const y0 = Math.min(by, ...years);
@@ -540,7 +544,7 @@ export function Globe() {
       ctx.font = `600 12.5px ${font}`;
       for (const o of st.catalog) {
         if (!(o.b || o === st.sel) || (o === st.sel && pathPin)) continue;
-        const p = project(...shownPlace(o, st.survey, datesOf(o, st.sel)), b);
+        const p = project(...shownPlace(o, st.survey, datesOf(o, st.sel), fade), b);
         if (!p[2]) continue;
         pins.push({ o, x: p[0], y: p[1] });
         const lx = near ? 14 : 9;
@@ -939,7 +943,7 @@ export function Globe() {
       return (
         separation(...epochPlace(o), cur.ra, cur.dec) < 2 / 3600 ||
         separation(o.ra, o.dec, cur.ra, cur.dec) < tol ||
-        separation(...shownPlace(o, survey, datesOf(o, sel)), cur.ra, cur.dec) < tol
+        separation(...shownPlace(o, survey, datesOf(o, sel), fadeRef.current), cur.ra, cur.dec) < tol
       );
     };
     const hit = sel && on(sel) ? sel : catalog.find((o) => o.pmra != null && on(o));
@@ -966,7 +970,7 @@ export function Globe() {
   const sv = SURVEYS.find((x) => x.id === survey)!;
   // the selected object on the backdrop shown: the date its pin stands at, and the dates of the archive images of its place
   const selDates = sel && moving(sel) ? imageDates(sel.n, sel.ra, sel.dec) : undefined;
-  const selYear = sel ? backdropYear(survey, selDates) : 0;
+  const selYear = sel ? backdropYear(survey, selDates, pastMap ? 1 : 0) : 0;
   const selImage = selDates?.find((x) => x.backdrop === survey);
 
   return (

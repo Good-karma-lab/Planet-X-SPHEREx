@@ -145,6 +145,8 @@ function loadDust(): void {
 /** the globe radius (pixels) from which a survey is faded in over the star map, and by which it has replaced it */
 export const STAR_MAP_FADE_FROM = 8000;
 export const STAR_MAP_FADE_TO = 16000;
+/** How much of DSS2 shows over the star map at a globe scale R (0 = none, 1 = all): the pins' epoch follows it. */
+export const starMapFade = (R: number): number => Math.min(1, Math.max(0, (R - STAR_MAP_FADE_FROM) / (STAR_MAP_FADE_TO - STAR_MAP_FADE_FROM)));
 
 /** the black point (of 255) some baked layers need on top of what the manifest says: the faint colour of the empty sky of 2MASS */
 const EXTRA_BLACK: Record<string, number> = { '2mass': 16 };
