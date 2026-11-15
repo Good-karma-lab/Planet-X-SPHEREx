@@ -55,8 +55,7 @@ CATALOGUE_LABEL = {
 MOVING = (
     "film",
 )  # asked of JPL Small-Body Identification: only tracks within one pass move like an asteroid (the movers between passes are stars)
-FILM_MIN_VISITS = 4
-COLLECT_REV = 2  # bump when the way finds are read or merged changes: the next sweep rewrites them
+COLLECT_REV = 3  # bump when the way finds are read or merged changes: the next sweep rewrites them
 SB_VMAG = 21.0  # SPHEREx depth: fainter bodies are not what a find could be
 SB_MATCH_ARCSEC = 15.0
 SB_RATE_TOL = 0.25
@@ -290,14 +289,15 @@ def collect(
             g = meta.get("grid") or {}
             fr = meta.get("frames") or []
             place = place_name(targets, float(p["ra"]), float(p["dec"]))
-            gate = max(FILM_MIN_VISITS, int((meta.get("control") or {}).get("min_visits_drawn") or 0))
+            ctl = meta.get("control") or {}
             for i, t in enumerate(meta.get("tracks", [])):
                 pts = t.get("pts") or []
                 if not pts or not g:
                     continue
-                # only what the film search itself stands behind: verified, seen in at least as many visits as chance never makes
-                if not t.get("verified") or int(t.get("nvis") or t.get("n_found") or t.get("n") or 0) < gate:
-                    continue
+                # every stored track already passed the film search's own bar; an orbit track (verified) is the strong kind, a line track the weaker
+                line = t.get("method") == "line" or not t.get("verified")
+                ctl_key = "line_chance" if line else "chance"
+                per_search = (ctl.get(ctl_key) or {}).get(str(t.get("n")), 0.0)  # a missing key: none seen in the control trials
                 mid = pts[len(pts) // 2]
                 n, step = g["n"], g["step_arcsec"] / 3600.0
                 dec = g["dec0"] + (n / 2 - mid["y"]) * step
@@ -314,8 +314,15 @@ def collect(
                         "rate": _f(t.get("rate")),
                         "snr": _f(t.get("z_together")),
                         "score": _f(t.get("z_together")),
-                        "chance": None,
-                        "data": {"track": t, "mjd": mjd, "film": p.get("mjd"), "chance": meta.get("chance") or meta.get("control")},
+                        "chance": _f(per_search),
+                        "data": {
+                            "track": t,
+                            "mjd": mjd,
+                            "film": p.get("mjd"),
+                            "control": ctl,
+                            "less_certain": line,
+                            "controls_per_search": per_search,
+                        },
                         "scans": [row["key"]],
                     }
                 )
