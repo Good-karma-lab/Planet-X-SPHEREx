@@ -35,6 +35,7 @@ from service.jobs.scheduler import Priority, Scheduler
 from service.known import Known
 from service.lightcurves import neowise as lc_neowise
 from service.lightcurves import ztf as lc_ztf
+from service.loopwatch import LoopWatch
 from service.movers import Movers
 from service.pairs import Pairs
 from service.products.store import Store, product_key
@@ -104,6 +105,7 @@ class State:
         self.coverage_task: asyncio.Task[None] | None = None
         self.findings: Findings | None = None
         self.fpx_known: FpxIdentifier | None = None
+        self.loopwatch: LoopWatch | None = None
 
 
 class _NoAnomalies:
@@ -157,6 +159,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         else:
             st.scheduler = scheduler
         st.scheduler.start()
+        st.loopwatch = LoopWatch()
+        st.loopwatch.start()
         st.searched = Searched(st.store, cfg.store_dir, st.scheduler, st.movers, st.pairs, st.dwarfs)
         st.searched.prime()
         if not STANDBY:
@@ -206,6 +210,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             await st.findings.stop()
         if st.fpx_known is not None:
             await st.fpx_known.stop()
+        if st.loopwatch is not None:
+            st.loopwatch.stop()
         await st.scheduler.stop()
         await st.s3.close()
         await st.hips.close()

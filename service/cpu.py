@@ -36,7 +36,7 @@ renewed = 0  # how many times a broken pool was replaced
 
 
 PERSON_LOW_CAP = 2  # background calls at most while a person is at the page
-PERSON_RECENT_S = 20.0  # a person's call this recent counts as a person at the page
+PERSON_RECENT_S = 60.0  # a person's call this recent counts as a person at the page (the scheduler's person_active window)
 LOW = 2  # priorities from this one on (the warm runner, maintenance) are "background": they never take the workers kept free for people
 
 
