@@ -2410,3 +2410,5 @@ input[type='range']::-moz-range-thumb {
 @media (min-width: 761px) {
   .vsq.wallv .fstatus { bottom: 42px; flex-wrap: nowrap; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 }
+
+.adesrow { margin-top: 4px; }

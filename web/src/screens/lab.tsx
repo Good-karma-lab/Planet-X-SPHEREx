@@ -1749,6 +1749,31 @@ export function Lab({ route }: { route: Route }) {
     }
     return t.gaia ? `Gaia DR3 ${t.gaia.source_id}` : '';
   });
+  // a mover's positions in every pass as an MPC ADES report: built by the service, saved as a file; what the MPC would still need is said (nothing is sent anywhere)
+  const [adesNote, setAdesNote] = useState('');
+  const downloadAdes = async (t: Track, i: number) => {
+    setAdesNote('Building the ADES report…');
+    try {
+      const observations = t.mjd.map((m, k) => ({ mjd_utc: m, ra: t.ra[k]!, dec: t.dec[k]!, rms_ra_arcsec: Math.max(0.05, t.rms_arcsec), rms_dec_arcsec: Math.max(0.05, t.rms_arcsec) }));
+      const r = await fetch('/api/v1/export/ades', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ track_id: `SPX${i + 1}`, observations, fill_positions: true, comment: 'a lead, not a discovery' }),
+      });
+      if (!r.ok) return setAdesNote(`The ADES report could not be built (${r.status}).`);
+      const d = (await r.json()) as { ready: boolean; problems: string[]; notes: string[]; text: string };
+      if (d.text) {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([d.text], { type: 'text/plain' }));
+        a.download = `spherex_ades_SPX${i + 1}.psv`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+      }
+      setAdesNote(d.ready ? 'ADES report saved: ready for the MPC.' : `ADES report saved, not ready to send: ${[...d.problems, ...d.notes].join('; ')}`);
+    } catch {
+      setAdesNote('The ADES report could not be built.');
+    }
+  };
   const pickTrack = (t: Track, name: string) => {
     // the spectrum of a mover: measured along its own track (motion from the search, place at 2025.9)
     const years = 2025.9 - 2000;
@@ -3200,6 +3225,14 @@ export function Lab({ route }: { route: Route }) {
               <section class="psec fsec">
                 <div class="fsh">Movers between passes</div>
                 <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
+                {(mv?.result?.tracks ?? []).filter((t) => t.mjd.length >= 2).map((t, i) => (
+                  <div class="adesrow" key={i}>
+                    <button class="mini" onClick={() => void downloadAdes(t, i)} title="The positions of this mover in every pass as an MPC ADES report (nothing is sent; the file says what is missing before it could be)">
+                      MPC ADES · {trackNames[i] || `track ${i + 1}`}
+                    </button>
+                  </div>
+                ))}
+                {adesNote && <div class="ssum">{adesNote}</div>}
               </section>
               <section class="psec fsec">
                 <div class="fsh">Brown dwarf candidates</div>
