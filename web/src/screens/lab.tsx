@@ -561,6 +561,8 @@ export function Lab({ route }: { route: Route }) {
   const distD = useDistant({ ra, dec, fov, pass: null, mjd: autoMjd, dmin: 250, dmax: 2000, det: '4' });
   const [deepSt, setDeepSt] = useState<[string, string]>(['idle', 'idle']);
   const [deepFr, setDeepFr] = useState<[number | null, number | null]>([null, null]);
+  // the distance search's own map replaces the sky only when asked: a link from the Planet X page, or the switch in its section
+  const [distShow, setDistShow] = useState(fpx);
   const fpxStarted = useRef('');
   useEffect(() => {
     const key = `${ra},${dec},${fov}`;
@@ -577,7 +579,8 @@ export function Lab({ route }: { route: Route }) {
     if (!findId || !meta || findShown.current === key) return;
     findShown.current = key;
     const kind = findId.split(':')[0] ?? '';
-    const name = { anomaly: 'Anomaly', mover: 'Mover', track: 'Mover', red: 'Red source', pair: 'Pair', brown_dwarf: 'Brown dwarf' }[kind] ?? 'Find';
+    const name =
+      { anomaly: 'Anomaly', mover: 'Mover', track: 'Mover', red: 'Red source', pair: 'Pair', brown_dwarf: 'Brown dwarf' }[kind] ?? 'Find';
     // the find's own place when the link gives it (the link then opens the field's own centre); else the link's place is the find's
     const fra = Number(p['find_ra']);
     const fdec = Number(p['find_dec']);
@@ -1327,7 +1330,18 @@ export function Lab({ route }: { route: Route }) {
         const k = near(sra, sdec, 8);
         if (k) k.selected = true;
         else
-          selMark = { ra: sra, dec: sdec, kind: 'track', name: '', lines: [], colour: '#ffb454', fill: '#ffd08a', rr: 13, selected: true, ref: refPlace(sl) };
+          selMark = {
+            ra: sra,
+            dec: sdec,
+            kind: 'track',
+            name: '',
+            lines: [],
+            colour: '#ffb454',
+            fill: '#ffd08a',
+            rr: 13,
+            selected: true,
+            ref: refPlace(sl),
+          };
       }
       const all = selMark ? [...marks, selMark] : marks;
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
@@ -1584,7 +1598,10 @@ export function Lab({ route }: { route: Route }) {
       // the rings stay where they are on the sky: centred on the place of the object at the first epoch (the first season, or the first visit in
       // Days), never on where the mark is now, so the object is seen travelling across them
       const ref: [number, number] | null = centre
-        ? (centre.ref ?? (days && centre.kind === 'target' ? [centre.ra, centre.dec] : ((centre.path?.[0] as [number, number] | undefined) ?? [centre.ra, centre.dec])))
+        ? (centre.ref ??
+          (days && centre.kind === 'target'
+            ? [centre.ra, centre.dec]
+            : ((centre.path?.[0] as [number, number] | undefined) ?? [centre.ra, centre.dec])))
         : null;
       for (const box of rects) {
         const [cu, cv] = ref ? uvOf(ref[0], ref[1]) : [0.5, 0.5];
@@ -2527,7 +2544,7 @@ export function Lab({ route }: { route: Route }) {
                 <div class="vwait">loading the pictures of every {view === 'det' ? 'detector' : 'band'} for each pass…</div>
               )}
               {film !== null && !filmData && <div class="vwait">{filmNote || 'asking for the visits of the pass…'}</div>}
-              {dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
+              {distShow && dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
               <div class="float ftitle" data-testid="field-title">
                 <b>{fieldName}</b>
                 <span>
@@ -3362,6 +3379,12 @@ export function Lab({ route }: { route: Route }) {
               </section>
               <section class="psec fsec" id="px-section">
                 <div class="fsh">Planet X · bodies beyond Neptune</div>
+                {dist.ds.state === 'ok' && (
+                  <label class="ds-chk">
+                    <input type="checkbox" checked={distShow} onChange={(e) => setDistShow((e.target as HTMLInputElement).checked)} /> Show
+                    the distance search on the picture (instead of the sky)
+                  </label>
+                )}
                 {FPX_AUTO && !fpx ? (
                   [
                     [distRef, '30–300 au · D1–D3'],
