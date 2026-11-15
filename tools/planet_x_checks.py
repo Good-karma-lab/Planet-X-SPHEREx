@@ -65,7 +65,7 @@ def run_centre(c: httpx.Client, f: dict[str, Any], poll_s: float, max_hours: flo
     t0 = time.monotonic()
     while time.monotonic() - t0 < max_hours * 3600.0:
         try:
-            r = c.get("/api/v1/deep", params={**run_q, "background": 1})
+            r = c.get("/api/v1/deep", params={**run_q, "bg": 1})
         except httpx.HTTPError:  # the service restarts (a deploy): ask again, the job is started again or attached
             time.sleep(poll_s)
             continue

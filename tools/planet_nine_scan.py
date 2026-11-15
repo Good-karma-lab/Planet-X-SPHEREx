@@ -12,8 +12,8 @@ Both use all the passes that cover the field. Nothing is copied from earlier wor
 
     uv run python tools/planet_nine_scan.py --base http://127.0.0.1:8790 --out planet_nine.json
 
-The job is asked for with `background=1` (accepted from the machine itself): it runs at the lowest priority and pauses while a person is
-using the service. The script asks again every minute, keeps the answer of each field in the output file as it comes, and says honestly
+The job is asked for with `bg=1`: it gives way to every person's job (a person's field always finds a free worker) but does not stop while
+someone uses the site. The script asks again every minute, keeps the answer of each field in the output file as it comes, and says honestly
 what each search found: the peaks above the noise ceiling of the negated sum, their photometric S/N, and the controls.
 """
 
@@ -74,7 +74,7 @@ def run_field(c: httpx.Client, f: dict[str, Any], poll_s: float, max_hours: floa
     t0 = time.monotonic()
     while time.monotonic() - t0 < max_hours * 3600.0:
         try:
-            r = c.get("/api/v1/deep", params={**q, "background": 1}, timeout=300)
+            r = c.get("/api/v1/deep", params={**q, "bg": 1}, timeout=300)
         except httpx.HTTPError:  # the service restarts (a deploy): ask again
             time.sleep(poll_s)
             continue
