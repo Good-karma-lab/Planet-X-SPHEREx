@@ -1126,6 +1126,9 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
             i = by.get(c, {})
             if i.get("state") == "ok" and i.get("sep") is not None and i["sep"] <= RESIDUAL_ARCSEC:
                 return "residual"
+    if kind == "peak" and _ref_mjd(kind, d) is None:
+        # without the date its place is for, the peak cannot be compared with the known bodies (JPL): it is not called unexplained
+        return "unchecked"
     want = decisive_of(kind, f.get("ra") or 0.0, f.get("dec") or 90.0, d)
 
     def open_(c: str) -> bool:

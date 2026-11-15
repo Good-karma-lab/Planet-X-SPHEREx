@@ -296,7 +296,15 @@ def test_peaks_known_by_jpl_or_a_star_residual() -> None:
     got = status_of(old, [star])
     assert got == "residual" and "residual of that star" in verdict_of(old, [star], got)
     far = {**star, "sep": 5.0}
-    assert status_of(old, [far, {"catalogue": "simbad", "state": "none"}, {"catalogue": "gaia", "state": "none"}]) == "unexplained"
+    # an undated peak cannot be compared with the known bodies (JPL), so nothing explaining it is not yet "unexplained"
+    assert status_of(old, [far, {"catalogue": "simbad", "state": "none"}, {"catalogue": "gaia", "state": "none"}]) == "unchecked"
+    dated_far = [
+        far,
+        {"catalogue": "simbad", "state": "none"},
+        {"catalogue": "gaia", "state": "none"},
+        {"catalogue": "sbident", "state": "none"},
+    ]
+    assert status_of(peak, dated_far) == "unexplained"
 
 
 def _jpl_by_date(rows_by_mjd: dict[str, list[list[Any]]]) -> Any:
