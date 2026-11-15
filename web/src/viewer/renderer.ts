@@ -111,6 +111,10 @@ vec4 colourOf(int k) {
       float ref = pow(max(sg.x * uWB[k].x, 1e-9) * max(sg.y, 1e-9) * max(sg.z * uWB[k].y, 1e-9), 1.0 / 3.0);
       vec3 bg = uPBg[k];
       s = vec3(snLaw((r - bg.x) * uWB[k].x / ref), snLaw((g - bg.y) / ref), snLaw((b - bg.z) * uWB[k].y / ref));
+      // bright stars and the halos round them keep the fixed stretch (their colour is the star's, not the faint sources' to bring out): from 150 sigma over the noise
+      // the old law takes over, completely at 1500 sigma
+      float hot = smoothstep(150.0, 1500.0, (g - bg.y) / max(sg.y, 1e-9));
+      if (hot > 0.0) s = mix(s, vec3(law(r * uWB[k].x), law(g), law(b * uWB[k].y)), hot);
     } else {
       s = vec3(law(r * uWB[k].x), law(g), law(b * uWB[k].y));
     }

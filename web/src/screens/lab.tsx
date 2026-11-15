@@ -468,6 +468,23 @@ export function Lab({ route }: { route: Route }) {
           }[];
         }) => {
           targets.current = d.catalog.filter((o) => o.b);
+          // a small field opened at a catalogue object's J2000 place (from the catalogue, the front page, a finding) is centred where the object is during the SPHEREx
+          // survey: a fast star has moved by arcminutes since 2000 and would be outside the field (WISE 0855 moved 3.5')
+          const cur = parseHash(location.hash);
+          const cra = Number(cur.params['ra']);
+          const cdec = Number(cur.params['dec']);
+          const cfov = Number(cur.params['fov'] ?? 5);
+          if (cur.screen === 'lab' && Number.isFinite(cra) && Number.isFinite(cdec) && cfov <= 10) {
+            for (const o of targets.current) {
+              if (!(o.pmra || o.pmdec)) continue;
+              const near = (a: number, b: number, c: number, e: number) => Math.hypot((a - c) * Math.cos((b * Math.PI) / 180), b - e) * 3600;
+              if (near(o.ra, o.dec, cra, cdec) > 6) continue;
+              const [era, edec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2025.9);
+              if (near(era, edec, o.ra, o.dec) < 20) break;
+              location.replace(formatHash({ screen: 'lab', params: { ...cur.params, ra: era.toFixed(5), dec: edec.toFixed(5) } }));
+              break;
+            }
+          }
         },
       )
       .catch(() => {});

@@ -178,7 +178,7 @@ export function drawMovingPath(
   c: CanvasRenderingContext2D,
   project: (ra: number, dec: number) => [number, number, boolean],
   o: MovingObject,
-  opts: { imageYears: number[]; backdropYear: number; zoomedIn: boolean; maxJump: number; font?: string },
+  opts: { imageYears: number[]; backdropYear: number; zoomedIn: boolean; maxJump: number; font?: string; note?: string | null },
 ): void {
   const y0 = Math.min(...opts.imageYears, opts.backdropYear);
   const y1 = 2050;
@@ -227,7 +227,7 @@ export function drawMovingPath(
   const pin = at(opts.backdropYear);
   if (pin[2]) {
     c.lineWidth = 3;
-    label(pin[0] + 8, pin[1] + 14, `${o.name} · ${Math.round(opts.backdropYear)}`, true);
+    label(pin[0] + 8, pin[1] + 14, `${o.name} · ${Math.round(opts.backdropYear)}${opts.note ? ` · ${opts.note}` : ''}`, true);
   }
   const first = Math.min(...opts.imageYears);
   const yearsByPriority = [...opts.imageYears].sort((a, b) => (a === first ? -1 : b === first ? 1 : 0));
