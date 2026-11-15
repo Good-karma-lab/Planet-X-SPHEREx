@@ -11,6 +11,8 @@ columns its y: what web/src/lib/hips.ts reads). Run it with a Python that has nu
     tiles-bake/venv/bin/python -I tools/bake_tiles.py equirect     WORK/svs.u8 W H OUT svs 5   # tiles of the deepest order from an equirectangular map
     tiles-bake/venv/bin/python -I tools/bake_tiles.py pyramid      OUT svs 5                   # the shallower orders: four children averaged into one tile
     tiles-bake/venv/bin/python -I tools/bake_tiles.py hips         OUT dss2 CDS/DSS2/color jpg 2.4 16 3 6   # a survey's HiPS tiles, toned, re-encoded to WebP
+    tiles-bake/venv/bin/python -I tools/bake_tiles.py cube         OUT spherex SPHEREx/spherex_allsky_cube 73,42,16 1 0 3 5   # a cube HiPS: three frames as R,G,B
+    tiles-bake/venv/bin/python -I tools/bake_tiles.py dust         SFD.fits dust_allsky.jpg OUT dust 4   # SFD98 E(B-V) in the globe's dust colours
     tiles-bake/venv/bin/python -I tools/bake_tiles.py manifest     OUT                          # (re)writes OUT/manifest.json from OUT/*/layer.json
 
 `hips` takes the source tiles from IRSA's HiPS root (https://irsa.ipac.caltech.edu/data/hips/), applies the globe's tone to every pixel
@@ -90,7 +92,9 @@ _STATE: dict[str, Any] = {}
 
 
 def _init_equirect(path: str, w: int, h: int, order: int, root: str, layer: str) -> None:
-    _STATE.update(img=np.memmap(path, dtype=np.uint8, mode="r", shape=(h, w, 3)), w=w, h=h, order=order, root=Path(root), layer=layer, off=offsets())
+    _STATE.update(
+        img=np.memmap(path, dtype=np.uint8, mode="r", shape=(h, w, 3)), w=w, h=h, order=order, root=Path(root), layer=layer, off=offsets()
+    )
 
 
 def _bake_equirect_tile(i: int) -> int:
@@ -150,7 +154,9 @@ def _pyramid_tile(args: tuple[str, str, int, int]) -> int:
     for q in range(4):  # child 4i + q: bit 0 selects the half of the rows, bit 1 the half of the columns
         child = tile_path(root, layer, order + 1, 4 * i + q)
         if child.exists():
-            mosaic[(q & 1) * TILE : (q & 1) * TILE + TILE, (q >> 1) * TILE : (q >> 1) * TILE + TILE] = _load(root, layer, order + 1, 4 * i + q)
+            mosaic[(q & 1) * TILE : (q & 1) * TILE + TILE, (q >> 1) * TILE : (q >> 1) * TILE + TILE] = _load(
+                root, layer, order + 1, 4 * i + q
+            )
     small = (mosaic.reshape(TILE, 2, TILE, 2, 3).sum(axis=(1, 3)) + 2) // 4
     return save_webp(tile_path(root, layer, order, i), small.astype(np.uint8))
 
@@ -199,9 +205,7 @@ def _fetch_hips_tile(args: tuple[str, str, str, int, int, float, float, str]) ->
     with Image.open(io.BytesIO(raw)) as im:
         rgb = np.asarray(im.convert("RGB")).astype(np.float32)
     if rgb.shape[0] != TILE:  # a 256 pixel source is smoothly enlarged to the 512 pixel tile
-        from PIL import Image as _I
-
-        rgb = np.asarray(_I.fromarray(rgb.astype(np.uint8)).resize((TILE, TILE), _I.BICUBIC)).astype(np.float32)
+        rgb = np.asarray(Image.fromarray(rgb.astype(np.uint8)).resize((TILE, TILE), Image.BICUBIC)).astype(np.float32)
     g = gain * 255.0 / (255.0 - black)
     toned = np.clip(np.maximum(0.0, rgb - black) * g, 0, 255).astype(np.uint8)
     return save_webp(dest, toned)
@@ -224,8 +228,178 @@ def bake_hips(root: Path, layer: str, path: str, ext: str, gain: float, black: f
                 elif size == -2:
                     failed += 1
                 if k % 2000 == 0:
-                    print(f"  order {order}: {k}/{n} ({made} written, {missing} outside, {failed} failed), {time.time() - t0:.0f} s", flush=True)
-        print(f"order {order}: {n} asked, {made} written ({total / 1e6:.0f} MB), {missing} outside the survey, {failed} failed, {time.time() - t0:.0f} s", flush=True)
+                    print(
+                        f"  order {order}: {k}/{n} ({made} written, {missing} outside, {failed} failed), {time.time() - t0:.0f} s",
+                        flush=True,
+                    )
+        print(
+            f"order {order}: {n} asked, {made} written ({total / 1e6:.0f} MB), {missing} outside the survey, {failed} failed, {time.time() - t0:.0f} s",
+            flush=True,
+        )
+
+
+def _fetch_cube_tile(args: tuple[str, str, str, int, int, tuple[int, int, int], float, float]) -> int:
+    """One tile of a cube HiPS as a colour composite: three frames (red, green, blue) of the same tile, toned as `hips` does."""
+    import io
+    import ssl
+    import urllib.error
+    import urllib.request
+
+    import certifi
+    from PIL import Image
+
+    root_s, layer, path, order, i, frames, gain, black = args
+    dest = tile_path(Path(root_s), layer, order, i)
+    if dest.exists():
+        return -1
+    ctx = ssl.create_default_context(cafile=certifi.where())
+    chans = []
+    for f in frames:
+        name = f"Npix{i}.png" if f == 0 else f"Npix{i}_{f}.png"
+        url = f"https://irsa.ipac.caltech.edu/data/hips/{path}/Norder{order}/Dir{i // 10000 * 10000}/Npix{i}/{name}"
+        raw = b""
+        for attempt in range(4):
+            try:
+                with urllib.request.urlopen(
+                    urllib.request.Request(url, headers={"User-Agent": "spherex-tile-bake/1"}), timeout=40, context=ctx
+                ) as r:
+                    raw = r.read()
+                break
+            except urllib.error.HTTPError as e:
+                if e.code == 404:
+                    return 0
+                time.sleep(1.5 * (attempt + 1))
+            except OSError:
+                time.sleep(1.5 * (attempt + 1))
+        if not raw:
+            return -2
+        with Image.open(io.BytesIO(raw)) as im:
+            chans.append(np.asarray(im.convert("L")).astype(np.float32))
+    rgb = np.stack(chans, axis=-1)
+    if rgb.shape[0] != TILE:
+        rgb = np.asarray(Image.fromarray(rgb.astype(np.uint8)).resize((TILE, TILE), Image.BICUBIC)).astype(np.float32)
+    g = gain * 255.0 / (255.0 - black)
+    return save_webp(dest, np.clip(np.maximum(0.0, rgb - black) * g, 0, 255).astype(np.uint8))
+
+
+def bake_cube(
+    root: Path, layer: str, path: str, frames: tuple[int, int, int], gain: float, black: float, omin: int, omax: int, threads: int
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    for order in range(omin, omax + 1):
+        n = 12 * 4**order
+        t0, total, made, missing, failed = time.time(), 0, 0, 0, 0
+        jobs = [(str(root), layer, path, order, i, frames, gain, black) for i in range(n)]
+        with ThreadPoolExecutor(threads) as ex:
+            for k, size in enumerate(ex.map(_fetch_cube_tile, jobs), 1):
+                if size > 0:
+                    made += 1
+                    total += size
+                elif size == 0:
+                    missing += 1
+                elif size == -2:
+                    failed += 1
+                if k % 2000 == 0:
+                    print(
+                        f"  order {order}: {k}/{n} ({made} written, {missing} outside, {failed} failed), {time.time() - t0:.0f} s",
+                        flush=True,
+                    )
+        print(
+            f"order {order}: {n} asked, {made} written ({total / 1e6:.0f} MB), {missing} outside, {failed} failed, {time.time() - t0:.0f} s",
+            flush=True,
+        )
+
+
+GAL_FROM_EQ = np.array(
+    [
+        [-0.0548755604, -0.8734370902, -0.4838350155],
+        [0.4941094279, -0.4448296300, 0.7469822445],
+        [-0.8676661490, -0.1980763734, 0.4559837762],
+    ]
+)
+DUST_SAMPLES = 128  # the dust map is smooth (6 arcmin at best): a tile is computed on 128 x 128 points and enlarged to 512
+
+
+def dust_palette(picture: Path) -> tuple[np.ndarray, np.ndarray]:
+    """From the globe's all-sky dust picture: (area-weighted sorted luminance, a 256-step colour table keyed by luminance)."""
+    from PIL import Image
+
+    im = np.asarray(Image.open(picture).convert("RGB")).astype(np.float32)
+    h = im.shape[0]
+    y = im @ np.array([0.299, 0.587, 0.114], dtype=np.float32)
+    w = np.cos(np.radians(90.0 - (np.arange(h) + 0.5) / h * 180.0 - 0.0))[:, None] * np.ones((1, im.shape[1]))
+    order = np.argsort(y.ravel())
+    ys, ws = y.ravel()[order], w.ravel()[order]
+    cdf = np.cumsum(ws) / ws.sum()
+    lut = np.zeros((256, 3), np.float32)
+    have = np.zeros(256, bool)
+    bins = np.clip(y.round().astype(int), 0, 255).ravel()
+    flat = im.reshape(-1, 3)
+    for b in range(256):
+        sel = bins == b
+        if sel.sum() >= 5:
+            lut[b] = np.median(flat[sel], axis=0)
+            have[b] = True
+    idx = np.nonzero(have)[0]
+    for c in range(3):
+        lut[:, c] = np.interp(np.arange(256), idx, lut[idx, c])
+    return np.stack([cdf, ys]), lut
+
+
+def _dust_tile(args: tuple[str, str, int, int]) -> int:
+    from astropy import units as u
+    from astropy_healpix import healpix_to_lonlat
+    from PIL import Image
+
+    root_s, layer, order, i = args
+    dest = tile_path(Path(root_s), layer, order, i)
+    if dest.exists():
+        return -1
+    g = _DUST
+    n = DUST_SAMPLES
+    r = np.arange(n)
+    off = spread(r)[:, None] + 2 * spread(r)[None, :]
+    k = int(np.log2(n))
+    idx = i * 4**k + off.ravel()
+    lon, lat = healpix_to_lonlat(idx, 2 ** (order + k), order="nested")
+    lon, lat = lon.to_value(u.rad), lat.to_value(u.rad)
+    v = np.stack([np.cos(lat) * np.cos(lon), np.cos(lat) * np.sin(lon), np.sin(lat)])
+    gv = GAL_FROM_EQ @ v
+    gl, gb = np.arctan2(gv[1], gv[0]) % (2 * np.pi), np.arcsin(np.clip(gv[2], -1, 1))  # astropy-healpix wants longitudes in 0..2 pi
+    val = g["hp"].interpolate_bilinear_lonlat(gl * u.rad, gb * u.rad, g["map"])
+    q = np.searchsorted(g["sorted"], val) / g["sorted"].size
+    lum = np.interp(q, g["cdf"], g["ys"])
+    f = np.clip(lum, 0, 255)
+    lo = np.floor(f).astype(int).clip(0, 254)
+    t = (f - lo)[:, None]
+    rgb = (g["lut"][lo] * (1 - t) + g["lut"][lo + 1] * t).reshape(n, n, 3)
+    big = np.asarray(Image.fromarray(np.clip(rgb, 0, 255).astype(np.uint8)).resize((TILE, TILE), Image.BICUBIC))
+    return save_webp(dest, big)
+
+
+_DUST: dict[str, Any] = {}
+
+
+def _dust_init(fits_path: str, picture: str) -> None:
+    from astropy.io import fits
+    from astropy_healpix import HEALPix
+
+    with fits.open(fits_path, memmap=False) as h:
+        m = np.asarray(h[1].data["TEMPERATURE"]).astype(np.float64).ravel()
+    cdf_ys, lut = dust_palette(Path(picture))
+    _DUST.update(hp=HEALPix(nside=512, order="nested"), map=m, sorted=np.sort(m), cdf=cdf_ys[0], ys=cdf_ys[1], lut=lut)
+
+
+def bake_dust(fits_path: Path, picture: Path, root: Path, layer: str, omax: int, workers: int) -> None:
+    """The dust layer from the SFD98 E(B-V) map (galactic, NESTED, NSIDE 512): coloured by quantile matching to the globe's own dust picture,
+    so a given share of the sky has the same colour as in that picture; tiles of the orders 0..omax are made directly."""
+    for order in range(0, omax + 1):
+        n = 12 * 4**order
+        t0 = time.time()
+        with mp.Pool(workers, initializer=_dust_init, initargs=(str(fits_path), str(picture))) as pool:
+            sizes = pool.map(_dust_tile, [(str(root), layer, order, i) for i in range(n)], chunksize=8)
+        print(f"order {order}: {n} tiles, {sum(s for s in sizes if s > 0) / 1e6:.0f} MB, {time.time() - t0:.0f} s", flush=True)
 
 
 def write_layer_json(root: Path, layer: str, info: dict[str, Any]) -> None:
@@ -270,7 +444,32 @@ def main(argv: list[str]) -> int:
         src, w, h, root, layer, order = Path(argv[2]), int(argv[3]), int(argv[4]), Path(argv[5]), argv[6], int(argv[7])
         bake_equirect(src, w, h, root, layer, order, workers)
     elif cmd == "hips":
-        bake_hips(Path(argv[2]), argv[3], argv[4], argv[5], float(argv[6]), float(argv[7]), int(argv[8]), int(argv[9]), int(os.environ.get("BAKE_THREADS", "12")))
+        bake_hips(
+            Path(argv[2]),
+            argv[3],
+            argv[4],
+            argv[5],
+            float(argv[6]),
+            float(argv[7]),
+            int(argv[8]),
+            int(argv[9]),
+            int(os.environ.get("BAKE_THREADS", "12")),
+        )
+    elif cmd == "cube":
+        fr = tuple(int(x) for x in argv[5].split(","))
+        bake_cube(
+            Path(argv[2]),
+            argv[3],
+            argv[4],
+            (fr[0], fr[1], fr[2]),
+            float(argv[6]),
+            float(argv[7]),
+            int(argv[8]),
+            int(argv[9]),
+            int(os.environ.get("BAKE_THREADS", "12")),
+        )
+    elif cmd == "dust":
+        bake_dust(Path(argv[2]), Path(argv[3]), Path(argv[4]), argv[5], int(argv[6]), workers)
     elif cmd == "pyramid":
         pyramid(Path(argv[2]), argv[3], int(argv[4]), workers)
     elif cmd == "manifest":
