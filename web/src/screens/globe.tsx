@@ -79,6 +79,35 @@ const ZOOM_MIN = 0.8;
 const ZOOM_MIN_INSIDE = 1.05;
 const ZOOM_MAX = 400;
 const ZOOM_NEAR = 30;
+/** A name SIMBAD knows (CDS Sesame, answered from the browser): its place, type and proper motion (mas/yr). */
+interface Named { n: string; type: string; ra: number; dec: number; pmra: number; pmdec: number }
+/** Asks CDS Sesame for a name (SIMBAD first); null when it knows no such name. */
+async function sesame(q: string, signal: AbortSignal): Promise<Named | null> {
+  // the service's resolver first (cached, near SIMBAD); CDS Sesame from the browser when the service has none
+  const sv = await fetch(`/api/v1/resolve?name=${encodeURIComponent(q)}`, { signal }).catch(() => null);
+  if (sv && sv.ok) {
+    const d = (await sv.json()) as { found?: boolean; name?: string; type?: string; ra?: number; dec?: number; pmra?: number; pmdec?: number };
+    if (d.found === false || d.ra == null || d.dec == null) return null;
+    return { n: d.name ?? q, type: d.type ?? '', ra: d.ra, dec: d.dec, pmra: d.pmra ?? 0, pmdec: d.pmdec ?? 0 };
+  }
+  const r = await fetch(`https://cds.unistra.fr/cgi-bin/nph-sesame/-oI/S?${encodeURIComponent(q)}`, { signal });
+  if (!r.ok) return null;
+  const t = await r.text();
+  const j = t.match(/^%J\s+([\d.+-]+)\s+([\d.+-]+)/m);
+  if (!j) return null;
+  const n = (t.match(/^%I\.0\s+(.+)$/m)?.[1] ?? q).replace(/^\*+\s*/, '').trim();
+  const p = t.match(/^%P\s+([\d.+-]+)\s+([\d.+-]+)/m);
+  return { n, type: (t.match(/^%C\.0\s+(\S+)/m)?.[1] ?? '').trim(), ra: Number(j[1]), dec: Number(j[2]), pmra: p ? Number(p[1]) : 0, pmdec: p ? Number(p[2]) : 0 };
+}
+const pad2 = (v: number) => String(Math.floor(v)).padStart(2, '0');
+/** RA and Dec as 17:57:48.5 +04:41:36, short enough for one line of a card */
+function shortCoords(ra: number, dec: number): string {
+  const h = (((ra % 360) + 360) % 360) / 15, hm = (h % 1) * 60, hs = (hm % 1) * 60;
+  const ad = Math.abs(dec), dm = (ad % 1) * 60, ds = (dm % 1) * 60;
+  return `${pad2(h)}:${pad2(hm)}:${hs.toFixed(1).padStart(4, '0')} ${dec < 0 ? '−' : '+'}${pad2(ad)}:${pad2(dm)}:${pad2(ds)}`;
+}
+const ROW_ICON = (n: string) => <span dangerouslySetInnerHTML={{ __html: icon(n, 16) }} style={{ display: 'contents' }} />;
+
 /** a catalogue object faster than this (mas/yr) gets its path drawn when selected */
 const PATH_PM = 50;
 
@@ -828,6 +857,37 @@ export function Globe() {
     }
     return L;
   }, [catalog, filter, query]);
+  const ql = query.trim().toLowerCase();
+  const fixedList = (filter === 'demo' ? DEMOS : filter === 'small' ? SMALL : []).filter((d) => !ql || d.n.toLowerCase().includes(ql) || d.what.toLowerCase().includes(ql));
+  const [knownCount, setKnownCount] = useState(0);
+  // a name the snapshot does not hold: ask SIMBAD (debounced), and offer it at the top of the list
+  const [named, setNamed] = useState<Named | null>(null);
+  const [asking, setAsking] = useState<'' | 'asking' | 'none' | 'slow'>('');
+  const isCoord = /^(.+?)[,;]\s*(.+)$/.test(ql) && /\d/.test(ql);
+  useEffect(() => {
+    setNamed(null);
+    setAsking('');
+    if (filter === 'demo' || filter === 'small' || ql.length < 3 || isCoord) return;
+    if (list.some((o) => o.n.toLowerCase() === ql)) return;
+    const ctl = new AbortController();
+    const t = setTimeout(() => {
+      setAsking('asking');
+      void sesame(query.trim(), ctl.signal)
+        .then((n) => {
+          setNamed(n);
+          setAsking(n ? '' : 'none');
+        })
+        .catch(() => setAsking((a) => (a === 'asking' ? 'slow' : a)));
+    }, 450);
+    const give = setTimeout(() => ctl.abort(), 20000);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(give);
+      ctl.abort();
+    };
+  }, [ql, filter, list.length]);
+  const namedNew = named && !list.some((o) => separation(o.ra, o.dec, named.ra, named.dec) < 0.01);
+  const total = filter === 'demo' ? fixedList.length : filter === 'small' ? fixedList.length + knownCount : list.length + (namedNew ? 1 : 0);
   const pages = Math.max(1, Math.ceil(list.length / per));
   const pg = Math.min(page, pages);
   const slice = list.slice((pg - 1) * per, pg * per);
@@ -1074,51 +1134,49 @@ export function Globe() {
           </div>
         </div>
         <div class="cat-list">
-          {filter !== 'demo' && filter !== 'small' && !slice.length && catalog.length > 0 && (
-            <div class="empty">Not in the local SIMBAD snapshot. Coordinates work too, e.g. “17h57m48s, +04d41m”.</div>
+          {filter !== 'demo' && filter !== 'small' && !slice.length && !namedNew && catalog.length > 0 && (
+            <div class="empty">
+              {asking === 'asking' ? 'Not in this list; asking SIMBAD for that name…' : asking === 'none' ? 'SIMBAD knows no object of that name.' : asking === 'slow' ? 'SIMBAD did not answer in time.' : 'Nothing in this list.'} Coordinates work too, e.g. “17h57m48s, +04d41m”.
+            </div>
           )}
+          {(filter === 'demo' || filter === 'small') && ql && !fixedList.length && filter === 'demo' && <div class="empty">No demo field matches “{query.trim()}”.</div>}
           {(filter === 'demo' || filter === 'small') &&
-            (filter === 'demo' ? DEMOS : SMALL).map((d) => (
+            fixedList.map((d) => (
               <div key={d.n} class="row" onClick={() => aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog')}>
                 <div class="nm">
-                  <span class="t">{d.n}</span>
+                  <span class="t" title={d.n}>{d.n}</span>
                   <span class="badge orange">{d.film ? 'film' : 'field'}</span>
                 </div>
-                <div class="co">
-                  <span>{formatRA(d.ra)}</span> <span>{formatDec(d.dec)}</span> <span>· {d.fov}′</span>
-                </div>
-                <div class="mv">
-                  <span>{d.what}</span>
+                <div class="meta" title={d.what}>
+                  <span class="co">{shortCoords(d.ra, d.dec)} · {d.fov}′</span>
+                  <span class="mv">{d.what}</span>
                 </div>
                 <div class="gobtns">
                   <button
-                    class="btn sm primary go"
+                    class="btn sm primary go ico"
+                    title="Show on map"
+                    aria-label={`Show ${d.n} on the map`}
                     onClick={(e) => {
                       e.stopPropagation();
                       aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
                       flyRef.current(d.ra, d.dec, (d.fov / 60) * 1.5);
                     }}
                   >
-                    <span dangerouslySetInnerHTML={{ __html: icon('target', 16) }} style={{ display: 'contents' }} />
-                    Show on map
+                    {ROW_ICON('target')}
                   </button>
                   <button
-                    class="btn sm go"
+                    class="btn sm go ico"
+                    title="Open in lab"
+                    aria-label={`Open ${d.n} in the lab`}
                     onClick={(e) => {
                       e.stopPropagation();
                       location.hash = formatHash({
                         screen: 'lab',
-                        params: {
-                          ra: d.ra.toFixed(5),
-                          dec: d.dec.toFixed(5),
-                          fov: String(d.fov),
-                          ...(d.film ? { film: String(d.film) } : {}),
-                        },
+                        params: { ra: d.ra.toFixed(5), dec: d.dec.toFixed(5), fov: String(d.fov), ...(d.film ? { film: String(d.film) } : {}) },
                       });
                     }}
                   >
-                    <span dangerouslySetInnerHTML={{ __html: icon('chart-line-up', 16) }} style={{ display: 'contents' }} />
-                    Open in lab
+                    {ROW_ICON('chart-line-up')}
                   </button>
                 </div>
               </div>
@@ -1130,6 +1188,8 @@ export function Globe() {
           )}
           {filter === 'small' && (
             <KnownList
+              query={query.trim()}
+              onCount={setKnownCount}
               selected={bodyPath?.body.spkid ?? null}
               today={bodyPath}
               onShow={(p) => {
@@ -1144,6 +1204,41 @@ export function Globe() {
                 });
               }}
             />
+          )}
+          {filter !== 'demo' && filter !== 'small' && namedNew && named && (
+            <div class="row named">
+              <div class="nm">
+                <span class="t" title={named.n}>{named.n}</span>
+                <span class="badge">SIMBAD{named.type ? ` · ${named.type}` : ''}</span>
+              </div>
+              <div class="meta">
+                <span class="co">{shortCoords(named.ra, named.dec)}</span>
+                <span class="mv">{Math.hypot(named.pmra, named.pmdec) >= 50 ? `Motion: ${(Math.hypot(named.pmra, named.pmdec) / 1000).toFixed(2)} ″/yr` : 'found by name in SIMBAD'}</span>
+              </div>
+              <div class="gobtns">
+                <button
+                  class="btn sm primary go ico"
+                  title="Show on map"
+                  aria-label={`Show ${named.n} on the map`}
+                  onClick={() => {
+                    aim.set({ ra: named.ra, dec: named.dec }, 'catalog');
+                    flyRef.current(named.ra, named.dec, 2);
+                  }}
+                >
+                  {ROW_ICON('target')}
+                </button>
+                <button
+                  class="btn sm go ico"
+                  title="Open in lab"
+                  aria-label={`Open ${named.n} in the lab`}
+                  onClick={() => {
+                    location.hash = formatHash({ screen: 'lab', params: { ra: named.ra.toFixed(5), dec: named.dec.toFixed(5), fov: '5' } });
+                  }}
+                >
+                  {ROW_ICON('chart-line-up')}
+                </button>
+              </div>
+            </div>
           )}
           {filter !== 'demo' &&
             filter !== 'small' &&
@@ -1164,34 +1259,32 @@ export function Globe() {
                     </span>
                     <span class={`badge ${KIND[o.k]?.cls ?? ''}`}>{o.b ? (TARGET_CLASS[o.n] ?? o.c) : o.c}</span>
                   </div>
-                  <div class="co">
-                    <span>{formatRA(ra)}</span> <span>{formatDec(dec)}</span>
-                  </div>
-                  <div class="mv">
-                    <span>{motion(o)}</span>
+                  <div class="meta">
+                    <span class="co">{shortCoords(ra, dec)}</span>
+                    <span class="mv">{motion(o).replace(/^Motion:\s*/, '')}</span>
                   </div>
                   <div class="gobtns">
                     <button
-                      class="btn sm primary go"
-                      title="Fly to the object on the map, zoom to it and draw its path"
+                      class="btn sm primary go ico"
+                      title="Show on map: fly to it, zoom and draw its path"
+                      aria-label={`Show ${o.n} on the map`}
                       onClick={(e) => {
                         e.stopPropagation();
                         select(o, true);
                       }}
                     >
-                      <span dangerouslySetInnerHTML={{ __html: icon('target', 16) }} style={{ display: 'contents' }} />
-                      Show on map
+                      {ROW_ICON('target')}
                     </button>
                     <button
-                      class="btn sm go"
-                      title="Open this field in the spectral lab"
+                      class="btn sm go ico"
+                      title="Open in lab"
+                      aria-label={`Open ${o.n} in the lab`}
                       onClick={(e) => {
                         e.stopPropagation();
                         openObj(o);
                       }}
                     >
-                      <span dangerouslySetInnerHTML={{ __html: icon('chart-line-up', 16) }} style={{ display: 'contents' }} />
-                      Open in lab
+                      {ROW_ICON('chart-line-up')}
                     </button>
                   </div>
                 </div>
@@ -1225,7 +1318,7 @@ export function Globe() {
               <option value={String(v)}>{v} / page</option>
             ))}
           </select>
-          <span class="cnt">Total: {list.length.toLocaleString('en-US')}</span>
+          <span class="cnt">Total: {total.toLocaleString('en-US')}</span>
         </div>
       </aside>
       </div>
