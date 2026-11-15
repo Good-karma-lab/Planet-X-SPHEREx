@@ -4,6 +4,7 @@ import { binNote, binSpectrum, type Bin } from './spectrum/bins';
 import { CatalogueCheck, REF_LAM, useCatalogue, useReferencePhotometry } from './spectrum/catalogue';
 import { quickPoints, useQuicklook, type QuickPoint } from './spectrum/quicklook';
 import { StampPanels, useStamps } from './spectrum/stamps';
+import { guessObject } from './spectrum/classify';
 import type { Source, SpecPoint } from './spectrum/types';
 import './spectrum/extra.css';
 
@@ -385,6 +386,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const [playing, setPlaying] = useState(false);
   const rows = useMemo(() => [...points].sort((a, b) => a.i - b.i), [points]);
   const bins = useMemo(() => binSpectrum(points), [points]);
+  const ident = useIdentify(shown);
   // a target that saturates the detector has no SPHEREx spectrum: say so once, show none of the per-exposure lines
   const saturated = !!view && (view.no_spectrum || (view.measured >= 20 && view.saturated > 0.5 * view.measured));
   // the all-sky quick look is only a placeholder: gone as soon as a measured point exists, never drawn from a mostly empty column
@@ -426,6 +428,16 @@ export function SpectrumTab({ src }: { src: Source | null }) {
   const perDet = [1, 2, 3, 4, 5, 6].map((d) => points.filter((p) => p.ok && p.det === d).length);
   const usable = points.filter((p) => p.ok).length;
   const cur = rows[k] ?? null;
+  const sb = ident && ident !== 'asking' ? ident.simbad : undefined;
+  const guess = guessObject({
+    bins,
+    usable,
+    saturated,
+    running: !view || view.state === 'running',
+    name: shown.name ?? (sb?.state === 'ok' ? sb.name : null),
+    type: sb?.state === 'ok' ? sb.type : null,
+    sp: sb?.state === 'ok' ? sb.sp : null,
+  });
   return (
     <div class="spec">
       <div class="spec-head">
@@ -443,9 +455,10 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           : view.state === 'running'
             ? `Measuring: ${view.measured} of ${view.total} exposures that cover this place · ${usable} used`
             : view.state === 'done'
-              ? `${usable} points from the ${view.total} exposures that cover this place`
+              ? guess.head
               : `Failed: ${view.error}`}
       </div>
+      {view?.state === 'done' && guess.features && <div class="spec-feat">{guess.features}</div>}
       {(!view || view.state === 'running') && (
         <div class={`spec-prog${!view || view.total === 0 ? ' indet' : ''}`} aria-label="Measuring the spectrum">
           <i style={view && view.total > 0 ? `width:${Math.round((100 * view.measured) / view.total)}%` : ''} />
@@ -455,7 +468,13 @@ export function SpectrumTab({ src }: { src: Source | null }) {
         <div class="partial">Saturated in most exposures: no SPHEREx spectrum (the core of this star overflows the detector)</div>
       )}
       <SpectrumChart points={points} bins={bins} cur={saturated ? null : cur} quick={showQuick ? qpts : null} refs={refs} />
-      {bins.length > 0 && <div class="spec-bin-note">{binNote(bins)}</div>}
+      {(bins.length > 0 || view?.state === 'done') && (
+        <div class="spec-bin-note">
+          {view?.state === 'done' ? `${usable} points from the ${view.total} exposures that cover this place` : ''}
+          {view?.state === 'done' && bins.length > 0 ? ' · ' : ''}
+          {bins.length > 0 ? binNote(bins) : ''}
+        </div>
+      )}
       <div class="spec-dets">
         {perDet.map((n, i) => (
           <span key={i}>
@@ -565,6 +584,32 @@ function useIdentify(src: Source | null): Identified | null | 'asking' {
     return () => ctl.abort();
   }, [src?.ra, src?.dec, src?.pmra, src?.pmdec]);
   return v;
+}
+
+/** What the object probably is, read from its spectrum: the same words as the Spectrum tab's header (one function behind both). Shown in the passport beside the portrait. */
+export function ObjectGuess({ src }: { src: Source | null }) {
+  const { view, points } = useSpectrum(src);
+  const id = useIdentify(src);
+  const bins = useMemo(() => binSpectrum(points), [points]);
+  if (!src) return null;
+  const usable = points.filter((p) => p.ok).length;
+  const saturated = !!view && (view.no_spectrum || (view.measured >= 20 && view.saturated > 0.5 * view.measured));
+  const sb = id && id !== 'asking' ? id.simbad : undefined;
+  const g = guessObject({
+    bins,
+    usable,
+    saturated,
+    running: !view || view.state === 'running',
+    name: src.name ?? (sb?.state === 'ok' ? sb.name : null),
+    type: sb?.state === 'ok' ? sb.type : null,
+    sp: sb?.state === 'ok' ? sb.sp : null,
+  });
+  return (
+    <div class="obj-guess" data-testid="object-guess">
+      <div>{!view ? 'Reading its spectrum…' : view.state === 'failed' ? 'No spectrum to read a class from' : g.head}</div>
+      {g.features && <div class="spec-feat">{g.features}</div>}
+    </div>
+  );
 }
 
 export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum: () => void }) {

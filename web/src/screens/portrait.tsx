@@ -2,6 +2,7 @@
 // colour of its wavelength (blue for the shortest, red for the longest), so the colour of the source is its spectrum. A core
 // saturated in most exposures is drawn white, never as a hole.
 
+import type { ComponentChildren } from 'preact';
 import { useEffect, useRef } from 'preact/hooks';
 import { halfToFloat } from '../lib/sxp';
 
@@ -27,7 +28,7 @@ export interface PortraitData {
   stepArcsec: number;
 }
 
-export function Portrait({ data, x, y, label }: { data: PortraitData; x: number; y: number; label: string }) {
+export function Portrait({ data, x, y, label, aside }: { data: PortraitData; x: number; y: number; label: string; aside?: ComponentChildren }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const boxArcsec = 60;
   useEffect(() => {
@@ -110,6 +111,7 @@ export function Portrait({ data, x, y, label }: { data: PortraitData; x: number;
           ))}
         </div>
         {boxArcsec}″ · colour = its spectrum
+        {aside}
       </div>
     </div>
   );

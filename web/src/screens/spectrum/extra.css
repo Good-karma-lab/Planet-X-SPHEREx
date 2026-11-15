@@ -23,3 +23,9 @@
 .spec-prog i { display: block; height: 100%; background: var(--accent); transition: width 0.3s; }
 .spec-prog.indet i { width: 35%; animation: spec-indet 1.4s ease-in-out infinite; }
 @keyframes spec-indet { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+
+/* what the object probably is: under the Spectrum tab's header and beside the portrait */
+.spec-feat { font: 500 11.5px var(--font); color: var(--muted); margin: 2px 0 4px; line-height: 1.35; }
+.obj-guess { margin-top: 8px; font: 500 12px var(--font); color: var(--ink); line-height: 1.4; }
+.portrait .pt-key { min-width: 0; }
+.portrait .pt-key .obj-guess { white-space: normal; }
