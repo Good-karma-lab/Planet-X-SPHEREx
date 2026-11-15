@@ -46,12 +46,13 @@ def _rounded(ra: float, dec: float, fov: float) -> dict[str, Any]:
 # is that field (SNAP of the field size), so a link a few arcseconds off never rebuilds a field that is ready
 SNAP = 1.0 / 20.0
 _CENTRES: dict[float, set[tuple[float, float]]] = {}
+_WARM: dict[float, set[tuple[float, float]]] = {}  # the warm set's centres win over any other field nearby
 
 
-def remember(ra: float, dec: float, fov: float) -> None:
-    """A field the service has (or warms): later requests near it snap to its centre."""
+def remember(ra: float, dec: float, fov: float, warm: bool = False) -> None:
+    """A field the service has (or warms): later requests near it snap to its centre; a warm field is preferred."""
     p = _rounded(ra, dec, fov)
-    _CENTRES.setdefault(p["fov"], set()).add((p["ra"], p["dec"]))
+    (_WARM if warm else _CENTRES).setdefault(p["fov"], set()).add((p["ra"], p["dec"]))
 
 
 def canonical(ra: float, dec: float, fov: float) -> dict[str, Any]:
@@ -59,16 +60,22 @@ def canonical(ra: float, dec: float, fov: float) -> dict[str, Any]:
     field size from a field the service already has is that field."""
     p = _rounded(ra, dec, fov)
     tol = p["fov"] / 60.0 * SNAP
+    for group in (_WARM, _CENTRES):
+        hit = _nearest(group, p, tol)
+        if hit is not None:
+            return {"ra": hit[0], "dec": hit[1], "fov": p["fov"]}
+    return p
+
+
+def _nearest(group: dict[float, set[tuple[float, float]]], p: dict[str, Any], tol: float) -> tuple[float, float] | None:
     best: tuple[float, float] | None = None
     best_d = tol
-    for r, d in _CENTRES.get(p["fov"], ()):
+    for r, d in group.get(p["fov"], ()):
         dra = ((p["ra"] - r + 540.0) % 360.0 - 180.0) * math.cos(math.radians(0.5 * (p["dec"] + d)))
         sep = math.hypot(dra, p["dec"] - d)
         if sep <= best_d:
             best, best_d = (r, d), sep
-    if best is not None:
-        return {"ra": best[0], "dec": best[1], "fov": p["fov"]}
-    return p
+    return best
 
 
 def memory_estimate_mb(fov: float) -> int:

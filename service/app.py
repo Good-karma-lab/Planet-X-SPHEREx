@@ -171,7 +171,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         # the fields the service has: a request a few arcseconds off one of them is that field (fieldjob.canonical snaps to them)
         for wf in warm_set():
             if wf.film_mjd is None:
-                fieldjob.remember(wf.ra, wf.dec, wf.fov)
+                fieldjob.remember(wf.ra, wf.dec, wf.fov, warm=True)
         for row in st.store.listing((fieldjob.KIND,)) if st.store is not None else []:
             pp = row["params"]
             if row["complete"] and {"ra", "dec", "fov"} <= pp.keys():
