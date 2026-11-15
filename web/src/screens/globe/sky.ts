@@ -170,18 +170,13 @@ class SkyPainter {
     // the star map before the manifest has said where it is: nothing to paint yet
     if (layer[0]!.id === 'svs' && !equiOf('svs') && !HIPS['svs']) return false;
     if (moving) {
+      // every frame is painted at full resolution (one source pixel per screen pixel), with the same level selection as at rest: no coarse step while the view moves and
+      // no re-painting when it stops. A slow machine gets a lower frame rate, never a change of quality.
       this.pass = null;
-      this.stale = true;
-      // while the view moves the picture is painted at the finest step the machine keeps near 30 frames a second (1 = every pixel): it steps coarser only
-      // when a frame took too long and finer again when it was quick, so a drag is not a drop to a quarter of the resolution that jumps back when it stops
-      const t0 = performance.now();
-      const s = this.moveS;
-      const p = this.begin(view, layer, s);
+      this.stale = false; // what was painted is complete: a stop is not followed by a second picture (only a tile that arrives later asks for one)
+      const p = this.begin(view, layer, 1);
       this.rows(p, Infinity);
       this.finish(p);
-      const dt = performance.now() - t0;
-      if (dt > 34 && this.moveS < 4) this.moveS++;
-      else if (dt < 14 && this.moveS > 1) this.moveS--;
       return true;
     }
     if (!this.pass) {
@@ -353,8 +348,6 @@ class SkyPainter {
   /** The new pixels over the previous picture, moved and scaled to the new view. */
   /** the survey on show: a picture is carried over to a new view only while it is the same survey (no half-old, half-new picture after a switch) */
   private shownKey = '';
-  /** the step (source pixels per painted pixel) of a picture painted while the view moves */
-  private moveS = 2;
   private switchKey = '';
   private switchSince = 0;
 

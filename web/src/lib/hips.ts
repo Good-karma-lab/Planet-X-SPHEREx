@@ -576,8 +576,8 @@ export function orderFor(id: string, R: number, irsaShallow = true): number {
   const n = Math.log2((1.023 * R) / s.w) + 0.2;
   const b = baked.get(id);
   // baked tiles start at their own shallowest order (the whole sky is a few tiles): the Allsky image is not needed
-  // texels no smaller than a screen pixel (a little less is allowed), so that stars do not shimmer as the view moves
-  if (b) return Math.min(s.max, Math.max(b.min, Math.floor(n + 0.2)));
+  // the order whose texels are no larger than a screen pixel (7 % over is allowed): the finer tiles are asked for as soon as the zoom passes each level, up to the deepest baked order
+  if (b) return Math.min(s.max, Math.max(b.min, Math.ceil(n - 0.3)));
   const floor = s.path && irsaShallow ? s.min : Math.max(3, s.min);
   if (floor >= 3) return n < 2.3 ? FROM_ALLSKY : Math.min(s.max, Math.max(3, Math.round(n)));
   return Math.min(s.max, Math.max(floor, Math.round(n)));
