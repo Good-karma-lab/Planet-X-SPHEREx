@@ -2444,6 +2444,22 @@ export function Lab({ route }: { route: Route }) {
     const next = fpxRuns.find((r) => r.ds.state === 'idle' && !r.closed());
     if (next) void next.start(null, true);
   });
+  // the leads of the field: the confirmed peaks (ok) of every search, one per object (peaks within 10″ of each other are one object: the strongest is kept)
+  const fpxLeads = (() => {
+    const labels = ['30–300 au · D1–D3', '30–300 au · D4', '250–2000 au · D1–D3', '250–2000 au · D4'];
+    const out: { c: DistantCandidate; i: number; r: DistantResult; label: string }[] = [];
+    fpxRuns.forEach((run, k) => {
+      if (run.ds.state !== 'ok') return;
+      const r = run.ds.r;
+      r.candidates.forEach((c, i) => {
+        if (!c.ok) return;
+        const near = out.findIndex((o) => Math.hypot((o.c.ra - c.ra) * Math.cos((c.dec * Math.PI) / 180), o.c.dec - c.dec) * 3600 < 10);
+        if (near < 0) out.push({ c, i, r, label: labels[k]! });
+        else if (c.sn > out[near]!.c.sn) out[near] = { c, i, r, label: labels[k]! };
+      });
+    });
+    return out;
+  })();
   const fpxAllOver = FPX_AUTO && fpxRuns.every((r) => (r.ds.state !== 'idle' && r.ds.state !== 'loading') || r.closed());
   const deepOn = FPX_AUTO && passes.length >= 3;
   const pxState = (() => {
@@ -2458,7 +2474,7 @@ export function Lab({ route }: { route: Route }) {
         fpxRuns.some((r) => r.ds.state === 'loading') || deepSt.some((x) => x === 'planning' || x === 'plan' || x === 'running');
       const finished = fpxAllOver && (!deepOn || deepSt.every((x) => x === 'done' || x === 'none' || x === 'error'));
       if (finished) {
-        const n = fpxRuns.reduce((a, r) => a + (r.ds.state === 'ok' ? peaksAbove(r.ds) : 0), 0);
+        const n = fpxLeads.length;
         return { frac: 1, text: `${n} found` };
       }
       if (!active && fpxHold) return { frac: 0, text: 'waiting for the other scans' };
@@ -3551,6 +3567,22 @@ export function Lab({ route }: { route: Route }) {
                     <input type="checkbox" checked={distShow} onChange={(e) => setDistShow((e.target as HTMLInputElement).checked)} /> Show
                     the distance search on the picture (instead of the sky)
                   </label>
+                )}
+                {FPX_AUTO && !fpx && (
+                  <div class="fpxleads" data-testid="fpx-leads">
+                    <div class="mono-s">
+                      {fpxLeads.length
+                        ? `${fpxLeads.length} Find Planet X ${fpxLeads.length === 1 ? 'lead' : 'leads'} in this field (peaks the photometry confirms, one per object across the searches) · a lead, not a discovery`
+                        : fpxAllOver
+                          ? 'No Find Planet X lead in this field'
+                          : 'Find Planet X is still running on this field'}
+                    </div>
+                    {fpxLeads.map((l, i) => (
+                      <button key={i} class="btn sm leadbtn" onClick={() => onPeak(l.c, l.i, l.r)}>
+                        <b>Peak {i + 1}</b> · S/N {l.c.sn} · {l.c.d} au ({l.c.d_lo}–{l.c.d_hi}) · photometry {l.c.phot_sn != null ? `${l.c.phot_sn}σ` : 'n/a'} · {l.label}
+                      </button>
+                    ))}
+                  </div>
                 )}
                 {FPX_AUTO && !fpx ? (
                   [

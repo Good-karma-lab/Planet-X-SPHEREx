@@ -83,8 +83,8 @@ export interface DistantSliders {
   neg: boolean;
 }
 
-/** the peaks of a result that stand above its bar (the ones that count; below it is noise) */
-export const peaksAbove = (ds: DistantState): number => (ds.state === 'ok' ? ds.r.candidates.filter((c) => c.sn >= ds.r.threshold).length : 0);
+/** A lead is a peak the photometry along its orbit confirms (ok): the one rule Findings counts too. Peaks that only stand above the bar are not leads. */
+export const peaksAbove = (ds: DistantState): number => (ds.state === 'ok' ? ds.r.candidates.filter((c) => c.ok).length : 0);
 
 export const DMIN = 30;
 export const DMAX = 300;
@@ -461,7 +461,7 @@ export function DistantPanel({
             </>
           )}
           <DistantLines r={ds.r} />
-          {ds.r.candidates.map((c, i) => c.sn < ds.r.threshold ? null : (
+          {!auto && ds.r.candidates.map((c, i) => !c.ok ? null : (
             <button
               key={i}
               class={`btn sm leadbtn${ds.sel === i ? ' on' : ''}`}
@@ -550,9 +550,11 @@ export function DistantLines({ r }: { r: DistantResult }) {
         'The same sum of the negated differences gives the noise ceiling; a peak counts above the bar.',
       )}
       {L(
-        r.candidates.filter((c) => c.sn >= r.threshold).length
-          ? `${plural(r.candidates.filter((c) => c.sn >= r.threshold).length, 'peak')} above the bar · a lead, not a discovery`
-          : 'nothing above the bar · nothing marked',
+        r.candidates.filter((c) => c.ok).length
+          ? `${plural(r.candidates.filter((c) => c.ok).length, 'lead')} (peaks the photometry confirms) · a lead, not a discovery`
+          : r.candidates.length
+            ? `${plural(r.candidates.length, 'peak')} above the bar, none confirmed by the photometry · not a lead`
+            : 'nothing above the bar · nothing marked',
       )}
       {L(
         `${r.control.measured} control tracks · ${r.control.reach_sn5} reach S/N 5`,
