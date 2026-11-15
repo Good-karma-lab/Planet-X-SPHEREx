@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { honestLines } from '../search/jobs';
 import { useSearched, type SearchedField } from '../search/searched';
-import { DEPTH, P9, RECORDED } from './data';
+import { P9, RECORDED } from './data';
 import type { Group, Layers, PxField, PxScene, View } from './scene';
 import './px3.css';
 
@@ -349,22 +349,10 @@ function body(i: number, nFields: number, peaks: SearchedField[]) {
         <p>
           SPHEREx maps the <b>whole sky every six months</b> in 102 colours of infrared light. Two passes half a year apart see the Earth on opposite sides of the Sun: a distant body jumps by an amount that gives its distance.
         </p>
-        <p>Adding up the exposures along every orbit a body could have reaches fainter than any single picture. At 3 µm (D4) the search goes deeper than the WISE search for Planet Nine:</p>
-        <div class="px3-bars">
-          {DEPTH.map((d) => (
-            <div key={d.name} class="bar">
-              <span>
-                {d.name}
-                <small>{d.note}</small>
-              </span>
-              <span class="tr">
-                <i style={{ width: `${(d.mjy / 0.07) * 100}%`, background: d.colour }} />
-              </span>
-              <span class="v">{d.mjy.toFixed(3)} mJy</span>
-            </div>
-          ))}
-        </div>
-        <div class="src">Faintest body found, mJy at 3 µm, with artificial bodies in 1° fields: a shorter bar is a deeper search.</div>
+        <p>
+          Adding up the exposures along every orbit a body could have reaches fainter than any single picture. Each search measures its own
+          noise bar on its field and says it: a body fainter than that bar is not found there, and finding nothing does not show that nothing is there.
+        </p>
       </>
     );
   return (
