@@ -401,3 +401,16 @@ def test_identification_order_puts_the_few_that_matter_first(tmp_path: Path) -> 
     assert order[:2] == ["m2", "m1"] or set(order[:3]) == {"m1", "m2", "p1"}
     assert order.index("a1") > order.index("m1") and order.index("r1") > order.index("p1")
     assert order[-1] == "r1" or order[-2:] == ["a1", "r1"] or order[-2:] == ["r1", "a1"]
+
+
+def test_identification_summary_splits_deciding_catalogues_from_extras(tmp_path: Path) -> None:
+    rows, keys = _store(tmp_path)
+    finds, _ = collect(tmp_path, rows, keys, TARGETS)
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds(finds)
+    red = next(f for f in finds if f["kind"] == "red")
+    db.put_ident(red["id"], "vsx", "unavailable", None, None, None, {})
+    db.put_ident(red["id"], "gaia", "unavailable", None, None, None, {})
+    db.db.commit()
+    got = query(db, None, "all", None, 10, 0)["identification"]
+    assert got["unavailable"] == 2 and got["unavailable_decisive"] == 1 and got["unavailable_extras"] == 1

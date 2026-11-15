@@ -30,15 +30,14 @@ function FindingsPage() {
   const searched = useSearched();
   const [leadId, setLeadId] = useLeadParam();
   const wide = useWide();
-  const all = searched ? searched.reduce((a, f) => a + f.found, 0) : undefined;
   return (
     <>
       <div class="pg-h">
         <h1>Findings</h1>
         <p class="hint">Every find of every searched field, each checked against the catalogues. Every number is measured by this system on SPHEREx Level-2 files.</p>
       </div>
-      <SearchedCounter fields={searched} />
-      <FindingsView wide={wide} leadId={leadId} setLeadId={setLeadId} total={all} />
+      <SearchedCounter fields={searched} leads={false} />
+      <FindingsView wide={wide} leadId={leadId} setLeadId={setLeadId} />
       <p class="fmethod">
         <a href="#/method?sec=validation">How we know it works → Method, validation</a>
       </p>

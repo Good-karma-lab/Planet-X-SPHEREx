@@ -38,7 +38,7 @@ interface Reply {
   total: number;
   counts: Record<string, { all: number; unexplained: number; unchecked: number; known: number }>;
   labels: Record<string, string>;
-  identification: { pending: number; unavailable: number; catalogues: string[] };
+  identification: { pending: number; unavailable: number; unavailable_decisive?: number; unavailable_extras?: number; catalogues: string[] };
   finds: Find[];
 }
 
@@ -107,7 +107,10 @@ export function titleOf(f: Find): string {
 }
 
 /** The best name any catalogue gave, for the second line of a row. */
-const nameOf = (f: Find) => f.idents.find((i) => i.state === 'ok' && i.name && i.catalogue !== 'gaia')?.name ?? f.idents.find((i) => i.state === 'ok' && i.name)?.name ?? '';
+const nameOf = (f: Find) => {
+  const i = f.idents.find((x) => x.state === 'ok' && x.name && x.catalogue !== 'gaia') ?? f.idents.find((x) => x.state === 'ok' && x.name);
+  return i?.name ? (i.catalogue === 'simbad' ? cleanName(i.name) : i.name) : '';
+};
 
 // ---- the 2′ picture as a blink of the passes ----
 const frames = new Map<string, Promise<{ n: number; g: Uint8ClampedArray } | null>>();
@@ -362,7 +365,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
   );
 }
 
-export function FindingsView({ wide, leadId, setLeadId, total }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void; total?: number }) {
+export function FindingsView({ wide, leadId, setLeadId }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void }) {
   const r = useFinds();
   const [kind, setKind] = useState<string>('all');
   const [stat, setStat] = useState<'all' | 'unexplained' | 'unchecked' | 'known'>('all');
@@ -390,9 +393,10 @@ export function FindingsView({ wide, leadId, setLeadId, total }: { wide: boolean
         ))}
       </div>
       <p class="hint leadcount">
-        {rows.length} of {r.total} finds in the searched fields{total != null && total > r.total ? ` · ${total} leads counted by the searches` : ''}
+        {rows.length} of {r.total} finds in the searched fields · a find is a lead, not a discovery
         {r.identification.pending > 0 && ` · identifying: ${r.identification.pending} catalogue answers to come`}
-        {r.identification.unavailable > 0 && ` · ${r.identification.unavailable} did not answer`}
+        {(r.identification.unavailable_decisive ?? 0) > 0 && ` · ${r.identification.unavailable_decisive} deciding answers being retried`}
+        {(r.identification.unavailable_extras ?? r.identification.unavailable) > 0 && ` · extra catalogues that did not answer: ${r.identification.unavailable_extras ?? r.identification.unavailable} (they add detail, they do not decide)`}
       </p>
       {(kind === 'all' ? KIND_ORDER : [kind]).map((k) => {
         const g = rows.filter((f) => f.kind === k);
