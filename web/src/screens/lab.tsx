@@ -21,6 +21,7 @@ import {
   DeepSumPanel,
   DistantCanvas,
   peakRows,
+  type DeepCandidate,
   type DistantCandidate,
   type DistantResult,
   peaksAbove,
@@ -568,6 +569,7 @@ export function Lab({ route }: { route: Route }) {
   const distD = useDistant({ ra, dec, fov, pass: null, mjd: autoMjd, dmin: 250, dmax: 2000, det: '4' });
   const [deepSt, setDeepSt] = useState<[string, string]>(['idle', 'idle']);
   const [deepFr, setDeepFr] = useState<[number | null, number | null]>([null, null]);
+  const [deepCands, setDeepCands] = useState<[DeepCandidate[] | undefined, DeepCandidate[] | undefined]>([undefined, undefined]);
   // the distance search's own map replaces the sky only when asked: a link from the Planet X page, or the switch in its section
   const [distShow, setDistShow] = useState(fpx);
   const fpxStarted = useRef('');
@@ -2444,20 +2446,49 @@ export function Lab({ route }: { route: Route }) {
     const next = fpxRuns.find((r) => r.ds.state === 'idle' && !r.closed());
     if (next) void next.start(null, true);
   });
-  // the leads of the field: the confirmed peaks (ok) of every search, one per object (peaks within 10″ of each other are one object: the strongest is kept)
-  const fpxLeads = (() => {
+  // the leads of the field: the confirmed peaks (ok) of every search, the distance searches and the deep sums, one per object (peaks within 10″ of each other
+  // are one object: the strongest is kept)
+  type Lead = { ra: number; dec: number; sn: number; d: number; range: string; phot: number | null; label: string; open: () => void };
+  const fpxLeads: Lead[] = (() => {
     const labels = ['30–300 au · D1–D3', '30–300 au · D4', '250–2000 au · D1–D3', '250–2000 au · D4'];
-    const out: { c: DistantCandidate; i: number; r: DistantResult; label: string }[] = [];
+    const out: Lead[] = [];
+    const add = (l: Lead) => {
+      const near = out.findIndex((o) => Math.hypot((o.ra - l.ra) * Math.cos((l.dec * Math.PI) / 180), o.dec - l.dec) * 3600 < 10);
+      if (near < 0) out.push(l);
+      else if (l.sn > out[near]!.sn) out[near] = l;
+    };
     fpxRuns.forEach((run, k) => {
       if (run.ds.state !== 'ok') return;
       const r = run.ds.r;
       r.candidates.forEach((c, i) => {
-        if (!c.ok) return;
-        const near = out.findIndex((o) => Math.hypot((o.c.ra - c.ra) * Math.cos((c.dec * Math.PI) / 180), o.c.dec - c.dec) * 3600 < 10);
-        if (near < 0) out.push({ c, i, r, label: labels[k]! });
-        else if (c.sn > out[near]!.c.sn) out[near] = { c, i, r, label: labels[k]! };
+        if (c.ok) add({ ra: c.ra, dec: c.dec, sn: c.sn, d: c.d, range: `${c.d_lo}–${c.d_hi}`, phot: c.phot_sn ?? null, label: labels[k]!, open: () => onPeak(c, i, r) });
       });
     });
+    deepCands.forEach((cs, k) =>
+      (cs ?? []).forEach((c, i) => {
+        if (!c.ok) return;
+        add({
+          ra: c.ra,
+          dec: c.dec,
+          sn: c.sn,
+          d: c.d,
+          range: '',
+          phot: c.phot_sn,
+          label: `deep sum of the passes · ${k ? '250–800' : '60–110'} au`,
+          open: () =>
+            openCard(c.ra, c.dec, `Deep peak ${i + 1} · ${c.d} au`, {
+              title: `Find Planet X · deep sum, peak ${i + 1}: a lead, not a discovery`,
+              rows: [
+                ['Signal', `S/N ${c.sn} in the sum of the passes · ${c.phot_sn != null ? `${c.phot_sn} σ` : 'n/a'} in photometry`],
+                ['Distance', `${c.d} au`],
+                ['Own motion', `${c.mu[0]}, ${c.mu[1]} ″/day (east, north)`],
+                ['In each pass', c.by_pass.map((q) => (q.sn != null ? `${q.sn}σ` : '—')).join(' · ')],
+                ['Control tracks', c.control_sn?.length ? `${c.control_sn.join(', ')} σ` : 'n/a'],
+              ],
+            }),
+        });
+      }),
+    );
     return out;
   })();
   const fpxAllOver = FPX_AUTO && fpxRuns.every((r) => (r.ds.state !== 'idle' && r.ds.state !== 'loading') || r.closed());
@@ -3572,14 +3603,14 @@ export function Lab({ route }: { route: Route }) {
                   <div class="fpxleads" data-testid="fpx-leads">
                     <div class="mono-s">
                       {fpxLeads.length
-                        ? `${fpxLeads.length} Find Planet X ${fpxLeads.length === 1 ? 'lead' : 'leads'} in this field (peaks the photometry confirms, one per object across the searches) · a lead, not a discovery`
+                        ? `${fpxLeads.length} Find Planet X ${fpxLeads.length === 1 ? 'lead' : 'leads'} in this field (peaks the photometry confirms, one per object across the searches and the deep sums) · a lead, not a discovery`
                         : fpxAllOver
                           ? 'No Find Planet X lead in this field'
                           : 'Find Planet X is still running on this field'}
                     </div>
                     {fpxLeads.map((l, i) => (
-                      <button key={i} class="btn sm leadbtn" onClick={() => onPeak(l.c, l.i, l.r)}>
-                        <b>Peak {i + 1}</b> · S/N {l.c.sn} · {l.c.d} au ({l.c.d_lo}–{l.c.d_hi}) · photometry {l.c.phot_sn != null ? `${l.c.phot_sn}σ` : 'n/a'} · {l.label}
+                      <button key={i} class="btn sm leadbtn" onClick={l.open}>
+                        <b>Peak {i + 1}</b> · S/N {l.sn} · {l.d} au{l.range ? ` (${l.range})` : ''} · photometry {l.phot != null ? `${l.phot}σ` : 'n/a'} · {l.label}
                       </button>
                     ))}
                   </div>
@@ -3620,6 +3651,7 @@ export function Lab({ route }: { route: Route }) {
                         onState={(x) => {
                           setDeepSt((o) => (o[0] === x.state ? o : [x.state, o[1]]));
                           setDeepFr((o) => (o[0] === x.frac ? o : [x.frac, o[1]]));
+                          setDeepCands((o) => (o[0] === x.candidates ? o : [x.candidates, o[1]]));
                         }}
                       />
                       <DeepSumPanel
@@ -3632,6 +3664,7 @@ export function Lab({ route }: { route: Route }) {
                         onState={(x) => {
                           setDeepSt((o) => (o[1] === x.state ? o : [o[0], x.state]));
                           setDeepFr((o) => (o[1] === x.frac ? o : [o[0], x.frac]));
+                          setDeepCands((o) => (o[1] === x.candidates ? o : [o[0], x.candidates]));
                         }}
                       />
                     </>

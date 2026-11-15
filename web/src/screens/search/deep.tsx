@@ -80,7 +80,7 @@ export function DeepSumPanel({
   /** an automatic run waits while this is true (the other scans and the earlier searches go first) */
   autoHold?: boolean;
   /** the state of the search, for the owner's scan line */
-  onState?: (s: { state: string; frac: number | null }) => void;
+  onState?: (s: { state: string; frac: number | null; candidates?: DeepCandidate[] }) => void;
   /** a peak was chosen: the owner opens its card with these rows */
   onPick?: (title: string, c: DeepCandidate, rows: [string, string, string][]) => void;
 }) {
@@ -101,7 +101,7 @@ export function DeepSumPanel({
   });
   const started = useRef('');
   useEffect(() => {
-    onState?.({ state: d.state, frac: d.state === 'running' ? d.frac : d.state === 'done' ? 1 : null });
+    onState?.({ state: d.state, frac: d.state === 'running' ? d.frac : d.state === 'done' ? 1 : null, candidates: d.state === 'done' ? d.r.candidates : undefined });
   }, [d]);
   useEffect(() => {
     if (!autoRun || autoHold || has !== true || passes.length < 3) return;
