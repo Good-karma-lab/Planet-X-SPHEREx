@@ -279,6 +279,9 @@ export function Globe() {
   // zoomed in past the resolution of the star map: DSS2 is faded in over it, and the credit line says so
   // zoomed past what the star map holds the layer itself changes to Visible (as if chosen by hand) and back when zoomed out again; a layer chosen by hand is never changed
   const autoVisible = useRef(false);
+  // the zoom slider: its position (0 = the widest view, 1 = the deepest) follows wheel and pinch; the globe's effect fills the API
+  const [zt, setZt] = useState(0.3);
+  const zoomApi = useRef<{ set: (t: number) => void; by: (k: number) => void }>({ set: () => {}, by: () => {} });
   const [catOpen, setCatOpen] = useState(kept.catOpen);
   const [filter, setFilter] = useState(kept.filter);
   const [query, setQuery] = useState(kept.query);
@@ -397,6 +400,7 @@ export function Globe() {
     const zoomMin = () => (inn() ? ZOOM_MIN_INSIDE : ZOOM_MIN);
     // the Mollweide map: zoom and the shift of its centre (it zooms and pans like the globe turns)
     const mv = { z: 1, x: 0, y: 0 };
+    let syncZt = (): void => {};
     const mw = () => Math.min(W - 20, (H - 20) * 2) * mv.z;
     const mcx = () => W / 2 + mv.x;
     const mcy = () => H / 2 + mv.y;
@@ -642,6 +646,7 @@ export function Globe() {
       }
       // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
       const st = live.current;
+      syncZt();
       if (st.proj === 'globe') {
         if (st.survey === 'svs' && R() > STAR_MAP_TO_VISIBLE && HIPS['dss2']) {
           autoVisible.current = true;
@@ -813,6 +818,55 @@ export function Globe() {
       const r = c.getBoundingClientRect();
       const f = frame;
       if (f && Math.abs(e.clientX - r.left - f.x) < f.s && Math.abs(e.clientY - r.top - f.y) < f.s) showAreaRef.current();
+    };
+    // the zoom slider and its buttons: the same zoom as the wheel, about the aim point (the centre of the picture when the aim is out of sight)
+    let ztSent = -1;
+    const aimAt = (): [number, number] => {
+      const a = aim.get();
+      const pp = project(a.ra, a.dec, basis());
+      return pp[2] && pp[0] > 0 && pp[0] < W && pp[1] > 0 && pp[1] < H ? [pp[0], pp[1]] : [W / 2, H / 2];
+    };
+    const zoomAbout = (k: number) => {
+      const [qx, qy] = aimAt();
+      anim = null;
+      if (live.current.proj === 'moll') {
+        const z1 = Math.max(1, Math.min(40, mv.z * k));
+        const kz = z1 / mv.z;
+        mv.x = qx - W / 2 - (qx - mcx()) * kz;
+        mv.y = qy - H / 2 - (qy - mcy()) * kz;
+        mv.z = z1;
+        if (mv.z <= 1.0001) {
+          mv.x = 0;
+          mv.y = 0;
+        }
+        clampMap();
+      } else {
+        const F = basis();
+        const p = worldOf(F, rayAt(qx, qy, R()));
+        view.current.zoom = Math.max(zoomMin(), Math.min(ZOOM_MAX, view.current.zoom * k));
+        const sx = (W / 2 - qx) / R();
+        const sy = (H / 2 - qy) / R();
+        if (inn() || sx * sx + sy * sy < 0.97) setFrame(turnFrame(F, worldOf(F, rayAt(qx, qy, R())), p));
+      }
+      dirty.current = true;
+    };
+    const ztNow = (): number => {
+      const [lo, hi, z] = live.current.proj === 'moll' ? [1, 40, mv.z] : [zoomMin(), ZOOM_MAX, view.current.zoom];
+      return Math.max(0, Math.min(1, Math.log(z / lo) / Math.log(hi / lo)));
+    };
+    zoomApi.current = {
+      by: (k) => zoomAbout(k),
+      set: (t) => {
+        const [lo, hi, z] = live.current.proj === 'moll' ? [1, 40, mv.z] : [zoomMin(), ZOOM_MAX, view.current.zoom];
+        zoomAbout((lo * (hi / lo) ** t) / z);
+      },
+    };
+    syncZt = () => {
+      const t = ztNow();
+      if (Math.abs(t - ztSent) > 0.003) {
+        ztSent = t;
+        setZt(t);
+      }
     };
     c.onwheel = (e) => {
       e.preventDefault();
@@ -1001,6 +1055,24 @@ export function Globe() {
     <div class="screen">
       <div class="globe-wrap">
         <canvas ref={cv} aria-label="Sky globe" data-testid="sky" />
+        <div class="zoomctl dark-glass" role="group" aria-label="Zoom" data-testid="zoom-slider">
+          <button aria-label="Zoom in" title="Zoom in" onClick={() => zoomApi.current.by(1.5)}>
+            +
+          </button>
+          <div class="zs">
+            <input
+              type="range"
+              min="0"
+              max="1000"
+              value={Math.round(zt * 1000)}
+              aria-label="Zoom, from the whole sphere to the deepest view"
+              onInput={(e) => zoomApi.current.set(Number((e.target as HTMLInputElement).value) / 1000)}
+            />
+          </div>
+          <button aria-label="Zoom out" title="Zoom out" onClick={() => zoomApi.current.by(1 / 1.5)}>
+            −
+          </button>
+        </div>
         <div class="map-ui map-bar" data-testid="map-bar">
           <div class="aimrow dark-glass" role="group" aria-label="Aim">
             <label class="fld" for="gRa">

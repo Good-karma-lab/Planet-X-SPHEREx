@@ -148,3 +148,11 @@
 .catalog .row .gobtns a.btn { height: 30px; padding: 0 8px; display: inline-flex; align-items: center; font-size: 11.5px; }
 .catalog .row.named { background: rgba(95, 227, 214, 0.06); box-shadow: inset 2px 0 0 var(--accent); }
 .catalog .known .sb-bar .mono-s { display: none; }
+
+/* the zoom slider: a small glass control on the left edge, above the help box and away from the catalogue drawer */
+.zoomctl { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 4px; border-radius: 14px; background: rgba(8, 18, 24, 0.62); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.1); }
+.zoomctl button { width: 26px; height: 26px; padding: 0; border-radius: 8px; border: 1px solid var(--edge); background: rgba(0, 0, 0, 0.3); color: var(--ink); font: 600 16px/1 var(--font); cursor: pointer; }
+.zoomctl button:hover { background: rgba(95, 227, 214, 0.18); }
+.zoomctl .zs { position: relative; width: 26px; height: 150px; }
+.zoomctl .zs input { position: absolute; left: 50%; top: 50%; width: 150px; margin: 0; transform: translate(-50%, -50%) rotate(-90deg); accent-color: #5fe3d6; background: transparent; }
+@media (max-height: 560px) { .zoomctl .zs { height: 90px; } .zoomctl .zs input { width: 90px; } }
