@@ -2536,6 +2536,83 @@ export function Lab({ route }: { route: Route }) {
     const dir = Math.abs(dy) > Math.abs(dx) ? (dy > 0 ? 'north' : 'south') : dx > 0 ? 'east' : 'west';
     return ` · ${o.n} was ${r >= 60 ? `${(r / 60).toFixed(1)}′` : `${r.toFixed(0)}″`} ${dir} of its 2025 place`;
   }
+  /** Where a source is seen: its signal over the scatter of each detector's picture at its place on each season, as words ("Seen at 3.8–5 µm (D5/D6) in Nov ’25 and May ’26; faint in May ’25; invisible below 3.8 µm"). */
+  const levelsOf = useRef(new WeakMap<Uint16Array, { bg: number[]; sigma: number[] }>());
+  const seenText = (src: { ra: number; dec: number; pmra?: number; pmdec?: number }): string | null => {
+    void portraitTick;
+    if (!meta) return null;
+    const LO = [0.75, 1.1, 1.6, 2.4, 3.8, 4.4];
+    const HI = [1.1, 1.6, 2.4, 3.8, 4.4, 5];
+    const g = meta.grid;
+    const strong = new Map<string, string[]>();
+    const faint: string[] = [];
+    const none: string[] = [];
+    let any = 0;
+    let lowest = 7;
+    for (const q of meta.passes) {
+      const d = detsData.current.get(q.index);
+      if (!d) continue;
+      any++;
+      const year = 2000 + (q.mjd_mid - 51544.5) / 365.25;
+      const [pra, pdec] = src.pmra || src.pmdec ? atEpoch(src.ra, src.dec, src.pmra ?? 0, src.pmdec ?? 0, year) : [src.ra, src.dec];
+      const gx = Math.round(g.n / 2 - ((((pra - g.ra0 + 540) % 360) - 180) * Math.cos((g.dec0 * Math.PI) / 180) * 3600) / g.step_arcsec);
+      const gy = Math.round(g.n / 2 - ((pdec - g.dec0) * 3600) / g.step_arcsec);
+      if (gx < 2 || gy < 2 || gx >= g.n - 2 || gy >= g.n - 2) continue;
+      let lv = levelsOf.current.get(d.dets);
+      if (!lv) {
+        lv = planeLevels(d.dets, d.n, 6);
+        levelsOf.current.set(d.dets, lv);
+      }
+      const N = d.n * d.n;
+      const seen: number[] = [];
+      let best = 0;
+      for (let det = 0; det < 6; det++) {
+        const sg = lv.sigma[det]!;
+        if (!(sg > 0)) continue;
+        // the source's own peak: the brightest pixel within 1 pixel of its place, and it counts only when it is a peak (not lower than the pixels 3 away): the wing of a
+        // neighbouring star slopes up towards that star and is not the source
+        let m = -1e9;
+        let ring = -1e9;
+        for (let dy = -3; dy <= 3; dy++)
+          for (let dx = -3; dx <= 3; dx++) {
+            const inner = Math.abs(dx) <= 1 && Math.abs(dy) <= 1;
+            const outer = Math.abs(dx) === 3 || Math.abs(dy) === 3;
+            if (!inner && !outer) continue;
+            const x = gx + dx;
+            const y = gy + dy;
+            if (x < 0 || y < 0 || x >= d.n || y >= d.n) continue;
+            const v = halfToFloat(d.dets[det * N + y * d.n + x]!);
+            if (!Number.isFinite(v)) continue;
+            if (inner) m = Math.max(m, (v - lv.bg[det]!) / sg);
+            else ring = Math.max(ring, (v - lv.bg[det]!) / sg);
+          }
+        if (m < ring) m = Math.min(m, 2.9);
+        best = Math.max(best, m);
+        if (m >= 5) seen.push(det + 1);
+      }
+      const lab = season(q.mjd_mid);
+      if (seen.length) {
+        const key = seen.join('/');
+        strong.set(key, [...(strong.get(key) ?? []), lab]);
+        lowest = Math.min(lowest, seen[0]!);
+      } else if (best >= 3) faint.push(lab);
+      else none.push(lab);
+    }
+    if (!any) return null;
+    const join = (a: string[]) => (a.length === 2 ? a.join(' and ') : a.length > 2 ? `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}` : a[0]!);
+    const parts: string[] = [];
+    let first = true;
+    for (const [key, labs] of strong) {
+      const set = key.split('/').map(Number);
+      const range = set.length === 6 ? 'all six detectors (0.75–5 µm)' : `${LO[set[0]! - 1]}–${HI[set[set.length - 1]! - 1]} µm (${set.map((x) => `D${x}`).join('/')})`;
+      parts.push(`${first ? 'Seen at ' : 'at '}${range} in ${join(labs)}`);
+      first = false;
+    }
+    if (faint.length) parts.push(`${parts.length ? 'faint' : 'Faint'} in ${join(faint)}`);
+    if (!parts.length) return `No signal over 3σ at this place in ${join(none)}.`;
+    if (lowest > 1 && lowest <= 6) parts.push(`invisible below ${LO[lowest - 1]} µm`);
+    return `${parts.join('; ')}.`;
+  };
   /** The portrait of a source at (ra, dec) [J2000 with motion] from the detector stacks of the season shown. */
   const portraitOf = (src: { ra: number; dec: number; pmra?: number; pmdec?: number }, label: string, aside?: ComponentChildren) => {
     void portraitTick;
@@ -3584,7 +3661,15 @@ export function Lab({ route }: { route: Route }) {
                       )}
                     </div>
                   )}
-                  {sel && portraitOf(sel, sel.name ?? 'selected source', <ObjectGuess src={sel} />)}
+                  {sel &&
+                    portraitOf(
+                      sel,
+                      sel.name ?? 'selected source',
+                      <>
+                        <ObjectGuess src={sel} />
+                        {seenText(sel) && <div class="obj-seen">{seenText(sel)}</div>}
+                      </>,
+                    )}
                   <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
                   {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
                   {sel && (
