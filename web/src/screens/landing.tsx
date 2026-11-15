@@ -13,7 +13,7 @@ const STAR = `#/explore?sel=${encodeURIComponent("Barnard's Star")}&path=1`;
 const BROWN_DWARF = '#/lab?ra=331.09645&dec=-56.80059&fov=5'; // its place at 2025.9: the warm field
 /** Eris: the lab on its field, where Find Planet X runs. */
 const ERIS = '#/lab?ra=27.378&dec=-0.120&fov=20';
-/** The 30-second demo, served as a static file of the web app. */
+/** The demo film (about 80 seconds), served as a static file of the web app. */
 const VIDEO = '/demo/spherex-sky-demo.mp4';
 const REPO = 'https://github.com/Good-karma-lab/Planet-X-SPHEREx';
 const IMG = '/landing/';
@@ -285,7 +285,7 @@ function Video() {
   return (
     <div class="lp-video">
       {ok ? (
-        <video controls playsInline preload="metadata" src={`${VIDEO}#t=1`} onError={() => setOk(false)} aria-label="30-second demo of SPHEREx Space, captions burned in" />
+        <video controls playsInline preload="metadata" poster="/demo/spherex-sky-demo.jpg" src={VIDEO} onError={() => setOk(false)} aria-label="Demo film of SPHEREx Space, captions burned in" />
       ) : (
         <a class="lp-video-slot" href={APP} aria-label="Open SPHEREx Space">
           <span class="lp-play">
@@ -376,7 +376,7 @@ export function Landing() {
           <div class="lp-wrap">
             <div class="lp-head">
               <div>
-                <p class="lp-eyebrow">See it in 30 seconds</p>
+                <p class="lp-eyebrow">See it in a minute</p>
                 <h2 id="lp-vh">From the whole sky to one moving star.</h2>
               </div>
             </div>
