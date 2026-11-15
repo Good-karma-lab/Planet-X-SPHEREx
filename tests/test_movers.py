@@ -94,3 +94,40 @@ def test_a_motion_is_a_mover_only_at_5_sigma_and_a_pixel_over_the_baseline() -> 
     r = view["result"]
     assert [t["check"] for t in r["tracks"]] == ["same", "none"] and r["tracks"][1]["grade"] == "mover"
     assert len(r["slow_tracks"]) == 1 and r["slow"] == 1
+
+
+def test_a_track_between_two_static_stars_is_a_centroid_shift() -> None:
+    import asyncio
+    import math
+    from types import SimpleNamespace
+
+    from service.movers import Movers
+
+    track: dict[str, object] = {
+        "mjd": [60834.2446, 61017.9337, 61285.5887],
+        "ra": [247.414524, 247.418455, 247.422781],
+        "dec": [67.197779, 67.197028, 67.197011],
+        "v_east": 9.218,
+        "v_north": -2.192,
+        "speed": 9.48,
+    }
+    star_a = {"source_id": 1, "ra": 247.4136074, "dec": 67.1979340, "pmra": 1.6, "pmdec": 5.7, "parallax": 1.0, "phot_g_mean_mag": 13.3}
+    star_b = {"source_id": 2, "ra": 247.4252363, "dec": 67.1968966, "pmra": 0.1, "pmdec": -7.8, "parallax": 1.0, "phot_g_mean_mag": 13.4}
+
+    async def near(ra: float, dec: float, radius: float) -> list[dict[str, object]]:
+        return [s for s in (star_a, star_b) if math.hypot((s["ra"] - ra) * math.cos(math.radians(dec)), s["dec"] - dec) * 3600.0 < radius]  # type: ignore[operator]
+
+    m = SimpleNamespace(_gaia_near=near, _static_near=None)
+    m._static_near = lambda t, k, y: Movers._static_near(m, t, k, y)  # type: ignore[arg-type]
+    t = dict(track)
+    asyncio.run(Movers._check(m, t))  # type: ignore[arg-type]
+    assert t["check"] == "still" and t["gaia"]["pair"] == ["1", "2"]  # type: ignore[index]
+    only_one = dict(track)
+
+    async def near_a(ra: float, dec: float, radius: float) -> list[dict[str, object]]:
+        return [s for s in await near(ra, dec, radius) if s is star_a]
+
+    m2 = SimpleNamespace(_gaia_near=near_a, _static_near=None)
+    m2._static_near = lambda t, k, y: Movers._static_near(m2, t, k, y)  # type: ignore[arg-type]
+    asyncio.run(Movers._check(m2, only_one))  # type: ignore[arg-type]
+    assert only_one["check"] == "none"
