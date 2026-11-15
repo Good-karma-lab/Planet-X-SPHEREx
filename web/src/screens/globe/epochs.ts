@@ -152,5 +152,6 @@ export function shownPlace(o: Catalogued, survey: string, imgs?: ArchiveImage[] 
  *  three frames; it is a faint red point in WISE only. null when it can show. */
 export function coldNote(sp: string | null | undefined, survey: string): string | null {
   if (!sp || !/^Y/i.test(sp.trim())) return null;
-  return survey === 'wise' ? null : 'too cold to show here; see Infrared';
+  // SPHEREx sees it at 3–5 µm and the AllWISE picture shows it as a faint red point; it is nothing in visible light, 2MASS or the Gaia star map
+  return survey === 'svs' || survey === 'dss2' || survey === '2mass' ? 'too cold to show here; see Infrared' : null;
 }

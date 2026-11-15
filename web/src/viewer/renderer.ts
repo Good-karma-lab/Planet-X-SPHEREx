@@ -220,7 +220,7 @@ vec3 passColour(int k) {
   if (core >= 1.0) return uWhiteCores == 1 ? vec3(1.0) : satCore(k);  // a saturated core is white or the star's colour at full scale, never a hole
   G = sharpGain(k);
   vec4 c = colourOf(k);
-  vec3 base = c.a > 0.5 ? c.rgb : (core > 0.2 ? vec3(1.0) : uNoData);   // no data inside the fade of a core is part of the core, not a black pixel
+  vec3 base = c.a > 0.5 ? c.rgb : (core > 0.2 ? vec3(1.0) : uNoData);   // no data inside the fade of a core is filled with the star's colour round it (never a black or grey pixel), and the white comes in over a wide, smooth edge
   if (core <= 0.0) return base;
   return mix(base, uWhiteCores == 1 ? vec3(1.0) : satCore(k), core);
 }
