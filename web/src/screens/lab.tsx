@@ -569,6 +569,17 @@ export function Lab({ route }: { route: Route }) {
     setTab('cand');
     void distRef.start(null);
   }, [fpx, meta, distRef.available, distRef.ds.state, ra, dec, fov]);
+  // a link from Findings (find=<id>): the find sits at the field's centre; once the field is open it is selected and its ring pulses on the picture
+  const findId = p['find'] ?? '';
+  const findShown = useRef('');
+  useEffect(() => {
+    const key = `${findId}|${ra},${dec},${fov}`;
+    if (!findId || !meta || findShown.current === key) return;
+    findShown.current = key;
+    const kind = findId.split(':')[0] ?? '';
+    const name = { anomaly: 'Anomaly', mover: 'Mover', track: 'Mover', red: 'Red source', pair: 'Pair', brown_dwarf: 'Brown dwarf' }[kind] ?? 'Find';
+    setSel({ ra, dec, name });
+  }, [findId, meta, ra, dec, fov]);
   // when the selected source changed: its ring pulses for a few seconds, so that a click in a list shows where on the picture the thing is
   const selAtRef = useRef(0);
   useEffect(() => {
