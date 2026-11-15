@@ -19,8 +19,8 @@ on the live service (2026-11-14 and 2026-11-15).
 5. **What does not look like a star.** Any dot gives its spectrum in 102 colours; the tool builds the field's ordinary star from them
    and flags what does not fit. In its field ε Indi B comes out as spectral anomaly 1: a cold brown dwarf glows at the long wavelengths. Every find gets a passport: score, wavelengths, motion. "Anomaly", never "discovery".
 6. **Validated on real data, every number checked against another telescope or catalogue.** Nearby stars against ESA Gaia: Barnard's Star
-   11.4 ± 0.5″/yr at 5′ and 10.7 ± 0.8 at 20′ (Gaia 10.4), ε Indi B 4.6 ± 0.5 (Gaia 4.7), WISE 0855 7.9 (SIMBAD 8.15). Known asteroids found blind: 6 of 8 known bodies to V 19.1
-   on a 60′ field, every track a known body, 0 false in that field. Bodies beyond Neptune: Eris 95.6 ± 0.4 au, Makemake 52.5 au, Sedna 83.0 au (a strong lead). Chance control: every
+   11.4 ± 0.5″/yr at 5′ and 10.7 ± 0.8 at 20′ (Gaia 10.4), ε Indi B 4.6 ± 0.5 (Gaia 4.7), WISE 0855 7.9 ± 0.6 (SIMBAD 8.15). Known asteroids found blind: 6 of 8 known bodies to V 19.1
+   on a 60′ field, every track a known body, 0 false, in the December 2025 60′ ecliptic field. Bodies beyond Neptune: Eris 95.6 ± 0.4 au, Makemake 52.5 au, Sedna 83.0 au (a strong lead). Chance control: every
    search re-run on shuffled data, 0.0 tracks per field in 20 trials. Limits: bright stars saturate, asteroids to about V 19, a lead is
    not a discovery.
 7. **Try it now: free, no account.** spherex.space · code github.com/Good-karma-lab/Planet-X-SPHEREx (Apache-2.0) · team Good Karma
