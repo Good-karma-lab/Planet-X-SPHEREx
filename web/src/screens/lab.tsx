@@ -543,6 +543,11 @@ export function Lab({ route }: { route: Route }) {
     setTab('cand');
     void distRef.start(null);
   }, [fpx, meta, distRef.available, distRef.ds.state, ra, dec, fov]);
+  // when the selected source changed: its ring pulses for a few seconds, so that a click in a list shows where on the picture the thing is
+  const selAtRef = useRef(0);
+  useEffect(() => {
+    selAtRef.current = performance.now();
+  }, [sel?.ra, sel?.dec, sel?.name]);
   const trackSelRef = useRef(-1);
   trackSelRef.current = trackSel;
   const [raIn, setRaIn] = useState('');
@@ -1291,6 +1296,19 @@ export function Lab({ route }: { route: Route }) {
         ctx.strokeStyle = mk.colour;
         shape();
         ctx.setLineDash([]);
+        // a just-selected mark: a ring that opens out from it and fades, repeated for about four seconds
+        const age = performance.now() - selAtRef.current;
+        if (mk.selected && age < 4200) {
+          const ph = (age % 900) / 900;
+          ctx.save();
+          ctx.globalAlpha = (1 - ph) * Math.min(1, (4200 - age) / 600);
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2.5;
+          ctx.beginPath();
+          ctx.arc(x, y, rr + 4 + ph * 22, 0, 2 * Math.PI);
+          ctx.stroke();
+          ctx.restore();
+        }
       };
       const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
         // only the name or number at the ring; the rate, the checks and the rest are on the selected mark and in the Candidates list (the test target keeps its line)
