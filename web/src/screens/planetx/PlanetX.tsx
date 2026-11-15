@@ -169,6 +169,17 @@ export function PlanetXPage() {
                   <a class="go" href={fieldOf(pk)}>Open in the Lab →</a>
                 </div>
   );
+  /** a field's Find Planet X result, from the same peaks Findings lists: its leads, or the known bodies found in it, or nothing */
+  const resultOf = (f: SearchedField): { text: string; lead: boolean } => {
+    if (f.state === 'running') return { text: 'running', lead: false };
+    const inF = (x: Peak) => sep([f.ra, f.dec], [x.ra, x.dec]) <= f.fov / 120;
+    const nl = (leads ?? []).filter(inF).length;
+    if (nl) return { text: `${nl} ${nl === 1 ? 'lead' : 'leads'}`, lead: true };
+    const kn = knownPeaks.filter(inF).map((x) => (x.data.peak?.known?.name ?? '').replace(/^\d+\s+/, '').replace(/\s*\(.*\)$/, '')).filter(Boolean);
+    if (kn.length) return { text: `${[...new Set(kn)].join(', ')}, found blind`, lead: false };
+    if (/^(Eris|Makemake)$/.test(nameOf(f))) return { text: 'known body, found blind', lead: false };
+    return { text: 'nothing above the bar', lead: false };
+  };
   // one label per place on the model (the newest search of it)
   const seen = new Set<string>();
   const onModel = mine.filter((f) => {
@@ -182,11 +193,11 @@ export function PlanetXPage() {
     ra: f.ra,
     dec: f.dec,
     name: nameOf(f),
-    best: /^(Eris|Makemake)$/.test(nameOf(f)) ? 'known body, found blind' : f.best ? f.best.label : f.state === 'running' ? 'running' : 'nothing above the bar',
+    best: resultOf(f).text,
     href: labHref(f),
-    lead: !!(f.best && f.best.kind === 'peak') && !/^(Eris|Makemake)$/.test(nameOf(f)),
+    lead: resultOf(f).lead,
   }));
-  const fieldSig = fields.map((f) => f.key + f.best).join('|');
+  const fieldSig = fields.map((f) => f.key + f.best).join('|') + (leads?.length ?? '-');
 
   useEffect(() => {
     let dead = false;
@@ -370,7 +381,7 @@ export function PlanetXPage() {
               </div>
               {searched == null && <p class="px3-note">Loading the searched fields…</p>}
               {mine.map((f) => (
-                <a key={f.key} class={`px3-sf ${f.best?.kind === 'peak' ? 'lead' : ''}`} href={labHref(f)} onMouseEnter={() => scene.current?.highlight(f.key)} onMouseLeave={() => scene.current?.highlight(null)}>
+                <a key={f.key} class={`px3-sf ${resultOf(f).lead ? 'lead' : ''}`} href={labHref(f)} onMouseEnter={() => scene.current?.highlight(f.key)} onMouseLeave={() => scene.current?.highlight(null)}>
                   <span class="sd" />
                   <span>
                     <b>{nameOf(f)}</b>
@@ -379,7 +390,7 @@ export function PlanetXPage() {
                     </small>
                   </span>
                   <span class="sr">
-                    {f.best ? f.best.label : f.state === 'running' ? 'running' : 'nothing above the bar'}
+                    {resultOf(f).text}
                     <i>open →</i>
                   </span>
                 </a>
