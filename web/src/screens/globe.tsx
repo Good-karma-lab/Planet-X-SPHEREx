@@ -288,6 +288,9 @@ export function Globe() {
   // zoomed in past the resolution of the star map: DSS2 is faded in over it, and the credit line says so
   // zoomed past what the star map holds the layer itself changes to Visible (as if chosen by hand) and back when zoomed out again; a layer chosen by hand is never changed
   const autoVisible = useRef(false);
+  // the layer whose picture is ON SHOW (the painter keeps the old picture until the new layer's tiles are under the view): the epoch caption and the pins follow it
+  const [shownLayer, setShownLayer] = useState<SurveyId>(kept.survey);
+  const shownRef = useRef<SurveyId>(kept.survey);
   // the zoom slider: its position (0 = the widest view, 1 = the deepest) follows wheel and pinch; the globe's effect fills the API
   const [zt, setZt] = useState(0.3);
   const zoomApi = useRef<{ set: (t: number) => void; by: (k: number) => void }>({ set: () => {}, by: () => {} });
@@ -529,6 +532,10 @@ export function Globe() {
       // zoomed past the star map DSS2 shows over it: the pins and the path stand on the DSS2 plate's date, not on Gaia's
       // and on the layer whose picture is ON SHOW: a new layer's date is taken only when its tiles are under the view (a pin never jumps to an empty sky)
       const shownId = SURVEYS.find((x) => x.layer.map((l) => l.id).join('+') === sky.shownKey)?.id ?? st.survey;
+      if (shownId !== shownRef.current) {
+        shownRef.current = shownId;
+        setShownLayer(shownId);
+      }
       pins = [];
       if (st.bodyPath) drawBodyPath(ctx, (ra, dec) => project(ra, dec, b), st.bodyPath, W / 2, font);
       // the selected object's path: from its earliest archive image to 2050, a dot at every image date, the SPHEREx stretch, and its
@@ -1088,8 +1095,8 @@ export function Globe() {
   const sv = SURVEYS.find((x) => x.id === survey)!;
   // the selected object on the backdrop shown: the date its pin stands at, and the dates of the archive images of its place
   const selDates = sel && moving(sel) ? imageDates(sel.n, sel.ra, sel.dec) : undefined;
-  const selYear = sel ? backdropYear(survey, selDates) : 0;
-  const selImage = selDates?.find((x) => x.backdrop === survey);
+  const selYear = sel ? backdropYear(shownLayer, selDates) : 0;
+  const selImage = selDates?.find((x) => x.backdrop === shownLayer);
 
   return (
     <div class="screen">
@@ -1208,7 +1215,7 @@ export function Globe() {
           {sel && moving(sel) && (
             <div class="map-read map-dates" data-testid="globe-dates">
               On this picture: <b>{sel.n.length > 26 ? `${sel.n.slice(0, 24)}…` : sel.n}</b> in {selYear.toFixed(1)}
-              {selImage ? ` (${selImage.name} image)` : survey === 'svs' ? ' (Gaia epoch)' : survey === 'spherex' ? ' (SPHEREx survey)' : survey === 'dust' ? ' (SPHEREx survey; no stars on the dust map)' : ' (middle of the survey)'}
+              {selImage ? ` (${selImage.name} image)` : shownLayer === 'svs' ? ' (Gaia epoch)' : shownLayer === 'spherex' ? ' (SPHEREx survey)' : shownLayer === 'dust' ? ' (SPHEREx survey; no stars on the dust map)' : ' (middle of the survey)'}
               {selDates === undefined ? (
                 <span class="faint"> · asking IRSA for the dates of the archive images…</span>
               ) : selDates ? (
@@ -1219,7 +1226,7 @@ export function Globe() {
             </div>
           )}
           <div class="map-credit" data-testid="map-credit">
-            {LAYER_CAPTION[survey]}
+            {LAYER_CAPTION[shownLayer]}
           </div>
           <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
           <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
