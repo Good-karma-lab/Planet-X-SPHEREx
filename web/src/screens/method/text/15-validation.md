@@ -30,8 +30,6 @@ A 5′ field has a saturated core that pulls the rate up; a 20′ field gives 10
 
 **Result:** WISE 0855−0714 (RA 133.75999°, Dec −7.2422°), a Y dwarf that Gaia does not have, is found in the red bands 3.8–5 µm at 7.93 ± 0.61 ″/yr, position angle 280.8°, against SIMBAD 8.15 ″/yr, 274.7°: −0.4σ in speed, 6° in angle. Source: live `/api/v1/browndwarfs`, 2026-11-14.
 
-On the 60′ field of ε Indi the search publishes 3 tracks: one is explained by Gaia (ε Indi B) and two are unexplained leads, at 6.92 and 3.36 ″/yr. Source: live `/api/v1/movers`, 2026-11-14.
-
 ### Known asteroids are found without being told where to look
 
 The 60′ ecliptic film of December 2025 (RA 169.8917°, Dec +4.3514°, 24 visits) is searched blind for movers; afterwards the tracks are matched with JPL's predictions (Small-Body Identification and Horizons). JPL predicts 61 bodies in the film. Eight of them have at least 4 frames inside it and V ≤ 19.1.
@@ -165,6 +163,5 @@ Each query takes 39–86 ms. Source: `docs/validation/2026-11-14-m2-index.md`.
 | per-visit pixels per pass | 1918, 461, 1230 | 6070, 4544, 1378, 4324 |
 | width of isolated unsaturated stars (FWHM) | 8.8″ (9 stars) | 8.8″ (7 stars) |
 | weight lattice (largest relative rms at the detector-pixel period) | 4.6 % | 10.9 % |
-| proper motion with the catalogue parallax | 10.08 ″/yr toward 355° (catalogue 10.39, 356°) | 4.58 ″/yr toward 122° (catalogue 4.68, 122°), rms 0.05″ |
 
 **Speed.** Fields open between 2 ms and 1.7 s server side, and a cold 5′ field of Barnard's Star builds on the cloud machine from the bucket within 90 s. Source: `docs/PROGRESS.md`.

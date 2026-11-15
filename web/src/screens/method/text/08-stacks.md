@@ -1,6 +1,6 @@
 # Cleaning and stacks
 
-Every moving picture on this site rests on one product: for every pass of a field, one clean stack per detector and per named band, on a common north-up grid, with the saturated share and the weight. Raw frames do not show motion, because each exposure sees the target at another wavelength, angle and pixel grid, so stepping through raw frames shows the blink of the spectrum and the jitter of pixels instead of a shift of a third of a pixel. We clean each exposure, deposit its pixels onto a finer grid, reject what only one exposure sees, and register the passes to each other. Result: Barnard's Star moves 10.08 ″/yr toward 355° and ε Indi B 4.58 ″/yr toward 122° in the stacks of three and four passes.
+Every moving picture on this site rests on one product: for every pass of a field, one clean stack per detector and per named band, on a common north-up grid, with the saturated share and the weight. Raw frames do not show motion, because each exposure sees the target at another wavelength, angle and pixel grid, so stepping through raw frames shows the blink of the spectrum and the jitter of pixels instead of a shift of a third of a pixel. We clean each exposure, deposit its pixels onto a finer grid, reject what only one exposure sees, and register the passes to each other. We check the stacks on two real fields, described at the end of this part.
 
 ## Background and masks
 
@@ -208,14 +208,9 @@ We validate the stacks on real exposures of the two test fields where the answer
 |---|---|---|
 | Field and exposures | 7′, 402 exposures, 3 passes | 7′, 496 exposures, 4 passes |
 | White frame | D1–D6 | D2, D3, D5, D6 |
-| Motion measured in the stacks | 10.08 ″/yr toward 355° | 4.58 ″/yr toward 122° |
-| Catalogue (SIMBAD place, proper motion and parallax) | 10.39 ″/yr toward 356°, parallax 547.0 mas | 4.68 ″/yr toward 122°, parallax 270.7 mas |
-| Rms of the places about the fit | 0.49″ | 0.05″ |
 | Target place per pass against the catalogue | within 0.6″ | within 0.6″ |
 | FWHM of isolated unsaturated stars, white frame, pass 1 | 8.8″ (9 stars) | 8.8″ (7 stars) |
 | Weight lattice, largest relative rms at the detector-pixel period in a detector stack | 4.6 % | 10.9 % |
-
-**Result:** the stacks reproduce the proper motion of ε Indi B to 0.10 ″/yr (4.58 against 4.68) and of Barnard's Star to 0.31 ″/yr, 3 % low (10.08 against 10.39), with the direction within 1° (Source: docs/validation/2026-11-14-m3-field.md).
 
 **Result:** isolated unsaturated stars have a FWHM of 8.8″ in the white frame in both fields (Source: docs/validation/2026-11-14-m3-field.md).
 
