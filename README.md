@@ -80,8 +80,9 @@ in Chromium against the real service). Deployment on a single VM is described in
 ## AI assistance
 
 The code, the tests and the documentation were written largely by AI coding assistants (Anthropic's Claude Code) working under the
-direction of the team, who set the goals, chose between designs and reviewed every result. No picture, figure or video of the tool is
-AI-generated: they are computed by this code from real exposures. See
+direction of the team, who set the goals, chose between designs and reviewed every result. No picture or figure of the tool is
+AI-generated: they are computed by this code from real exposures. The 30-second demo video contains two AI-generated clips,
+marked on screen, and an AI voice-over. See
 [`docs/submission/si-disclosure.md`](docs/submission/si-disclosure.md).
 
 ## Team

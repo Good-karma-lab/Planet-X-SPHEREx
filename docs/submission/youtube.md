@@ -34,7 +34,7 @@ Method with every number and its source: https://www.spherex.space/#/method
 
 Data credits: NASA SPHEREx Level-2 spectral images (DR1 and QR3), NASA/IPAC Infrared Science Archive (IRSA); ESA Gaia DR3; NASA/Goddard SVS Deep Star Maps; DSS2, 2MASS and AllWISE sky surveys; JPL Small-Body Database and Horizons; SIMBAD (CDS). This work uses SPHEREx data products (JPL and Caltech, funded by NASA). Independent project, not endorsed by NASA.
 
-AI disclosure: built with AI coding assistants (Anthropic's Claude Code) under the team's direction. Every picture and the video are recordings of the tool computed from real data; no AI-generated images, video or voice.
+AI disclosure: built with AI coding assistants (Anthropic's Claude Code) under the team's direction. The screen recordings show the tool on real SPHEREx data. Two clips (the telescope in orbit and the flying star) are AI-generated with Google Gemini and marked on screen; the voice-over and sound effects are made with ElevenLabs; music: "Transmission" (CC0, OpenGameArt).
 
 ## Tags
 

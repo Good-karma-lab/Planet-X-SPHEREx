@@ -130,4 +130,4 @@ The full list with links is in `data-and-references.md` and on the About page of
 ## Use of Super Intelligence (SI)
 
 See `si-disclosure.md`: the code, tests and documentation were written largely by AI coding assistants (Anthropic's Claude Code) under
-the team's direction; no picture or video of the tool is AI-generated.
+the team's direction; no picture of the tool is AI-generated; the 30-second demo video contains two AI-generated clips, marked on screen, and an AI voice-over.
