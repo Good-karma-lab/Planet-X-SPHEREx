@@ -64,7 +64,30 @@ float law(float x) { return clamp(asinh((x - uLo) / uSoft) / asinh((uHi - uLo) /
 
 int satK(int k) { return uFilm == 1 ? 0 : k; }
 float G = 1.0;                 // Sharpen gain of the place, the same for every layer and channel (so it never changes a colour)
-float raw(int pass, int ch, vec2 q) { return texture(uVal, vec3(q, float(pass * uPerPass + ch))).r; }
+// the Days film is a coarse grid shown many times larger: bilinear turns a star into a diamond, so its layers are read with a cubic B-spline (four bilinear taps)
+float rawSmooth(float layer, vec2 q) {
+  vec2 sz = vec2(textureSize(uVal, 0).xy);
+  vec2 p = q * sz - 0.5;
+  vec2 i = floor(p);
+  vec2 f = p - i;
+  vec2 w0 = (1.0 - f) * (1.0 - f) * (1.0 - f) / 6.0;
+  vec2 w1 = (4.0 - 6.0 * f * f + 3.0 * f * f * f) / 6.0;
+  vec2 w2 = (1.0 + 3.0 * f + 3.0 * f * f - 3.0 * f * f * f) / 6.0;
+  vec2 w3 = f * f * f / 6.0;
+  vec2 g0 = w0 + w1;
+  vec2 g1 = w2 + w3;
+  vec2 h0 = (i - 0.5 + w1 / g0) / sz;
+  vec2 h1 = (i + 1.5 + w3 / g1) / sz;
+  float a = texture(uVal, vec3(h0.x, h0.y, layer)).r;
+  float b = texture(uVal, vec3(h1.x, h0.y, layer)).r;
+  float c = texture(uVal, vec3(h0.x, h1.y, layer)).r;
+  float d = texture(uVal, vec3(h1.x, h1.y, layer)).r;
+  return g0.y * (g0.x * a + g1.x * b) + g1.y * (g0.x * c + g1.x * d);
+}
+float raw(int pass, int ch, vec2 q) {
+  float layer = float(pass * uPerPass + ch);
+  return uFilm == 1 ? rawSmooth(layer, q) : texture(uVal, vec3(q, layer)).r;
+}
 vec2 cq;                       // the place the colour is taken at (the pixel, or a neighbour of a saturated core)
 float val(int pass, int ch) { return raw(pass, ch, cq) * G; }
 
