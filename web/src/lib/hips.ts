@@ -48,6 +48,11 @@ export function loadManifest(): Promise<boolean> {
         if (HIPS[id]) HIPS[id]!.frame = b.frame === 'galactic' ? 'galactic' : undefined;
         HIPS[id] ??= { max: b.max, min: b.min ?? 0, w: size, frame: b.frame === 'galactic' ? 'galactic' : undefined, bakedOnly: true };
       }
+      // the shallowest baked tiles (the whole sky in a dozen files at order 0) are asked for at once, first of all: a layer is then never a few patches on empty sky
+      for (const [id, b] of baked) {
+        const n = 12 * 4 ** b.min;
+        if (n <= 768) for (let i = 0; i < n; i++) want(id, b.min, i, 5);
+      }
       listeners.forEach((f) => f());
       return baked.size > 0;
     })
@@ -511,14 +516,14 @@ export class Sampler {
         }
       }
       if (t) return this.read(t, n, f, out, k);
-      for (let m = n - 1; m >= this.s.min; m--) {
+      for (let m = n - 1; m >= (baked.get(this.id)?.min ?? this.s.min); m--) {
         const u = this.L.levels[m]!.get(pixAt(m, f));
         if (u) return this.read(u, m, f, out, k);
       }
       // the base: the shallowest tiles from IRSA (a dozen small tiles cover the sky)
       if (floor < 3 && n > floor) {
         const bp = pixAt(floor, f);
-        if (this.L.levels[floor]!.get(bp) === undefined) want(this.id, floor, bp, 1);
+        if (this.L.levels[floor]!.get(bp) === undefined) want(this.id, floor, bp, baked.has(this.id) ? 5 : 1);
       }
     }
     // and under everything the Allsky image, asked for first: one request gives a picture of the whole sky
@@ -537,7 +542,8 @@ export class Sampler {
 
   private allsky(f: FacePt, out: Float32Array | number[], k: number, ask: boolean): number {
     this.lastBaked = false;
-    if (this.s.bakedOnly) return FROM_NOTHING; // baked only: there is no Allsky image
+    // a baked layer has no Allsky image to fall back on: the live one has another tone (dust: another palette), so a place whose baked tile is not here yet waits for it
+    if (this.s.bakedOnly || baked.has(this.id)) return FROM_NOTHING;
     const a = this.L.allsky;
     if (a === undefined) {
       if (ask) want(this.id, ALLSKY, 0, 4);
