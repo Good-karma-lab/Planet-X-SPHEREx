@@ -142,9 +142,11 @@ const tileKey = (id: string, l: number, x: number, y: number) => `${id}/${l}/${x
 const tileUrl = (s: EquiSpec, l: number, x: number, y: number) => s.url.replace('{l}', String(l)).replace('{x}', String(x)).replace('{y}', String(y));
 
 /** The level whose pixels match a globe of radius R px (one tile pixel about one screen pixel). */
-export function equiLevelFor(s: EquiSpec, R: number): number {
-  // a level whose texels are no smaller than a screen pixel (a little less is allowed): finer texels than the screen has pixels shimmer as the view moves
-  const l = Math.log2((2 * Math.PI * R) / s.size) + 0.25;
+export function equiLevelFor(s: EquiSpec, R: number, dec = 0): number {
+  // a level whose texels are no smaller than a screen pixel (a little less is allowed): finer texels than the screen has pixels shimmer as the view moves.
+  // Near a pole the texels of a row are crowded in RA (a row at declination δ is a circle cos δ times the equator): the level is lowered by log2(1/cos δ) there,
+  // so the texels are no smaller than a screen pixel ALONG the row too (below that a pixel would pick one texel of many: the radial streaks round the pole)
+  const l = Math.log2((2 * Math.PI * R * Math.max(0.03, Math.cos((dec * Math.PI) / 180))) / s.size) + 0.25;
   return Math.max(s.min, Math.min(s.max, Math.floor(l)));
 }
 
@@ -166,11 +168,13 @@ export class EquiSampler {
   readonly s: EquiSpec;
   /** the level asked for */
   readonly level: number;
+  private R: number;
   private lastKey = '';
   private lastTile: Slot | undefined;
   constructor(id: string, R: number) {
     this.s = specs.get(id)!;
     this.level = equiLevelFor(this.s, R);
+    this.R = R;
     stamp = performance.now();
   }
   private tile(l: number, tx: number, ty: number, ask: boolean): Slot | undefined {
@@ -189,7 +193,9 @@ export class EquiSampler {
     const v = (90 - Math.max(-90, Math.min(90, dec))) / 180;
     if (u >= 1) u = 0;
     // the finest level, down from the one asked for, whose tile under this place is at hand (the others are asked for)
-    for (let l = this.level; l >= this.s.min; l--) {
+    // the level for this place: lower toward the poles (see equiLevelFor)
+    const top = Math.min(this.level, equiLevelFor(this.s, this.R, dec));
+    for (let l = top; l >= this.s.min; l--) {
       const W = S * 2 ** l;
       const H = W / 2;
       const X = u * W - 0.5;
@@ -198,7 +204,7 @@ export class EquiSampler {
       const y0 = Math.floor(Y);
       const cx = ((Math.round(X) % W) + W) % W;
       const cy = Math.max(0, Math.min(H - 1, Math.round(Y)));
-      const c = this.tile(l, Math.floor(cx / S), Math.floor(cy / S), l >= this.level - 2);
+      const c = this.tile(l, Math.floor(cx / S), Math.floor(cy / S), l >= top - 2);
       if (!c) continue;
       const fx = X - x0;
       const fy = Y - y0;

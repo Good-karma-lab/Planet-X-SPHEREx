@@ -2437,3 +2437,8 @@ input[type='range']::-moz-range-thumb {
 .about-grid > section { break-inside: avoid; margin: 0 0 14px; }
 @media (max-width: 1100px) { .about-grid { column-count: 2; } }
 @media (max-width: 700px) { .about-grid { column-count: 1; } }
+
+/* a panel's body that scrolls fades out above the scans tray (a row cut by the edge reads as scrolled, not as covered); the 28 px of padding keeps the last row clear of the fade when scrolled to the end */
+@media (min-width: 861px) {
+  .lab .pbody { -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); mask-image: linear-gradient(to bottom, #000 calc(100% - 22px), transparent); }
+}
