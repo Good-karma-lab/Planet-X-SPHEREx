@@ -841,15 +841,15 @@ export function Globe() {
     let turnToken = 0;
     const zoomAbout = (k: number) => {
       anim = null;
-      const so = live.current.sel;
-      const target = so ? shownPlace(so, live.current.survey, undefined) : null;
+      // the zoom is about the aim frame (the field, or the object the aim sits on), which the drag centres too
+      const target: [number, number] = [aim.get().ra, aim.get().dec];
       if (live.current.proj === 'moll') {
         const z1 = Math.max(1, Math.min(40, mv.z * k));
         const kz = z1 / mv.z;
         mv.x = -(W / 2 - mcx()) * kz;
         mv.y = -(H / 2 - mcy()) * kz;
         mv.z = z1;
-        if (target) {
+        {
           const pp = project(target[0], target[1], basis());
           if (pp[2]) {
             mv.x += W / 2 - pp[0];
@@ -864,8 +864,7 @@ export function Globe() {
       } else {
         const F = basis();
         // the selected object, else the aim frame, is turned to the centre (smoothly, 0.35 s), and the zoom is about the centre
-        const goal = target ?? ([aim.get().ra, aim.get().dec] as [number, number]);
-        const c = frameOf(goal[0], goal[1], 0).c;
+        const c = frameOf(target[0], target[1], 0).c;
         const cosA = Math.max(-1, Math.min(1, dot3(F.c, c)));
         const th = Math.acos(cosA);
         if (th > 1e-4) {
@@ -1290,7 +1289,10 @@ export function Globe() {
           {(filter === 'demo' || filter === 'small') && ql && !fixedList.length && filter === 'demo' && <div class="empty">No demo field matches “{query.trim()}”.</div>}
           {(filter === 'demo' || filter === 'small') &&
             fixedList.map((d) => (
-              <div key={d.n} class="row" onClick={() => aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog')}>
+              <div key={d.n} class="row" onClick={() => {
+                setSel(null);
+                aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
+              }}>
                 <div class="nm">
                   <span class="t" title={d.n}>{d.n}</span>
                   <span class="badge orange">{d.film ? 'film' : 'field'}</span>
@@ -1306,6 +1308,7 @@ export function Globe() {
                     aria-label={`Show ${d.n} on the map`}
                     onClick={(e) => {
                       e.stopPropagation();
+                      setSel(null);
                       aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
                       flyRef.current(d.ra, d.dec, (d.fov / 60) * 1.5);
                     }}
