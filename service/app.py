@@ -168,6 +168,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                     st.coverage = await asyncio.to_thread(coverage_payload, index_path)
 
             st.coverage_task = asyncio.get_running_loop().create_task(prime_coverage())
+        # the index's size for /health, counted once in a thread (the async health route never counts 1.6 million rows itself)
+        asyncio.get_running_loop().run_in_executor(None, index_health)
         # the fields the service has: a request a few arcseconds off one of them is that field (fieldjob.canonical snaps to them)
         for wf in warm_set():
             if wf.film_mjd is None:
@@ -464,8 +466,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         return response
 
     @app.get(f"{API_PREFIX}/health")
-    def health() -> dict[str, Any]:
-        """Cheap liveness and state."""
+    async def health() -> dict[str, Any]:
+        """Cheap liveness and state. Async on purpose: it never queues for the thread pool behind field lookups, so Caddy's health check
+        (2 s) does not mistake a busy main instance for a dead one and send visitors to the standby, which cannot build fields."""
         return {
             "ok": True,
             "service": SERVICE_NAME,
