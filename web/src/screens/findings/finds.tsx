@@ -255,7 +255,14 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [inline, onClose]);
-  const lab = formatHash({ screen: 'lab', params: { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id } });
+  // the Lab opens the FIELD the searches ran on (its own centre and size: the warm one), with the find's id and place to highlight
+  const fp = f.data.field_params as { ra: number; dec: number; fov: number } | undefined;
+  const lab = formatHash({
+    screen: 'lab',
+    params: fp
+      ? { ra: fp.ra.toFixed(5), dec: fp.dec.toFixed(5), fov: String(fp.fov), find: f.id, find_ra: f.ra.toFixed(5), find_dec: f.dec.toFixed(5) }
+      : { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id },
+  });
   const json = () => encodeURIComponent(JSON.stringify({ ...f, note: 'a lead, not a discovery', exported: new Date().toISOString() }, null, 2));
   const spec = f.spectrum.filter((s) => s.lam != null && s.flux != null).map((s) => ({ x: ((s.lam as number) + (s.lam_hi ?? (s.lam as number))) / 2, y: s.flux as number, e: s.err, m: s.model }));
   const curves = [...new Set(f.lightcurve.map((p) => p.label))];
