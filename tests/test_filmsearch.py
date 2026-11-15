@@ -47,9 +47,9 @@ def test_the_body_is_one_straight_track_found_in_every_visit() -> None:
     tr = out["tracks"][0]
     assert tr["method"] == "line" and tr["verified"] is False
     assert tr["n_found"] == 8 and abs(tr["rate"] - 31.25) < 3.0
-    assert (
-        (tr["pa"] == tr["pa"] and 80 < tr["pa"] < 100) or 260 < tr["pa"] < 280
-    )  # east (grid x grows westward: the body moves toward larger x)
+    assert (tr["pa"] == tr["pa"] and 80 < tr["pa"] < 100) or 260 < tr[
+        "pa"
+    ] < 280  # east (grid x grows westward: the body moves toward larger x)
     assert all(0 <= p["x"] < N and 0 <= p["y"] < N for p in tr["pts"])
     assert out["control"]["trials"] == 10 and out["control"]["min_visits_drawn"] >= fs.NMIN_FOUND
 

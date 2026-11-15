@@ -269,11 +269,34 @@ def test_a_catalogue_that_never_answers_does_not_hold_a_find_unchecked_forever()
     from service.findings import MAX_ATTEMPTS
 
     red = {"kind": "red", "data": {}}
-    ids = [{"catalogue": c, "state": "none", "attempts": 0} for c in ("simbad", "gaia", "twomass", "allwise", "ned")]
-    retrying = [*ids, {"catalogue": "vsx", "state": "unavailable", "attempts": 2}]
-    gave_up = [*ids, {"catalogue": "vsx", "state": "unavailable", "attempts": MAX_ATTEMPTS}]
-    assert status_of(red, retrying) == "unchecked"
+    ids = [{"catalogue": c, "state": "none", "attempts": 0} for c in ("simbad", "twomass", "allwise", "ned", "vsx")]
+    retrying = [*ids, {"catalogue": "gaia", "state": "unavailable", "attempts": 2}]
+    gave_up = [*ids, {"catalogue": "gaia", "state": "unavailable", "attempts": MAX_ATTEMPTS}]
+    assert status_of(red, retrying) == "unchecked"  # Gaia decides a red source and is still being retried
     assert status_of(red, gave_up) == "unexplained"
+    # VSX, NED and 2MASS only add detail: SIMBAD and Gaia having answered, a find is final whatever they did
+    decided = [
+        {"catalogue": "simbad", "state": "none"},
+        {"catalogue": "gaia", "state": "none"},
+        {"catalogue": "vsx", "state": "unavailable", "attempts": 0, "label": "VSX"},
+    ]
+    assert status_of(red, decided) == "unexplained"
+    assert "Did not answer: VSX" in verdict_of(red, decided, "unexplained")
+
+
+def test_peaks_known_by_jpl_or_a_star_residual() -> None:
+    from service.findings import decisive_of
+
+    peak = {"kind": "peak", "ra": 10.0, "dec": 5.0, "data": {"peak": {"ref_mjd": 61000.0}}}
+    old = {"kind": "peak", "ra": 10.0, "dec": 5.0, "data": {"peak": {}}}
+    assert decisive_of("peak", 10.0, 5.0, peak["data"]) == ["simbad", "gaia", "sbident"]
+    assert decisive_of("peak", 10.0, 5.0, old["data"]) == ["simbad", "gaia"]  # no date: JPL is not asked
+    assert status_of(peak, [{"catalogue": "sbident", "state": "ok"}]) == "known"
+    star = {"catalogue": "allwise", "state": "ok", "sep": 1.4, "label": "AllWISE", "name": "AllWISE J040313.55+082720.0"}
+    got = status_of(old, [star])
+    assert got == "residual" and "residual of that star" in verdict_of(old, [star], got)
+    far = {**star, "sep": 5.0}
+    assert status_of(old, [far, {"catalogue": "simbad", "state": "none"}, {"catalogue": "gaia", "state": "none"}]) == "unexplained"
 
 
 def _jpl_by_date(rows_by_mjd: dict[str, list[list[Any]]]) -> Any:
