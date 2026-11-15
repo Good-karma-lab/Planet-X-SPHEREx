@@ -61,6 +61,23 @@ function applyManifest(m: ManifestJson): boolean {
       for (const [id, b] of baked) {
         const n = 12 * 4 ** b.min;
         if (n <= 768) for (let i = 0; i < n; i++) want(id, b.min, i, 5);
+        // a layer baked down to the whole sky (the star map): its orders 1 and 2 as well, so that the first view is never a few sharp patches on a coarse
+        // picture. Order 1 (48 tiles, 4 MB) goes with order 0 at a priority below anything a view asks for (2-5); order 2 (192 tiles, 13 MB) is fetched
+        // after the first frame into the browser's cache, two at a time (the queue below drops a waiting tile once the view has moved on, and a view's
+        // newer requests always go first, so a low-priority tile would never be fetched).
+        if (b.min === 0 && b.max >= 2) {
+          for (let i = 0; i < 48; i++) want(id, 1, i, 0.6);
+          // after the first frame (two animation frames; a hidden tab runs none, so a timer starts it anyway)
+          let started = false;
+          const go = () => {
+            if (!started) {
+              started = true;
+              warm(id, 2, 192);
+            }
+          };
+          requestAnimationFrame(() => requestAnimationFrame(go));
+          setTimeout(go, 1500);
+        }
       }
       listeners.forEach((f) => f());
       return baked.size > 0;
@@ -295,6 +312,26 @@ function pump(): void {
     queue.delete(bestKey);
     start(bestKey, best);
   }
+}
+
+/** Fetches the first `count` tiles of an order into the browser's HTTP cache (the tiles are immutable), two at a time and at low priority, so that a view
+ *  that later needs them finds them there. Failures are ignored: the view asks again when it needs the tile. */
+function warm(id: string, o: number, count: number): void {
+  let next = 0;
+  const one = async (): Promise<void> => {
+    while (next < count) {
+      const u = urls(id, o, next++).baked;
+      if (!u) return;
+      try {
+        const r = await fetch(u, { mode: 'cors', credentials: 'omit', priority: 'low' } as RequestInit);
+        await r.blob();
+      } catch {
+        // asked again when the view needs it
+      }
+    }
+  };
+  void one();
+  void one();
 }
 
 function urls(id: string, o: number, i: number): { baked?: string; irsa?: string; service?: string } {
