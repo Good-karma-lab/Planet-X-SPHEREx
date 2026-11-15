@@ -321,6 +321,7 @@ export function Landing() {
             <a href="#finds" onClick={jump('finds')}>What moves</a>
             <a href="#team" onClick={jump('team')}>Team</a>
             <a href="#challenge" onClick={jump('challenge')}>The challenge</a>
+            <a href={REPO} target="_blank" rel="noopener noreferrer" data-testid="landing-source">Source code</a>
             <a class="lp-btn lp-btn-primary lp-btn-sm" href={APP} data-testid="landing-open">
               Open the app
             </a>
@@ -362,7 +363,7 @@ export function Landing() {
               <ul class="lp-trust">
                 <li>1.6 million real SPHEREx exposures</li>
                 <li>Every mover checked against ESA Gaia</li>
-                <li>Free, no account, open source</li>
+                <li>Free, no account, <a href={REPO} target="_blank" rel="noopener noreferrer">open source</a></li>
               </ul>
               <p class="lp-or">
                 Or <a href={APP}>explore the whole sky map</a> and pick your own spot.
