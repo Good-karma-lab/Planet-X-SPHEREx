@@ -515,7 +515,9 @@ export function Globe() {
       ctx.stroke();
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
       // zoomed past the star map DSS2 shows over it: the pins and the path stand on the DSS2 plate's date, not on Gaia's
-      const fade = st.proj === 'globe' ? starMapFade(R()) : 0;
+      // and on the layer whose picture is ON SHOW: a new layer's date is taken only when its tiles are under the view (a pin never jumps to an empty sky)
+      const shownId = SURVEYS.find((x) => x.layer.map((l) => l.id).join('+') === sky.shownKey)?.id ?? st.survey;
+      const fade = st.proj === 'globe' && shownId === 'svs' ? starMapFade(R()) : 0;
       fadeRef.current = fade;
       pins = [];
       if (st.bodyPath) drawBodyPath(ctx, (ra, dec) => project(ra, dec, b), st.bodyPath, W / 2, font);
@@ -525,7 +527,7 @@ export function Globe() {
       const mo = st.sel && moving(st.sel);
       if (st.sel && mo) {
         const imgs = imageDates(st.sel.n, st.sel.ra, st.sel.dec) ?? [];
-        const by = backdropYear(st.survey, imgs, fade);
+        const by = backdropYear(shownId, imgs, fade);
         // a dot at the middle of the calendar year of each image, so that its label reads the year the image was taken
         const years = imgs.map((x) => Math.floor(x.year) + 0.499);
         const y0 = Math.min(by, ...years);
@@ -563,7 +565,7 @@ export function Globe() {
       ctx.font = `600 12.5px ${font}`;
       for (const o of st.catalog) {
         if (!(o.b || o === st.sel) || (o === st.sel && pathPin)) continue;
-        const p = project(...shownPlace(o, st.survey, datesOf(o, st.sel), fade), b);
+        const p = project(...shownPlace(o, shownId, datesOf(o, st.sel), fade), b);
         if (!p[2]) continue;
         pins.push({ o, x: p[0], y: p[1] });
         const lx = near ? 14 : 9;
