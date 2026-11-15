@@ -1262,6 +1262,8 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
     unavailable = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable")
+    deciding = {f["id"]: set(decisive_of(f["kind"], f["ra"], f["dec"], f["data"])) for f in items}
+    missing_decisive = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable" and i["catalogue"] in deciding[f["id"]])
     return {
         "count": len(sel),
         "total": sum(1 for f in items if f["status"] != "residual"),
@@ -1270,6 +1272,8 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         "identification": {
             "pending": pending,
             "unavailable": unavailable,
+            "unavailable_decisive": missing_decisive,
+            "unavailable_extras": unavailable - missing_decisive,
             "catalogues": [CATALOGUE_LABEL[c] for c in CATALOGUES] + [CATALOGUE_LABEL["sbident"]],
         },
         "finds": sel[offset : offset + limit],
