@@ -183,7 +183,7 @@ def _fetch_hips_tile(args: tuple[str, str, str, int, int, float, float, str]) ->
     dest = tile_path(Path(root_s), layer, order, i)
     if dest.exists():
         return -1
-    url = f"https://irsa.ipac.caltech.edu/data/hips/{path}/Norder{order}/Dir{i // 10000 * 10000}/Npix{i}.{ext}"
+    url = f"{os.environ.get('BAKE_HIPS_ROOT', 'https://irsa.ipac.caltech.edu/data/hips')}/{path}/Norder{order}/Dir{i // 10000 * 10000}/Npix{i}.{ext}"
     raw = b""
     for attempt in range(4):
         try:
