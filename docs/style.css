@@ -1,4 +1,4 @@
-/* SPHEREx Space presentation site: dark, same teal/amber as the app. Static; no build step. */
+/* SPHEREx Sky presentation site: dark, same teal/amber as the app. Static; no build step. */
 :root{
   --bg:#04080c; --bg1:#08111a; --card:#0d171f; --card2:#111d26; --line:rgba(140,225,240,.14);
   --text:#e6f0f3; --muted:#a3bcc5; --faint:#7d96a0; --accent:#5fe3d6; --ink:#032420; --amber:#ffb454;
