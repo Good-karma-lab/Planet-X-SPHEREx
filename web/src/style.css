@@ -2397,3 +2397,6 @@ input[type='range']::-moz-range-thumb {
 .sbar .sline .sval, .sbar .tray-sum .it { font-variant-numeric: tabular-nums; }
 .sbar .sline .sval { overflow: hidden; text-overflow: ellipsis; }
 .sbar .tray-sum .it .v { display: inline-block; min-width: 4.5ch; text-align: left; }
+
+/* the portrait's place while its pictures load: the same size as the portrait, so the content below stays where it is */
+.portrait .ph { width: 132px; height: 132px; flex: none; border-radius: 4px; box-shadow: 0 0 0 1px var(--edge-hi); background: #02070a; }
