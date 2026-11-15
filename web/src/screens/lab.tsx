@@ -1758,7 +1758,17 @@ export function Lab({ route }: { route: Route }) {
       const r = await fetch('/api/v1/export/ades', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ track_id: `SPX${i + 1}`, observations, fill_positions: true, comment: 'a lead, not a discovery' }),
+        body: JSON.stringify({
+          track_id: `SPX${i + 1}`,
+          observations,
+          fill_positions: true,
+          // the header of our team; the file is only for download, nothing is ever sent to the MPC from here
+          submitter: 'A. Ostapenko',
+          measurers: ['A. Ostapenko', 'K. Karmatskikh'],
+          observers: ['SPHEREx Science Team'],
+          ast_cat: 'Gaia3',
+          comment: 'a lead, not a discovery',
+        }),
       });
       if (!r.ok) return setAdesNote(`The ADES report could not be built (${r.status}).`);
       const d = (await r.json()) as { ready: boolean; problems: string[]; notes: string[]; text: string };
@@ -2745,7 +2755,8 @@ export function Lab({ route }: { route: Route }) {
                     {passes.map((q, i) => (
                       <span
                         key={q.index}
-                        class={frameIndex === q.index && time !== 'sum' ? 'on' : ''}
+                        class={`${frameIndex === q.index && time !== 'sum' ? 'on' : ''}${i === 0 && passes.length > 1 ? ' restart' : ''}`}
+                        title={i === 0 && passes.length > 1 ? 'The loop starts here and comes back here' : undefined}
                         style={{
                           left: passes.length > 1 ? `${(i / (passes.length - 1)) * 100}%` : '0%',
                           transform: `translateX(${i === 0 ? 0 : i === passes.length - 1 ? -100 : -50}%)`,

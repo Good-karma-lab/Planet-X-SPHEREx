@@ -117,7 +117,8 @@
 @media (max-width: 860px), (max-aspect-ratio: 1/1) {
   .map-ui.map-bar { left: 10px; right: 46px; top: 10px; }
   .map-ui.map-bar .aimrow { flex-wrap: wrap; gap: 6px 10px; }
-  .map-ui.map-bar .seg.sm { max-width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; }
+  /* the layer row wraps on a phone: every layer is in sight, none hides behind a swipe */
+  .map-ui.map-bar .seg.sm { max-width: 100%; flex-wrap: wrap; border-radius: 14px; }
   .screen .globe-wrap::before { height: 250px; }
   .cat-handle { left: -34px; width: 34px; height: 110px; }
   .cat-drawer { top: 150px; }
