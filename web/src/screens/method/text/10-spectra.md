@@ -68,6 +68,8 @@ Detected bins are drawn as points with error bars over the individual points, up
 
 ## Portrait
 
+[figure: object-portrait | The portrait of an object: its own image from the stacks in the picture's colours, beside its spectrum]
+
 The portrait is the object's own image, coloured by its spectrum: a cutout 60″ across, centred on the object, from the stacks of the pass on view. We take the colour picture of that pass with its white balance, so the portrait has the colours of the main picture; where that picture is not yet on the page the six detector pictures are added in the colour of their detector (0.75 µm blue to 5 µm red, a fixed colour for each). The brightness follows an asinh law scaled to the cutout's peak, and the three channels are scaled together so a bright red dwarf stays red instead of clipping to a white blob. A pixel saturated in most exposures is painted white, never as a hole.
 
 ## Spectrum of a moving body

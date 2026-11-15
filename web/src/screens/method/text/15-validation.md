@@ -65,7 +65,7 @@ We search Eris and Makemake blind in one pass and link the passes; the distances
 
 **Result:** Makemake, two passes linked, 52.5 ± 0.2 au (not confirmed by a third pass). Source: live runs, 2026-11-15 (keys 54c02b2d2ff66213f303847d, 15340cf077cd7c68b891a29e).
 
-[figure: slider-eris | the distance slider for Eris: one pass cannot fix the distance, the link of passes can]
+[figure: slider-eris | Eris, found blind by the live service: each pass alone gives a wide range of distances; three passes linked by one orbit give 95.6 ± 0.4 au (JPL 95.5)]
 
 ## Recall of the search between passes
 

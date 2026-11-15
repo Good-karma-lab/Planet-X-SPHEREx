@@ -166,6 +166,8 @@ The passes are months apart, and the pointing of SPHEREx is good but not perfect
 
 ## Field sizes and grid rule
 
+[figure: field-size | The same place at the field sizes of the lab, from 2′ to 60′]
+
 What a field size is for: an object that stays in the frame for a year moves at most half the field per year, so a 60′ field keeps objects that move up to 30′ per year, while a small field shows what is slow; a very small field has few reference stars to register on. The grid is coarser at 60′ because a finer one would hold more than a screen shows.
 
 A field is one of five sizes. The grid step is 1.5375″ up to 20′ and 3.075″ at 60′, and the grid side is a multiple of 4 grid pixels, that is a whole number of detector pixels.
