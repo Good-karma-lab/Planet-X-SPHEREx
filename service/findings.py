@@ -917,7 +917,8 @@ class Findings:
                     timeout=httpx.Timeout(
                         SB_TIMEOUT_S, connect=10.0
                     ),  # JPL's search of a field often takes 20-60 s, well past the catalogues' 12 s
-                )
+                ),
+                lane="sbident",
             )
             r.raise_for_status()
             body: dict[str, Any] = r.json()

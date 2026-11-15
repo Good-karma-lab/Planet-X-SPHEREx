@@ -20,6 +20,8 @@ export function knownName(k: KnownBody | undefined): string | null {
 
 export interface DistantCandidate {
   known?: KnownBody;
+  /** the distance is not bounded: the S/N is still high at the edge of the range searched */
+  edge?: boolean;
   sn: number;
   d: number;
   d_lo: number;
@@ -488,7 +490,7 @@ export function DistantPanel({
               }}
             >
               <b>Peak {i + 1}</b> · S/N {c.sn} ·{' '}
-              {ds.r.n_hypotheses < 10 ? `${c.d} au (one orbit tried: the distance is not measured)` : `${c.d} au (${c.d_lo}–${c.d_hi})`} · photometry{' '}
+              {ds.r.n_hypotheses < 10 ? `${c.d} au (one orbit tried: the distance is not measured)` : c.edge ? `${c.d_lo} au or farther (at the edge of the range: not bounded)` : `${c.d} au (${c.d_lo}–${c.d_hi})`} · photometry{' '}
               {c.phot_sn != null ? `${c.phot_sn}σ` : 'n/a'}
               {c.ok ? ' · confirmed' : ''}
               {knownName(c.known) ? ` · ${knownName(c.known)}` : ''}

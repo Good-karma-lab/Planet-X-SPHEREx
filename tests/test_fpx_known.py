@@ -100,9 +100,15 @@ class FakeStore:
 def test_the_sweep_identifies_a_finished_result_ahead_of_time_and_keeps_the_answer(tmp_path: Path) -> None:
     meta: dict[str, Any] = {
         "status": "ok",
-        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
+        "plan": {"passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES]},  # as the live deep results say it
         "candidates": [
-            {"d": 83.0, "ra": 60.7125, "dec": 8.6082, "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]}
+            {
+                "ok": True,
+                "d": 83.0,
+                "ra": 60.7125,
+                "dec": 8.6082,
+                "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES],
+            }
         ],
     }
     idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
@@ -124,7 +130,7 @@ def test_a_failed_answer_is_not_kept(tmp_path: Path) -> None:
     meta: dict[str, Any] = {
         "status": "ok",
         "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
-        "candidates": [{"d": 83.0, "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]}],
+        "candidates": [{"ok": True, "d": 83.0, "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]}],
     }
 
     def boom(request: httpx.Request) -> httpx.Response:
@@ -140,7 +146,13 @@ def test_findings_peaks_that_are_known_bodies_say_so(tmp_path: Path) -> None:
         "status": "ok",
         "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
         "candidates": [
-            {"d": 83.0, "ra": 60.712549, "dec": 8.608244, "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]}
+            {
+                "ok": True,
+                "d": 83.0,
+                "ra": 60.712549,
+                "dec": 8.608244,
+                "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES],
+            }
         ],
     }
     idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
@@ -173,7 +185,10 @@ def test_an_answer_got_is_kept_while_another_lead_waits_for_jpl(tmp_path: Path, 
     meta: dict[str, Any] = {
         "status": "ok",
         "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
-        "candidates": [{"d": 83.0, "ra": 1.0, "dec": 1.0, "by_pass": by_pass}, {"d": 83.0, "ra": 2.0, "dec": 2.0, "by_pass": by_pass}],
+        "candidates": [
+            {"d": 83.0, "ra": 1.0, "dec": 1.0, "ok": True, "by_pass": by_pass},
+            {"d": 83.0, "ra": 2.0, "dec": 2.0, "ok": True, "by_pass": by_pass},
+        ],
     }
     good = fake_jpl()
     calls = {"sb": 0}

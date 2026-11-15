@@ -14,3 +14,13 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
     for item in items:
         if "network" in item.keywords:
             item.add_marker(skip)
+
+
+@pytest.fixture(autouse=True)
+def _jpl_without_waits(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests talk to fake JPLs: no spacing between their requests (a test of the spacing sets its own)."""
+    from service.upstream import jpl
+
+    monkeypatch.setattr(jpl, "GAP_S", 0.0)
+    monkeypatch.setattr(jpl, "SBIDENT_GAP_S", 0.0)
+    jpl._next_at.clear()

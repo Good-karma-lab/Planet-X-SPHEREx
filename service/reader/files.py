@@ -64,7 +64,8 @@ class FileReader:
         async with lock:
             if key in self._layouts:
                 return self._layouts[key]
-            lay = self._layout_from_cache(key) or await self._walk(key)
+            # the cached headers are read and parsed in a thread: hundreds of exposures at once held the event loop for over a second
+            lay = await asyncio.to_thread(self._layout_from_cache, key) or await self._walk(key)
             self._layouts[key] = lay
             return lay
 

@@ -112,7 +112,7 @@ class KnownBodies:
     async def _get(self, url: str, params: dict[str, str]) -> dict[str, Any]:
         self.breaker.before()
         try:
-            r = await jpl.turn(lambda: self.client.get(url, params=params))
+            r = await jpl.turn(lambda: self.client.get(url, params=params), "sbident" if url == SB_IDENT else "ssd")
             r.raise_for_status()
             body: dict[str, Any] = r.json()
         except Exception:
