@@ -5,6 +5,10 @@ export interface Source {
   name?: string;
   pmra?: number;
   pmdec?: number;
+  /** where the motion comes from: a catalogue (the default), or the lab's own search (a mover track, a red source, an anomaly) */
+  pmKind?: 'catalogue' | 'measured';
+  /** the uncertainty of a measured motion, mas/yr */
+  pmErr?: number;
 }
 
 export interface SpecPoint {
