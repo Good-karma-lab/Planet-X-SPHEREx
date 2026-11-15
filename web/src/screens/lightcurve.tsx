@@ -3,7 +3,7 @@ import { brightnessLine } from './brightness-line';
 import type { Source } from './spectrum';
 
 interface Part<P> {
-  state: 'ok' | 'none' | 'unavailable';
+  state: 'ok' | 'none' | 'unavailable' | 'pending';
   error?: string;
   points: P[];
 }
@@ -163,11 +163,21 @@ export function LightCurves({ src, field }: { src: Source; field?: { ra: number;
     if (!field) return;
     const ctl = new AbortController();
     const q = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6), fov: String(field.fov), field_ra: field.ra.toFixed(6), field_dec: field.dec.toFixed(6), pmra: String(src.pmra ?? 0), pmdec: String(src.pmdec ?? 0) });
-    fetch(`/api/v1/brightness?${q}`, { signal: ctl.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: Brightness | null) => setBr(d))
-      .catch(() => {});
-    return () => ctl.abort();
+    let timer = 0;
+    // the field may still be building: ask again every few seconds until the service has the answer
+    const ask = (tries: number) =>
+      fetch(`/api/v1/brightness?${q}`, { signal: ctl.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: Brightness | null) => {
+          setBr(d);
+          if (d && (d.state === 'running' || d.state === 'waiting') && tries < 90) timer = window.setTimeout(() => ask(tries + 1), 3000);
+        })
+        .catch(() => {});
+    ask(0);
+    return () => {
+      ctl.abort();
+      window.clearTimeout(timer);
+    };
   }, [src.ra, src.dec, src.pmra, src.pmdec, field?.ra, field?.dec, field?.fov]);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -179,14 +189,23 @@ export function LightCurves({ src, field }: { src: Source; field?: { ra: number;
       q.set('pmra', String(src.pmra ?? 0));
       q.set('pmdec', String(src.pmdec ?? 0));
     }
-    fetch(`/api/v1/lightcurves?${q}`, { signal: ctl.signal })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: Curves | null) => {
-        setC(d);
-        setBusy(false);
-      })
-      .catch(() => setBusy(false));
-    return () => ctl.abort();
+    let timer = 0;
+    // a survey that has not answered within a few seconds is `pending` on the service and keeps running there: ask again
+    const ask = (tries: number) =>
+      fetch(`/api/v1/lightcurves?${q}`, { signal: ctl.signal })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d: Curves | null) => {
+          setC(d);
+          const pending = !!d && (d.ztf.state === 'pending' || d.neowise.state === 'pending');
+          if (pending && tries < 60) timer = window.setTimeout(() => ask(tries + 1), 2000);
+          else setBusy(false);
+        })
+        .catch(() => setBusy(false));
+    ask(0);
+    return () => {
+      ctl.abort();
+      window.clearTimeout(timer);
+    };
   }, [src.ra, src.dec, src.pmra, src.pmdec]);
   const say = (p: Part<unknown> | undefined, what: string) =>
     !p

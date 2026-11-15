@@ -9,7 +9,7 @@ import multiprocessing
 import os
 import secrets
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable, Coroutine
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -64,6 +64,7 @@ SERVICE_NAME = "spherex-sky"
 API_PREFIX = "/api/v1"
 # a second instance that takes over while the main one restarts (deploy/push.sh): it builds nothing new
 STANDBY = os.environ.get("SKY_STANDBY", "0") == "1"
+LIGHTCURVES_WAIT_S = 3.0  # IRSA may take a minute for NEOWISE: the light curves route answers within this, the rest `pending`
 
 
 class State:
@@ -95,7 +96,8 @@ class State:
         self.movers: Movers | None = None
         self.anomalies: Anomalies | None = None
         self.bodies: KnownBodies | None = None
-        self.lightcurves: dict[tuple[float, float, int, int], dict[str, Any]] = {}
+        self.lightcurves: dict[tuple[Any, ...], dict[str, Any]] = {}  # answered parts: (place, part name)
+        self.lc_tasks: dict[tuple[Any, ...], asyncio.Task[dict[str, Any]]] = {}  # parts still being asked of IRSA
         self.identified: dict[tuple[float, float, int, int, str | None], dict[str, Any]] = {}
         self.coverage_lock = asyncio.Lock()
         self.coverage_task: asyncio.Task[None] | None = None
@@ -607,17 +609,40 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if st.spectra is None:
             raise HTTPException(503, "the exposure index is not loaded")
         key = (round(ra, 5), round(dec, 5), round(pmra), round(pmdec))
-        hit = st.lightcurves.get(key)
-        if hit is not None:
-            return hit
         params = spectrum_params(ra, dec, pmra, pmdec)
-        z, nw = await asyncio.gather(lc_ztf(params), lc_neowise(params))
-        out = {"ztf": z, "neowise": nw}
-        if z["state"] != "unavailable" and nw["state"] != "unavailable":
-            st.lightcurves[key] = out
-            if len(st.lightcurves) > 2000:
-                st.lightcurves.pop(next(iter(st.lightcurves)))
-        return out
+
+        async def part(name: str, fn: Callable[[dict[str, Any]], Coroutine[Any, Any, dict[str, Any]]]) -> dict[str, Any]:
+            """One survey's answer: kept when it answered, else asked (one request at a time) and waited for LIGHTCURVES_WAIT_S. A part that
+            has not answered by then is `pending` and keeps running, so the next ask finds it."""
+            pk = (*key, name)
+            hit = st.lightcurves.get(pk)
+            if hit is not None:
+                return hit
+            task = st.lc_tasks.get(pk)
+            if task is None:
+                task = asyncio.create_task(fn(params))
+                st.lc_tasks[pk] = task
+
+                def landed(t: asyncio.Task[dict[str, Any]], pk: tuple[Any, ...] = pk) -> None:
+                    st.lc_tasks.pop(pk, None)
+                    if t.cancelled() or t.exception() is not None:
+                        return
+                    res = t.result()
+                    if res["state"] != "unavailable":  # an answer that failed is said, never kept
+                        st.lightcurves[pk] = res
+                        if len(st.lightcurves) > 4000:
+                            st.lightcurves.pop(next(iter(st.lightcurves)))
+
+                task.add_done_callback(landed)
+            done, _ = await asyncio.wait({task}, timeout=LIGHTCURVES_WAIT_S)
+            if not done:
+                return {"state": "pending", "points": []}
+            if task.exception() is not None:
+                return {"state": "unavailable", "error": type(task.exception()).__name__, "points": []}
+            return task.result()
+
+        z, nw = await asyncio.gather(part("ztf", lc_ztf), part("neowise", lc_neowise))
+        return {"ztf": z, "neowise": nw}
 
     @app.get(f"{API_PREFIX}/identify")
     async def identify(
