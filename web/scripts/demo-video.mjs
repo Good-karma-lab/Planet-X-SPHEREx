@@ -46,7 +46,7 @@ await page.goto(`${BASE}/#/lab?ra=269.44629&dec=4.76792&fov=20&spd=0.5`);
 await waitPicture();
 await page.getByTestId('tab-cand').click();
 await page.waitForTimeout(4000);
-await subtitle("Barnard's Star, pass by pass: the search finds it moving, 10.7″ a year. Gaia agrees.");
+await subtitle("Barnard's Star, pass by pass: the search finds it moving, 10.7″ a year; Gaia agrees.");
 mark('barnard');
 await page.waitForTimeout(8000);
 mark('barnard-end');
@@ -57,7 +57,7 @@ await waitPicture();
 await page.getByTestId('tab-cand').click();
 await page.getByText(/known brown dwarf/).first().waitFor({ timeout: 120000 });
 await page.waitForTimeout(2000);
-await subtitle('A cold brown dwarf, ε Indi B: found moving, and red in the 3–5 µm bands.');
+await subtitle('A cold brown dwarf, ε Indi B, found moving and red.');
 mark('epsindi');
 await page.waitForTimeout(7000);
 mark('epsindi-end');
@@ -65,15 +65,26 @@ mark('epsindi-end');
 // 3. the Planet X page: the Solar System with the predicted orbit and the searched directions
 await page.goto(`${BASE}/#/planetx`);
 await page.waitForTimeout(5000);
-await subtitle('Find Planet X: every orbit from 30 to 2000 au, the passes added along each one.');
+await subtitle('Find Planet X: every orbit from 30 to 2000 au, summed over the passes.');
 mark('planetx');
 await page.waitForTimeout(8500);
 mark('planetx-end');
 
-// 4. what it found: known worlds found blind, and the best Planet Nine peak ruled out
-await page.getByText(/Known worlds found blind/i).last().scrollIntoViewIfNeeded().catch(() => {});
+// 4. what it found: Eris coming into focus as the exposures are added along its path, and the link of three passes (the Method's live figure)
+await page.goto(`${BASE}/#/method`);
+await page.waitForTimeout(3000);
+const eris = page.locator('figure[data-fig="slider-eris"]').first();
+await eris.scrollIntoViewIfNeeded();
+await page.evaluate(() => {
+  const f = document.querySelector('figure[data-fig="slider-eris"]');
+  if (f) window.scrollBy(0, f.getBoundingClientRect().top - 120);
+  document.querySelectorAll('figure[data-fig="slider-eris"] video').forEach((v) => {
+    v.currentTime = 0;
+    void v.play();
+  });
+});
 await page.waitForTimeout(1500);
-await subtitle('It finds Eris blind: 95.6 au, three passes linked. Our best Planet Nine peak: ruled out by NEOWISE.');
+await subtitle('It finds Eris blind: 95.6 au, three passes linked (JPL 95.5).');
 mark('results');
 await page.waitForTimeout(7000);
 mark('results-end');
@@ -87,7 +98,7 @@ await page.evaluate(() => {
     'background:radial-gradient(1200px 700px at 50% 40%,#0d2430,#04080c);color:#eafcff;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';
   el.innerHTML =
     '<div style="font-size:96px;font-weight:700;letter-spacing:.02em">SPHEREx Sky</div>' +
-    '<div style="font-size:46px;font-weight:500;color:#9ff3ea">see the sky move</div>' +
+    '<div style="font-size:46px;font-weight:500;color:#9ff3ea">Flip through the sky.</div>' +
     '<div style="font:600 56px ui-monospace,Menlo,monospace;color:#ffffff;margin-top:24px">spherex.space</div>' +
     '<div style="font-size:28px;font-weight:500;color:#a0b9c2;margin-top:20px">Real NASA SPHEREx data · Good Karma Lab · NASA Space Apps 2026</div>';
   document.body.appendChild(el);
