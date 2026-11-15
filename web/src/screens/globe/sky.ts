@@ -6,6 +6,7 @@
 // slices of a few milliseconds per frame and replaces the picture when it is done. Nothing is painted while nothing changes.
 
 import { D2R } from '../../lib/sky';
+import { EQUI_NOTHING, EquiSampler, equiFrame, equiOf } from '../../lib/equi';
 import { FROM_NOTHING, HIPS, bakedOf, facePt, orderFor, Sampler, tiles, type FacePt } from '../../lib/hips';
 
 export interface SkyView {
@@ -116,6 +117,8 @@ interface Pass {
   painted: number;
   /** past the star map's resolution a real survey is faded in over it (the sampler of DSS2, the weight of it, its live tone) */
   fade?: { s: Sampler; w: number; gain: number; black: number };
+  /** the layer is an equirectangular pyramid: its own sampler (no HEALPix) */
+  equi?: EquiSampler;
   /** pixels of the view this pass could paint at all (the disc of the globe, the map's ellipse, the whole picture inside) */
   total: number;
 }
@@ -184,6 +187,7 @@ class SkyPainter {
 
   private begin(view: SkyView, layer: SkyLayer[], s: number): Pass {
     tiles.frame();
+    equiFrame();
     // the dust map is the all-sky picture (the look of the globe) until its baked tiles are there
     const dustPic = layer[0]!.id === 'dust' && !bakedOf('dust');
     if (dustPic) {
@@ -194,7 +198,8 @@ class SkyPainter {
     const sh = Math.ceil(view.H / s);
     const R = view.proj === 'globe' ? view.R : mw(view) / 5;
     // the SPHEREx backdrop is three frames of the cube: one sampler per colour
-    const samplers = dustPic ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
+    const equi = !dustPic && layer.length === 1 && equiOf(layer[0]!.id) ? new EquiSampler(layer[0]!.id, R) : undefined;
+    const samplers = dustPic || equi ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
     // the star map is made from a map of 20″ pixels (one screen pixel at a globe radius of about 10 000 px): zoomed in past that it would only be a smooth
     // wash, so a real survey (DSS2) is faded in over it, fully by twice that radius
     let fade: Pass['fade'];
@@ -202,7 +207,7 @@ class SkyPainter {
       const t = Math.min(1, (R - STAR_MAP_FADE_FROM) / (STAR_MAP_FADE_TO - STAR_MAP_FADE_FROM));
       fade = { s: new Sampler('dss2', orderFor('dss2', R)), w: t * t * (3 - 2 * t), gain: 2.4, black: 16 };
     }
-    return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0, total: 0, fade };
+    return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0, total: 0, fade, equi };
   }
 
   /** Paints rows until the deadline; true when the pass is done. */
@@ -281,15 +286,16 @@ class SkyPainter {
             o[q + c] = (dd[t00 + c]! * (1 - ax) + dd[t01 + c]! * ax) * (1 - ay) + (dd[t10 + c]! * (1 - ax) + dd[t11 + c]! * ax) * ay;
         } else if (one) {
           const fd = p.fade;
-          const have = samplers[0]!.at(f, rgb, 0) !== FROM_NOTHING;
+          const eq = p.equi;
+          const have = eq ? eq.at(ra, Math.asin(zc) / D2R, rgb, 0) !== EQUI_NOTHING : samplers[0]!.at(f, rgb, 0) !== FROM_NOTHING;
           if (!have && !fd) continue;
           // a baked tile has its tone already; a live one (deeper than the baked orders, or while the baked ones are not read) gets the layer's
           let r0 = 0;
           let g1 = 0;
           let b1 = 0;
           if (have) {
-            const bk = samplers[0]!.lastBaked;
-            const B = bk ? bakedOf(l0.id) : undefined;
+            const bk = eq ? true : samplers[0]!.lastBaked;
+            const B = eq ? { gain: eq.s.gain, black: eq.s.black } : bk ? bakedOf(l0.id) : undefined;
             const bl = B ? B.black : l0.black;
             const gg = B ? (B.gain * 255) / (255 - B.black) : g0;
             r0 = Math.max(0, rgb[0]! - bl) * gg;

@@ -7,6 +7,8 @@
 // At most MAX_INFLIGHT tiles are on their way at once; the tiles of the latest view go first, and requests of views the
 // globe has left are dropped.
 
+import { equiPreload, registerEqui } from './equi';
+
 /** IRSA's HiPS root (CORS open). */
 const IRSA = 'https://irsa.ipac.caltech.edu/data/hips/';
 const FALLBACK_MS = 3000;
@@ -40,7 +42,25 @@ export function loadManifest(): Promise<boolean> {
   manifest ??= fetch('/tiles/manifest.json', { cache: 'no-cache' })
     .then((r) => (r.ok ? r.json() : null))
     .then((m: { layers?: Record<string, Partial<Baked> & { frame?: string }> } | null) => {
-      for (const [id, b] of Object.entries(m?.layers ?? {})) {
+      for (const [id, b0] of Object.entries(m?.layers ?? {})) {
+        const b = b0 as typeof b0 & { type?: string; base?: string; gain?: number; black?: number };
+        // a layer baked as an equirectangular pyramid (plate carrée tiles and a full-sky base) is read by its own sampler
+        if (b.type === 'equirect' && b.url && b.max != null) {
+          registerEqui({
+            id,
+            label: b.label ?? id,
+            credit: b.credit,
+            size: b.size ?? 512,
+            min: b.min ?? 2,
+            max: b.max,
+            url: b.url,
+            base: b.base,
+            gain: Number(b.gain) > 0 ? Number(b.gain) : 1,
+            black: Number(b.black) >= 0 ? Number(b.black) : 0,
+          });
+          equiPreload(id);
+          continue;
+        }
         if (!b.url || b.max == null) continue;
         const size = b.size ?? 512;
         baked.set(id, { label: b.label ?? id, credit: b.credit, frame: b.frame === 'galactic' ? 'galactic' : 'equatorial', size, min: b.min ?? 0, max: b.max, url: b.url, gain: Number(b.gain) > 0 ? Number(b.gain) : 1, black: Number(b.black) >= 0 ? Number(b.black) : 0 });
