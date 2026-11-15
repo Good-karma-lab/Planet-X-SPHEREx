@@ -143,8 +143,9 @@ const tileUrl = (s: EquiSpec, l: number, x: number, y: number) => s.url.replace(
 
 /** The level whose pixels match a globe of radius R px (one tile pixel about one screen pixel). */
 export function equiLevelFor(s: EquiSpec, R: number): number {
-  const l = Math.log2((2 * Math.PI * R) / s.size) + 0.2;
-  return Math.max(s.min, Math.min(s.max, Math.round(l)));
+  // a level whose texels are no smaller than a screen pixel (a little less is allowed): finer texels than the screen has pixels shimmer as the view moves
+  const l = Math.log2((2 * Math.PI * R) / s.size) + 0.25;
+  return Math.max(s.min, Math.min(s.max, Math.floor(l)));
 }
 
 function texel(t: Tile, i: number, j: number, k: number, out: Float32Array | number[], w: number, add: number): void {
