@@ -69,7 +69,8 @@ function usePeaks(): { leads: Peak[]; known: Peak[] } | null {
           if (stop || !d?.finds) return;
           // the Findings rule: one peak with ok=true per object; known bodies are not leads (status 'known' from the service; until the service
           // marks the live Eris and Makemake detections, their places are matched here)
-          const ok = d.finds.filter((f) => f.kind === 'peak' && f.data.peak?.ok !== false);
+          // statuses the service keeps out of the leads (a star's residual or halo, a galaxy, below the bar) are not leads here either
+          const ok = d.finds.filter((f) => f.kind === 'peak' && f.data.peak?.ok !== false && !['residual', 'galaxy', 'below', 'halo'].includes(f.status ?? ''));
           setP({ leads: ok.filter((f) => !isKnown(f)), known: ok.filter(isKnown) });
         })
         .catch(() => {});
