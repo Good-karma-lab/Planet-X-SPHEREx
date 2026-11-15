@@ -252,30 +252,46 @@ def search_block(workdir, a, b, wsum):
     return a, best, g, neg
 
 
-def search_merge(prep, parts, secs):
-    """The blocks put together (parts: the results of `search_block`, any order) -> the dict `search` returns"""
+def search_accumulator(prep):
+    """An empty running result for the blocks of a scan: the blocks are folded in as they finish, so a big scan never holds all of them
+    (a block's result is three N x N arrays; 384 of them at 60 arcmin were several GB in the API process: it was killed by the memory limit)."""
     N = prep["N"]
-    best = np.zeros((N, N), "f4")
-    arg = np.full((N, N), -1, "i4")
-    neg = np.zeros((N, N), "f4")
-    for a, b_, g_, n_ in sorted(parts, key=lambda q: q[0]):
-        m = b_ > best
-        best[m] = b_[m]
-        arg[m] = a + g_[m]
-        neg = np.maximum(neg, n_)
+    return dict(best=np.zeros((N, N), "f4"), arg=np.full((N, N), -1, "i4"), neg=np.zeros((N, N), "f4"))
+
+
+def search_fold(acc, part):
+    """One finished block (a, best, index in the block, negated best) folded into the running result, whatever the order they finish in
+    (a tie goes to the lower hypothesis, so the result does not depend on the order)."""
+    a, b_, g_, n_ = part
+    h = a + g_
+    m = (b_ > acc["best"]) | ((b_ == acc["best"]) & ((acc["arg"] < 0) | (h < acc["arg"])))
+    acc["best"][m] = b_[m]
+    acc["arg"][m] = h[m]
+    np.maximum(acc["neg"], n_, out=acc["neg"])
+
+
+def search_finish(prep, acc, secs):
     return dict(
         H=prep["H"],
         OFF=prep["OFF"],
         tv=prep["tv"],
         Rv=prep["Rv"],
         i0=prep["i0"],
-        best=best,
-        arg=arg,
-        neg=neg,
+        best=acc["best"],
+        arg=acc["arg"],
+        neg=acc["neg"],
         w=prep["w"],
         wa=prep["wa"],
         secs=secs,
     )
+
+
+def search_merge(prep, parts, secs):
+    """The blocks put together (parts: the results of `search_block`, any order) -> the dict `search` returns"""
+    acc = search_accumulator(prep)
+    for part in parts:
+        search_fold(acc, part)
+    return search_finish(prep, acc, secs)
 
 
 def search(DV, T, N, dmin, dmax, step=STEP, mu_scale=1.0, workers=6, progress=None, cancel=None, hmax=HMAX):

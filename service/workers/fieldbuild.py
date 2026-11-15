@@ -85,7 +85,9 @@ async def build_field(
     if progress:
         progress(f"{len(exps)} exposures found in {len(passes)} passes (of {len(found)} over the field)")
     bytes0 = fr.s3.stats.bytes
-    n_read = 0
+    read_idx: set[int] = (
+        set()
+    )  # the exposures read at least once (the quick part and the full build read some twice: the count must not overrun)
     visits_all = split_visits([e.mjd0 for e in exps], [e.det for e in exps])
     visit_of = {i: k for k, v in enumerate(visits_all) for i in v}
     natives: dict[int, NativeExposure] = {}
@@ -93,16 +95,15 @@ async def build_field(
     t_read = 0.0
 
     async def one(i: int) -> None:
-        nonlocal n_read
         try:
             ne = await read_native(fr, exps[i].key, grid, visit_of[i], wavelengths=wavelengths)
         except Exception as err:  # a file that cannot be read is counted and said, never hidden
             missing.append(f"{exps[i].key}: {err}")
             return
         finally:
-            n_read += 1
+            read_idx.add(i)
             if reading is not None:
-                reading(n_read, len(exps), (fr.s3.stats.bytes - bytes0) / 1e6)
+                reading(len(read_idx), len(exps), (fr.s3.stats.bytes - bytes0) / 1e6)
         if ne is not None and ne.val.size > 0:
             natives[i] = ne
 

@@ -34,3 +34,25 @@ def test_the_blocks_put_together_give_the_search(tmp_path: Path) -> None:
     assert np.allclose(got["best"], whole["best"]) and np.allclose(got["neg"], whole["neg"])
     assert (got["arg"] == whole["arg"]).mean() > 0.99  # a tie between two hypotheses may fall either way
     assert len(prep["H"]) == len(whole["H"]) and len(parts) <= edist.SEARCH_BLOCKS
+
+
+def test_folding_blocks_in_as_they_finish_gives_the_same_result_in_any_order() -> None:
+    import numpy as np
+
+    from engine import distant as edist
+
+    rng = np.random.default_rng(1)
+    prep = {"N": 6}
+    parts = [
+        (a, rng.random((6, 6)).astype("f4"), rng.integers(0, 4, (6, 6)).astype("i4"), rng.random((6, 6)).astype("f4"))
+        for a in (0, 4, 8, 12)
+    ]
+    parts.append((16, parts[0][1].copy(), parts[0][2].copy(), parts[0][3].copy()))  # a tie with the first block: the lower hypothesis wins
+    forward, backward = edist.search_accumulator(prep), edist.search_accumulator(prep)
+    for p in parts:
+        edist.search_fold(forward, p)
+    for p in reversed(parts):
+        edist.search_fold(backward, p)
+    for k in ("best", "arg", "neg"):
+        assert np.array_equal(forward[k], backward[k])
+    assert (forward["arg"] < 16).all() or (forward["arg"] >= 0).all()
