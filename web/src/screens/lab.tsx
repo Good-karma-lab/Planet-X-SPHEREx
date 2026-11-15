@@ -578,8 +578,12 @@ export function Lab({ route }: { route: Route }) {
     findShown.current = key;
     const kind = findId.split(':')[0] ?? '';
     const name = { anomaly: 'Anomaly', mover: 'Mover', track: 'Mover', red: 'Red source', pair: 'Pair', brown_dwarf: 'Brown dwarf' }[kind] ?? 'Find';
-    setSel({ ra, dec, name });
-  }, [findId, meta, ra, dec, fov]);
+    // the find's own place when the link gives it (the link then opens the field's own centre); else the link's place is the find's
+    const fra = Number(p['find_ra']);
+    const fdec = Number(p['find_dec']);
+    const own = p['find_ra'] != null && p['find_dec'] != null && Number.isFinite(fra) && Number.isFinite(fdec);
+    setSel({ ra: own ? fra : ra, dec: own ? fdec : dec, name });
+  }, [findId, meta, ra, dec, fov, p['find_ra'], p['find_dec']]);
   // when the selected source changed: its ring pulses for a few seconds, so that a click in a list shows where on the picture the thing is
   const selAtRef = useRef(0);
   useEffect(() => {
