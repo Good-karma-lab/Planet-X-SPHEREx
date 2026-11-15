@@ -13,6 +13,7 @@ OUT/LAYER/L{l}/{x}_{y}.webp (x from the left, y from the top). Run with the tile
 from __future__ import annotations
 
 import json
+import math
 import multiprocessing as mp
 import sys
 import time
@@ -197,7 +198,9 @@ def _hp_init(work: str, nasa: str, order: int, out: str, layer: str, cfg: dict) 
         cfg=cfg,
         off=_hp_offsets(),
         nasa=None if order > HP_NASA_MAX_ORDER else np.load(nasa),
-        img=None if order <= HP_NASA_MAX_ORDER else np.memmap(Path(work) / f"L{lvl}.f16", dtype=np.float16, mode="r", shape=shape_of(lvl)),
+        img=None
+        if order <= HP_NASA_MAX_ORDER and not cfg.get("polar_mix")
+        else np.memmap(Path(work) / f"L{lvl}.f16", dtype=np.float16, mode="r", shape=shape_of(lvl)),
     )
 
 
@@ -214,34 +217,73 @@ def _hp_tile(i: int) -> int:
     idx = i * 4**9 + h["off"].ravel()
     lon, lat = healpix_to_lonlat(idx, 2 ** (order + 9), order="nested")
     ra, dec = lon.to_value(u.deg), lat.to_value(u.deg)
-    src = h["nasa"] if h["nasa"] is not None else h["img"]
-    hh, ww = src.shape[0], src.shape[1]
-    x = ra / 360.0 * ww - 0.5
-    y = (90.0 - dec) / 180.0 * hh - 0.5
-    x0 = np.floor(x).astype(np.int64)
-    y0 = np.floor(y).astype(np.int64)
-    fx = (x - x0).astype(np.float32)[:, None]
-    fy = (y - y0).astype(np.float32)[:, None]
-    xa, xb = x0 % ww, (x0 + 1) % ww  # RA wraps
-    ya, yb = np.clip(y0, 0, hh - 1), np.clip(y0 + 1, 0, hh - 1)  # the poles: the rows are clamped (the row at the pole is the mean over RA)
-    lin = (
-        src[ya, xa].astype(np.float32) * (1 - fx) * (1 - fy)
-        + src[ya, xb].astype(np.float32) * fx * (1 - fy)
-        + src[yb, xa].astype(np.float32) * (1 - fx) * fy
-        + src[yb, xb].astype(np.float32) * fx * fy
-    ).reshape(TILE, TILE, 3)
-    if h["nasa"] is not None:
+
+    def sample(src: np.ndarray) -> np.ndarray:
+        hh, ww = src.shape[0], src.shape[1]
+        x = ra / 360.0 * ww - 0.5
+        y = (90.0 - dec) / 180.0 * hh - 0.5
+        x0 = np.floor(x).astype(np.int64)
+        y0 = np.floor(y).astype(np.int64)
+        fx = (x - x0).astype(np.float32)[:, None]
+        fy = (y - y0).astype(np.float32)[:, None]
+        xa, xb = x0 % ww, (x0 + 1) % ww  # RA wraps
+        ya, yb = (
+            np.clip(y0, 0, hh - 1),
+            np.clip(y0 + 1, 0, hh - 1),
+        )  # the poles: the rows are clamped (the row at the pole is the mean over RA)
+        return (
+            src[ya, xa].astype(np.float32) * (1 - fx) * (1 - fy)
+            + src[ya, xb].astype(np.float32) * fx * (1 - fy)
+            + src[yb, xa].astype(np.float32) * (1 - fx) * fy
+            + src[yb, xb].astype(np.float32) * fx * fy
+        ).reshape(TILE, TILE, 3)
+
+    def nasa_rgb(lin: np.ndarray) -> np.ndarray:
         enc = srgb_encode(np.clip(lin, 0.0, 1.0)) * 255.0
         rng = np.random.default_rng(i)
         noise = rng.random(enc.shape, dtype=np.float32) - rng.random(enc.shape, dtype=np.float32)
-        rgb = np.clip(np.rint(enc + noise), 0, 255).astype(np.uint8)
+        return enc + noise
+
+    if h["nasa"] is None:
+        rgb = tone(np.maximum(sample(h["img"]), 0.0), h["cfg"], order * 100003 + i)
+    elif h["cfg"].get("polar_mix") and float(np.abs(dec).max()) > float(h["cfg"]["polar_mix"]["start"]):
+        # NASA's 4k stars are round in the image, so squeezed along RA on the sphere near a pole (radial streaks): the polar caps of the
+        # overview orders mix over to the 64k map (its stars are round on the sphere), the mix growing from `start` to `full` degrees
+        pm = h["cfg"]["polar_mix"]
+        w = np.clip((np.abs(dec) - float(pm["start"])) / (float(pm["full"]) - float(pm["start"])), 0.0, 1.0)
+        w = (w * w * (3 - 2 * w)).reshape(TILE, TILE, 1).astype(np.float32)
+        a_ = nasa_rgb(sample(h["nasa"]))
+        b_ = tone(np.maximum(sample(h["img"]), 0.0), h["cfg"], order * 100003 + i).astype(np.float32)
+        rgb = np.clip(np.rint(a_ * (1 - w) + b_ * w), 0, 255).astype(np.uint8)
     else:
-        rgb = tone(np.maximum(lin, 0.0), h["cfg"], order * 100003 + i)
+        rgb = np.clip(np.rint(nasa_rgb(sample(h["nasa"]))), 0, 255).astype(np.uint8)
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_suffix(".part")
     Image.fromarray(rgb, "RGB").save(tmp, "WEBP", quality=int(h["cfg"].get("quality", 92)), method=4)
     tmp.replace(dest)
     return dest.stat().st_size
+
+
+def _polar_blurred(nasa: Path, work: Path, pb: dict) -> Path:
+    """NASA's 4k map draws its stars round in the image, so on the sphere they are squeezed along RA by cos(dec): radial streaks at the poles.
+    Each row is blurred along RA by sigma0 * tan(dec) (flux kept) so a star is round on the sphere again; the blur fades in between
+    `start` and `full` degrees of declination (the diffuse light keeps its value: the blur conserves it)."""
+    from scipy.ndimage import gaussian_filter1d
+
+    out = work / "nasa4k_lin_polar.npy"
+    lin = np.load(nasa)
+    h = lin.shape[0]
+    s0, start, full = float(pb["sigma"]), float(pb["start"]), float(pb["full"])
+    res = lin.copy()
+    for y in range(h):
+        dec = abs(90.0 - (y + 0.5) / h * 180.0)
+        ramp = float(np.clip((dec - start) / (full - start), 0.0, 1.0))
+        ramp = ramp * ramp * (3 - 2 * ramp)
+        sig = s0 * math.tan(math.radians(min(dec, 89.9))) * ramp
+        if sig > 0.3:
+            res[y] = gaussian_filter1d(lin[y], sig, axis=0, mode="wrap")
+    np.save(out, res)
+    return out
 
 
 def stage_healpix(work: Path, exr4k: Path, out: Path, layer: str, lo: int, hi: int, cfg: dict, workers: int) -> None:
@@ -257,6 +299,9 @@ def stage_healpix(work: Path, exr4k: Path, out: Path, layer: str, lo: int, hi: i
         lin = np.clip(pix.astype(np.float32), 0.0, 1.0)
         w = lin.shape[1]
         np.save(nasa, lin[:, (w // 2 - 1 - np.arange(w)) % w])  # RA turned to the layer's orientation (0 h at the left, increasing right)
+    pb = cfg.get("polar_blur")
+    if pb:
+        nasa = _polar_blurred(nasa, work, pb)
     for order in range(lo, hi + 1):
         n = 12 * 4**order
         t0, total = time.time(), 0
