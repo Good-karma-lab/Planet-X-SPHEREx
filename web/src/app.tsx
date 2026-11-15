@@ -51,7 +51,7 @@ export function App() {
   return (
     <div class="app">
       <nav class="rail">
-        <a class="brand" href="#/" title="SPHEREx Sky: the front page">
+        <a class="brand" href="#/" title="SPHEREx Space: the front page">
           <span class="logo" dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/></svg>' }} />
         </a>
         <div class="tabs">

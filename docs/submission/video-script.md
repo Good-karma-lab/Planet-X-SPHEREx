@@ -10,4 +10,4 @@ needed. It leads with what moves between the passes and with Find Planet X. Numb
 | 7–13 s | Lab, ε Indi B 20′: the brown dwarf moving among white stars | A cold brown dwarf, ε Indi B, found moving and red. |
 | 13–21 s | Planet X page: the Solar System with the predicted orbit; "Run Find Planet X in the Lab" | Find Planet X: every orbit from 30 to 2000 au, summed over the passes. |
 | 21–27 s | Eris coming into focus as the exposures are added along its path; the link of three passes | It finds Eris blind: 95.6 au, three passes linked (JPL 95.5). Sedna: 83.0 au, a strong lead. |
-| 27–30 s | Title card: SPHEREx Sky · spherex.space | SPHEREx Sky. Flip through the sky. spherex.space |
+| 27–30 s | Title card: SPHEREx Space · spherex.space | SPHEREx Space. Flip through the sky. spherex.space |

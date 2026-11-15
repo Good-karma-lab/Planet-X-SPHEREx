@@ -1,8 +1,8 @@
-# SPHEREx Sky
+# SPHEREx Space
 
 **Live: https://spherex.space** (no login)
 
-SPHEREx Sky is a free web tool that shows real images of the sky from NASA's SPHEREx mission so that anyone can see how they change
+SPHEREx Space is a free web tool that shows real images of the sky from NASA's SPHEREx mission so that anyone can see how they change
 over time, and that helps find moving objects nobody pointed out. It is our entry for the NASA Space Apps Challenge 2026, challenge
 "Planet X and SPHEREx".
 

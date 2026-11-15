@@ -1,4 +1,4 @@
-// Landing page: what SPHEREx Sky is, in plain words, over the real sky.
+// Landing page: what SPHEREx Space is, in plain words, over the real sky.
 // The background is NASA SVS's Deep Star Maps 2020 star map (Gaia DR2), the globe's default layer, as one equirectangular image
 // drawn from inside the sphere with a stereographic camera that turns as the page scrolls. Nothing is drawn or modelled on it.
 // Pictures on the page are real SPHEREx frames and DSS plates (web/public/landing/). Styles: ../landing.css (classes lp-).
@@ -282,9 +282,9 @@ function Video() {
   return (
     <div class="lp-video">
       {ok ? (
-        <video controls playsInline preload="metadata" src={`${VIDEO}#t=1`} onError={() => setOk(false)} aria-label="30-second demo of SPHEREx Sky, captions burned in" />
+        <video controls playsInline preload="metadata" src={`${VIDEO}#t=1`} onError={() => setOk(false)} aria-label="30-second demo of SPHEREx Space, captions burned in" />
       ) : (
-        <a class="lp-video-slot" href={APP} aria-label="Open SPHEREx Sky">
+        <a class="lp-video-slot" href={APP} aria-label="Open SPHEREx Space">
           <span class="lp-play">
             <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
               <path d="M8 5v14l11-7z" />
@@ -305,13 +305,13 @@ export function Landing() {
       <SkyBackdrop scroller={() => scroller.current} />
       <header class="lp-top">
         <div class="lp-wrap">
-          <a class="lp-brand" href={APP} aria-label="SPHEREx Sky, open the app">
+          <a class="lp-brand" href={APP} aria-label="SPHEREx Space, open the app">
             <svg class="lp-mark" viewBox="0 0 32 32" aria-hidden="true">
               <circle cx="16" cy="16" r="13" fill="none" stroke="#5fe3d6" stroke-width="2" />
               <circle cx="16" cy="16" r="6.5" fill="none" stroke="#5fe3d6" stroke-width="1.5" opacity=".55" />
               <circle cx="21.5" cy="11" r="2.6" fill="#ffb454" />
             </svg>
-            SPHEREx Sky <small>by Good Karma Lab</small>
+            SPHEREx Space <small>by Good Karma Lab</small>
           </a>
           <nav class="lp-nav" aria-label="Sections">
             <a href="#how" onClick={jump('how')}>How it works</a>
@@ -598,7 +598,7 @@ export function Landing() {
               <p class="lp-eyebrow">Made for</p>
               <h2 id="lp-ch">NASA Space Apps Challenge 2026</h2>
               <p class="lp-lede">
-                The world's largest annual hackathon for space and Earth science. We took part at the Barcelona Local Event and built SPHEREx Sky for the
+                The world's largest annual hackathon for space and Earth science. We took part at the Barcelona Local Event and built SPHEREx Space for the
                 challenge “Planet X and SPHEREx”.
               </p>
               <dl class="lp-facts">
@@ -659,7 +659,7 @@ export function Landing() {
           <div class="lp-cols">
             <div>
               <a class="lp-brand" href={APP}>
-                SPHEREx Sky
+                SPHEREx Space
               </a>
               <p>A free public tool by Good Karma Lab. Independent project, not affiliated with or endorsed by NASA, JPL, Caltech or ESA.</p>
             </div>

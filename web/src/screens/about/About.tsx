@@ -14,7 +14,7 @@ export function AboutBody() {
       <div class="pg-h">
         <h1>About</h1>
         <p class="hint">
-          SPHEREx Sky shows what NASA's SPHEREx telescope really saw. Here are the sources it is built on and the people who built it. Not affiliated with or endorsed by NASA.
+          SPHEREx Space shows what NASA's SPHEREx telescope really saw. Here are the sources it is built on and the people who built it. Not affiliated with or endorsed by NASA.
         </p>
       </div>
       <h2 class="about-h" id="references">

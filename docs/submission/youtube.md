@@ -6,13 +6,13 @@ paste it as it is.
 
 ## Title
 
-SPHEREx Sky: flip through the sky, spot what moves (NASA Space Apps 2026)
+SPHEREx Space: flip through the sky, spot what moves (NASA Space Apps 2026)
 
-(70 characters.) Shorter alternative: SPHEREx Sky: see the sky move
+(70 characters.) Shorter alternative: SPHEREx Space: see the sky move
 
 ## Description
 
-SPHEREx Sky is a free web tool that plays real images from NASA's SPHEREx space telescope as a moving picture, so anyone can see how a patch of sky changes and spot what moves.
+SPHEREx Space is a free web tool that plays real images from NASA's SPHEREx space telescope as a moving picture, so anyone can see how a patch of sky changes and spot what moves.
 
 Try it, no account needed: https://spherex.space
 

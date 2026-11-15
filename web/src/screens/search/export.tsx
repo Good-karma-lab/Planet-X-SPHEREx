@@ -55,7 +55,7 @@ const csvCell = (v: unknown) => {
 };
 
 export function foundCsv(ra: number, dec: number, fov: number, f: Found): string {
-  const head = `# SPHEREx Sky: leads in the ${fov}' field at RA ${ra.toFixed(5)} Dec ${dec.toFixed(5)}; a lead is not a discovery\n# kind,id,ra_deg,dec_deg,rate_arcsec_per_yr,pa_deg,passes,gaia_check,gaia_source,score,name\n`;
+  const head = `# SPHEREx Space: leads in the ${fov}' field at RA ${ra.toFixed(5)} Dec ${dec.toFixed(5)}; a lead is not a discovery\n# kind,id,ra_deg,dec_deg,rate_arcsec_per_yr,pa_deg,passes,gaia_check,gaia_source,score,name\n`;
   const rows = [
     ...f.tracks.map((t, i) => ['track', i + 1, t.ra_2025_9, t.dec_2025_9, t.speed, t.pa, t.passes.length, t.check, t.gaia?.source_id, '', '']),
     ...f.anomalies.map((a) => ['anomaly', a.n, a.ra, a.dec, '', '', '', '', a.identified?.gaia?.source_id, a.score, a.identified?.simbad?.name]),

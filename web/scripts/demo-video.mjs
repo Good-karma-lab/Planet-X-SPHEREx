@@ -97,7 +97,7 @@ await page.evaluate(() => {
     'position:fixed;inset:0;z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;' +
     'background:radial-gradient(1200px 700px at 50% 40%,#0d2430,#04080c);color:#eafcff;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';
   el.innerHTML =
-    '<div style="font-size:96px;font-weight:700;letter-spacing:.02em">SPHEREx Sky</div>' +
+    '<div style="font-size:96px;font-weight:700;letter-spacing:.02em">SPHEREx Space</div>' +
     '<div style="font-size:46px;font-weight:500;color:#9ff3ea">Flip through the sky.</div>' +
     '<div style="font:600 56px ui-monospace,Menlo,monospace;color:#ffffff;margin-top:24px">spherex.space</div>' +
     '<div style="font-size:28px;font-weight:500;color:#a0b9c2;margin-top:20px">Real NASA SPHEREx data · Good Karma Lab · NASA Space Apps 2026</div>';

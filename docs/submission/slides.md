@@ -4,7 +4,7 @@ The deck is design-review's `slides.html` (and its PDF); the text below is what 
 screenshots of https://spherex.space on real SPHEREx data, and archive plates from the Digitized Sky Surveys. Every number is one measured
 on the live service (2026-11-14 and 2026-11-15).
 
-1. **SPHEREx Sky. Flip through the sky, spot what moves.** NASA Space Apps Challenge 2026 · Barcelona · challenge "Planet X and
+1. **SPHEREx Space. Flip through the sky, spot what moves.** NASA Space Apps Challenge 2026 · Barcelona · challenge "Planet X and
    SPHEREx" · team Good Karma Lab · spherex.space. Picture: Barnard's Star in the archive plates and in SPHEREx (10.4″ a year).
 2. **The challenge: a new sky every six months, too much for any one person.** SPHEREx maps the whole sky in 102 infrared colours
    every six months. Asteroids, comets, nearby stars and brown dwarfs shift between images; Pluto was found that way. But raw frames

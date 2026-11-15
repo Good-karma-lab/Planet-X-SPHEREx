@@ -15,11 +15,11 @@ last save is reviewed.
 
 ## 1. Project name (2 words, 11 characters)
 
-SPHEREx Sky
+SPHEREx Space
 
 ## 2. High-level project summary (196 words, 1159 characters)
 
-SPHEREx Sky shows what NASA's SPHEREx telescope really saw. Pick any place on a globe of the sky and the lab plays the SPHEREx passes
+SPHEREx Space shows what NASA's SPHEREx telescope really saw. Pick any place on a globe of the sky and the lab plays the SPHEREx passes
 of that field back and forth like a blink comparator, coloured by SPHEREx's own spectrum: the background stands still, and a nearby
 star or a brown dwarf visibly moves. Searches start by themselves: tracks through the passes checked against ESA Gaia with a chance
 control, asteroids that hop between the visits of a pass checked against JPL, brown dwarf candidates, red sources and spectral

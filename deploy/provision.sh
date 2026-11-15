@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Provision an Ubuntu 24.04 VM (x86-64 or aarch64) for SPHEREx Sky. Idempotent; run as root on the VM:
+# Provision an Ubuntu 24.04 VM (x86-64 or aarch64) for SPHEREx Space. Idempotent; run as root on the VM:
 #   sudo SKY_DOMAIN=spherex.space bash /tmp/provision.sh
 # The code arrives by deploy/push.sh from a development machine (or by git once the repository is public).
 set -euo pipefail
