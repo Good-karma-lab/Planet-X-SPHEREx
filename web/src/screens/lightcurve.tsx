@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { brightnessLine } from './brightness-line';
 import type { Source } from './spectrum';
 
 interface Part<P> {
@@ -150,30 +151,6 @@ function SpherexChart({ b, ztf }: { b: NonNullable<Brightness['result']>; ztf: Z
     }
   }, [b, ztf]);
   return <canvas ref={ref} class="lc-chart" />;
-}
-
-/** One plain line: what the brightness did between pass 1 and 2, weighed over the detectors, against the scatter of the field's control stars. */
-export function brightnessLine(name: string, b: NonNullable<Brightness['result']>): string | null {
-  if (b.passes.length < 2) return null;
-  let sw = 0;
-  let sm = 0;
-  let scat = 0;
-  let n = 0;
-  for (const [d, v] of Object.entries(b.passes[1]!.detectors)) {
-    if (!v?.ratio_to_first || v.ratio_to_first <= 0 || !v.ratio_err) continue;
-    const e = (1.0857 * v.ratio_err) / v.ratio_to_first;
-    const w = 1 / (e * e + 1e-6);
-    sw += w;
-    sm += w * dmag(v.ratio_to_first);
-    scat = Math.max(scat, 1.0857 * (b.control.scatter[d] ?? 0));
-    n++;
-  }
-  if (!n) return null;
-  const m = sm / sw;
-  const e = Math.max(Math.sqrt(1 / sw), scat);
-  return Math.abs(m) > 2 * e
-    ? `${name} ${m < 0 ? 'brightened' : 'faded'} ${Math.abs(m).toFixed(1)} mag between pass 1 and 2 (measurement scatter ±${e.toFixed(2)} mag).`
-    : `${name} did not change beyond the scatter (±${e.toFixed(2)} mag) between pass 1 and 2.`;
 }
 
 /** ZTF and NEOWISE light curves of the selected source (IRSA), with the SPHEREx years shaded. */
