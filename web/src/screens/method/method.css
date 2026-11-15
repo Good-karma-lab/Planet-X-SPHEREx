@@ -189,3 +189,18 @@ table.v td.n { font-family: var(--mono); color: var(--ink); white-space: nowrap;
   height: auto;
   background: #000;
 }
+
+/* Eris, live: per-pass distance ranges and the link */
+.er { padding: 18px 20px 30px; background: #05090d; }
+.er-row { display: grid; grid-template-columns: 230px 1fr 110px; gap: 14px; align-items: center; padding: 7px 0; }
+.er-l b { display: block; font-size: 14px; color: var(--ink, #d6e7ed); }
+.er-l small { display: block; font: 11.5px var(--mono); color: var(--faint, #7d96a0); }
+.er-t { position: relative; height: 14px; border-radius: 7px; background: rgba(140, 225, 240, 0.07); }
+.er-t i { position: absolute; top: 2px; height: 10px; border-radius: 5px; background: rgba(255, 180, 84, 0.45); }
+.er-t i.link { background: #5fe3d6; top: 0; height: 14px; min-width: 6px; }
+.er-t u { position: absolute; top: -3px; width: 2px; height: 20px; margin-left: -1px; background: #fff; }
+.er-v { font: 500 13px var(--mono); text-align: right; color: var(--ink, #d6e7ed); }
+.er-axis { position: relative; margin: 4px 124px 0 244px; height: 18px; font: 11px var(--mono); color: var(--faint, #7d96a0); }
+.er-axis span { position: absolute; transform: translateX(-50%); }
+.er-axis em { position: absolute; right: -28px; font-style: normal; }
+@media (max-width: 700px) { .er-row { grid-template-columns: 1fr; gap: 4px; } .er-v { text-align: left; } .er-axis { margin: 4px 0 0; } }
