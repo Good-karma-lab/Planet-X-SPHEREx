@@ -1116,7 +1116,8 @@ export function Lab({ route }: { route: Route }) {
           }
           shownPass = t < 0.5 ? a : b;
           for (const q of panels) {
-            r.panel(q, a, b, t);
+            // a tile with no exposure in this season is plain black under its note (nothing is drawn: no white core where there is no data at all)
+            if (!q.empty) r.panel(q, a, b, t);
             if (!q.zoom) rects.push({ x: q.x, y: q.y, w: q.w, h: q.h });
             if (q.label)
               out.push({
