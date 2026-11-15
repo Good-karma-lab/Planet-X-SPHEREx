@@ -79,11 +79,15 @@ The main view is a blink of the pass stacks. The picture plays the passes in the
 
 [figure: pendulum-barnard | Barnard's Star in the pendulum: the background stays still and only the star hops between passes]
 
+[figure: epsindi-pendulum | ε Indi B in the pendulum of its four passes: the brown dwarf swings, the stars stand still]
+
 ### Co-add
 
 Co-add draws all passes as one still picture, the mean of the passes' display colours. Faint sources that do not move stand out; movers smear into a trail.
 
 ### Wall of bands
+
+[figure: epsindi-bands | ε Indi B in the named bands: it is bright only in the long-wavelength ones]
 
 The wall of bands has one panel for each chosen named band, under one blink timer and one display law: what an object is made of, and in which light it is bright. Outside a band's coverage a panel is black.
 
@@ -92,6 +96,8 @@ The wall of bands has one panel for each chosen named band, under one blink time
 The wall of detectors has six panels, labelled in words and microns ("very near infrared 0.75–1.11 µm" through "mid infrared 4.42–5.00 µm"), laid out 3 × 2, under one blink timer. A real object jumps in all six at once by the same amount; a cosmic ray, a glint or a detector artifact lives in one. We read the wall by eye, panel against panel.
 
 [figure: wall-detectors | The six detectors side by side: a mover jumps the same way in all of them]
+
+[figure: epsindi-wall | The wall of detectors of ε Indi B: the same shift in every detector that sees it]
 
 ## Difference between passes
 
@@ -109,6 +115,8 @@ k = robust width of (D − S)/σ in the same windows on source-free pixels
 The 5 % floor is not scaled by `k`: it is about flux (point-spread function and calibration differences between passes), not noise. `S` removes the change of the diffuse sky (zodiacal light) and real extended change larger than about 2.5′. We compute `z` for the white frame and for each of the seven bands, and store it as one byte per pixel (128 + 12.7 z, clipped at ±10).
 
 ### What is drawn
+
+[figure: difference | The difference between two passes of one field: a mover is a magenta and cyan pair, static stars leave nothing]
 
 The picture shows the pass dimmed and grey underneath. A pixel is coloured when `|z| > 4`: magenta for brighter, cyan for fainter, full strength at `|z| = 10`. The first pass is the reference and shows nothing. A second gate removes the small residual rings of static stars (registration, a slightly different point-spread function): the change must be a real share of the brightest light within one and a half detector pixels, in either pass: below 30 % of that peak it is not shown, from 50 % it is shown in full. A moving source changes by about its whole peak; a static star whose profile differs between passes changes by a small part of it. In the picture view the white-frame map is drawn; on the wall of bands each panel uses its own band's map.
 
@@ -171,6 +179,8 @@ mask:    static > 5 robust sigma above its median, grown by 1 grid point;
 The static background is what a blink comparator keeps still, so the film can drop it altogether. Motion only (Days scale) draws the motion map instead of the sky: dark, with amber only where the change connects, above 3σ, to a place a search found on that visit or where JPL predicts a known body that the visit shows; the amber is full from 8σ. Elsewhere the map stays dark, because the raw map's specks and a bright star's halo are not motion. Known bodies are ringed where JPL predicts them and solid when the motion map shows them there.
 
 ## Archive images
+
+[figure: archive-images | The same field in the archive images that precede SPHEREx, with the target's path through them]
 
 A year of SPHEREx moves Barnard's Star by about 10 arcseconds, while the archives give decades: at 10.4 arcseconds a year it has moved about 13 arcminutes in 76 years. We check a candidate by extending its motion backward and looking at whether it sits where the old images show it.
 
