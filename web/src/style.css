@@ -681,8 +681,7 @@ input[type='range']::-moz-range-thumb {
   background: rgba(2, 7, 10, 0.85);
 }
 .vsq canvas.vid.wall {
-  box-shadow: none;
-  background: transparent;
+  background: #000;
 }
 .seg.scale {
   width: auto;
@@ -707,10 +706,7 @@ input[type='range']::-moz-range-thumb {
   height: 100%;
   display: block;
   border-radius: 4px;
-  box-shadow:
-    0 0 0 1px var(--edge-hi),
-    0 14px 44px rgba(0, 0, 0, 0.55);
-  background: #02070a;
+  background: #000;
 }
 .vsq canvas.ov {
   position: absolute;
@@ -2354,7 +2350,7 @@ input[type='range']::-moz-range-thumb {
 
 /* the picture sits at whole pixels (its offsets are set in the page), so its frame has one width in every state */
 .lab .vstage { align-items: flex-start; justify-content: flex-start; }
-.vsq canvas.vid { box-shadow: 0 0 0 1px var(--edge-hi), 0 14px 44px rgba(0, 0, 0, 0.55); outline: none; }
+
 .vsq :focus, .vsq :focus-visible { outline: none; }
 
 /* the scans: a header with a clear chevron; opened (default), one line per scan; folded, the same scans in one wrapped line */
@@ -2437,3 +2433,6 @@ input[type='range']::-moz-range-thumb {
   .vsq .fbands .bchip.on { background: rgba(10, 24, 30, 0.7); }
   .vsq .fstatus { left: 12px; right: auto; bottom: 14px; top: auto; max-width: 42%; padding: 3px 9px; font: 600 12px var(--mono); color: #e6f2f6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; flex-wrap: nowrap; }
 }
+
+/* the frame: ONE fixed 1 px line round the picture's box, the same in every view (picture, bands, detectors, Days), drawn over the canvases so that nothing behind them shows and nothing about it depends on the canvas; no drop shadow */
+.vsq::after { content: ''; position: absolute; inset: 0; border: 1px solid #55707a; border-radius: 4px; pointer-events: none; z-index: 4; box-sizing: border-box; }
