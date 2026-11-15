@@ -11,6 +11,7 @@ import httpx
 import pytest
 
 from service import fpx_known
+from service.upstream import jpl
 
 
 @pytest.fixture(autouse=True)
@@ -164,3 +165,38 @@ def test_findings_peaks_that_are_known_bodies_say_so(tmp_path: Path) -> None:
     assert f["status"] == "known" and f["verdict"].startswith("This is Sedna (JPL), found blind")
     assert f["data"]["peak"]["known"]["name"].startswith("90377 Sedna")
     assert out["counts"]["peak"] == {"all": 1, "unexplained": 0, "unchecked": 0, "known": 1}
+
+
+def test_an_answer_got_is_kept_while_another_lead_waits_for_jpl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(jpl, "GAP_S", 0.0)
+    by_pass = [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
+        "candidates": [{"d": 83.0, "ra": 1.0, "dec": 1.0, "by_pass": by_pass}, {"d": 83.0, "ra": 2.0, "dec": 2.0, "by_pass": by_pass}],
+    }
+    good = fake_jpl()
+    calls = {"sb": 0}
+
+    async def flaky(request: httpx.Request) -> httpx.Response:
+        if "sb_ident" in str(request.url):
+            calls["sb"] += 1
+            if calls["sb"] == 1:
+                return httpx.Response(502, text="Proxy Error")  # JPL's gateway fails the first lead once
+        return await good._transport.handle_async_request(request)  # type: ignore[attr-defined]
+
+    fpx_known._SB_MEMO.clear()
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=httpx.AsyncClient(transport=httpx.MockTransport(flaky)))
+
+    async def go() -> None:
+        assert await idn.sweep() == 0  # the second lead answered, the first did not
+        kept = idn.cached("deep", "k" * 24)
+        assert kept is not None and set(kept) == {1} and kept[1]["state"] == "ok"
+        idn.failed_at.clear()
+        n_sb = calls["sb"]
+        assert await idn.sweep() == 1  # only the first lead is asked again
+        assert calls["sb"] <= n_sb + 1  # (the answer for these places may already be remembered)
+        kept = idn.cached("deep", "k" * 24)
+        assert kept is not None and set(kept) == {0, 1}
+
+    asyncio.run(go())

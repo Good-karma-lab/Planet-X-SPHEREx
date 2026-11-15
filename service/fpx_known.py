@@ -224,7 +224,8 @@ def places_of(kind: str, result: dict[str, Any], c: dict[str, Any]) -> tuple[lis
 
 class FpxIdentifier:
     """The JPL identification of the leads of every finished Find Planet X result, made ahead of time (a sweep over the store, one result at
-    a time, at the lowest rate) and kept on disk, so a page that asks finds it at once. A failed answer (JPL down) is never kept."""
+    a time, at the lowest rate) and kept on disk, so a page that asks finds it at once.
+    A failed answer (JPL down) is never kept; the definite ones are kept as they come."""
 
     def __init__(self, store: Any, directory: Path, client: httpx.AsyncClient | None = None, sweep_s: float = 60.0) -> None:
         self.store = store
@@ -236,6 +237,7 @@ class FpxIdentifier:
         self.limit = asyncio.Semaphore(2)
         self.failed_at: dict[tuple[str, str], float] = {}
         self.running: set[tuple[str, str]] = set()
+        self.complete: set[tuple[str, str]] = set()
 
     def path(self, kind: str, key: str) -> Path:
         return self.dir / f"{kind}-{key}.{FILE_VERSION}.json"
@@ -259,37 +261,53 @@ class FpxIdentifier:
         ]
         return out
 
-    async def identify_result(self, kind: str, key: str, result: dict[str, Any]) -> bool:
-        """Looks up the leads of one result and keeps the answers when JPL answered for all. -> kept."""
-        found: dict[int, dict[str, Any]] = {}
-        for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
-            pl = places_of(kind, result, c)
-            if pl is not None:
-                found[i] = {**await identify(self.client, pl[0], pl[1], pl[2], self.limit), "at": [c.get("ra"), c.get("dec"), c.get("d")]}
-        if not found or any(v.get("state") == "unavailable" for v in found.values()):
-            return False
+    def _keep(self, kind: str, key: str, found: dict[int, dict[str, Any]]) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         tmp = self.path(kind, key).with_suffix(".part")
-        tmp.write_text(json.dumps({str(i): v for i, v in found.items()}, separators=(",", ":")))
+        tmp.write_text(json.dumps({str(i): v for i, v in sorted(found.items())}, separators=(",", ":")))
         tmp.replace(self.path(kind, key))
-        return True
+
+    async def identify_result(self, kind: str, key: str, result: dict[str, Any]) -> bool:
+        """Looks up the leads of one result, strongest first, and keeps each definite answer as it comes (JPL's gateway fails one request
+        in a few: an answer already got is never asked again). -> every lead has its answer."""
+        found = {i: v for i, v in (self.cached(kind, key) or {}).items() if v.get("state") in ("ok", "none")}
+        whole = True
+        for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
+            pl = places_of(kind, result, c)
+            if pl is None or i in found:
+                continue
+            v = {**await identify(self.client, pl[0], pl[1], pl[2], self.limit), "at": [c.get("ra"), c.get("dec"), c.get("d")]}
+            if v.get("state") == "unavailable":
+                whole = False
+                continue
+            found[i] = v
+            self._keep(kind, key, found)
+        return whole and bool(found)
 
     async def sweep(self) -> int:
-        """One pass over the finished results without kept answers. -> how many were looked up."""
+        """One pass over the finished results whose leads are not all answered, the deep sums first (few, and they hold the strongest
+        leads). -> how many were completed."""
         n = 0
         rows = await asyncio.to_thread(self.store.listing, KINDS)
+        rows = sorted(rows, key=lambda r: KINDS.index(r["kind"]) if r["kind"] in KINDS else len(KINDS))
         for row in rows:
             kind, key = row["kind"], row["key"]
-            if not row["complete"] or self.cached(kind, key) is not None or (kind, key) in self.running:
+            if not row["complete"] or (kind, key) in self.complete or (kind, key) in self.running:
                 continue
             if time.monotonic() - self.failed_at.get((kind, key), -1e9) < 300.0:
                 continue  # JPL did not answer a moment ago: not again at once
             meta = await asyncio.to_thread(self.store.read_meta, kind, key)
             if not meta or meta.get("status") != "ok" or not meta.get("candidates"):
                 continue
+            have = self.cached(kind, key) or {}
+            need = [i for i, c in enumerate(meta["candidates"][:KNOWN_MAX]) if places_of(kind, meta, c) is not None]
+            if need and all(have.get(i, {}).get("state") in ("ok", "none") for i in need):
+                self.complete.add((kind, key))
+                continue
             self.running.add((kind, key))
             try:
                 if await self.identify_result(kind, key, meta):
+                    self.complete.add((kind, key))
                     n += 1
                 else:
                     self.failed_at[(kind, key)] = time.monotonic()
