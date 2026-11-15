@@ -39,6 +39,14 @@ export function App() {
   useEffect(() => {
     if (route.screen === 'lab' && route.params['ra']) setLastLab(location.hash);
   }, [route]);
+  // a screen opens at its top: the page's own scroller (a desktop) and the document (a phone) both keep the place of the screen before otherwise
+  useEffect(() => {
+    const t = setTimeout(() => {
+      window.scrollTo(0, 0);
+      document.querySelectorAll('.screen').forEach((e) => ((e as HTMLElement).scrollTop = 0));
+    }, 0);
+    return () => clearTimeout(t);
+  }, [route.screen]);
   if (route.screen === 'landing') return <Landing />;
   return (
     <div class="app">
