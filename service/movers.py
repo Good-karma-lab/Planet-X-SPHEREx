@@ -134,7 +134,7 @@ class Movers:
                 extra = []  # the catalogue did not answer: the search's own tracks stand, and this part is tried on the next search
             for t in extra:  # the star's name (SIMBAD: "eps Ind A"), when the catalogue answers in a few seconds
                 t["name"] = await self._star_name(t)
-            result["tracks"] = list(result["tracks"]) + extra
+            result["tracks"] = replace_saturated(list(result["tracks"]), extra, stars if extra else []) + extra
             result["saturated_movers"] = len(extra)
             run.result = result
             run.checked_at = time.monotonic()
@@ -418,6 +418,35 @@ def _carried(st: dict[str, Any], mjd: float) -> tuple[float, float]:
     return st["ra"] + (st["pmra"] or 0.0) * k / 3.6e6 / math.cos(math.radians(d)), d
 
 
+def stands_for(tr: dict[str, Any], st: dict[str, Any]) -> bool:
+    """Whether a track passes within 6 arcsec of a Gaia star (carried to the pass dates) in every pass of the track."""
+    return all(
+        math.hypot(
+            (tr["ra"][j] - _carried(st, m)[0]) * math.cos(math.radians(tr["dec"][j])),
+            tr["dec"][j] - _carried(st, m)[1],
+        )
+        * 3600.0
+        < 6.0
+        for j, m in enumerate(tr["mjd"])
+    )
+
+
+def biased_halo(tr: dict[str, Any], st: dict[str, Any]) -> bool:
+    """A track of the search through saturated pixels (not a saturated-zone track) whose speed is not the star's own: the halo's
+    centroid."""A track of the search through saturated pixels (not a saturated-zone track) whose speed is not the star's own: the halo's centroid."""
+    if not tr.get("saturated") or tr.get("source") == "saturated":
+        return False
+    pm = math.hypot(st["pmra"] or 0.0, st["pmdec"] or 0.0) / 1000.0
+    return abs(float(tr["speed"]) - pm) > max(0.5, 0.15 * pm)
+
+
+def replace_saturated(tracks: list[dict[str, Any]], extra: list[dict[str, Any]], stars: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The search's own tracks without the saturated ones that a saturated-zone track now stands for (one star, one track)."""
+    named = {str(t["gaia"]["source_id"]) for t in extra if t.get("gaia")}
+    by_id = [st for st in stars if str(st["source_id"]) in named]
+    return [t for t in tracks if not any(stands_for(t, st) and biased_halo(t, st) for st in by_id)]
+
+
 def saturated_movers(
     meta: dict[str, Any], raws: list[bytes], stars: list[dict[str, Any]], tracks: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
@@ -450,18 +479,9 @@ def saturated_movers(
             exp_dec.append(d)
         if any(not (0 <= x < n and 0 <= y < n) for x, y in exp_xy):
             continue
-        if any(
-            all(
-                math.hypot(
-                    (tr["ra"][j] - _carried(st, m)[0]) * math.cos(math.radians(tr["dec"][j])),
-                    tr["dec"][j] - _carried(st, m)[1],
-                )
-                * 3600.0
-                < 6.0
-                for j, m in enumerate(tr["mjd"])
-            )
-            for tr in tracks
-        ):
+        # a track of the search that stands for the star leaves it out, unless that track is itself a saturated centroid: its speed is
+        # the halo's (ε Indi A in a 60′ field came out at 6.9″/yr against Gaia's 4.7 and with no name), the saturated zone is better
+        if any(stands_for(tr, st) and not biased_halo(tr, st) for tr in tracks):
             continue
         found: list[tuple[int, float, float]] = []
         rad = max(2, math.ceil(SAT_BLOB_ARCSEC / step))

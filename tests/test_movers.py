@@ -131,3 +131,28 @@ def test_a_track_between_two_static_stars_is_a_centroid_shift() -> None:
     m2._static_near = lambda t, k, y: Movers._static_near(m2, t, k, y)  # type: ignore[arg-type]
     asyncio.run(Movers._check(m2, only_one))  # type: ignore[arg-type]
     assert only_one["check"] == "none"
+
+
+def test_a_saturated_centroid_track_gives_way_to_the_saturated_zone_track_of_its_star() -> None:
+    from service.movers import replace_saturated, stands_for
+
+    star = {"source_id": 6412595290592307840, "ra": 330.8402, "dec": -56.7860, "pmra": 3966.7, "pmdec": -2536.2}
+    mjds = [60834.2, 61017.9, 61285.6]
+    from service.movers import _carried
+
+    places = [_carried(star, m) for m in mjds]
+    biased = {  # a track on the halo of the star: it stands within 6 arcsec of it at every pass, with the wrong speed
+        "mjd": mjds,
+        "ra": [a + 2.0 / 3600.0 for a, _ in places],
+        "dec": [d for _, d in places],
+        "speed": 6.92,
+        "saturated": True,
+    }
+    other = {"mjd": mjds, "ra": [a + 0.1 for a, _ in places], "dec": [d for _, d in places], "speed": 4.68, "saturated": False}
+    right = dict(biased, speed=4.75)  # a saturated track whose speed is the star's own (Barnard's star) is the star's track: it stays
+    assert stands_for(biased, star) and not stands_for(other, star)
+    extra = [{"gaia": {"source_id": str(star["source_id"])}, "saturated": True, "speed": 4.29}]
+    kept = replace_saturated([biased, other], extra, [star])
+    assert kept == [other]  # the biased halo track is replaced, the unrelated one stays
+    assert replace_saturated([right], extra, [star]) == [right]
+    assert replace_saturated([biased, other], [], [star]) == [biased, other]  # nothing replaces it when no saturated track was found
