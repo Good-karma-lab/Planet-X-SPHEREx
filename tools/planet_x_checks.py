@@ -53,9 +53,22 @@ def run_centre(c: httpx.Client, f: dict[str, Any], poll_s: float, max_hours: flo
     if plan.get("status") != "plan":
         out["state"] = plan.get("status", "no-plan")
         return out
+    # the plan places the fields; the job runs on those fields (the centre form only plans)
+    run_q = {
+        "fields": ";".join(f"{x[0]},{x[1]},{x[2]}" for x in plan["fields"]),
+        "fov": f["fov"],
+        "dmin": f["dmin"],
+        "dmax": f["dmax"],
+        "det": f["det"],
+    }
+    out["fields"] = run_q["fields"]
     t0 = time.monotonic()
     while time.monotonic() - t0 < max_hours * 3600.0:
-        r = c.get("/api/v1/deep", params={**q, "background": 1})
+        try:
+            r = c.get("/api/v1/deep", params={**run_q, "background": 1})
+        except httpx.HTTPError:  # the service restarts (a deploy): ask again, the job is started again or attached
+            time.sleep(poll_s)
+            continue
         if r.status_code >= 400:
             return {**out, "state": f"HTTP {r.status_code}", "error": r.text[:200]}
         body = r.json()

@@ -73,7 +73,11 @@ def run_field(c: httpx.Client, f: dict[str, Any], poll_s: float, max_hours: floa
         return out
     t0 = time.monotonic()
     while time.monotonic() - t0 < max_hours * 3600.0:
-        r = c.get("/api/v1/deep", params={**q, "background": 1}, timeout=300)
+        try:
+            r = c.get("/api/v1/deep", params={**q, "background": 1}, timeout=300)
+        except httpx.HTTPError:  # the service restarts (a deploy): ask again
+            time.sleep(poll_s)
+            continue
         if r.status_code >= 400:
             out["state"] = f"HTTP {r.status_code}"
             out["error"] = r.text[:200]
