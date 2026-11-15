@@ -4,7 +4,7 @@ import { formatHash } from '../lib/route';
 import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVEY_EPOCH } from '../lib/sky';
 import { icon } from '../ui/icons';
 import { backdropYear, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
-import { sky, type SkyLayer } from './globe/sky';
+import { sky, STAR_MAP_FADE_FROM, type SkyLayer } from './globe/sky';
 import { catalogNow, kept, loadCatalog, type Obj, type SurveyId } from './globe/store';
 import { HIPS, bakedOf, loadManifest, tiles } from '../lib/hips';
 import { KnownList } from './search/known';
@@ -232,6 +232,8 @@ export function Globe() {
   const survey: SurveyId = surveyPick === 'svs' && !svsOn ? 'dss2' : surveyPick;
   const [proj, setProj] = useState<'globe' | 'moll'>(kept.proj);
   const [inside, setInside] = useState(kept.inside);
+  // zoomed in past the resolution of the star map: DSS2 is faded in over it, and the credit line says so
+  const [pastMap, setPastMap] = useState(false);
   const [catOpen, setCatOpen] = useState(kept.catOpen);
   const [filter, setFilter] = useState(kept.filter);
   const [query, setQuery] = useState(kept.query);
@@ -252,7 +254,8 @@ export function Globe() {
   const live = useRef({ survey, proj, inside, a, sel, catalog, bodyPath });
   live.current = { survey, proj, inside, a, sel, catalog, bodyPath };
   const dirty = useRef(true);
-  const view = useRef(kept.view ?? { ra: a.ra, dec: a.dec, zoom: 1.6 });
+  // the globe opens wide: a view kept from a deep zoom (a 5′ frame) comes back as about 50° across, centred on the same place (decided once, when it opens)
+  const view = useRef(kept.view ? { ...kept.view, zoom: kept.view.zoom > 8 ? 2.4 : kept.view.zoom } : { ra: a.ra, dec: a.dec, zoom: 1.6 });
   kept.view = view.current;
   const flyRef = useRef<(ra: number, dec: number, spanDeg?: number) => void>(() => {});
 
@@ -335,6 +338,7 @@ export function Globe() {
     resize();
     const offTile = tiles.onTile(() => (sky.stale = true));
 
+    const pastRef = { current: false };
     const R = () => (Math.min(W, H) / 2) * 0.9 * view.current.zoom;
     /** seen from inside the globe */
     const inn = () => live.current.proj === 'globe' && live.current.inside;
@@ -582,6 +586,11 @@ export function Globe() {
       }
       // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
       const st = live.current;
+      const past = R() > STAR_MAP_FADE_FROM && st.proj === 'globe';
+      if (past !== pastRef.current) {
+        pastRef.current = past;
+        setPastMap(past);
+      }
       const sv = { ra: view.current.ra, dec: view.current.dec, roll: view.current.roll ?? 0, R: R(), proj: st.proj, inside: st.inside && st.proj === 'globe', W, H, mz: mv.z, mx: mv.x, my: mv.y };
       const sig = [sv.ra, sv.dec, sv.roll, sv.R, sv.proj, sv.inside, W, H, mv.z, mv.x, mv.y].join();
       const layer = SURVEYS.find((x) => x.id === st.survey)!.layer;
@@ -844,7 +853,11 @@ export function Globe() {
     const o = catalog.find((x) => x.n.toLowerCase() === name.toLowerCase());
     if (!o) return;
     linked.current = true;
-    setTimeout(() => select(o, q.get('path') === '1'), 300);
+    // opened from a link (the landing's "Watch a star move"): the globe shows about 50° of the sky around the object, not the 5′ frame; its path is drawn larger than true
+    setTimeout(() => {
+      select(o, false);
+      flyRef.current(...epochPlace(o), 50);
+    }, 300);
   }, [catalog]);
 
   /** The lab at the object's place during the SPHEREx survey (where it is in the pictures the lab shows). */
@@ -1001,6 +1014,7 @@ export function Globe() {
           {survey === 'svs' && (
             <div class="map-credit" data-testid="map-credit">
               {bakedOf('svs')?.label ?? 'Star map · Gaia (NASA SVS)'} · {bakedOf('svs')?.credit ?? STAR_MAP_CREDIT}
+              {pastMap && ' · zoomed past the star map: showing DSS2'}
             </div>
           )}
           <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>

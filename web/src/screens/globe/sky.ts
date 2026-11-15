@@ -114,6 +114,8 @@ interface Pass {
   samplers: Sampler[];
   /** pixels this pass painted (a pass of a new survey that has nothing yet leaves the picture on show alone) */
   painted: number;
+  /** past the star map's resolution a real survey is faded in over it (the sampler of DSS2, the weight of it, its live tone) */
+  fade?: { s: Sampler; w: number; gain: number; black: number };
   /** pixels of the view this pass could paint at all (the disc of the globe, the map's ellipse, the whole picture inside) */
   total: number;
 }
@@ -137,6 +139,10 @@ function loadDust(): void {
   im.src = '/globe/dust_allsky.jpg';
 }
 
+/** the globe radius (pixels) from which a survey is faded in over the star map, and by which it has replaced it */
+export const STAR_MAP_FADE_FROM = 8000;
+export const STAR_MAP_FADE_TO = 16000;
+
 class SkyPainter {
   /** the picture on screen, W×H CSS pixels */
   canvas = document.createElement('canvas');
@@ -149,6 +155,7 @@ class SkyPainter {
   private scratch = document.createElement('canvas');
   private f: FacePt = { face: 0, x: 0, y: 0 };
   private rgb = new Float32Array(3);
+  private rgb2 = new Float32Array(3);
 
   /** One frame of work. `moving`: the view is changing, paint a coarse picture now. Returns true when the picture changed. */
   frame(view: SkyView, layer: SkyLayer[], moving: boolean): boolean {
@@ -188,7 +195,14 @@ class SkyPainter {
     const R = view.proj === 'globe' ? view.R : mw(view) / 5;
     // the SPHEREx backdrop is three frames of the cube: one sampler per colour
     const samplers = dustPic ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
-    return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0, total: 0 };
+    // the star map is made from a map of 20″ pixels (one screen pixel at a globe radius of about 10 000 px): zoomed in past that it would only be a smooth
+    // wash, so a real survey (DSS2) is faded in over it, fully by twice that radius
+    let fade: Pass['fade'];
+    if (layer.length === 1 && layer[0]!.id === 'svs' && R > STAR_MAP_FADE_FROM && HIPS['dss2']) {
+      const t = Math.min(1, (R - STAR_MAP_FADE_FROM) / (STAR_MAP_FADE_TO - STAR_MAP_FADE_FROM));
+      fade = { s: new Sampler('dss2', orderFor('dss2', R)), w: t * t * (3 - 2 * t), gain: 2.4, black: 16 };
+    }
+    return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0, total: 0, fade };
   }
 
   /** Paints rows until the deadline; true when the pass is done. */
@@ -200,6 +214,7 @@ class SkyPainter {
     const M = mw(v);
     const f = this.f;
     const rgb = this.rgb;
+    const rgb2 = this.rgb2;
     const one = layer.length === 1;
     const l0 = layer[0]!;
     // a survey whose tiles are in galactic coordinates (the dust map) is looked up at the galactic place of each pixel
@@ -265,15 +280,37 @@ class SkyPainter {
           for (let c = 0; c < 3; c++)
             o[q + c] = (dd[t00 + c]! * (1 - ax) + dd[t01 + c]! * ax) * (1 - ay) + (dd[t10 + c]! * (1 - ax) + dd[t11 + c]! * ax) * ay;
         } else if (one) {
-          if (samplers[0]!.at(f, rgb, 0) === FROM_NOTHING) continue;
+          const fd = p.fade;
+          const have = samplers[0]!.at(f, rgb, 0) !== FROM_NOTHING;
+          if (!have && !fd) continue;
           // a baked tile has its tone already; a live one (deeper than the baked orders, or while the baked ones are not read) gets the layer's
-          const bk = samplers[0]!.lastBaked;
-          const B = bk ? bakedOf(l0.id) : undefined;
-          const bl = B ? B.black : l0.black;
-          const gg = B ? (B.gain * 255) / (255 - B.black) : g0;
-          o[q] = Math.max(0, rgb[0]! - bl) * gg;
-          o[q + 1] = Math.max(0, rgb[1]! - bl) * gg;
-          o[q + 2] = Math.max(0, rgb[2]! - bl) * gg;
+          let r0 = 0;
+          let g1 = 0;
+          let b1 = 0;
+          if (have) {
+            const bk = samplers[0]!.lastBaked;
+            const B = bk ? bakedOf(l0.id) : undefined;
+            const bl = B ? B.black : l0.black;
+            const gg = B ? (B.gain * 255) / (255 - B.black) : g0;
+            r0 = Math.max(0, rgb[0]! - bl) * gg;
+            g1 = Math.max(0, rgb[1]! - bl) * gg;
+            b1 = Math.max(0, rgb[2]! - bl) * gg;
+          }
+          if (fd) {
+            const got = fd.s.at(f, rgb2, 0) !== FROM_NOTHING;
+            if (got) {
+              const BD = fd.s.lastBaked ? bakedOf('dss2') : undefined;
+              const bl = BD ? BD.black : fd.black;
+              const gg = BD ? (BD.gain * 255) / (255 - BD.black) : (fd.gain * 255) / (255 - fd.black);
+              const w = have ? fd.w : 1;
+              r0 = r0 * (1 - w) + Math.max(0, rgb2[0]! - bl) * gg * w;
+              g1 = g1 * (1 - w) + Math.max(0, rgb2[1]! - bl) * gg * w;
+              b1 = b1 * (1 - w) + Math.max(0, rgb2[2]! - bl) * gg * w;
+            } else if (!have) continue;
+          }
+          o[q] = r0;
+          o[q + 1] = g1;
+          o[q + 2] = b1;
         } else {
           let ok = true;
           for (let c = 0; c < 3 && ok; c++) {
