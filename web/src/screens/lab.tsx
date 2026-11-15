@@ -699,6 +699,21 @@ export function Lab({ route }: { route: Route }) {
     }
   }, [ra, dec, fov, valid]);
 
+  // on a phone the status line and the band buttons stand under the picture, each as tall as it is: the room under the picture follows them (no empty gap)
+  useEffect(() => {
+    const v = document.querySelector('.vsq') as HTMLElement | null;
+    if (!v) return;
+    const set = () => {
+      const st = v.querySelector('.fstatus') as HTMLElement | null;
+      const ch = v.querySelector('.fbands') as HTMLElement | null;
+      v.style.setProperty('--below-status', `${st ? st.offsetHeight : 0}px`);
+      v.style.setProperty('--below-chips', `${ch ? ch.offsetHeight : 0}px`);
+    };
+    set();
+    const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(set);
+    v.querySelectorAll('.fstatus, .fbands').forEach((e) => ro?.observe(e));
+    return () => ro?.disconnect();
+  }, [valid, view, film, time, bandsWait]);
   // the picture is always square and as large as the free space allows
   useLayoutEffect(() => {
     const el = stageRef.current;
@@ -2277,6 +2292,23 @@ export function Lab({ route }: { route: Route }) {
       title: `Find Planet X · peak ${i + 1}: a lead, not a discovery`,
       rows: peakRows(c, r).map(([k, v]) => [k, v] as [string, string]),
     });
+  /** The pair's passport (from its ring on the picture or from the Candidates list): its numbers, and the passport of the component nearer `dist` (the first one without it); its own card (pictures per pass) stays in Candidates. */
+  const openPair = (k: number, dist?: (c: Pair['components'][0]) => number) => {
+    const pr = pairs[k];
+    if (!pr) return;
+    const [c0, c1] = pr.components;
+    const near0 = dist && dist(c1) < dist(c0) ? c1 : c0;
+    const nm = (c: typeof c0) => c.simbad?.name ?? (c.gaia?.source_id ? `Gaia DR3 ${c.gaia.source_id}` : 'unnamed');
+    setPairSel(k);
+    openCard(near0.ra, near0.dec, nm(near0), {
+      title: `Pair: ${nm(c0)} and ${nm(c1)}`,
+      rows: [
+        ['Separation', `${pr.separation_arcsec.toFixed(1)}″`],
+        ['Verdict', pr.verdict ?? 'a pair whose relative brightness changed between the passes: the peak seems to move, nothing does'],
+        ...(pr.change_sigma != null ? ([['Largest change between passes', `${pr.change_sigma.toFixed(1)}σ`]] as [string, string][]) : []),
+      ],
+    });
+  };
   const pick = (e: MouseEvent) => {
     const m = meta;
     if (m && film !== null) return pickBody(e);
@@ -2327,21 +2359,7 @@ export function Lab({ route }: { route: Route }) {
     for (let k = 0; k < pairs.length; k++) {
       const [c0, c1] = pairs[k]!.components;
       if (sep((c0.ra + c1.ra) / 2, (c0.dec + c1.dec) / 2) < tol + (pairs[k]!.separation_arcsec ?? 0) / 2) {
-        // the pair's passport: its numbers, and the passport of the component nearer the click; the pair's own card (pictures per pass) is in Candidates
-        const pr = pairs[k]!;
-        const near0 = sep(c0.ra, c0.dec) <= sep(c1.ra, c1.dec) ? c0 : c1;
-        const nm = (c: typeof c0) => c.simbad?.name ?? (c.gaia?.source_id ? `Gaia DR3 ${c.gaia.source_id}` : 'unnamed');
-        setPairSel(k);
-        openCard(near0.ra, near0.dec, nm(near0), {
-          title: `Pair: ${nm(c0)} and ${nm(c1)}`,
-          rows: [
-            ['Separation', `${pr.separation_arcsec.toFixed(1)}″`],
-            ['Verdict', pr.verdict ?? 'a pair whose relative brightness changed between the passes: the peak seems to move, nothing does'],
-            ...(pr.change_sigma != null
-              ? ([['Largest change between passes', `${pr.change_sigma.toFixed(1)}σ`]] as [string, string][])
-              : []),
-          ],
-        });
+        openPair(k, (c) => sep(c.ra, c.dec));
         return;
       }
     }
@@ -3651,10 +3669,7 @@ export function Lab({ route }: { route: Route }) {
                       key={i}
                       pair={pr}
                       on={pairSel === i}
-                      onClick={() => {
-                        setPairSel(i);
-                        setTab('cand');
-                      }}
+                      onClick={() => openPair(i)}
                     />
                   ))}
               </section>
