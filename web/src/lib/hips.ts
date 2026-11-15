@@ -46,8 +46,9 @@ export function loadManifest(): Promise<boolean> {
         const b = b0 as typeof b0 & { type?: string; base?: string; gain?: number; black?: number };
         // a layer baked as an equirectangular pyramid (plate carrée tiles and a full-sky base) is read by its own sampler
         if (b.type === 'equirect' && b.url && b.max != null) {
+          // the tone-mapped equirect star map (id svs-eq) is THE star map of the globe: it answers to the layer id the globe uses (svs)
           registerEqui({
-            id,
+            id: id === 'svs-eq' ? 'svs' : id,
             label: b.label ?? id,
             credit: b.credit,
             size: b.size ?? 512,
@@ -58,7 +59,7 @@ export function loadManifest(): Promise<boolean> {
             gain: Number(b.gain) > 0 ? Number(b.gain) : 1,
             black: Number(b.black) >= 0 ? Number(b.black) : 0,
           });
-          equiPreload(id);
+          equiPreload(id === 'svs-eq' ? 'svs' : id);
           continue;
         }
         if (!b.url || b.max == null) continue;
