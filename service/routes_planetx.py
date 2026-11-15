@@ -9,6 +9,8 @@ Job routes answer {key, state: running | done | error, phase, done, total, error
 
 from __future__ import annotations
 
+import asyncio
+import json
 import math
 from typing import Any
 
@@ -35,6 +37,19 @@ def _state(job: Job) -> str:
 
 def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
     r = APIRouter()
+    # a plan and the exposures of a request, kept per index state: a page that asks again (or many pages) costs nothing
+    plans: dict[tuple[str, int], dict[str, Any]] = {}
+    selections: dict[tuple[str, int], tuple[Any, Any, int, list[dict[str, Any]], str | None]] = {}
+
+    def index_version() -> int:
+        v = getattr(st.index, "version", None)
+        return int(v()) if callable(v) else 0
+
+    def remember(cache: dict[tuple[str, int], Any], key: tuple[str, int], value: Any) -> None:
+        if len(cache) > 2000:
+            cache.clear()
+        cache[key] = value
+
     estimates: dict[str, int] = {}
     psfs: dict[str, PsfProvider] = {}
 
@@ -107,9 +122,17 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             raise HTTPException(400, "dmax must be at least 1.2 times dmin")
         dets = tuple(sorted({int(c) for c in det if c in "123456"})) or (1, 2, 3)
         params = distantjob.distant_params(ra, dec, fov, mjd, pass_, dmin, dmax, dets, mu_scale)
+        memo = (json.dumps(params, sort_keys=True), index_version())
         if plan:
-            return await distantjob.plan_async(st.index, params)
-        exps, _pno, pk, info, _ = distantjob.selection(st.index, params)
+            hit = plans.get(memo)
+            if hit is None:
+                hit = await distantjob.plan_async(st.index, params)
+                remember(plans, memo, hit)
+            return hit
+        cached = selections.get(memo)
+        sel = cached if cached is not None else await asyncio.to_thread(distantjob.selection, st.index, params)
+        remember(selections, memo, sel)
+        exps, _pno, pk, info, _ = sel
         if not exps:
             return {
                 "state": "done",

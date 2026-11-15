@@ -254,7 +254,9 @@ class Scheduler:
                     if free <= 0 and not (j.priority == Priority.P0 and free > -2):
                         j.phase = f"waiting for a free worker ({queued.index(j) + 1} ahead)" if j.phase.startswith("waiting") else j.phase
                         continue
-                    if j.priority >= Priority.P2 and self.person_active():
+                    # the lowest priority (night scans) waits while anyone uses the site; the background (P2: the warm set, the page's own
+                    # automatic searches) starts whenever a slot is free, because the worker pool keeps a worker free for a person's call
+                    if j.priority >= Priority.P3 and self.person_active():
                         j.phase = "paused: a person is working"
                         continue
                     # a person's job counts only the memory of other people's jobs: the warm set's jobs give way to it at their checkpoints
