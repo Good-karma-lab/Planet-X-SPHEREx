@@ -25,6 +25,9 @@ export interface Baked {
   size: number;
   min: number;
   max: number;
+  /** what the manifest still asks of the baked pixels on screen (the star map is dark by nature: gain 3); 1 and 0 when the tone is all baked in */
+  gain: number;
+  black: number;
   /** tile address with {o} (order), {d} (the 10 000-tile directory) and {i} (the tile) */
   url: string;
 }
@@ -40,7 +43,7 @@ export function loadManifest(): Promise<boolean> {
       for (const [id, b] of Object.entries(m?.layers ?? {})) {
         if (!b.url || b.max == null) continue;
         const size = b.size ?? 512;
-        baked.set(id, { label: b.label ?? id, credit: b.credit, frame: b.frame === 'galactic' ? 'galactic' : 'equatorial', size, min: b.min ?? 0, max: b.max, url: b.url });
+        baked.set(id, { label: b.label ?? id, credit: b.credit, frame: b.frame === 'galactic' ? 'galactic' : 'equatorial', size, min: b.min ?? 0, max: b.max, url: b.url, gain: Number(b.gain) > 0 ? Number(b.gain) : 1, black: Number(b.black) >= 0 ? Number(b.black) : 0 });
         // a layer only the baked tiles have gets its own entry; the surveys read live keep theirs (the live path serves the depths below)
         if (HIPS[id]) HIPS[id]!.frame = b.frame === 'galactic' ? 'galactic' : undefined;
         HIPS[id] ??= { max: b.max, min: b.min ?? 0, w: size, frame: b.frame === 'galactic' ? 'galactic' : undefined, bakedOnly: true };

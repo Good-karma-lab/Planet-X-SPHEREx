@@ -13,6 +13,8 @@ export interface SkyView {
   dec: number;
   /** globe radius, CSS pixels */
   R: number;
+  /** the turn of the view about its own axis, radians (the globe is turned freely, so north need not be up) */
+  roll?: number;
   proj: 'globe' | 'moll';
   /** the globe seen from its centre: a perspective view of the sky with R as the focal length (pixels per radian at the centre) */
   inside?: boolean;
@@ -65,10 +67,17 @@ function mollweideTheta(phi: number): number {
 const basis = (v: SkyView) => {
   const ra = v.ra * D2R;
   const de = v.dec * D2R;
+  const c = [Math.cos(de) * Math.cos(ra), Math.cos(de) * Math.sin(ra), Math.sin(de)] as const;
+  const e0 = [-Math.sin(ra), Math.cos(ra), 0] as const;
+  const n0 = [-Math.sin(de) * Math.cos(ra), -Math.sin(de) * Math.sin(ra), Math.cos(de)] as const;
+  const r = v.roll ?? 0;
+  if (!r) return { c, e: e0, n: n0 };
+  const cr = Math.cos(r);
+  const sr = Math.sin(r);
   return {
-    c: [Math.cos(de) * Math.cos(ra), Math.cos(de) * Math.sin(ra), Math.sin(de)] as const,
-    e: [-Math.sin(ra), Math.cos(ra), 0] as const,
-    n: [-Math.sin(de) * Math.cos(ra), -Math.sin(de) * Math.sin(ra), Math.cos(de)] as const,
+    c,
+    e: [e0[0] * cr + n0[0] * sr, e0[1] * cr + n0[1] * sr, e0[2] * cr + n0[2] * sr] as const,
+    n: [n0[0] * cr - e0[0] * sr, n0[1] * cr - e0[1] * sr, n0[2] * cr - e0[2] * sr] as const,
   };
 };
 
@@ -256,8 +265,9 @@ class SkyPainter {
           if (samplers[0]!.at(f, rgb, 0) === FROM_NOTHING) continue;
           // a baked tile has its tone already; a live one (deeper than the baked orders, or while the baked ones are not read) gets the layer's
           const bk = samplers[0]!.lastBaked;
-          const bl = bk ? 0 : l0.black;
-          const gg = bk ? 1 : g0;
+          const B = bk ? bakedOf(l0.id) : undefined;
+          const bl = B ? B.black : l0.black;
+          const gg = B ? (B.gain * 255) / (255 - B.black) : g0;
           o[q] = Math.max(0, rgb[0]! - bl) * gg;
           o[q + 1] = Math.max(0, rgb[1]! - bl) * gg;
           o[q + 2] = Math.max(0, rgb[2]! - bl) * gg;
@@ -266,7 +276,7 @@ class SkyPainter {
           for (let c = 0; c < 3 && ok; c++) {
             const l = layer[c]!;
             if (samplers[c]!.at(f, rgb, 0) === FROM_NOTHING) ok = false;
-            else if (samplers[c]!.lastBaked) o[q + c] = rgb[0]!;
+            else if (samplers[c]!.lastBaked) o[q + c] = Math.max(0, rgb[0]! - (bakedOf(l.id)?.black ?? 0)) * (bakedOf(l.id)?.gain ?? 1);
             else o[q + c] = Math.max(0, rgb[0]! - l.black) * ((l.gain * 255) / (255 - l.black));
           }
           if (!ok) continue;

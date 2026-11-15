@@ -79,7 +79,7 @@ const ZOOM_MIN_INSIDE = 1.05;
 const ZOOM_MAX = 400;
 const ZOOM_NEAR = 30;
 /** a catalogue object faster than this (mas/yr) gets its path drawn when selected */
-const PATH_PM = 20;
+const PATH_PM = 50;
 
 /** Demo fields: places where the tool shows something worth seeing, with the view they open in. */
 const DEMOS: { n: string; what: string; ra: number; dec: number; fov: number; film?: number }[] = [
@@ -163,6 +163,60 @@ function spanOf(o: Obj, fov: number): number {
   const imgs = imageDates(o.n, o.ra, o.dec);
   const y0 = Math.min(1950, ...(imgs ?? []).map((x) => x.year));
   return Math.max((fov / 60) * 1.2, (Math.hypot(mo.pmra, mo.pmdec) * (2050 - y0)) / 3.6e6);
+}
+
+
+type V3 = [number, number, number];
+/** The view's own axes in the sky's coordinates: c to the centre of the view, e to the left of the picture (east), n up. */
+interface Frame {
+  c: V3;
+  e: V3;
+  n: V3;
+}
+const cross3 = (a: V3, b: V3): V3 => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dot3 = (a: V3, b: V3) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+/** The frame of a view centred on (ra, dec) degrees and turned by roll radians about its axis. */
+function frameOf(raDeg: number, decDeg: number, roll: number): Frame {
+  const ra = raDeg * D2R;
+  const de = decDeg * D2R;
+  const c: V3 = [Math.cos(de) * Math.cos(ra), Math.cos(de) * Math.sin(ra), Math.sin(de)];
+  const e0: V3 = [-Math.sin(ra), Math.cos(ra), 0];
+  const n0: V3 = [-Math.sin(de) * Math.cos(ra), -Math.sin(de) * Math.sin(ra), Math.cos(de)];
+  const cr = Math.cos(roll);
+  const sr = Math.sin(roll);
+  return {
+    c,
+    e: [e0[0] * cr + n0[0] * sr, e0[1] * cr + n0[1] * sr, e0[2] * cr + n0[2] * sr],
+    n: [n0[0] * cr - e0[0] * sr, n0[1] * cr - e0[1] * sr, n0[2] * cr - e0[2] * sr],
+  };
+}
+
+/** The centre, the roll and so on of a frame (the roll is measured from the standard north-up frame at that centre, so it stays continuous over a pole). */
+function viewOf(F: Frame): { ra: number; dec: number; roll: number } {
+  const ra = Math.atan2(F.c[1], F.c[0]);
+  const de = Math.asin(Math.max(-1, Math.min(1, F.c[2])));
+  const e0: V3 = [-Math.sin(ra), Math.cos(ra), 0];
+  const n0: V3 = [-Math.sin(de) * Math.cos(ra), -Math.sin(de) * Math.sin(ra), Math.cos(de)];
+  return { ra: ((ra / D2R) % 360 + 360) % 360, dec: de / D2R, roll: Math.atan2(dot3(F.e, n0), dot3(F.e, e0)) };
+}
+
+/** The frame turned by the rotation (about the axis u × v, by the angle between them) that takes the direction u to the direction v: the way a trackball turns. */
+function turnFrame(F: Frame, u: V3, v: V3): Frame {
+  const a = cross3(u, v);
+  const s = Math.hypot(a[0], a[1], a[2]);
+  if (s < 1e-12) return F;
+  const k: V3 = [a[0] / s, a[1] / s, a[2] / s];
+  const th = Math.atan2(s, dot3(u, v));
+  const ct = Math.cos(th);
+  const st = Math.sin(th);
+  // Rodrigues' rotation of one vector about k by th
+  const rot = (x: V3): V3 => {
+    const kx = cross3(k, x);
+    const kd = dot3(k, x) * (1 - ct);
+    return [x[0] * ct + kx[0] * st + k[0] * kd, x[1] * ct + kx[1] * st + k[1] * kd, x[2] * ct + kx[2] * st + k[2] * kd];
+  };
+  return { c: rot(F.c), e: rot(F.e), n: rot(F.n) };
 }
 
 export function Globe() {
@@ -291,15 +345,7 @@ export function Globe() {
     const mw = () => Math.min(W - 20, (H - 20) * 2) * mv.z;
     const mcx = () => W / 2 + mv.x;
     const mcy = () => H / 2 + mv.y;
-    const basis = () => {
-      const ra = view.current.ra * D2R;
-      const de = view.current.dec * D2R;
-      return {
-        c: [Math.cos(de) * Math.cos(ra), Math.cos(de) * Math.sin(ra), Math.sin(de)],
-        e: [-Math.sin(ra), Math.cos(ra), 0],
-        n: [-Math.sin(de) * Math.cos(ra), -Math.sin(de) * Math.sin(ra), Math.cos(de)],
-      };
-    };
+    const basis = (): Frame => frameOf(view.current.ra, view.current.dec, view.current.roll ?? 0);
     type B = ReturnType<typeof basis>;
     const project = (ra: number, dec: number, b: B): [number, number, boolean] => {
       if (live.current.proj === 'moll') {
@@ -440,14 +486,16 @@ export function Globe() {
           pins.push({ o: st.sel, x: q[0], y: q[1] });
           pathPin = true;
           if (m > 1) {
+            // a small note at the bottom edge of the frame, never under a label
             ctx.save();
-            ctx.font = `600 11px ${font}`;
+            ctx.font = `500 10px ${font}`;
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#000';
-            ctx.fillStyle = '#9fb6c0';
-            const t = `path ${Math.floor(y0)}→2050, drawn ×${m.toFixed(0)} larger than true`;
-            ctx.strokeText(t, p25[0] + 8, p25[1] + 30);
-            ctx.fillText(t, p25[0] + 8, p25[1] + 30);
+            ctx.fillStyle = '#8fa6b0';
+            ctx.textAlign = 'center';
+            const t = `path ${Math.floor(y0)}→2050 drawn ×${m.toFixed(0)} larger than true`;
+            ctx.strokeText(t, W / 2, H - 8);
+            ctx.fillText(t, W / 2, H - 8);
             ctx.restore();
           }
         }
@@ -517,7 +565,7 @@ export function Globe() {
       } else frame = null;
     };
     let frame: { x: number; y: number; s: number } | null = null;
-    let anim: { t0: number; dur: number; ra0: number; dra: number; de0: number; dde: number; z0: number; zm: number; z1: number } | null = null;
+    let anim: { t0: number; dur: number; ra0: number; dra: number; de0: number; dde: number; z0: number; zm: number; z1: number; r0?: number } | null = null;
     const loop = () => {
       raf = requestAnimationFrame(loop);
       const now = performance.now();
@@ -526,6 +574,7 @@ export function Globe() {
         const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
         view.current.ra = (((anim.ra0 + anim.dra * e) % 360) + 360) % 360;
         view.current.dec = anim.de0 + anim.dde * e;
+        if (anim.r0) view.current.roll = anim.r0 * (1 - e);
         // the scale follows a curve in log zoom through zm: out while the globe turns far, in at the end
         view.current.zoom = Math.exp((1 - e) * (1 - e) * anim.z0 + 2 * e * (1 - e) * anim.zm + e * e * anim.z1);
         if (t >= 1) anim = null;
@@ -533,8 +582,8 @@ export function Globe() {
       }
       // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
       const st = live.current;
-      const sv = { ra: view.current.ra, dec: view.current.dec, R: R(), proj: st.proj, inside: st.inside && st.proj === 'globe', W, H, mz: mv.z, mx: mv.x, my: mv.y };
-      const sig = [sv.ra, sv.dec, sv.R, sv.proj, sv.inside, W, H, mv.z, mv.x, mv.y].join();
+      const sv = { ra: view.current.ra, dec: view.current.dec, roll: view.current.roll ?? 0, R: R(), proj: st.proj, inside: st.inside && st.proj === 'globe', W, H, mz: mv.z, mx: mv.x, my: mv.y };
+      const sig = [sv.ra, sv.dec, sv.roll, sv.R, sv.proj, sv.inside, W, H, mv.z, mv.x, mv.y].join();
       const layer = SURVEYS.find((x) => x.id === st.survey)!.layer;
       if (st.survey !== lastLayer) {
         lastLayer = st.survey;
@@ -597,9 +646,14 @@ export function Globe() {
         z0: lz0,
         zm: lzm,
         z1: lz1,
+        r0: view.current.roll ?? 0,
       };
     };
     flyRef.current = flyTo;
+    northRef.current = () => {
+      // the view turns about its own axis until north is up again
+      anim = { t0: performance.now(), dur: 450, ra0: view.current.ra, dra: 0, de0: view.current.dec, dde: 0, z0: Math.log(view.current.zoom), zm: Math.log(view.current.zoom), z1: Math.log(view.current.zoom), r0: ((((view.current.roll ?? 0) + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI };
+    };
 
     // the map keeps its centre within the picture, so that it cannot be dragged away
     const clampMap = () => {
@@ -608,10 +662,35 @@ export function Globe() {
       mv.x = Math.max(-lx, Math.min(lx, mv.x));
       mv.y = Math.max(-ly, Math.min(ly, mv.y));
     };
-    let drag: { x: number; y: number; ra: number; dec: number; moved: boolean; mx: number; my: number } | null = null;
+    let drag: { x: number; y: number; ra: number; dec: number; moved: boolean; mx: number; my: number; F: Frame; p0: V3 } | null = null;
+    /** the ray through a pixel in the view's own axes (inside: perspective; outside: the sphere's surface, the rim for a pixel beside it) */
+    const rayAt = (px: number, py: number, Rv: number): V3 => {
+      const sx = (W / 2 - px) / Rv;
+      const sy = (H / 2 - py) / Rv;
+      if (inn()) {
+        const n = Math.sqrt(1 + sx * sx + sy * sy);
+        return [sx / n, sy / n, 1 / n];
+      }
+      const rr = sx * sx + sy * sy;
+      if (rr > 1) {
+        const s = Math.sqrt(rr);
+        return [sx / s, sy / s, 0];
+      }
+      return [sx, sy, Math.sqrt(1 - rr)];
+    };
+    const worldOf = (F: Frame, r: V3): V3 => [0, 1, 2].map((i) => r[2] * F.c[i]! + r[0] * F.e[i]! + r[1] * F.n[i]!) as V3;
+    const setFrame = (F: Frame) => {
+      const v = viewOf(F);
+      view.current.ra = v.ra;
+      view.current.dec = v.dec;
+      view.current.roll = v.roll;
+    };
     c.onpointerdown = (e) => {
       c.setPointerCapture(e.pointerId);
-      drag = { x: e.clientX, y: e.clientY, ra: view.current.ra, dec: view.current.dec, moved: false, mx: mv.x, my: mv.y };
+      const rc = c.getBoundingClientRect();
+      const F0 = basis();
+      const p0 = worldOf(F0, rayAt(e.clientX - rc.left, e.clientY - rc.top, R()));
+      drag = { x: e.clientX, y: e.clientY, ra: view.current.ra, dec: view.current.dec, moved: false, mx: mv.x, my: mv.y, F: F0, p0 };
       anim = null;
     };
     c.onpointermove = (e) => {
@@ -625,11 +704,10 @@ export function Globe() {
         clampMap();
         dirty.current = true;
       } else if (drag.moved && live.current.proj === 'globe') {
-        // outside: the sphere turns under the cursor; inside: the sky is grabbed (degrees per pixel at the centre)
-        const k = live.current.inside ? 1 / (R() * D2R) : (90 / R()) * 0.9;
-        const f = live.current.inside ? 1 : 0.6;
-        view.current.ra = (((drag.ra + ((dx * k) / Math.max(0.2, Math.cos(view.current.dec * D2R))) * f) % 360) + 360) % 360;
-        view.current.dec = Math.max(-89, Math.min(89, drag.dec + dy * k));
+        // a free turn like a trackball: the place grabbed stays under the cursor, there is no pole to wind round (no yaw/pitch)
+        const rc = c.getBoundingClientRect();
+        const u = worldOf(drag.F, rayAt(e.clientX - rc.left, e.clientY - rc.top, R()));
+        setFrame(turnFrame(drag.F, u, drag.p0));
         dirty.current = true;
       }
     };
@@ -692,7 +770,16 @@ export function Globe() {
       // a mouse-wheel notch (100 px) zooms ×1.25: twenty notches about ×90; a trackpad's small steps zoom in proportion
       const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? H : 1);
       const k = Math.max(0.5, Math.min(2, Math.exp(-px * 0.0022)));
+      // the zoom is about the cursor: the place under it stays under it
+      const rc = c.getBoundingClientRect();
+      const qx = e.clientX - rc.left;
+      const qy = e.clientY - rc.top;
+      const F = basis();
+      const p = worldOf(F, rayAt(qx, qy, R()));
       view.current.zoom = Math.max(zoomMin(), Math.min(ZOOM_MAX, view.current.zoom * k));
+      const sx = (W / 2 - qx) / R();
+      const sy = (H / 2 - qy) / R();
+      if (inn() || sx * sx + sy * sy < 0.97) setFrame(turnFrame(F, worldOf(F, rayAt(qx, qy, R())), p));
       dirty.current = true;
     };
     return () => {
@@ -702,6 +789,7 @@ export function Globe() {
     };
   }, []);
   const showAreaRef = useRef<() => void>(() => {});
+  const northRef = useRef<() => void>(() => {});
   /** switches the camera; the zoom keeps the same angular scale at the centre, within the limits of the new camera */
   const setInsideCam = (v: boolean) => {
     live.current.inside = v;
@@ -857,6 +945,9 @@ export function Globe() {
           </div>
           {proj === 'globe' && (
             <div class="seg sm" role="group" aria-label="Camera" data-testid="cam">
+              <button title="Turn the view until north is up" aria-label="North up" data-testid="north-up" onClick={() => northRef.current()}>
+                N↑
+              </button>
               <button class={inside ? 'on' : ''} aria-pressed={inside} title="The sky seen from the centre of the sphere" onClick={() => setInsideCam(true)}>
                 Inside
               </button>
