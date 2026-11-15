@@ -617,7 +617,12 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
   if (!src) return <div class="mono-s">Click a source in the picture</div>;
   const pm = src.pmra || src.pmdec ? Math.hypot(src.pmra ?? 0, src.pmdec ?? 0) : 0;
   const sb = id && id !== 'asking' ? id.simbad : undefined;
-  const ga = id && id !== 'asking' ? id.gaia : undefined;
+  const ga0 = id && id !== 'asking' ? id.gaia : undefined;
+  // a fast mover (a catalogue proper motion over 3″/yr) must be near: a Gaia source within 6″ with no parallax, or one far smaller than that motion allows (under 500 km/s on the sky),
+  // is a neighbour that happens to stand there, not the object (WISE 0855, which Gaia does not have)
+  const pmMas = src.pmKind !== 'measured' ? pm : 0;
+  const neighbour = ga0?.state === 'ok' && pmMas >= 3000 && (ga0.parallax == null || ga0.parallax < (pmMas / 105.5) * 0.5);
+  const ga = neighbour ? { state: 'none' } : ga0;
   const plx = ga?.state === 'ok' && ga.parallax != null && ga.parallax >= 3 && (ga.ruwe ?? 9) <= 1.4 ? ga.parallax : null;
   return (
     <div class="okv">
@@ -665,7 +670,9 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
             : ga?.state === 'ok'
               ? gaiaLine(ga)
               : ga?.state === 'none'
-                ? 'nothing within 6″'
+                ? neighbour
+                  ? `no match: the Gaia source within 6″ (G ${ga0?.g != null ? ga0.g.toFixed(1) : '?'}) has no parallax that fits a ${(pmMas / 1000).toFixed(1)} ″/yr mover`
+                  : 'nothing within 6″'
                 : ga?.state === 'pending'
                   ? 'asking…'
                   : 'not reachable'}
