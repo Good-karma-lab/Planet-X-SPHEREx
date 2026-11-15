@@ -122,10 +122,15 @@ export function onImageDates(f: () => void): () => void {
 }
 
 /** The date of a backdrop at a place: the image's own date when known, else the middle of the survey; SPHEREx (and the dust map, which shows no stars) at the survey epoch. */
-export function backdropYear(survey: string, imgs?: ArchiveImage[] | null): number {
+export function backdropYear(survey: string, imgs?: ArchiveImage[] | null, fade = 0): number {
   if (survey === 'spherex' || survey === 'dust') return SURVEY_EPOCH;
-  // the star map is Gaia DR2's (epoch 2015.5) with Hipparcos and Tycho under it
-  if (survey === 'svs') return 2015.5;
+  // the star map is Gaia DR2's (epoch 2015.5) with Hipparcos and Tycho under it; zoomed past it DSS2 is faded in over it (`fade` 0..1), and the
+  // object stands where it was on the DSS2 plate of its place
+  if (survey === 'svs') {
+    if (fade <= 0) return 2015.5;
+    const plate = imgs?.find((x) => x.backdrop === 'dss2')?.year ?? BACKDROP_YEAR['dss2']!;
+    return 2015.5 + Math.min(1, fade) * (plate - 2015.5);
+  }
   return imgs?.find((x) => x.backdrop === survey)?.year ?? BACKDROP_YEAR[survey] ?? SURVEY_EPOCH;
 }
 
@@ -138,7 +143,7 @@ export interface Catalogued {
 }
 
 /** Where a catalogue object stands on the backdrop shown: its J2000 place carried by its proper motion to the backdrop's date. */
-export function shownPlace(o: Catalogued, survey: string, imgs?: ArchiveImage[] | null): [number, number] {
+export function shownPlace(o: Catalogued, survey: string, imgs?: ArchiveImage[] | null, fade = 0): [number, number] {
   if (o.pmra == null || o.pmdec == null) return [o.ra, o.dec];
-  return placeAt({ name: o.n, ra: o.ra, dec: o.dec, pmra: o.pmra, pmdec: o.pmdec }, backdropYear(survey, imgs));
+  return placeAt({ name: o.n, ra: o.ra, dec: o.dec, pmra: o.pmra, pmdec: o.pmdec }, backdropYear(survey, imgs, fade));
 }
