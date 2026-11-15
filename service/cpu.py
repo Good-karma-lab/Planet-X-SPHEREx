@@ -15,18 +15,24 @@ import asyncio
 import contextlib
 import heapq
 import itertools
+import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import Executor
+from concurrent.futures.process import BrokenProcessPool
 from contextvars import ContextVar
 from typing import Any
 
 # the job running in this task (the scheduler sets it); its priority is read at call time, so a person taking over a job counts at once
 JOB: ContextVar[Any] = ContextVar("sky_job", default=None)
 
+log = logging.getLogger("sky.cpu")
+
 _pool: Executor | None = None
+_factory: Callable[[], Executor] | None = None
 _workers = 1
 _gate: _Gate | None = None
+renewed = 0  # how many times a broken pool was replaced
 
 
 PERSON_LOW_CAP = 2  # background calls at most while a person is at the page
@@ -110,12 +116,16 @@ class _Gate:
             "waiting": sum(1 for _, _, _, f in self.waiting if not f.done()),
             "background": self.used_low,
             "background_cap": self._cap(),
+            "pool_renewed": renewed,
         }
 
 
-def configure(pool: Executor | None, workers: int) -> None:
-    global _pool, _gate, _workers
+def configure(pool: Executor | None, workers: int, factory: Callable[[], Executor] | None = None) -> None:
+    """`factory` makes a new pool: a pool whose worker died (a MemoryError while a call's arguments were read, a crash) is broken for
+    good, and without a new one every later call (every field) would fail."""
+    global _pool, _gate, _workers, _factory
     _pool = pool
+    _factory = factory
     _workers = max(1, workers)
     _gate = _Gate(workers) if pool is not None else None
 
@@ -130,12 +140,43 @@ def priority() -> int:
     return int(getattr(job, "priority", 0)) if job is not None else 0
 
 
+def pool() -> Executor | None:
+    """The pool in use now (it is replaced when it breaks)."""
+    return _pool
+
+
+def _renew(broken: Executor) -> None:
+    """Replace a broken pool once (every call that was in it reports the same break)."""
+    global _pool, renewed
+    if _pool is not broken or _factory is None:
+        return
+    _pool = _factory()
+    renewed += 1
+    procs: list[Any] = []
+    with contextlib.suppress(Exception):
+        procs = list((getattr(broken, "_processes", None) or {}).values())
+        broken.shutdown(wait=False, cancel_futures=True)
+    for proc in procs:
+        with contextlib.suppress(Exception):
+            proc.terminate()
+
+
 async def run[R](fn: Callable[..., R], *args: Any) -> R:
     if _pool is None or _gate is None:
         return fn(*args)
     low = await _gate.acquire(priority())
     try:
-        return await asyncio.get_running_loop().run_in_executor(_pool, fn, *args)
+        for attempt in (0, 1):
+            used = _pool
+            assert used is not None
+            try:
+                return await asyncio.get_running_loop().run_in_executor(used, fn, *args)
+            except BrokenProcessPool:
+                log.warning("worker pool broken during %s (attempt %d): a new pool is started", getattr(fn, "__name__", fn), attempt + 1)
+                _renew(used)
+                if attempt or _pool is used:
+                    raise
+        raise AssertionError("unreachable")
     finally:
         _gate.release(low)
 

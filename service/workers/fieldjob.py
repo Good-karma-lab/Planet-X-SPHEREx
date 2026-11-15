@@ -166,6 +166,9 @@ async def run_field(
         wavelengths=wavelengths,
         reading=reading,
     )
+    if not built and b.exposures and len(b.missing) >= len(b.exposures):
+        # nothing could be read (the reader failed, not the sky): an error the page shows, never a black field kept as finished
+        raise RuntimeError(f"none of the {len(b.exposures)} exposures could be read; ask again in a moment")
     ctx.phase("comparing passes")
     if len(built) >= 2:
         z: dict[str, np.ndarray] = {}
@@ -298,3 +301,11 @@ def diff_pass(
             sa, sc = _white_noise(list(sa)), _white_noise(list(sc))
         z[f"p{index}_{name}"] = _encode_z(z_map(a, c, sa, sc, step_arcsec))
     return z
+
+
+def unread(meta: dict[str, Any] | None) -> bool:
+    """A kept field none of whose exposures was read (its build failed in the reader): it must be made again."""
+    if not meta or meta.get("passes"):
+        return False
+    n = int(meta.get("exposures") or 0)
+    return n > 0 and int(meta.get("not_readable") or 0) >= n

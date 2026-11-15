@@ -143,13 +143,15 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if scheduler is None:
             workers = max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2)))
             # fresh worker processes (forkserver), not copies of the API process: small, and the memory cap counts only their own work
-            st.executor = ProcessPoolExecutor(
-                workers,
-                mp_context=multiprocessing.get_context("forkserver"),
-                initializer=cpu.worker_init,
-                initargs=(int(os.environ.get("SKY_WORKER_MEM_MB", "6000")),),
-            )
-            cpu.configure(st.executor, workers)
+            mem_mb = int(os.environ.get("SKY_WORKER_MEM_MB", "6000"))
+
+            def new_pool(workers: int = workers, mem_mb: int = mem_mb) -> ProcessPoolExecutor:
+                return ProcessPoolExecutor(
+                    workers, mp_context=multiprocessing.get_context("forkserver"), initializer=cpu.worker_init, initargs=(mem_mb,)
+                )
+
+            st.executor = new_pool()
+            cpu.configure(st.executor, workers, new_pool)  # a pool a dying worker broke is replaced by a new one
             # two heavy jobs on 4 cores, more on a larger machine (each field build itself spreads over the pool)
             st.scheduler = Scheduler(executor=st.executor, slots={"light": 8, "heavy": max(2, workers // 4)})
         else:
@@ -198,10 +200,11 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         await st.s3.close()
         await st.hips.close()
         await st.catalogue.close()
-        if st.executor is not None:
+        ex = cpu.pool() or st.executor
+        if ex is not None:
             # do not wait for a field still being computed in a worker: its job is recomputed (or attached) after the restart
-            procs = list(getattr(st.executor, "_processes", {}).values())
-            st.executor.shutdown(wait=False, cancel_futures=True)
+            procs = list(getattr(ex, "_processes", {}).values())
+            ex.shutdown(wait=False, cancel_futures=True)
             for proc in procs:
                 proc.terminate()
             cpu.configure(None, 0)
@@ -213,7 +216,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         assert st.index is not None and st.store is not None and st.scheduler is not None and st.files is not None
         key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
         if st.store.is_complete(key):
-            return key, None
+            if not fieldjob.unread(st.store.read_meta(fieldjob.KIND, key)) or STANDBY:
+                return key, None
+            st.store.reopen(key)  # kept by a build whose worker pool had broken: no exposure was read, so it is made again
         if STANDBY:
             # the standby instance serves while the main one restarts: finished products only; the page asks again in a moment
             raise HTTPException(503, "the sky service is restarting; ask again in a few seconds", headers={"Retry-After": "3"})

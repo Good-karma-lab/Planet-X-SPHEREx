@@ -82,6 +82,11 @@ class Store:
         with self._lock:
             self._db.execute("UPDATE products SET complete = 1 WHERE key = ?", (key,))
 
+    def reopen(self, key: str) -> None:
+        """A product kept as complete that must be made again (a field none of whose exposures could be read)."""
+        with self._lock:
+            self._db.execute("UPDATE products SET complete = 0 WHERE key = ?", (key,))
+
     def is_complete(self, key: str) -> bool:
         with self._lock:
             row = self._db.execute("SELECT complete FROM products WHERE key = ?", (key,)).fetchone()
