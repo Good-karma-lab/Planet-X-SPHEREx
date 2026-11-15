@@ -21,6 +21,7 @@ from typing import Any
 import httpx
 
 from service.bodies import HORIZONS, SB_IDENT, _iso, _jd, _sexa_dec, _sexa_ra, horizons_command
+from service.upstream import jpl
 
 SLOW_RATE = 15.0  # arcsec/hour: faster is a main-belt or near-Earth body, not what a search at 30-2000 au looks for
 MATCH_ARCSEC = 20.0
@@ -51,17 +52,19 @@ async def slow_bodies(client: httpx.AsyncClient, ra: float, dec: float, mjd: flo
 
 
 async def _slow_bodies(client: httpx.AsyncClient, ra: float, dec: float, mjd: float, half_deg: float) -> list[dict[str, Any]]:
-    r = await client.get(
-        SB_IDENT,
-        params={
-            "mpc-code": "500",
-            "obs-time": _iso(mjd),
-            "fov-ra-center": _sexa_ra(ra),
-            "fov-dec-center": _sexa_dec(dec),
-            "fov-ra-hwidth": f"{half_deg / max(0.05, math.cos(math.radians(dec))):.4f}",
-            "fov-dec-hwidth": f"{half_deg:.4f}",
-            "vmag-lim": str(SB_VMAG),
-        },
+    r = await jpl.turn(
+        lambda: client.get(
+            SB_IDENT,
+            params={
+                "mpc-code": "500",
+                "obs-time": _iso(mjd),
+                "fov-ra-center": _sexa_ra(ra),
+                "fov-dec-center": _sexa_dec(dec),
+                "fov-ra-hwidth": f"{half_deg / max(0.05, math.cos(math.radians(dec))):.4f}",
+                "fov-dec-hwidth": f"{half_deg:.4f}",
+                "vmag-lim": str(SB_VMAG),
+            },
+        )
     )
     r.raise_for_status()
     body = r.json()
@@ -87,21 +90,23 @@ async def _slow_bodies(client: httpx.AsyncClient, ra: float, dec: float, mjd: fl
 
 async def horizons_track(client: httpx.AsyncClient, name: str, mjds: list[float]) -> list[dict[str, float | None]]:
     """The body's places (geocentric), V, heliocentric and geocentric distance at the dates."""
-    r = await client.get(
-        HORIZONS,
-        params={
-            "format": "json",
-            "COMMAND": f"'{horizons_command(name)}'",
-            "CENTER": "'500@399'",
-            "MAKE_EPHEM": "YES",
-            "EPHEM_TYPE": "OBSERVER",
-            "TLIST": " ".join(f"'{_jd(m):.5f}'" for m in mjds),
-            "TLIST_TYPE": "JD",
-            "QUANTITIES": "'1,9,19,20'",
-            "ANG_FORMAT": "DEG",
-            "CSV_FORMAT": "YES",
-            "OBJ_DATA": "NO",
-        },
+    r = await jpl.turn(
+        lambda: client.get(
+            HORIZONS,
+            params={
+                "format": "json",
+                "COMMAND": f"'{horizons_command(name)}'",
+                "CENTER": "'500@399'",
+                "MAKE_EPHEM": "YES",
+                "EPHEM_TYPE": "OBSERVER",
+                "TLIST": " ".join(f"'{_jd(m):.5f}'" for m in mjds),
+                "TLIST_TYPE": "JD",
+                "QUANTITIES": "'1,9,19,20'",
+                "ANG_FORMAT": "DEG",
+                "CSV_FORMAT": "YES",
+                "OBJ_DATA": "NO",
+            },
+        )
     )
     r.raise_for_status()
     text = r.json().get("result", "")

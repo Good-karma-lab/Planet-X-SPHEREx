@@ -27,6 +27,7 @@ from scipy.interpolate import CubicSpline
 
 from indexer.store import Index
 from service.storage import digest
+from service.upstream import jpl
 from service.upstream.breaker import Breaker, BreakerOpenError
 
 SBDB_QUERY = "https://ssd-api.jpl.nasa.gov/sbdb_query.api"
@@ -194,7 +195,7 @@ class Known:
         except BreakerOpenError as e:
             raise JplUnavailable(str(e)) from e
         try:
-            r = await (self.client.post(url, data=data) if data is not None else self.client.get(url, params=params))
+            r = await jpl.turn(lambda: self.client.post(url, data=data) if data is not None else self.client.get(url, params=params))
             if r.status_code not in ok:
                 r.raise_for_status()
             body = r.json()

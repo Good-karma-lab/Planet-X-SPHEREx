@@ -29,6 +29,7 @@ import httpx
 from service.bodies import SB_IDENT, _iso, _sexa_dec, _sexa_ra
 from service.products.store import Store
 from service.products.versions import VERSIONS
+from service.upstream import jpl
 from service.upstream.breaker import Breaker, BreakerOpenError
 
 SCHEMA = 2
@@ -901,20 +902,22 @@ class Findings:
     ) -> dict[str, Any]:
         self.breaker.before()
         try:
-            r = await self.catalogue.client.get(
-                SB_IDENT,
-                params={
-                    "mpc-code": "500",
-                    "obs-time": _iso(mjd),
-                    "fov-ra-center": _sexa_ra(ra),
-                    "fov-dec-center": _sexa_dec(dec),
-                    "fov-ra-hwidth": f"{half / max(0.05, math.cos(math.radians(dec))):.5f}",
-                    "fov-dec-hwidth": f"{half:.5f}",
-                    "vmag-lim": str(SB_VMAG),
-                },
-                timeout=httpx.Timeout(
-                    SB_TIMEOUT_S, connect=10.0
-                ),  # JPL's search of a field often takes 20-60 s, well past the catalogues' 12 s
+            r = await jpl.turn(
+                lambda: self.catalogue.client.get(
+                    SB_IDENT,
+                    params={
+                        "mpc-code": "500",
+                        "obs-time": _iso(mjd),
+                        "fov-ra-center": _sexa_ra(ra),
+                        "fov-dec-center": _sexa_dec(dec),
+                        "fov-ra-hwidth": f"{half / max(0.05, math.cos(math.radians(dec))):.5f}",
+                        "fov-dec-hwidth": f"{half:.5f}",
+                        "vmag-lim": str(SB_VMAG),
+                    },
+                    timeout=httpx.Timeout(
+                        SB_TIMEOUT_S, connect=10.0
+                    ),  # JPL's search of a field often takes 20-60 s, well past the catalogues' 12 s
+                )
             )
             r.raise_for_status()
             body: dict[str, Any] = r.json()

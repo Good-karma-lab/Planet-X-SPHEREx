@@ -24,6 +24,7 @@ import numpy as np
 
 from engine.grid import Grid
 from indexer.store import Index
+from service.upstream import jpl
 from service.upstream.breaker import Breaker
 
 SB_IDENT = "https://ssd-api.jpl.nasa.gov/sb_ident.api"
@@ -111,7 +112,7 @@ class KnownBodies:
     async def _get(self, url: str, params: dict[str, str]) -> dict[str, Any]:
         self.breaker.before()
         try:
-            r = await self.client.get(url, params=params)
+            r = await jpl.turn(lambda: self.client.get(url, params=params))
             r.raise_for_status()
             body: dict[str, Any] = r.json()
         except Exception:
@@ -122,7 +123,7 @@ class KnownBodies:
 
     async def _horizons(self, params: dict[str, str]) -> dict[str, Any]:
         """Horizons without the breaker: one body's failure must not shut out the others."""
-        r = await self.client.get(HORIZONS, params=params)
+        r = await jpl.turn(lambda: self.client.get(HORIZONS, params=params))
         r.raise_for_status()
         body: dict[str, Any] = r.json()
         if "result" not in body:
