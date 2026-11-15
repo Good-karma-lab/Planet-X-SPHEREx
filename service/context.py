@@ -411,7 +411,7 @@ class CatalogueContext:
             main_id, ra, dec, pmra, pmdec, otype = rows[0]
             return {
                 "name": main_id,
-                "display_name": display_name(main_id, [name]),
+                "display_name": " ".join(name.split()),
                 "ra": ra,
                 "dec": dec,
                 "pmra": pmra,
@@ -763,8 +763,9 @@ def name_variants(name: str) -> list[str]:
         forms.append(" ".join([_GREEK[first[0]] + first[1:], *words[1:]]))
     elif first.lower() in _GREEK_WORDS:
         forms.append(" ".join([_GREEK_WORDS[first.lower()], *words[1:]]))
+    plain = [f for f in forms if f.isascii()]
     out: list[str] = []
-    for f in forms:
+    for f in plain or forms:
         for v in (f, "NAME " + f, "* " + f):
             if v not in out:
                 out.append(v)

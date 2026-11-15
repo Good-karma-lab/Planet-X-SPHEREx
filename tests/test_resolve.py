@@ -12,7 +12,7 @@ from service.context import CatalogueContext, name_variants
 
 def test_greek_letters_and_prefixes_become_simbad_forms() -> None:
     v = name_variants("α Cen")
-    assert "alf Cen" in v and "* alf Cen" in v and "NAME α Cen" in v
+    assert "alf Cen" in v and "* alf Cen" in v and "NAME alf Cen" in v and all(x.isascii() for x in v)
     assert "NAME Sirius" in name_variants("  Sirius ")
     assert "alf CMa" in name_variants("alpha CMa")
     assert name_variants("   ") == []
