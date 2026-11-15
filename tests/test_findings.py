@@ -121,3 +121,63 @@ def test_related_tables_are_replaced_not_duplicated_and_carry_versions(tmp_path:
     out = query(db, "mover", "all", None, 5, 0)["finds"][0]
     assert out["versions"] and next(i for i in out["idents"] if i["catalogue"] == "simbad")["raw"] == {"raw": {"a": 1}}
     assert db.db.execute("SELECT value FROM meta WHERE key='schema'").fetchone()[0] == "2"
+
+
+class _Resp:
+    def __init__(self, body: dict[str, Any]) -> None:
+        self.body = body
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, Any]:
+        return self.body
+
+
+def _jpl(rows: list[list[Any]]) -> dict[str, Any]:
+    fields = [
+        "Object name",
+        'Dist. from center RA (")',
+        'Dist. from center Dec (")',
+        'RA rate ("/h)',
+        'Dec rate ("/h)',
+        "Visual magnitude (V)",
+    ]
+    return {"fields_first": fields, "data_first_pass": rows}
+
+
+def _findings_with(body: dict[str, Any]) -> Any:
+    from service.findings import Findings
+    from service.upstream.breaker import Breaker
+
+    class Client:
+        async def get(self, url: str, params: dict[str, str]) -> _Resp:
+            assert params["vmag-lim"] == "21.0"
+            return _Resp(body)
+
+    f = Findings.__new__(Findings)
+    f.breaker = Breaker("JPL")
+    f.catalogue = type("C", (), {"client": Client()})()
+    return f
+
+
+def test_sbident_needs_a_near_body_that_moves_like_the_find() -> None:
+    # ours: 58 ″/h toward 90° (east). A body 3″ away moving 56 ″/h east matches; one 3″ away moving north does not; one 40″ away is too far.
+    ok = _findings_with(_jpl([["8294 Takayuki", "3.0", "0.0", "56.0", "0.0", "19.5"], ["far", "40", "0", "58", "0", "18"]]))
+    got = asyncio.run(ok.sbident(120.0, 10.0, 61000.0, 58.0, 90.0))
+    assert got["state"] == "ok" and got["name"] == "8294 Takayuki" and got["body_rate"] == 56.0
+    wrong = _findings_with(_jpl([["12 Victoria", "3.0", "0.0", "0.0", "40.0", "17"]]))
+    got = asyncio.run(wrong.sbident(120.0, 10.0, 61000.0, 58.0, 90.0))
+    assert got["state"] == "none" and "not like this find" in got["note"]
+    crowded = _findings_with(_jpl([["x", "50", "0", "58", "0", "20"]] * 400))
+    assert asyncio.run(crowded.sbident(120.0, 10.0, 61000.0, 58.0, 90.0))["state"] == "none"
+
+
+def test_generic_simbad_types_and_pending_answers_explain_nothing() -> None:
+    from service.findings import _ident_from
+
+    assert _ident_from("simbad", {"state": "pending"})[0] == "unavailable"
+    red = {"kind": "red", "data": {}}
+    star = [{"catalogue": "simbad", "state": "ok", "type": "Star"}]
+    assert status_of(red, star) == "unexplained"
+    assert status_of(red, [{"catalogue": "simbad", "state": "ok", "type": "Mira"}]) == "known"

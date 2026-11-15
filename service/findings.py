@@ -52,7 +52,14 @@ CATALOGUE_LABEL = {
     "ned": "NED (galaxies)",
     "sbident": "JPL Small-Body Identification",
 }
-MOVING = ("mover", "browndwarf", "film", "peak")  # asked of JPL Small-Body Identification too
+MOVING = (
+    "film",
+)  # asked of JPL Small-Body Identification: only tracks within one pass move like an asteroid (the movers between passes are stars)
+SB_VMAG = 21.0  # SPHEREx depth: fainter bodies are not what a find could be
+SB_MATCH_ARCSEC = 15.0
+SB_RATE_TOL = 0.25
+SB_PA_TOL = 30.0
+GENERIC_TYPES = ("", "*", "Star", "IR", "Radio", "UV", "X", "Blue", "Red", "?")  # a SIMBAD type that explains nothing about a spectrum
 EPOCH = 2025.9
 RADIUS = 6.0  # arcsec: how far from a find a catalogue entry may stand and still be named
 SWEEP_S = 45.0
@@ -637,7 +644,7 @@ class FindingsDB:
 def _ident_from(cat: str, ans: dict[str, Any]) -> tuple[str, str | None, float | None, str | None, dict[str, Any]]:
     """(state, name, separation, type, detail) of one catalogue's answer from `CatalogueContext.context`."""
     st = ans.get("state")
-    if st == "unavailable" or st is None:
+    if st in ("unavailable", "pending") or st is None:
         return "unavailable", None, None, None, {"error": ans.get("error")}
     if st == "none":
         return "none", None, None, None, {}
@@ -724,8 +731,10 @@ class Findings:
                 await asyncio.wait_for(self.kick.wait(), SWEEP_S)
             self.kick.clear()
 
-    async def sbident(self, ra: float, dec: float, mjd: float) -> dict[str, Any]:
-        """JPL's Small-Body Identification at the place and time of a moving find: the nearest known body within 60″, or none."""
+    async def sbident(self, ra: float, dec: float, mjd: float, rate: float | None, pa: float | None) -> dict[str, Any]:
+        """JPL's Small-Body Identification at the place and time of a moving find (the position at that very time). A body counts only if it
+        stands within 15″, is brighter than V 21, and moves at the find's rate (25 %) and direction (30°); the nearest such body is named with
+        both rates. When bodies stand near but none moves like the find, the answer is `none` and says what the nearest was."""
         half = 60.0 / 3600.0
         self.breaker.before()
         try:
@@ -738,7 +747,7 @@ class Findings:
                     "fov-dec-center": _sexa_dec(dec),
                     "fov-ra-hwidth": f"{half / max(0.05, math.cos(math.radians(dec))):.5f}",
                     "fov-dec-hwidth": f"{half:.5f}",
-                    "vmag-lim": "26",
+                    "vmag-lim": str(SB_VMAG),
                 },
             )
             r.raise_for_status()
@@ -749,21 +758,50 @@ class Findings:
         self.breaker.success()
         fields = body.get("fields_first") or body.get("fields") or []
         data = body.get("data_first_pass") or body.get("data") or []
-        if not data:
-            return {"state": "none"}
         idx = {n: i for i, n in enumerate(fields)}
-        best: tuple[float, list[Any]] | None = None
+        c_ra, c_dec = 'Dist. from center RA (")', 'Dist. from center Dec (")'
+        r_ra, r_dec, c_v = 'RA rate ("/h)', 'Dec rate ("/h)', "Visual magnitude (V)"
+        near: list[tuple[float, list[Any]]] = []
         for row in data:
             try:
-                d = math.hypot(float(row[idx['Dist. from center RA (")']]), float(row[idx['Dist. from center Dec (")']]))
+                near.append((math.hypot(float(row[idx[c_ra]]), float(row[idx[c_dec]])), row))
             except (KeyError, ValueError, IndexError):
-                d = 0.0
-            if best is None or d < best[0]:
-                best = (d, row)
-        assert best is not None
-        row = best[1]
-        v = row[idx["Visual magnitude (V)"]] if "Visual magnitude (V)" in idx else None
-        return {"state": "ok", "name": str(row[0]), "sep": round(best[0], 1), "v": v, "n_bodies": len(data)}
+                continue
+        near.sort(key=lambda x: x[0])
+        out: dict[str, Any] = {"n_bodies": len(data), "vmag_limit": SB_VMAG}
+        for sep, row in near:
+            if sep > SB_MATCH_ARCSEC:
+                break
+            try:
+                vr, vd = float(row[idx[r_ra]]), float(row[idx[r_dec]])
+            except (KeyError, ValueError, IndexError):
+                out.update(state="none", note=f"{row[0]} stands {sep:.1f}″ away but JPL gave no rate to compare")
+                continue
+            speed, ang = math.hypot(vr, vd), math.degrees(math.atan2(vr, vd)) % 360.0
+            agrees = (
+                rate is not None
+                and pa is not None
+                and abs(speed - rate) <= SB_RATE_TOL * rate
+                and abs((ang - pa + 180.0) % 360.0 - 180.0) <= SB_PA_TOL
+            )
+            cand = {
+                "name": str(row[0]),
+                "sep": round(sep, 1),
+                "v": row[idx[c_v]] if c_v in idx else None,
+                "body_rate": round(speed, 1),
+                "body_pa": round(ang),
+                "our_rate": rate,
+                "our_pa": pa,
+            }
+            if agrees:
+                return {"state": "ok", **out, **cand}
+            out.update(
+                state="none",
+                nearest_rejected=cand,
+                note=f"{cand['name']} stands {sep:.1f}″ away but moves {speed:.0f}″/h toward {ang:.0f}°, not like this find",
+            )
+        out.setdefault("state", "none")
+        return out
 
     def _mjd_of(self, row: sqlite3.Row) -> float | None:
         d = json.loads(row["data"])
@@ -790,7 +828,8 @@ class Findings:
                 self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": "no observation time"})
             else:
                 try:
-                    a = await self.sbident(row["ra"], row["dec"], mjd)
+                    trk = json.loads(row["data"]).get("track") or {}
+                    a = await self.sbident(row["ra"], row["dec"], mjd, _fnum(trk.get("rate")), _fnum(trk.get("pa")))
                     self.db.put_ident(
                         row["id"],
                         "sbident",
@@ -838,7 +877,7 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
     kind = f["kind"]
     if kind == "mover":
         t = d.get("track") or {}
-        if t.get("check") == "same" or t.get("name") or str(t.get("status", "")).startswith("known") or ok("sbident"):
+        if t.get("check") == "same" or t.get("name") or str(t.get("status", "")).startswith("known"):
             return "known"
         return "unexplained"
     if kind == "browndwarf":
@@ -849,10 +888,9 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         )
     if kind == "film":
         return "known" if ok("sbident") else "unexplained"
-    if kind == "red":
-        return "known" if ok("simbad") else "unexplained"
-    if kind == "anomaly":
-        return "known" if ok("simbad") else "unexplained"
+    if kind in ("red", "anomaly"):
+        # SIMBAD must say what it is: a bare "Star" or "IR" explains neither a red colour nor an odd spectrum
+        return "known" if ok("simbad") and str(by["simbad"].get("type") or "") not in GENERIC_TYPES else "unexplained"
     if kind == "pair":
         return "known" if ok("vsx") else "unexplained"
     return "unexplained"
