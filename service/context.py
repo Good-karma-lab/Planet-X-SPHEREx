@@ -32,6 +32,8 @@ IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
 NED_URL = "https://ned.ipac.caltech.edu/cgi-bin/objsearch"
 SIMBAD_EPOCH, GAIA_EPOCH = 2000.0, 2016.0
+SIMBAD_HEDGE_S = 1.0  # the second SIMBAD mirror is asked as well when the first has not answered by then
+CONTEXT_PARTS = ("simbad", "gaia", "vsx", "ned", "twomass", "allwise", "catwise")
 IDENT_FAST_MAS = 1000.0  # above this proper motion (mas/yr) a star can have left the small cone: SIMBAD is asked for those in a wide cone
 GAIA_HEDGE_S = 1.0  # the AWS copy is asked as well when the Gaia archive has not answered after this long
 IDENT_DEADLINE_S = (
@@ -39,6 +41,8 @@ IDENT_DEADLINE_S = (
 )
 BRIGHT_MAG = 9.0  # a star brighter than this saturates SPHEREx: the centre of its core is uncertain by several arcseconds
 BRIGHT_RADIUS = 15.0
+BRIGHT_IR_MAG = 7.0  # a 2MASS or WISE magnitude brighter than this saturates the survey: its place is uncertain there too
+BRIGHT_NOTE = "a bright star: its core is saturated, so the place is only good to several arcseconds"
 IDENT_MAX_MAS = 11000.0  # the fastest star known (Barnard's Star) moves 10.4 arcsec/yr
 DEADLINE_S = 12.0
 TTL_S = 7 * 86400.0
@@ -122,7 +126,7 @@ def parse_simbad(rows: list[list[Any]], ra: float, dec: float, epoch: float, rad
         if sep <= radius and (best is None or score < best[0]):
             best = (score, found)
         elif sep <= BRIGHT_RADIUS and mag is not None and mag["value"] < BRIGHT_MAG and (bright is None or sep < bright[0]):
-            bright = (sep, {**found, "note": "a bright star: its core is saturated, so the place is only good to several arcseconds"})
+            bright = (sep, {**found, "note": BRIGHT_NOTE})
     if best:
         return best[1]
     return bright[1] if bright else {"state": "none"}
@@ -173,22 +177,31 @@ def parse_gaia_rows(rows: list[dict[str, Any]], ra: float, dec: float, epoch: fl
             if best is None or sep < best[0]:
                 best = (sep, found)
         elif bright is None or sep < bright[0]:
-            bright = (sep, {**found, "note": "a bright star: its core is saturated, so the place is only good to several arcseconds"})
+            bright = (sep, {**found, "note": BRIGHT_NOTE})
     if best:
         return best[1]
     return bright[1] if bright else {"state": "none", "source": label}
 
 
-def parse_irsa(body: str, ra: float, dec: float, radius: float, labels: dict[str, str]) -> dict[str, Any]:
+def _ir_saturated(mags: list[Any]) -> bool:
+    """A near-infrared or mid-infrared magnitude bright enough that the survey's own place for the star is uncertain (it saturates)."""
+    return any(isinstance(m, int | float) and m < BRIGHT_IR_MAG for m in mags)
+
+
+def parse_irsa(body: str, ra: float, dec: float, radius: float, labels: dict[str, str], bright: bool = False) -> dict[str, Any]:
+    """The nearest entry within `radius`; with `bright` (the place is a bright, saturated star) also a bright entry up to BRIGHT_RADIUS."""
     best: tuple[float, dict[str, Any]] | None = None
     for row in csv.DictReader(io.StringIO(body)):
         a, d = _fnum(row, "ra"), _fnum(row, "dec")
         if a is None or d is None:
             continue
         sep = sep_arcsec(a, d, ra, dec)
-        if sep <= radius + 1.0 and (best is None or sep < best[0]):
-            vals = {k: (row.get(c) if k in TEXT_KEYS else _fnum(row, c)) for k, c in labels.items()}
-            best = (sep, {"state": "ok", "sep": round(sep, 2), **vals})
+        vals = {k: (row.get(c) if k in TEXT_KEYS else _fnum(row, c)) for k, c in labels.items()}
+        far = sep > radius + 1.0
+        if far and not (bright and sep <= BRIGHT_RADIUS and _ir_saturated([vals.get(k) for k in ("J", "H", "Ks", "W1")])):
+            continue
+        if best is None or sep < best[0]:
+            best = (sep, {"state": "ok", "sep": round(sep, 2), **vals, **({"note": BRIGHT_NOTE} if far else {})})
     return best[1] if best else {"state": "none"}
 
 
@@ -237,15 +250,22 @@ def allwise_cone(ra: float, dec: float, radius: float) -> list[dict[str, Any]]:
     return allwise.sources(ra, dec, radius)
 
 
-def from_allwise(part: str, rows: list[dict[str, Any]], radius: float) -> dict[str, Any] | None:
+def from_allwise(part: str, rows: list[dict[str, Any]], radius: float, bright: bool = False) -> dict[str, Any] | None:
     """The answer of `parse_irsa` for 2MASS or AllWISE built from rows of the AllWISE Parquet copy (marked `via`); None when the copy cannot
     say (2MASS: a source stands there but AllWISE has no 2MASS match for it, which does not mean 2MASS has none)."""
     via = "AllWISE copy in AWS (IRSA's TAP did not answer)"
     for r in rows:
-        if r["sep_arcsec"] > radius + 1.0:
+        far = r["sep_arcsec"] > radius + 1.0
+        if far and not (
+            bright
+            and r["sep_arcsec"] <= BRIGHT_RADIUS
+            and _ir_saturated([r.get("w1mpro"), r.get("j_m_2mass"), r.get("h_m_2mass"), r.get("k_m_2mass")])
+        ):
             continue
+        note = {"note": BRIGHT_NOTE} if far else {}
         if part == "allwise":
             return {
+                **note,
                 "state": "ok",
                 "sep": r["sep_arcsec"],
                 "designation": r.get("designation"),
@@ -258,6 +278,7 @@ def from_allwise(part: str, rows: list[dict[str, Any]], radius: float) -> dict[s
             }
         if r.get("j_m_2mass") is not None or r.get("k_m_2mass") is not None:
             return {
+                **note,
                 "state": "ok",
                 "sep": r["sep_arcsec"],
                 "designation": None,
@@ -267,7 +288,8 @@ def from_allwise(part: str, rows: list[dict[str, Any]], radius: float) -> dict[s
                 "qual": None,
                 "via": via + ", the 2MASS magnitudes of AllWISE's own association",
             }
-    if part == "twomass" and any(r["sep_arcsec"] <= radius + 1.0 for r in rows):
+    reach = (BRIGHT_RADIUS if bright else radius) + 1.0
+    if part == "twomass" and any(r["sep_arcsec"] <= reach for r in rows):
         return None
     return {"state": "none", "via": via}
 
@@ -297,8 +319,9 @@ class CatalogueContext:
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(DEADLINE_S, connect=4.0), headers={"User-Agent": "spherex-sky/0.1"})
-        self.breakers = {k: Breaker(k) for k in ("simbad", "gaia", "irsa", "vizier", "ned")}
+        self.breakers = {k: Breaker(k) for k in ("simbad", "simbad2", "gaia", "irsa", "vizier", "ned")}
         self.cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
+        self._background: set[asyncio.Task[None]] = set()
 
     async def _get(self, which: str, url: str, params: dict[str, str] | None = None, form: bool = False) -> str:
         br = self.breakers[which]
@@ -326,21 +349,42 @@ class CatalogueContext:
             f"AND (b.pmra*b.pmra + b.pmdec*b.pmdec) > {IDENT_FAST_MAS**2:.0f})) "
             "AND (b.otype IS NULL OR b.otype NOT IN ('Pl', 'Pl?', 'PlG', 'PlG?'))"
         )
+
+        async def ask(which: str, base: str) -> dict[str, Any]:
+            body = await self._get(which, base, {"request": "doQuery", "lang": "adql", "format": "json", "query": adql})
+            found = parse_simbad(json.loads(body).get("data") or [], ra, dec, epoch, radius)
+            if found.get("state") == "ok":  # the name people use (eps Ind A) beside SIMBAD's main identifier
+                aliases = await self._aliases(base, found["name"], which)
+                found["aliases"] = aliases
+                found["display_name"] = display_name(found["name"], aliases)
+            return found
+
+        # Two mirrors, each with its own breaker: the second is asked as well when the first fails or has not answered within a second, and
+        # the first answer wins, so one mirror being down or slow never costs the name.
+        first = asyncio.create_task(ask("simbad", SIMBAD_BASES[0]))
+        second: asyncio.Task[dict[str, Any]] | None = None
+        running: set[asyncio.Task[dict[str, Any]]] = {first}
         err: Exception | None = None
-        for base in SIMBAD_BASES:
-            try:
-                body = await self._get("simbad", base, {"request": "doQuery", "lang": "adql", "format": "json", "query": adql})
-                found = parse_simbad(json.loads(body).get("data") or [], ra, dec, epoch, radius)
-                if found.get("state") == "ok":
-                    aliases = await self._aliases(base, found["name"])
-                    found["aliases"] = aliases
-                    found["display_name"] = display_name(found["name"], aliases)
-                return found
-            except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
-                err = e
+        try:
+            while running:
+                done, running = await asyncio.wait(
+                    running, timeout=SIMBAD_HEDGE_S if second is None else None, return_when=asyncio.FIRST_COMPLETED
+                )
+                for t in done:
+                    try:
+                        return t.result()
+                    except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
+                        err = e
+                if second is None:
+                    second = asyncio.create_task(ask("simbad2", SIMBAD_BASES[1]))
+                    running.add(second)
+        finally:
+            for left in (first, second):
+                if left is not None and not left.done():
+                    left.cancel()
         raise err or RuntimeError("no SIMBAD mirror")
 
-    async def _aliases(self, base: str, main_id: str) -> list[str]:
+    async def _aliases(self, base: str, main_id: str, which: str = "simbad") -> list[str]:
         """The other names SIMBAD has for an object (a few, best effort: the answer does not wait on them)."""
         q = (
             "SELECT TOP 40 ident.id FROM ident JOIN basic ON ident.oidref = basic.oid WHERE basic.main_id = '"
@@ -349,7 +393,7 @@ class CatalogueContext:
         )
         try:
             body = await asyncio.wait_for(
-                self._get("simbad", base, {"request": "doQuery", "lang": "adql", "format": "json", "query": q}), 2.0
+                self._get(which, base, {"request": "doQuery", "lang": "adql", "format": "json", "query": q}), 2.0
             )
             return [str(r[0]) for r in (json.loads(body).get("data") or [])]
         except (httpx.HTTPError, BreakerOpenError, ValueError, TimeoutError):
@@ -467,25 +511,27 @@ class CatalogueContext:
             out["gaia"] = {k: gm[k] for k in ("state", "error") if k in gm}
         return out
 
-    async def _irsa(self, part: str, ra: float, dec: float, radius: float, alt: tuple[float, float] | None = None) -> dict[str, Any]:
+    async def _irsa(
+        self, part: str, ra: float, dec: float, radius: float, alt: tuple[float, float] | None = None, bright: bool = False
+    ) -> dict[str, Any]:
         """One IRSA catalogue at the place `ra, dec` (at that catalogue's epoch). When IRSA's TAP does not answer, 2MASS and AllWISE are
         read from IRSA's Parquet copy of AllWISE in AWS (it carries AllWISE's 2MASS magnitudes): `alt` is the place at AllWISE's epoch."""
         table, cols, _, labels = IRSA_PARTS[part]
-        cone = (radius + 1.0) / 3600.0
+        cone = ((BRIGHT_RADIUS if bright else radius) + 1.0) / 3600.0
         adql = (
             f"SELECT TOP 10 {cols} FROM {table} WHERE CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {cone:.6f})) = 1"
         )
         try:
-            return parse_irsa(await self._tap("irsa", IRSA_TAP, adql), ra, dec, radius, labels)
+            return parse_irsa(await self._tap("irsa", IRSA_TAP, adql), ra, dec, radius, labels, bright)
         except (httpx.HTTPError, BreakerOpenError, ValueError) as first:
             if part not in ("twomass", "allwise"):
                 raise
             a, d = (ra, dec) if part == "allwise" or alt is None else alt
             try:
-                rows = await cpu.run(allwise_cone, a, d, radius + 1.0)
+                rows = await cpu.run(allwise_cone, a, d, (BRIGHT_RADIUS if bright else radius) + 1.0)
             except Exception:  # the cloud copy did not answer either: the first failure is the one said
                 raise first from None
-            answer = from_allwise(part, rows, radius)
+            answer = from_allwise(part, rows, radius, bright)
             if answer is None:
                 raise first
             return answer
@@ -536,23 +582,56 @@ class CatalogueContext:
         return await self._kept("simbad_" + pos, lambda: self._simbad(ra, dec, epoch, radius))
 
     async def context(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        await self._context(ra, dec, epoch, radius, out)
+        return out
+
+    async def context_within(self, ra: float, dec: float, epoch: float, radius: float, deadline: float) -> dict[str, Any]:
+        """`context`, but at most `deadline` seconds: the catalogues that have not answered are `pending` (still being asked; they keep
+        running and the next call finds their answers kept)."""
+        out: dict[str, Any] = {}
+        work = asyncio.create_task(self._context(ra, dec, epoch, radius, out))
+        self._background.add(work)
+        work.add_done_callback(self._background.discard)
+        done, _ = await asyncio.wait({work}, timeout=deadline)
+        if done:
+            work.result()
+            return out
+        snap = dict(out)
+        for k in CONTEXT_PARTS:
+            if k not in snap:
+                snap[k] = {"state": "pending", "error": "still being asked"}
+        snap["complete"] = False
+        return snap
+
+    async def _context(self, ra: float, dec: float, epoch: float, radius: float, out: dict[str, Any]) -> None:
         t0 = time.time()
         pos = f"{ra:.4f}_{dec:.4f}_{epoch:.1f}_{radius:.1f}"
-        tasks: dict[str, asyncio.Task[dict[str, Any]]] = {
-            "simbad": asyncio.create_task(self._kept("simbad_" + pos, lambda: self._simbad(ra, dec, epoch, radius))),
-            "gaia": asyncio.create_task(self._kept("gaia_" + pos, lambda: self._gaia(ra, dec, epoch, radius))),
-            "vsx": asyncio.create_task(self._kept("vsx_" + pos, lambda: self._vsx(ra, dec, radius))),
-            "ned": asyncio.create_task(self._kept("ned_" + pos, lambda: self._ned(ra, dec, radius))),
-        }
-        out: dict[str, Any] = {"ra": ra, "dec": dec, "epoch": epoch, "radius": radius}
+        out.update({"ra": ra, "dec": dec, "epoch": epoch, "radius": radius})
+        tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
+
+        def start(k: str, t: asyncio.Task[dict[str, Any]]) -> None:
+            tasks[k] = t
+
+            def land(done: asyncio.Task[dict[str, Any]], k: str = k) -> None:
+                if not done.cancelled() and done.exception() is None:
+                    out[k] = done.result()
+
+            t.add_done_callback(land)
+
+        start("simbad", asyncio.create_task(self._kept("simbad_" + pos, lambda: self._simbad(ra, dec, epoch, radius))))
+        start("gaia", asyncio.create_task(self._kept("gaia_" + pos, lambda: self._gaia(ra, dec, epoch, radius))))
+        start("vsx", asyncio.create_task(self._kept("vsx_" + pos, lambda: self._vsx(ra, dec, radius))))
+        start("ned", asyncio.create_task(self._kept("ned_" + pos, lambda: self._ned(ra, dec, radius))))
         gaia = await tasks["gaia"]
         pm: tuple[float | None, float | None] = (None, None)
+        sm = await tasks["simbad"]
         if gaia.get("state") == "ok":
             pm = (gaia.get("pmra"), gaia.get("pmdec"))
-        else:
-            sm = await tasks["simbad"]
-            if sm.get("state") == "ok":
-                pm = (sm.get("pmra"), sm.get("pmdec"))
+        elif sm.get("state") == "ok":
+            pm = (sm.get("pmra"), sm.get("pmdec"))
+        # a bright (saturated) star: the infrared surveys' own places for it are uncertain too, so they are asked in the wide cone
+        bright = any(a.get("state") == "ok" and a.get("note") == BRIGHT_NOTE for a in (gaia, sm))
 
         def at(year: float) -> tuple[float, float]:
             return (ra, dec) if pm[0] is None else moved(ra, dec, pm[0], pm[1], year - epoch)
@@ -562,14 +641,13 @@ class CatalogueContext:
             alt = at(2010.5)
 
             def fetch(part: str = part, a: float = a, d: float = d, alt: tuple[float, float] = alt) -> Awaitable[dict[str, Any]]:
-                return self._irsa(part, a, d, radius, alt)
+                return self._irsa(part, a, d, radius, alt, bright)
 
-            tasks[part] = asyncio.create_task(self._kept(f"{part}_{a:.5f}_{d:.5f}_{radius:.1f}", fetch))
+            start(part, asyncio.create_task(self._kept(f"{part}_{a:.5f}_{d:.5f}_{radius:.1f}{'b' if bright else ''}", fetch)))
         for k, t in tasks.items():
             out[k] = await t
         out["complete"] = all(out[k].get("state") != "unavailable" for k in tasks)
         out["secs"] = round(time.time() - t0, 2)
-        return out
 
     async def close(self) -> None:
         await self.client.aclose()

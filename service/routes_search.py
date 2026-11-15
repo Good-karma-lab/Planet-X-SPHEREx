@@ -31,12 +31,16 @@ def make_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         dec: float = Query(..., ge=-90, le=90),
         epoch: float = Query(2025.9, ge=1900, le=2100),
         radius: float = Query(6.0, gt=0, le=60),
+        deadline: float = Query(4.0, ge=0, le=120),
     ) -> Any:
-        """What SIMBAD, Gaia DR3, 2MASS, AllWISE, CatWISE, VSX and NED know about the place at the epoch (ok / none / unavailable each)."""
+        """What SIMBAD, Gaia DR3, 2MASS, AllWISE, CatWISE, VSX and NED know about the place at the epoch (ok / none / unavailable each).
+        A catalogue that has not answered within `deadline` seconds is `pending` (ask again: it keeps running); 0 waits for all."""
         cat: CatalogueContext | None = getattr(st, "catalogue", None)
         if cat is None:
             raise HTTPException(503, "the catalogue client is not running")
-        return await cat.context(ra, dec, epoch, radius)
+        if deadline <= 0:
+            return await cat.context(ra, dec, epoch, radius)
+        return await cat.context_within(ra, dec, epoch, radius, deadline)
 
     def film_track_view(film_key: str) -> dict[str, Any]:
         """The found tracks of a finished film, the job that finds them, or why not yet."""
