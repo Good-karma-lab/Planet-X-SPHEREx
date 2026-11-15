@@ -5,7 +5,7 @@ import { formatHash, parseHash, type Route } from '../lib/route';
 import { formatDec, formatRA, parseDec, parseRA } from '../lib/sky';
 import type { SxpPart } from '../lib/sxp';
 import { icon } from '../ui/icons';
-import { passLevels, starBalance } from '../viewer/balance';
+import { passLevels, planeLevels, starBalance } from '../viewer/balance';
 import { ARCHIVE, ArchiveSet } from '../viewer/archive';
 import { FADE_MS, HOLD_MS, order } from '../viewer/pendulum';
 import { PER_PASS, Renderer, wallLayout, type Panel, type StackName } from '../viewer/renderer';
@@ -789,6 +789,15 @@ export function Lab({ route }: { route: Route }) {
       if (part.arrays['sat']) {
         r.uploadSat(k, part.arrays['sat'].data as Uint8Array);
         satData.current.set(k, part.arrays['sat'].data as Uint8Array);
+      }
+      if (stack === 'picture') {
+        const pl = planeLevels(arr.data as Uint16Array, n, PER_PASS.picture);
+        r.setPictureNoise(k, pl.bg, pl.sigma);
+      }
+      if (stack === 'bands') {
+        // every band against its own background and noise, for the colour blend of the picture
+        const bl = planeLevels(arr.data as Uint16Array, n, PER_PASS.bands);
+        r.setBandNoise(k, bl.bg, bl.sigma);
       }
       if (stack === 'dets') {
         detsData.current.set(k, { n, dets: arr.data as Uint16Array });
