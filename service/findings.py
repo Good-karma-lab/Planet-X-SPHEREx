@@ -809,7 +809,9 @@ class Findings:
         self.movers, self.pairs, self.dwarfs, self.anomalies = movers, pairs, dwarfs, anomalies
         self.db = FindingsDB(store_dir / "findings.db", writer)
         self.writer = writer and not self.db.read_only
-        self.breaker = Breaker("JPL Small-Body Identification")
+        # JPL's field search is slow (20-60 s) and suffers from many at once: one request at a time, and a patient breaker
+        self.breaker = Breaker("JPL Small-Body Identification", consecutive=6, open_s=60.0)
+        self.sb_gate = asyncio.Semaphore(1)
         self.tasks: list[asyncio.Task[None]] = []
         self.lock = asyncio.Lock()
         self.kick = asyncio.Event()
@@ -871,6 +873,14 @@ class Findings:
         stands within 15″, is brighter than V 21, and moves at the find's rate (25 %) and direction (30°); the nearest such body is named with
         both rates. When bodies stand near but none moves like the find, the answer is `none` and says what the nearest was."""
         half = 60.0 / 3600.0
+        if getattr(self, "sb_gate", None) is None:
+            self.sb_gate = asyncio.Semaphore(1)
+        async with self.sb_gate:
+            return await self._sbident_ask(ra, dec, mjd, rate, pa, check_rate, half)
+
+    async def _sbident_ask(
+        self, ra: float, dec: float, mjd: float, rate: float | None, pa: float | None, check_rate: bool, half: float
+    ) -> dict[str, Any]:
         self.breaker.before()
         try:
             r = await self.catalogue.client.get(
@@ -1005,7 +1015,9 @@ class Findings:
                     "per_visit",
                 )
                 self.db.put_ident(row["id"], "sbident", a["state"], a.get("name"), a.get("sep"), None, {k: a[k] for k in keep if k in a}, a)
-            except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
+            except BreakerOpenError:
+                pass  # JPL is resting after failures: the find stays pending and is asked later, no attempt spent
+            except (httpx.HTTPError, ValueError) as e:
                 self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": str(e)[:120]})
         if "simbad" in want:
             ctx = await self.catalogue.context(row["ra"], row["dec"], EPOCH, RADIUS)
