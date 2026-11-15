@@ -328,7 +328,7 @@ class PointMeter:
         n = len(ras)
         out: list[tuple[float, float, float] | None] = [None] * n
         lay = await self.fr.layout(key)
-        w = self.fr.wcs_of(key, lay)
+        w = await self.fr.wcs(key, lay)
         px, py = spxwcs.sky2pix(w, ras, decs)
         nx, ny = lay.image.nx, lay.image.ny
         ok = np.isfinite(px) & np.isfinite(py) & (px >= HALF) & (py >= HALF) & (px <= nx - 1 - HALF) & (py <= ny - 1 - HALF)

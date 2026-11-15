@@ -27,5 +27,11 @@ def test_resolve_answers_the_place_or_none() -> None:
     cc = CatalogueContext()
     cc.client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
     found = asyncio.run(cc.resolve("Sirius"))
-    assert found is not None and found["name"] == "* alf CMa" and abs(found["ra"] - 101.287) < 1e-3
+    assert (
+        found is not None
+        and found["found"]
+        and found["main_id"] == "* alf CMa"
+        and found["name"] == "Sirius"
+        and abs(found["ra"] - 101.287) < 1e-3
+    )
     assert asyncio.run(cc.resolve("No Such Star")) is None

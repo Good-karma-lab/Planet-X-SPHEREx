@@ -40,7 +40,7 @@ class LoopWatch:
             reported = True
             self.stalls += 1
             frame = sys._current_frames().get(loop_thread)
-            stack = "".join(traceback.format_stack(frame, limit=14)) if frame is not None else "(no frame)"
+            stack = "".join(traceback.format_list(traceback.extract_stack(frame)[-18:])) if frame is not None else "(no frame)"
             log.warning("event loop held for %.1f s; the code holding it:\n%s", late, stack)
 
     def start(self) -> None:

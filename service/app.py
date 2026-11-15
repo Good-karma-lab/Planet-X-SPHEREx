@@ -677,16 +677,16 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
     @app.get(f"{API_PREFIX}/resolve")
     async def resolve(name: str = Query(..., min_length=1, max_length=80)) -> Any:
-        """Where SIMBAD puts a name (the globe's catalogue search for a star the snapshot lacks): 404 when SIMBAD does not know it."""
+        """Where SIMBAD puts a name (the globe's catalogue search for a star the snapshot lacks): {found, name (as typed), main_id,
+        type, ra, dec, pmra, pmdec}; {found: false} when SIMBAD does not know it, 503 when no SIMBAD mirror answers."""
         if st.catalogue is None:
             raise HTTPException(503, "the catalogues are not ready")
         try:
             found = await st.catalogue.resolve(name)
         except RuntimeError as e:
             raise HTTPException(503, str(e)) from e
-        if found is None:
-            raise HTTPException(404, f"SIMBAD does not know {name!r}")
-        return JSONResponse(found, headers={"Cache-Control": "public, max-age=86400"})
+        # an unknown name is an answer too ({"found": false}), so the page does not go on to ask anyone else
+        return JSONResponse(found or {"found": False, "name": name}, headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get(f"{API_PREFIX}/identify")
     async def identify(

@@ -47,6 +47,12 @@ class FileReader:
             w = self._wcs[key] = spxwcs.celestial(lay.image_header)
         return w
 
+    async def wcs(self, key: str, lay: Layout) -> Any:
+        """wcs_of, built in a thread the first time: astropy reads the header's SIP terms for up to a second, which must never hold the
+        event loop (every answer, /health too, would wait)."""
+        w = self._wcs.get(key)
+        return w if w is not None else await asyncio.to_thread(self.wcs_of, key, lay)
+
     # ---- layout -------------------------------------------------------------------------------------------------------------
     def _headers_path(self, key: str) -> Path:
         return sharded(self.store / "raw" / "headers", digest("headers-v1", key), ".npz")

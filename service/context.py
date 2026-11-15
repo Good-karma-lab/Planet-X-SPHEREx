@@ -410,13 +410,14 @@ class CatalogueContext:
                 return None
             main_id, ra, dec, pmra, pmdec, otype = rows[0]
             return {
-                "name": main_id,
-                "display_name": " ".join(name.split()),
+                "found": True,
+                "name": " ".join(name.split()),
+                "main_id": main_id,
+                "type": otype or "",
                 "ra": ra,
                 "dec": dec,
-                "pmra": pmra,
-                "pmdec": pmdec,
-                "otype": otype,
+                "pmra": pmra or 0.0,
+                "pmdec": pmdec or 0.0,
             }
         raise RuntimeError(f"SIMBAD did not answer: {err}")
 

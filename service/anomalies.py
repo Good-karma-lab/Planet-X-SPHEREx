@@ -178,7 +178,7 @@ class Anomalies:
 
     async def _measure(self, e: Exposure, sources: list[dict[str, Any]]) -> list[tuple[int, float, float]]:
         lay = await self.files.layout(e.key)
-        w = self.files.wcs_of(e.key, lay)
+        w = await self.files.wcs(e.key, lay)
         nx, ny = lay.image.nx, lay.image.ny
         places = [place_at(s, lay.mjd) for s in sources]
         px, py = spxwcs.sky2pix(w, [p[0] for p in places], [p[1] for p in places])
