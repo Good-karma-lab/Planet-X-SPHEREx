@@ -122,6 +122,7 @@ def parse_simbad(rows: list[list[Any]], ra: float, dec: float, epoch: float, rad
             "pmdec": r[4],
             "plx": r[5],
             "mag": mag,
+            "j": None if r[11] is None else round(float(r[11]), 2),
         }
         if sep <= radius and (best is None or score < best[0]):
             best = (score, found)
@@ -392,9 +393,7 @@ class CatalogueContext:
             + "'"
         )
         try:
-            body = await asyncio.wait_for(
-                self._get(which, base, {"request": "doQuery", "lang": "adql", "format": "json", "query": q}), 2.0
-            )
+            body = await asyncio.wait_for(self._get(which, base, {"request": "doQuery", "lang": "adql", "format": "json", "query": q}), 2.0)
             return [str(r[0]) for r in (json.loads(body).get("data") or [])]
         except (httpx.HTTPError, BreakerOpenError, ValueError, TimeoutError):
             return []
@@ -646,6 +645,20 @@ class CatalogueContext:
             start(part, asyncio.create_task(self._kept(f"{part}_{a:.5f}_{d:.5f}_{radius:.1f}{'b' if bright else ''}", fetch)))
         for k, t in tasks.items():
             out[k] = await t
+        two, sb = out.get("twomass") or {}, out.get("simbad") or {}
+        if two.get("state") == "unavailable" and sb.get("state") == "ok" and sb.get("j") is not None:
+            # IRSA did not answer: SIMBAD's own J magnitude is 2MASS's, for the star it names (a star that moves fast has no AllWISE match)
+            out["twomass"] = {
+                "state": "ok",
+                "sep": sb["sep"],
+                "designation": None,
+                "J": sb["j"],
+                "H": "—",
+                "Ks": "—",
+                "qual": None,
+                "via": "SIMBAD's 2MASS J magnitude of " + str(sb["name"]) + " (the 2MASS catalogue did not answer)",
+                **({"note": sb["note"]} if "note" in sb else {}),
+            }
         out["complete"] = all(out[k].get("state") != "unavailable" for k in tasks)
         out["secs"] = round(time.time() - t0, 2)
 
