@@ -142,11 +142,8 @@ function loadDust(): void {
   im.src = '/globe/dust_allsky.jpg';
 }
 
-/** the globe radius (pixels) from which a survey is faded in over the star map, and by which it has replaced it */
-export const STAR_MAP_FADE_FROM = 8000;
-export const STAR_MAP_FADE_TO = 16000;
-/** How much of DSS2 shows over the star map at a globe scale R (0 = none, 1 = all): the pins' epoch follows it. */
-export const starMapFade = (R: number): number => Math.min(1, Math.max(0, (R - STAR_MAP_FADE_FROM) / (STAR_MAP_FADE_TO - STAR_MAP_FADE_FROM)));
+/** the globe radius (pixels) past which the star map holds no more detail (its source has 20″ pixels): the globe then shows Visible (DSS2), and the star map again below it */
+export const STAR_MAP_TO_VISIBLE = 12000;
 
 /** the black point (of 255) some baked layers need on top of what the manifest says: the faint colour of the empty sky of 2MASS */
 const EXTRA_BLACK: Record<string, number> = { '2mass': 16 };
@@ -208,13 +205,7 @@ class SkyPainter {
     // the SPHEREx backdrop is three frames of the cube: one sampler per colour
     const equi = !dustPic && layer.length === 1 && equiOf(layer[0]!.id) ? new EquiSampler(layer[0]!.id, R) : undefined;
     const samplers = dustPic || equi ? [] : layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
-    // the star map is made from a map of 20″ pixels (one screen pixel at a globe radius of about 10 000 px): zoomed in past that it would only be a smooth
-    // wash, so a real survey (DSS2) is faded in over it, fully by twice that radius
-    let fade: Pass['fade'];
-    if (layer.length === 1 && layer[0]!.id === 'svs' && R > STAR_MAP_FADE_FROM && HIPS['dss2']) {
-      const t = Math.min(1, (R - STAR_MAP_FADE_FROM) / (STAR_MAP_FADE_TO - STAR_MAP_FADE_FROM));
-      fade = { s: new Sampler('dss2', orderFor('dss2', R)), w: t * t * (3 - 2 * t), gain: 2.4, black: 16 };
-    }
+    const fade: Pass['fade'] = undefined;
     return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0, total: 0, fade, equi };
   }
 
