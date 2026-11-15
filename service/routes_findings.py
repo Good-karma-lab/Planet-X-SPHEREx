@@ -20,6 +20,10 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             raise HTTPException(503, "the findings database is not loaded")
         return f
 
+    def enrich(body: dict[str, Any]) -> dict[str, Any]:
+        idn = getattr(st, "fpx_known", None)
+        return idn.enrich_findings(body) if idn is not None else body
+
     @router.get(f"{prefix}/findings")
     async def findings(
         kind: str | None = Query(None),
@@ -34,13 +38,13 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             raise HTTPException(422, f"kind is one of {', '.join(KINDS)}")
         f = need()
         body: dict[str, Any] = await asyncio.to_thread(query, f.db, kind, status, place, limit, offset)
-        return body
+        return enrich(body)
 
     @router.get(f"{prefix}/findings/{{find_id}}")
     async def one(find_id: str) -> Any:
         f = need()
         body: dict[str, Any] = await asyncio.to_thread(query, f.db, None, "all", None, 5000, 0)
-        for x in body["finds"]:
+        for x in enrich(body)["finds"]:
             if x["id"] == find_id:
                 return x
         raise HTTPException(404, "no such find")

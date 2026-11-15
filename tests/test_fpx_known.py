@@ -132,3 +132,35 @@ def test_a_failed_answer_is_not_kept(tmp_path: Path) -> None:
     fpx_known._SB_MEMO.clear()
     idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=httpx.AsyncClient(transport=httpx.MockTransport(boom)))
     assert asyncio.run(idn.sweep()) == 0 and not list(tmp_path.glob("*.json"))
+
+
+def test_findings_peaks_that_are_known_bodies_say_so(tmp_path: Path) -> None:
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
+        "candidates": [
+            {"d": 83.0, "ra": 60.712549, "dec": 8.608244, "by_pass": [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]}
+        ],
+    }
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
+    asyncio.run(idn.sweep())
+    body: dict[str, Any] = {
+        "counts": {"peak": {"all": 1, "unexplained": 0, "unchecked": 1, "known": 0}},
+        "finds": [
+            {
+                "id": "peak:1",
+                "kind": "peak",
+                "ra": 60.712549,
+                "dec": 8.608244,
+                "status": "unchecked",
+                "verdict": "",
+                "scans": ["k" * 24],
+                "data": {"search": "deep", "peak": {"d": 83.0}},
+            }
+        ],
+    }
+    out = idn.enrich_findings(body)
+    f = out["finds"][0]
+    assert f["status"] == "known" and f["verdict"].startswith("This is Sedna (JPL), found blind")
+    assert f["data"]["peak"]["known"]["name"].startswith("90377 Sedna")
+    assert out["counts"]["peak"] == {"all": 1, "unexplained": 0, "unchecked": 0, "known": 1}

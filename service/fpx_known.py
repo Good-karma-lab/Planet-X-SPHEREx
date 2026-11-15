@@ -260,7 +260,7 @@ class FpxIdentifier:
         for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
             pl = places_of(kind, result, c)
             if pl is not None:
-                found[i] = await identify(self.client, pl[0], pl[1], pl[2], self.limit)
+                found[i] = {**await identify(self.client, pl[0], pl[1], pl[2], self.limit), "at": [c.get("ra"), c.get("dec"), c.get("d")]}
         if not found or any(v.get("state") == "unavailable" for v in found.values()):
             return False
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -309,3 +309,33 @@ class FpxIdentifier:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.task
         await self.client.aclose()
+
+    def enrich_findings(self, body: dict[str, Any]) -> dict[str, Any]:
+        """The Findings answer with the JPL identification on its Find Planet X peaks: a peak that is a known body reads
+        'this is Sedna (JPL), found blind' and counts as known."""
+        changed = 0
+        for f in body.get("finds", []):
+            if f.get("kind") != "peak":
+                continue
+            pk = (f.get("data") or {}).get("peak") or {}
+            scans = f.get("scans") or []
+            kind = (f.get("data") or {}).get("search", "distant")
+            found = self.cached(kind, scans[0]) if scans and kind in KINDS else None
+            if found is None:
+                continue
+            for v in found.values():
+                at = v.get("at") or [None, None, None]
+                if at[0] is not None and abs(at[0] - f["ra"]) < 1e-4 and abs(at[1] - f["dec"]) < 1e-4:
+                    pk["known"] = v
+                    if v.get("state") == "ok":
+                        if f.get("status") != "known":
+                            changed += 1
+                        f["status"], f["verdict"] = "known", v["words"][0].upper() + v["words"][1:] + "."
+        if changed and isinstance(body.get("counts", {}).get("peak"), dict):
+            c = body["counts"]["peak"]
+            c["known"] = c.get("known", 0) + changed
+            for k in ("unexplained", "unchecked"):
+                take = min(changed, c.get(k, 0))
+                c[k] = c.get(k, 0) - take
+                changed -= take
+        return body
