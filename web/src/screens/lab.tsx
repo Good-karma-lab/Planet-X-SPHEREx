@@ -78,7 +78,7 @@ const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2
 /** a band's name on a tile too small for the full one */
 const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
 /** what a picture shows where its pixels have not arrived yet */
-const DARK: [number, number, number] = [0.03, 0.045, 0.06];
+const DARK: [number, number, number] = [0, 0, 0];
 const BANDS = [
   { key: 'star', name: 'Starlight', band: '0.75–1.1 µm', hue: 48, icon: 'sun' },
   {
