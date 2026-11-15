@@ -29,7 +29,7 @@ is how Pluto was found in 1930 and how volunteers have since found thousands of 
 
 ## 3. Link to project demo
 
-Slides (7 including the title) or a video of 30 seconds or less, as a public link. **[fill: the public link of the video or the slides]**
+Slides (7 including the title) or a video of 30 seconds or less, as a public link. https://good-karma-lab.github.io/Planet-X-SPHEREx/ (the presentation site: the 30-second video and the 7 slides; live once the repository is public and Pages is on, see `docs/PAGES.md`), or the YouTube link of the video **[fill after the upload]**
 Files: `docs/submission/demo/` (video, PDF of the deck), the deck's text is `docs/submission/slides.md`, the video script
 `docs/submission/video-script.md`. Test the link in a private window.
 
