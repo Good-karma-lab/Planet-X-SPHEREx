@@ -13,6 +13,7 @@ Parts (SXP1, row 0 = north, column 0 = east):
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import numpy as np
@@ -34,12 +35,40 @@ FIELD_SIZES = (2.0, 5.0, 10.0, 20.0, 60.0)
 KIND = "field"
 
 
-def canonical(ra: float, dec: float, fov: float) -> dict[str, Any]:
-    """The address rounding: RA to 0.01 s of time, Dec to 0.1″, the field size to one of the five sizes."""
+def _rounded(ra: float, dec: float, fov: float) -> dict[str, Any]:
     ra_s = round((ra % 360.0) / 15.0 * 3600.0, 2)
     dec_as = round(dec * 3600.0, 1)
     size = min(FIELD_SIZES, key=lambda f: abs(f - fov))
     return {"ra": ra_s * 15.0 / 3600.0, "dec": dec_as / 3600.0, "fov": size}
+
+
+# the centres of the fields the service already has (the warm set and every field in the store), by size: a request this close to one
+# is that field (SNAP of the field size), so a link a few arcseconds off never rebuilds a field that is ready
+SNAP = 1.0 / 20.0
+_CENTRES: dict[float, set[tuple[float, float]]] = {}
+
+
+def remember(ra: float, dec: float, fov: float) -> None:
+    """A field the service has (or warms): later requests near it snap to its centre."""
+    p = _rounded(ra, dec, fov)
+    _CENTRES.setdefault(p["fov"], set()).add((p["ra"], p["dec"]))
+
+
+def canonical(ra: float, dec: float, fov: float) -> dict[str, Any]:
+    """The address rounding: RA to 0.01 s of time, Dec to 0.1″, the field size to one of the five sizes; a place within SNAP of the
+    field size from a field the service already has is that field."""
+    p = _rounded(ra, dec, fov)
+    tol = p["fov"] / 60.0 * SNAP
+    best: tuple[float, float] | None = None
+    best_d = tol
+    for r, d in _CENTRES.get(p["fov"], ()):
+        dra = ((p["ra"] - r + 540.0) % 360.0 - 180.0) * math.cos(math.radians(0.5 * (p["dec"] + d)))
+        sep = math.hypot(dra, p["dec"] - d)
+        if sep <= best_d:
+            best, best_d = (r, d), sep
+    if best is not None:
+        return {"ra": best[0], "dec": best[1], "fov": p["fov"]}
+    return p
 
 
 def memory_estimate_mb(fov: float) -> int:

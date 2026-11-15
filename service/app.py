@@ -150,6 +150,14 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                     st.coverage = await asyncio.to_thread(coverage_payload, index_path)
 
             st.coverage_task = asyncio.get_running_loop().create_task(prime_coverage())
+        # the fields the service has: a request a few arcseconds off one of them is that field (fieldjob.canonical snaps to them)
+        for wf in warm_set():
+            if wf.film_mjd is None:
+                fieldjob.remember(wf.ra, wf.dec, wf.fov)
+        for row in st.store.listing((fieldjob.KIND,)) if st.store is not None else []:
+            pp = row["params"]
+            if row["complete"] and {"ra", "dec", "fov"} <= pp.keys():
+                fieldjob.remember(float(pp["ra"]), float(pp["dec"]), float(pp["fov"]))
         warm_task = None
         if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None:
             st.warm = WarmRunner(warm_set())
@@ -484,6 +492,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                     {"error": "too many new fields from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
                 )
         _, job = submit_field(params, Priority.P0)
+        fieldjob.remember(params["ra"], params["dec"], params["fov"])  # a request near this one joins this field
         if job is None:
             return {"key": key, "state": "done", "params": params, "meta": fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))}
         return {"key": key, "params": params, "job": job.view()}

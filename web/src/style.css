@@ -2390,3 +2390,10 @@ input[type='range']::-moz-range-thumb {
   .lab .pbody { flex: none; overflow: visible; }
   .lab .sbar { max-height: none; overflow: visible; }
 }
+
+/* the scans never reflow while a count or a % changes: fixed columns, digits of one width */
+.sbar .sline { grid-template-columns: minmax(0, 1fr) 64px 84px; }
+.sbar .sline.sline-px { grid-template-columns: auto 34px minmax(0, 1fr) 84px; }
+.sbar .sline .sval, .sbar .tray-sum .it { font-variant-numeric: tabular-nums; }
+.sbar .sline .sval { overflow: hidden; text-overflow: ellipsis; }
+.sbar .tray-sum .it .v { display: inline-block; min-width: 4.5ch; text-align: left; }

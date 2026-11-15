@@ -3386,7 +3386,7 @@ export function Lab({ route }: { route: Route }) {
                 {scanItems.map(([n, v]) => (
                   <span class="it" key={n}>
                     <i class={v === null || v.endsWith('%') ? 'busy' : ''} />
-                    {n} {v ?? '…'}
+                    {n} <span class="v">{v ?? '…'}</span>
                   </span>
                 ))}
               </div>

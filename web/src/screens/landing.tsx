@@ -10,7 +10,7 @@ const APP = '#/explore';
 /** "Watch a star move": the globe with Barnard's Star selected and its path drawn. */
 const STAR = `#/explore?sel=${encodeURIComponent("Barnard's Star")}&path=1`;
 /** "See a brown dwarf move": the lab on ε Indi B, one of the five warmed test fields (its 2025-26 place). */
-const BROWN_DWARF = '#/lab?ra=331.077&dec=-56.794&fov=5';
+const BROWN_DWARF = '#/lab?ra=331.09645&dec=-56.80059&fov=5'; // its place at 2025.9: the warm field
 /** Eris: the lab on its field, where Find Planet X runs. */
 const ERIS = '#/lab?ra=27.378&dec=-0.120&fov=20';
 /** The 30-second demo, served as a static file of the web app. */
