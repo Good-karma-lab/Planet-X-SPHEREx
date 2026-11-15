@@ -55,13 +55,31 @@ CATALOGUE_LABEL = {
 MOVING = (
     "film",
 )  # asked of JPL Small-Body Identification: only tracks within one pass move like an asteroid (the movers between passes are stars)
-COLLECT_REV = 5  # bump when the way finds are read or merged changes: the next sweep rewrites them
+COLLECT_REV = 6  # bump when the way finds are read or merged changes: the next sweep rewrites them
 SB_VMAG = 21.0  # SPHEREx depth: fainter bodies are not what a find could be
 SB_MATCH_ARCSEC = 15.0
 SB_RATE_TOL = 0.25
 SB_PA_TOL = 30.0
 GENERIC_TYPES = ("", "*", "Star", "IR", "Radio", "UV", "X", "Blue", "Red", "?")  # a SIMBAD type that explains nothing about a spectrum
 EPOCH = 2025.9
+ECLIPTIC_BAND = 15.0  # degrees of ecliptic latitude: a slow mover there is also checked against the known solar-system bodies
+
+
+def ecl_lat(ra: float, dec: float) -> float:
+    e = math.radians(23.4393)
+    r, d = math.radians(ra), math.radians(dec)
+    return math.degrees(math.asin(math.sin(d) * math.cos(e) - math.cos(d) * math.sin(e) * math.sin(r)))
+
+
+def want_of(kind: str, ra: float, dec: float, data: dict[str, Any]) -> list[str]:
+    """The identifications a find needs: a film track (it moves within a pass) only JPL's Small-Body Identification; the rest every catalogue, and
+    a brown dwarf candidate near the ecliptic JPL as well (it must not be a known body before it is called a candidate)."""
+    if kind == "film":
+        return ["sbident"]
+    near = kind == "browndwarf" and data.get("group") != "known" and abs(ecl_lat(ra, dec)) < ECLIPTIC_BAND
+    return [*CATALOGUES, *(["sbident"] if near else [])]
+
+
 RADIUS = 6.0  # arcsec: how far from a find a catalogue entry may stand and still be named
 SWEEP_S = 45.0
 RETRY_S = 90.0
@@ -306,6 +324,15 @@ def collect(
                 dec = g["dec0"] + (n / 2 - mid["y"]) * step
                 ra = g["ra0"] - (mid["x"] - n / 2) * step / math.cos(math.radians(g["dec0"]))
                 mjd = fr[mid["f"]]["mjd"] if mid["f"] < len(fr) else None
+                visits = [
+                    {
+                        "ra": g["ra0"] - (q["x"] - n / 2) * step / math.cos(math.radians(g["dec0"])),
+                        "dec": g["dec0"] + (n / 2 - q["y"]) * step,
+                        "mjd": fr[q["f"]]["mjd"],
+                    }
+                    for q in pts
+                    if q["f"] < len(fr)
+                ]
                 add(
                     {
                         "id": find_id("film", ra, dec, str(i)),
@@ -321,6 +348,7 @@ def collect(
                         "data": {
                             "track": t,
                             "mjd": mjd,
+                            "visits": visits,
                             "film": p.get("mjd"),
                             "control": ctl,
                             "less_certain": line,
@@ -398,7 +426,18 @@ def merge(finds: list[dict[str, Any]]) -> list[dict[str, Any]]:
     which lists them all (`data.detections`: place, field size, scans, product version)."""
     out: list[dict[str, Any]] = []
     for f in sorted(finds, key=lambda x: -x.get("fov", 0)):
-        det = {"place": f["place"], "fov": f.get("fov"), "scans": f["scans"], "versions": f.get("versions"), "ra": f["ra"], "dec": f["dec"]}
+        src = (f["data"].get("track") or f["data"].get("source") or {}) if isinstance(f["data"], dict) else {}
+        det = {
+            "place": f["place"],
+            "fov": f.get("fov"),
+            "scans": f["scans"],
+            "versions": f.get("versions"),
+            "ra": f["ra"],
+            "dec": f["dec"],
+            "rate": f.get("rate"),
+            "sigma": f.get("score"),
+            "rate_err": _f(src.get("speed_err")),
+        }
         host = next((o for o in out if same_object(o, f)), None)
         if host is None:
             f["data"]["detections"] = [det]
@@ -409,6 +448,14 @@ def merge(finds: list[dict[str, Any]]) -> list[dict[str, Any]]:
             for k in ("snr", "score"):
                 if (f.get(k) or 0) > (host.get(k) or 0):
                     host[k] = f[k]
+    for h in out:
+        dets = h["data"]["detections"]
+        if h["kind"] in ("mover", "browndwarf") and dets:
+            best = max(dets, key=lambda x: x.get("sigma") or 0.0)  # the best measurement of the object, not the one of the biggest field
+            if best.get("rate") is not None:
+                h["rate"] = best["rate"]
+            h["data"]["rate_err"] = best.get("rate_err")
+            h["data"]["best_detection"] = {k: best.get(k) for k in ("fov", "rate", "rate_err", "sigma", "place")}
     return out
 
 
@@ -644,7 +691,7 @@ class FindingsDB:
         out: list[tuple[float, sqlite3.Row]] = []
         done = {(r["find_id"], r["catalogue"]): r for r in self.db.execute("SELECT * FROM idents")}
         for r in rows:
-            want = list(CATALOGUES) + (["sbident"] if r["kind"] in MOVING else [])
+            want = want_of(r["kind"], r["ra"], r["dec"], json.loads(r["data"] or "{}"))
             worst = None
             for c in want:
                 d = done.get((r["id"], c))
@@ -805,7 +852,9 @@ class Findings:
                 await asyncio.wait_for(self.kick.wait(), SWEEP_S)
             self.kick.clear()
 
-    async def sbident(self, ra: float, dec: float, mjd: float, rate: float | None, pa: float | None) -> dict[str, Any]:
+    async def sbident(
+        self, ra: float, dec: float, mjd: float, rate: float | None, pa: float | None, check_rate: bool = True
+    ) -> dict[str, Any]:
         """JPL's Small-Body Identification at the place and time of a moving find (the position at that very time). A body counts only if it
         stands within 15″, is brighter than V 21, and moves at the find's rate (25 %) and direction (30°); the nearest such body is named with
         both rates. When bodies stand near but none moves like the find, the answer is `none` and says what the nearest was."""
@@ -852,7 +901,7 @@ class Findings:
                 out.update(state="none", note=f"{row[0]} stands {sep:.1f}″ away but JPL gave no rate to compare")
                 continue
             speed, ang = math.hypot(vr, vd), math.degrees(math.atan2(vr, vd)) % 360.0
-            agrees = (
+            agrees = (not check_rate) or (
                 rate is not None
                 and pa is not None
                 and abs(speed - rate) <= SB_RATE_TOL * rate
@@ -890,32 +939,65 @@ class Findings:
             m = d.get("film")
         return _fnum(m)
 
+    async def sbident_visits(self, row: sqlite3.Row) -> dict[str, Any]:
+        """JPL at the dates of the find's visits. A film track: three of its visits (first, middle, last), the same body at two of three at the
+        track's rate; a brown dwarf candidate near the ecliptic: the same body within 15″ at every pass date."""
+        d = json.loads(row["data"])
+        trk = d.get("track") or {}
+        if row["kind"] == "film":
+            vis = d.get("visits") or []
+            sel = [vis[i] for i in sorted({0, len(vis) // 2, len(vis) - 1})] if vis else []
+            rate, pa, check, need = _fnum(trk.get("rate")), _fnum(trk.get("pa")), True, max(1, math.ceil(len(sel) * 2 / 3))
+        else:
+            sel = [{"ra": row["ra"], "dec": row["dec"], "mjd": m} for m in (d.get("mjd") or []) if m is not None]
+            rate, pa, check, need = None, None, False, len(sel)
+        if not sel:
+            return {"state": "unavailable", "error": "no visit dates"}
+        got = [await self.sbident(v["ra"], v["dec"], v["mjd"], rate, pa, check) for v in sel]
+        names = [g["name"] for g in got if g.get("state") == "ok"]
+        best = max(set(names), key=names.count) if names else None
+        per = [
+            {"mjd": v["mjd"], "state": g["state"], "name": g.get("name"), "sep": g.get("sep"), "note": g.get("note")}
+            for v, g in zip(sel, got, strict=True)
+        ]
+        if best is not None and names.count(best) >= need:
+            hit = next(g for g in got if g.get("name") == best)
+            return {**hit, "visits_checked": len(sel), "visits_matched": names.count(best), "per_visit": per}
+        return {
+            "state": "none",
+            "visits_checked": len(sel),
+            "visits_matched": names.count(best) if best else 0,
+            "per_visit": per,
+            "n_bodies": max(g.get("n_bodies", 0) for g in got),
+        }
+
     async def identify_one(self, row: sqlite3.Row) -> None:
-        ctx = await self.catalogue.context(row["ra"], row["dec"], EPOCH, RADIUS)
-        for cat in CATALOGUES:
-            a = ctx.get(cat) or {"state": "unavailable", "error": "no answer"}
-            state, name, sep, typ, detail = _ident_from(cat, a)
-            self.db.put_ident(row["id"], cat, state, name, sep, typ, detail, a)
-        if row["kind"] in MOVING:
-            mjd = self._mjd_of(row)
-            if mjd is None:
-                self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": "no observation time"})
-            else:
-                try:
-                    trk = json.loads(row["data"]).get("track") or {}
-                    a = await self.sbident(row["ra"], row["dec"], mjd, _fnum(trk.get("rate")), _fnum(trk.get("pa")))
-                    self.db.put_ident(
-                        row["id"],
-                        "sbident",
-                        a["state"],
-                        a.get("name"),
-                        a.get("sep"),
-                        None,
-                        {k: a[k] for k in ("v", "n_bodies") if k in a},
-                        a,
-                    )
-                except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
-                    self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": str(e)[:120]})
+        want = want_of(row["kind"], row["ra"], row["dec"], json.loads(row["data"] or "{}"))
+        if "sbident" in want:
+            try:
+                a = await self.sbident_visits(row)
+                keep = (
+                    "v",
+                    "n_bodies",
+                    "body_rate",
+                    "body_pa",
+                    "our_rate",
+                    "our_pa",
+                    "note",
+                    "nearest_rejected",
+                    "visits_checked",
+                    "visits_matched",
+                    "per_visit",
+                )
+                self.db.put_ident(row["id"], "sbident", a["state"], a.get("name"), a.get("sep"), None, {k: a[k] for k in keep if k in a}, a)
+            except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
+                self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": str(e)[:120]})
+        if "simbad" in want:
+            ctx = await self.catalogue.context(row["ra"], row["dec"], EPOCH, RADIUS)
+            for cat in CATALOGUES:
+                a = ctx.get(cat) or {"state": "unavailable", "error": "no answer"}
+                state, name, sep, typ, detail = _ident_from(cat, a)
+                self.db.put_ident(row["id"], cat, state, name, sep, typ, detail, a)
         self.db.db.commit()
 
     async def identify_loop(self) -> None:
@@ -979,7 +1061,7 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         known = ok("vsx")
     if known:
         return "known"
-    want = list(CATALOGUES) + (["sbident"] if kind in MOVING else [])
+    want = want_of(kind, f.get("ra") or 0.0, f.get("dec") or 90.0, d)
 
     def open_(c: str) -> bool:
         i = by.get(c, {})
@@ -1058,7 +1140,7 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         }  # fmt: skip
         ids_ = idents[r["id"]]
         have = {i["catalogue"] for i in ids_}
-        for c in list(CATALOGUES) + (["sbident"] if r["kind"] in MOVING else []):
+        for c in want_of(r["kind"], r["ra"], r["dec"], f["data"]):
             if c not in have:
                 ids_.append(
                     {
