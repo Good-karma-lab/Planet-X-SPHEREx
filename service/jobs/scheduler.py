@@ -121,6 +121,12 @@ class Context:
             raise Cancelled
         if j.priority < Priority.P2 or not self._s.person_waiting():
             return
+        if j.state == "paused":  # another task of this job (a block of its scan) already waits: wait with it, it restores the phase
+            while self._s.person_waiting() and not j._cancel:
+                await asyncio.sleep(0.5)
+            if j._cancel:
+                raise Cancelled
+            return
         before, t0 = j.phase, time.time()
         j.state, j.phase = "paused", "paused: a person is working"
         while self._s.person_waiting() and not j._cancel:

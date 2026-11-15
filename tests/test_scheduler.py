@@ -129,3 +129,32 @@ def test_light_jobs_do_not_wait_behind_heavy_ones_and_errors_are_kept() -> None:
         await s.stop()
 
     asyncio.run(run())
+
+
+def test_blocks_of_one_background_job_pause_together_and_its_phase_comes_back() -> None:
+    async def run() -> None:
+        s = Scheduler()
+        s.start()
+
+        async def blocks(ctx: Context) -> dict[str, Any]:
+            ctx.phase("scanning")
+
+            async def one() -> None:
+                for _ in range(10):
+                    await ctx.checkpoint()
+                    await asyncio.sleep(0.03)
+
+            await asyncio.gather(*(one() for _ in range(4)))
+            return {}
+
+        warm = s.submit("distant", "warm", {}, blocks, Priority.P2, "heavy")
+        await until(lambda: warm.state == "running")
+        person = s.submit("field", "person", {}, sleeper(0.3), Priority.P0, "heavy")
+        await until(lambda: warm.state == "paused")
+        await until(lambda: person.state == "done")
+        await until(lambda: warm.state != "paused")
+        assert warm.phase in ("scanning", "done")
+        await until(lambda: warm.state == "done", timeout=10)
+        await s.stop()
+
+    asyncio.run(run())

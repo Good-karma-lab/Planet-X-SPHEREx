@@ -409,6 +409,7 @@ async def scan_blocks(
         ctx.phase(f"scanning distance and own motion: {len(blocks)} blocks, about {left0:.0f} s", 0, len(blocks))
 
         async def one(a: int, b: int) -> None:
+            await ctx.checkpoint()  # a background scan gives its workers back block by block while a person's job runs
             parts.append(await ctx.compute(edist.search_block, work, a, b, prep["wsum"]))
             secs = time.monotonic() - t0
             left = secs / len(parts) * (len(blocks) - len(parts))

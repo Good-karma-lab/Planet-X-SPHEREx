@@ -213,7 +213,8 @@ def _stack_block(A, B, sh, wsum):
     return best, arg, neg
 
 
-SEARCH_BLOCKS = 96  # at most this many blocks (each its own call, spread over the worker processes)
+SEARCH_BLOCKS = 384  # at most this many blocks (each its own call, spread over the worker processes): a block stays short even
+# in a big scan, so a person waits at most one block for a worker the background holds
 BLOCK_SECONDS = 4.0  # a block should take about this long on one core, so that progress moves and the pool stays busy
 SEC_PER_VISIT_PIXEL = 1.2e-9  # one hypothesis on one core: this many seconds per visit and per pixel of the field
 
