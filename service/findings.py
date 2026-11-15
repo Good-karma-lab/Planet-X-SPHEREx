@@ -55,7 +55,7 @@ CATALOGUE_LABEL = {
 MOVING = (
     "film",
 )  # asked of JPL Small-Body Identification: only tracks within one pass move like an asteroid (the movers between passes are stars)
-COLLECT_REV = 4  # bump when the way finds are read or merged changes: the next sweep rewrites them
+COLLECT_REV = 5  # bump when the way finds are read or merged changes: the next sweep rewrites them
 SB_VMAG = 21.0  # SPHEREx depth: fainter bodies are not what a find could be
 SB_MATCH_ARCSEC = 15.0
 SB_RATE_TOL = 0.25
@@ -478,8 +478,8 @@ def extras(f: dict[str, Any]) -> dict[str, Any]:
                 )
     elif kind == "peak":
         for i, q in enumerate((d.get("peak") or {}).get("by_pass") or []):
-            lc.append({"label": "flux per pass", "mjd": None, "flux": q.get("flux_mjy"), "err": None})
-            pos.append({"label": f"pass {i}", "mjd": None, "ra": q.get("ra"), "dec": q.get("dec"), "snr": q.get("sn")})
+            lc.append({"label": "flux per pass", "mjd": q.get("mjd"), "flux": q.get("flux_mjy"), "err": None})
+            pos.append({"label": f"pass {i}", "mjd": q.get("mjd"), "ra": q.get("ra"), "dec": q.get("dec"), "snr": q.get("sn")})
     prod = _PRODUCT.get(kind, kind)
     return {"positions": pos, "spectrum": spec, "lightcurve": lc, "versions": {prod: VERSIONS.get(prod)}}
 
@@ -1034,7 +1034,7 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
             "red": "Very red in the 4–5 µm bands and no SIMBAD source there.",
             "anomaly": "An odd spectrum and no SIMBAD source there.",
             "pair": "Two sources whose flux changes in place; no catalogue calls it a variable.",
-            "peak": "A candidate of the Find Planet X search: a peak above the bar, not a detection.",
+            "peak": "A candidate of the Find Planet X search: a peak above the bar, not a detection. Its place is the orbit's place at the search's reference date.",
         }.get(kind, "No catalogue names it.")
         if none:
             text += f" Nothing within {RADIUS:.0f}″ in {', '.join(none)}."
