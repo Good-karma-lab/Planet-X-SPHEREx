@@ -66,11 +66,29 @@ export function useFinds(): Reply | null {
   return r;
 }
 
+const GREEK: Record<string, string> = { alf: 'α', bet: 'β', gam: 'γ', del: 'δ', eps: 'ε', zet: 'ζ', eta: 'η', tet: 'θ', iot: 'ι', kap: 'κ', lam: 'λ', mu: 'μ', nu: 'ν', ksi: 'ξ', pi: 'π', rho: 'ρ', sig: 'σ', tau: 'τ', phi: 'φ', chi: 'χ', psi: 'ψ', ome: 'ω' };
+const CONST: Record<string, string> = { Ind: 'Indi', Dra: 'Draconis', Aur: 'Aurigae', Cen: 'Centauri', Eri: 'Eridani', Oph: 'Ophiuchi' };
+/** A SIMBAD name read by people: no leading mark, Greek letters as letters, the constellation in full where it is common. */
+export const cleanName = (n: string) =>
+  n
+    .replace(/^(NAME|\*+)\s+/, '')
+    .replace(/^([a-z]{2,3})(?=\s)/, (m) => GREEK[m] ?? m)
+    .replace(/\s([A-Z][a-z]{1,2})(?=\s|$)/, (m, c) => (CONST[c] ? ` ${CONST[c]}` : m))
+    .replace(/\s+/g, ' ')
+    .trim();
+/** The name a catalogue gave the find, when one did (SIMBAD first). */
+export const knownName = (f: Find) => {
+  const sb = f.idents.find((i) => i.catalogue === 'simbad' && i.state === 'ok' && i.name);
+  return sb ? cleanName(sb.name!) : '';
+};
+
 export function titleOf(f: Find): string {
   const d = f.data;
   switch (f.kind) {
-    case 'mover':
-      return `${(f.rate ?? 0).toFixed(2)}″/yr mover`;
+    case 'mover': {
+      const nm = knownName(f);
+      return nm ? `${nm} · ${(f.rate ?? 0).toFixed(2)}″/yr` : `${(f.rate ?? 0).toFixed(2)}″/yr mover${f.status === 'known' ? ' (a known star)' : ''}`;
+    }
     case 'browndwarf':
       return `${d.group === 'known' ? 'Known brown dwarf' : d.group === 'slow' ? 'Slow red mover' : 'Brown dwarf candidate'} · ${(f.rate ?? 0).toFixed(1)}″/yr`;
     case 'red':
