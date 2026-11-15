@@ -133,7 +133,9 @@ export function PlanetXPage() {
   /** the warm field a peak lies in (the lab opens it ready), else the peak's own place */
   const fieldOf = (pk: Peak) => {
     const f = (searched ?? []).find((x) => sep([x.ra, x.dec], [pk.ra, pk.dec]) < x.fov / 120);
-    return f ? labHref(f) : `#/lab?ra=${pk.ra.toFixed(4)}&dec=${pk.dec.toFixed(4)}&fov=${snap(pk.fov)}`;
+    // the lead is named in the link, with its own place: the Lab marks it on arrival (pulsing ring, 2′ zoom)
+    const mark = `&find=peak:${pk.ra.toFixed(4)},${pk.dec.toFixed(4)}&find_ra=${pk.ra.toFixed(5)}&find_dec=${pk.dec.toFixed(5)}`;
+    return f ? `${labHref(f)}${mark}` : `#/lab?ra=${pk.ra.toFixed(4)}&dec=${pk.dec.toFixed(4)}&fov=${snap(pk.fov)}${mark}`;
   };
   const nLeads = leads?.length ?? 0;
   // one label per place on the model (the newest search of it)

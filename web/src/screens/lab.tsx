@@ -73,6 +73,8 @@ const VIEWS: { id: View; name: string; icon: string; tip: string }[] = [
 ];
 
 /** the detectors whose range holds a band (D1 0.75–1.11, D2 1.11–1.64, D3 1.64–2.42, D4 2.42–3.82, D5 3.82–4.42, D6 4.42–5.00 µm) */
+/** the room under the picture for the status line and the band buttons, px */
+const BELOW = 90;
 const BAND_DETS: Record<string, number[]> = { star: [1], h2o: [2, 3, 4], ch4: [2, 4], ice: [4], pah: [4], co2: [5], co: [6] };
 /** a band's name on a tile too small for the full one */
 const BAND_SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄', ice: 'Ice', pah: 'Dust', co2: 'CO₂', co: 'CO' };
@@ -485,6 +487,7 @@ export function Lab({ route }: { route: Route }) {
   selRef.current = sel;
   const [mv, setMv] = useState<MoversView | null>(null);
   const mvRef = useRef<MoversView | null>(null);
+  const trackNamesRef = useRef<string[]>([]);
   mvRef.current = mv;
   const [an, setAn] = useState<AnomalyView | null>(null);
   const anRef = useRef<AnomalyView | null>(null);
@@ -572,7 +575,7 @@ export function Lab({ route }: { route: Route }) {
   const [trackSel, setTrackSel] = useState(-1);
   const [note, setNote] = useState('');
   const [wallWait, setWallWait] = useState(false);
-  const [trayOpen, setTrayOpen] = useState(() => typeof innerWidth === 'number' && innerWidth > 860 && innerHeight > 640);
+  const [trayOpen, setTrayOpen] = useState(() => typeof innerWidth === 'number' && innerWidth > 860 && innerHeight > 860);
   const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
   const dwarfsRef = useRef<DwarfView | null>(null);
   dwarfsRef.current = dwarfs;
@@ -628,7 +631,7 @@ export function Lab({ route }: { route: Route }) {
     findShown.current = key;
     const kind = findId.split(':')[0] ?? '';
     const name =
-      { anomaly: 'Anomaly', mover: 'Mover', track: 'Mover', red: 'Red source', pair: 'Pair', brown_dwarf: 'Brown dwarf' }[kind] ?? 'Find';
+      { anomaly: 'Anomaly', mover: 'Mover', track: 'Mover', red: 'Red source', pair: 'Pair', brown_dwarf: 'Brown dwarf', peak: 'Find Planet X lead' }[kind] ?? 'Find';
     // the find's own place when the link gives it (the link then opens the field's own centre); else the link's place is the find's
     const fra = Number(p['find_ra']);
     const fdec = Number(p['find_dec']);
@@ -696,7 +699,8 @@ export function Lab({ route }: { route: Route }) {
       const w = Math.max(160, Math.floor(el.clientWidth));
       const h = Math.max(160, Math.floor(el.clientHeight));
       setStage({ w, h });
-      setSide(Math.min(w, h));
+      // under the square: the status line and the band buttons (they used to float over the picture and covered its rings)
+      setSide(Math.min(w, h - (w >= 561 ? BELOW : 0)));
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -996,7 +1000,7 @@ export function Lab({ route }: { route: Route }) {
             }
           } else if (st.view === 'bands') {
             // on a phone the status line sits over the bottom of the picture: the tiles leave room for it
-            const wallRes = w < 560 ? 156 : 124;
+            const wallRes = w < 560 ? 156 : 96;
             const shownBands = BANDS.map((bd, i) => ({ bd, i })).filter((x) => st.bands.includes(x.bd.key));
             panels = wallLayout(shownBands.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the band buttons below
@@ -1023,7 +1027,7 @@ export function Lab({ route }: { route: Route }) {
               };
             });
           } else {
-            const wallRes = w < 560 ? 156 : 124;
+            const wallRes = w < 560 ? 156 : 96;
             const shownDets = st.dets.slice().sort();
             panels = wallLayout(shownDets.length, w, h - wallRes).map((c0, j) => {
               const c = { ...c0, y: c0.y + 48 }; // clear of the title row above and the detector buttons below
@@ -1238,7 +1242,8 @@ export function Lab({ route }: { route: Route }) {
               ra: raN,
               dec: decN,
               kind: 'track',
-              name: `Mover ${ti + 1}`,
+              // the name of the identification (the same as in the lists and the passport), else its number
+              name: ((n) => (n && !n.startsWith('Gaia DR3') ? n : `Mover ${ti + 1}`))(trackNamesRef.current[ti]),
               lines: [line],
               colour: '#ffb454',
               fill: '#ffd08a',
@@ -1595,7 +1600,8 @@ export function Lab({ route }: { route: Route }) {
           const y = box.y + v * box.h;
           if (x < box.x - 30 || y < box.y - 30 || x > box.x + box.w + 30 || y > box.y + box.h + 30) continue;
           if (wall) {
-            if ((mk.kind !== 'target' && !mk.selected) || mk.ghost) continue;
+            // every tile of a wall carries the same rings as the picture (movers, red sources, anomalies, known bodies, the selected one), without names
+            if (mk.ghost) continue;
             ring(x, y, mk, Math.max(8, Math.min(14, box.w / 22)), mk.kind === 'target');
             continue;
           }
@@ -1808,6 +1814,7 @@ export function Lab({ route }: { route: Route }) {
     }
     return identNames[ti] ?? (t.gaia ? `Gaia DR3 ${t.gaia.source_id}` : '');
   });
+  trackNamesRef.current = trackNames;
   // a mover's positions in every pass as an MPC ADES report: built by the service, saved as a file; what the MPC would still need is said (nothing is sent anywhere)
   const [adesNote, setAdesNote] = useState('');
   const downloadAdes = async (t: Track, i: number) => {
@@ -2248,8 +2255,19 @@ export function Lab({ route }: { route: Route }) {
     for (let k = 0; k < pairs.length; k++) {
       const [c0, c1] = pairs[k]!.components;
       if (sep((c0.ra + c1.ra) / 2, (c0.dec + c1.dec) / 2) < tol + (pairs[k]!.separation_arcsec ?? 0) / 2) {
+        // the pair's passport: its numbers, and the passport of the component nearer the click; the pair's own card (pictures per pass) is in Candidates
+        const pr = pairs[k]!;
+        const near0 = sep(c0.ra, c0.dec) <= sep(c1.ra, c1.dec) ? c0 : c1;
+        const nm = (c: typeof c0) => c.simbad?.name ?? (c.gaia?.source_id ? `Gaia DR3 ${c.gaia.source_id}` : 'unnamed');
         setPairSel(k);
-        setTab('cand');
+        openCard(near0.ra, near0.dec, nm(near0), {
+          title: `Pair: ${nm(c0)} and ${nm(c1)}`,
+          rows: [
+            ['Separation', `${pr.separation_arcsec.toFixed(1)}″`],
+            ['Verdict', pr.verdict ?? 'a pair whose relative brightness changed between the passes: the peak seems to move, nothing does'],
+            ...(pr.change_sigma != null ? ([['Largest change between passes', `${pr.change_sigma.toFixed(1)}σ`]] as [string, string][]) : []),
+          ],
+        });
         return;
       }
     }
@@ -2667,7 +2685,7 @@ export function Lab({ route }: { route: Route }) {
                 // whole pixels, so that the 1 px frame is crisp and never one pixel thick in one state and two in another
                 marginLeft: `${Math.max(0, Math.floor((stage.w - side) / 2))}px`,
                 // a phone: the picture sits at the top of its stage (centred, it left a band of empty space above it)
-                marginTop: stage.w < 560 ? '0px' : `${Math.max(0, Math.floor((stage.h - side) / 2))}px`,
+                marginTop: stage.w < 560 ? '0px' : `${Math.max(0, Math.floor((stage.h - side - BELOW) / 2))}px`,
                 cursor: 'crosshair',
               }}
               onClick={(e) => {
