@@ -285,7 +285,7 @@ function Video() {
   return (
     <div class="lp-video">
       {ok ? (
-        <video controls playsInline preload="metadata" poster="/demo/spherex-sky-demo.jpg" src={VIDEO} onError={() => setOk(false)} aria-label="Demo film of SPHEREx Space, captions burned in" />
+        <video controls playsInline preload="metadata" poster="/demo/spherex-sky-demo.jpg" src={VIDEO} onError={() => setOk(false)} aria-label="30-second film of SPHEREx Space with a voice-over and captions" />
       ) : (
         <a class="lp-video-slot" href={APP} aria-label="Open SPHEREx Space">
           <span class="lp-play">
@@ -377,7 +377,7 @@ export function Landing() {
           <div class="lp-wrap">
             <div class="lp-head">
               <div>
-                <p class="lp-eyebrow">See it in a minute</p>
+                <p class="lp-eyebrow">See it in 30 seconds</p>
                 <h2 id="lp-vh">From the whole sky to one moving star.</h2>
               </div>
             </div>
