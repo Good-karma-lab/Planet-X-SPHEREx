@@ -43,11 +43,20 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default="http://127.0.0.1:8780")
     ap.add_argument("--sizes", default="5,10,20,60")
-    ap.add_argument("--places", default="", help="'ra,dec[;ra,dec...]': these 5′ fields (the Planet X lead links) instead of the targets")
+    ap.add_argument(
+        "--places",
+        default="",
+        help="'ra,dec[,fov][;...]': these fields, 5′ unless a size is given (the Planet X lead links) instead of the targets",
+    )
     a = ap.parse_args()
     sizes = {float(x) for x in a.sizes.split(",")}
     if a.places:
-        fields = [WarmField(f"lead {p}", float(p.split(",")[0]), float(p.split(",")[1]), 5.0) for p in a.places.split(";") if p.strip()]
+        fields = [
+            WarmField(f"place {p}", float(q[0]), float(q[1]), float(q[2]) if len(q) > 2 else 5.0)
+            for p in a.places.split(";")
+            if p.strip()
+            for q in [p.split(",")]
+        ]
     else:
         fields = [f for f in warm_set() if f.film_mjd is None and f.label in TARGETS and f.fov in sizes and f.fov >= 5]
     seen: set[tuple[str, float]] = set()
