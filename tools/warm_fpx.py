@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from service.warm import warm_set
+from service.warm import WarmField, warm_set
 
 TARGETS = ("Barnard's Star", "ε Indi B", "WISE 0855−0714", "RW Aurigae", "R Draconis")
 SEARCHES = [(30, 300, None), (30, 300, "4"), (250, 2000, "123"), (250, 2000, "4")]
@@ -43,9 +43,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default="http://127.0.0.1:8780")
     ap.add_argument("--sizes", default="5,10,20,60")
+    ap.add_argument("--places", default="", help="'ra,dec[;ra,dec...]': these 5′ fields (the Planet X lead links) instead of the targets")
     a = ap.parse_args()
     sizes = {float(x) for x in a.sizes.split(",")}
-    fields = [f for f in warm_set() if f.film_mjd is None and f.label in TARGETS and f.fov in sizes and f.fov >= 5]
+    if a.places:
+        fields = [WarmField(f"lead {p}", float(p.split(",")[0]), float(p.split(",")[1]), 5.0) for p in a.places.split(";") if p.strip()]
+    else:
+        fields = [f for f in warm_set() if f.film_mjd is None and f.label in TARGETS and f.fov in sizes and f.fov >= 5]
     seen: set[tuple[str, float]] = set()
     with httpx.Client(base_url=a.base, timeout=600) as c:
         for f in fields:
