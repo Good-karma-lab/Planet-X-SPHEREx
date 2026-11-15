@@ -10,7 +10,7 @@ All numbers were obtained on 2026-11-14. A "live" source is an endpoint of the r
 |---|---|---|
 | Motion of stars against Gaia DR3 | Barnard's Star 11.37 ± 0.47 ″/yr at 5′ and 10.7 ± 0.8 ″/yr at 20′ (Gaia 10.393, 2.1σ at 5′); ε Indi B 4.59 ± 0.49 ″/yr (Gaia 4.684, 0.2σ); WISE 0855−0714 7.93 ± 0.61 ″/yr (SIMBAD 8.15, −0.4σ) | live `/api/v1/movers` on 5′ fields; WISE 0855 from live `/api/v1/browndwarfs` |
 | Known asteroids found blind | 6 of the 8 known bodies brighter than V 19.1 with at least 4 frames in the 60′ ecliptic film of December 2025; 0 of 6 tracks unmatched | live `/api/v1/film/48c5bbb2c5e028b847075c51/tracks` and `/bodies` (JPL Small-Body Identification and Horizons) |
-| Find Planet X on known bodies | Eris: three passes linked by one orbit 95.6 ± 0.4 au, third pass confirmed; each pass alone 70–165 au (first pass). Makemake: two passes linked 52.5 ± 0.2 au, not confirmed | live `/api/v1/distant` and `/api/v1/link` runs, 2026-11-15 (keys in Bodies beyond Neptune) |
+| Find Planet X on known bodies | Eris: three passes linked by one orbit 95.6 ± 0.4 au, third pass confirmed; each pass alone 70–165 au (first pass). Makemake: two passes linked 52.5 ± 0.2 au, not confirmed; Sedna: blind deep sum of three passes peaks at 83.0 au (JPL 83.0), 8.2σ between the noise ceiling 8.07σ and the bar 8.48σ, a strong lead and not a formal detection | live `/api/v1/distant` and `/api/v1/link` runs, 2026-11-15 (keys in Bodies beyond Neptune) |
 | Chance controls | 0.0 chance tracks per field between passes (20 trials, five 5′ fields and ε Indi at 10′, 20′, 60′); in the film search 0.0 at 4 or more visits (12 trials) and 1.83 per trial at 3 or more | live `/api/v1/movers` and the film's search result |
 | Wavelength, index and engine | wavelength of a pixel: median difference 0.00008–0.00048 µm against IRSA's per-pixel calibration; PSF identical in 12 of 12 detector-release pairs; index of 1,628,230 files; the number of exposures that hold a body equals IRSA's Moving Object Search Tool for 4 of 4 asteroids | `docs/validation/` reports of 2026-11-14 |
 
@@ -64,6 +64,8 @@ We search Eris and Makemake blind in one pass and link the passes; the distances
 **Result:** Eris, three passes linked by one orbit, 95.6 ± 0.4 au with the third pass confirmed; one pass alone gives only a wide range. Source: live runs on spherex.space, 2026-11-15 (keys 5fe287a1cf7b66ba53baadea, 4c25da646369e21eff3f3df7, cc3ed6461aa1f971864801a8).
 
 **Result:** Makemake, two passes linked, 52.5 ± 0.2 au (not confirmed by a third pass). Source: live runs, 2026-11-15 (keys 54c02b2d2ff66213f303847d, 15340cf077cd7c68b891a29e).
+
+**Result:** Sedna, blind deep sum of three passes of one field, peaks at 83.0 au against JPL's 83.0 au, 0.5 to 0.8 arcseconds from JPL's place in each pass; the signal, 8.2σ, is above the noise ceiling (8.07σ) and below the bar (8.48σ), so it is a strong lead and not a formal detection. Source: live run, key a4d42817cf7c533afe5542d1, 2026-11-15.
 
 [figure: slider-eris | Eris, found blind by the live service: each pass alone gives a wide range of distances; three passes linked by one orbit give 95.6 ± 0.4 au (JPL 95.5)]
 

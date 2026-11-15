@@ -150,12 +150,17 @@ Each row is one run on the live service, with the method that gave it and its ke
 | Makemake, pass 1 | one-pass distance search | scan 16.0σ, photometry 10.9σ | live key 54c02b2d2ff66213f303847d, 2026-11-15 |
 | Makemake, pass 2 | one-pass distance search | scan 14.6σ, photometry 10.3σ | live key 15340cf077cd7c68b891a29e, 2026-11-15 |
 | Makemake, the two tracks | link of passes | 52.5 ± 0.2 au, misfit 1.5″, not confirmed (two passes only) | live link of the two keys above, 2026-11-15 |
+| Sedna, deep sum of three passes, one 18 arcmin field centred on JPL's place, D1-D3, 75-92 au, all bound orbits, no prior, 6,023,296 orbits, 6,900 s | deep sum | strongest peak at 83.0 au (JPL 83.0 au); pass-sum signal 8.2 sigma (8.3 sigma tuned) against a noise ceiling of 8.07 sigma and a bar of 8.48 sigma: above the ceiling, below the bar, so a strong lead and not a formal detection; photometry 0.036 ± 0.005 mJy, 7.5 sigma (per pass 5.9, 4.8 and 0.9 sigma); 0 of 4 control tracks reach 5 sigma | live key a4d42817cf7c533afe5542d1, 2026-11-15 |
 
 **Result:** Linking the three Eris tracks with one orbit gives 95.6 ± 0.4 au, with the third pass confirmed by the orbit. Source: live link of keys 5fe287a1…, 4c25da64…, cc3ed646…, 2026-11-15.
 
 **Result:** Each single pass of Eris gives only a wide distance range (70 to 165 au in the first); linking the passes pins the distance. Source: the same live runs.
 
 **Result:** Linking the two Makemake tracks gives 52.5 ± 0.2 au with a misfit of 1.5″; with two passes only, the link is not confirmed by a third. Source: live link of keys 54c02b2d… and 15340cf0…, 2026-11-15.
+
+**Result:** The blind deep sum of three passes of Sedna's field peaks at 83.0 au against JPL's 83.0 au, at 8.2 sigma between a noise ceiling of 8.07 sigma and a bar of 8.48 sigma; by our rule it is a strong lead and not a formal detection. Source: live deep sum, key a4d42817cf7c533afe5542d1, 2026-11-15.
+
+**Result:** The place of that peak lies 0.8, 0.5 and 0.8 arcseconds from Sedna's JPL position at the mean exposure date of each of the three passes. Source: the same run, compared with JPL Horizons at each pass's own date.
 
 ## What it can and cannot say
 

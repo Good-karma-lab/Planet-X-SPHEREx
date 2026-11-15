@@ -18,6 +18,7 @@ Every search on this site has a depth and a set of conditions under which it wor
 - Saturated stars have no SPHEREx spectrum, and RW Aurigae and R Draconis give no tracks for the same reason; the spectrum tab says so and shows the catalogue photometry instead.
 - A spectrum checked against 2MASS and WISE is checked on the stars we measured (a field star and ε Indi B); we have no statistic over many stars.
 - One pass of the search for bodies beyond Neptune finds a place but does not fix the distance: a single pass of Eris gave a range of 70 to 165 au, and the link of three passes gave 95.6 ± 0.4 au (live runs, 2026-11-15); two passes of Makemake are linked but not confirmed by a third.
+- The blind deep sum of Sedna's field is above its noise ceiling and below its bar, so we call it a strong lead and not a formal detection (live run, 2026-11-15).
 - The quick look from the all-sky cube is a placeholder for a few seconds, from a 12.9 arcsecond pixel, and is never a measurement of a source.
 - The survey's own time sampling limits what the film shows: visits come a few times a day with gaps of days, so a body that crosses a field between visits is seen in few frames.
 
