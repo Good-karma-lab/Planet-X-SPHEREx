@@ -50,6 +50,7 @@ LAST_HOLD_MS = 1800  # the last pass stays a little longer before the clip start
 QUALITY = 82
 CLIP_FOV = 5.0  # the field built for a clip when no finished field will do
 MAX_BUILDS = 2  # fields being built for clips at once (running or queued); further clips wait their turn and are asked for again
+LABELS_MIN_SIZE = 200  # a clip smaller than this carries no dates and no width (they would run into each other)
 RING_ARCSEC = 15.0  # radius of the ring round the object
 MOVING = ("mover", "browndwarf", "peak")  # kinds whose motion between passes is a few arcseconds: they want the fine grid
 FIELD = "field"
@@ -320,6 +321,7 @@ def draw_frame(
     corner: str,
     size: int = SIZE,
     motion: tuple[str, float | None] | None = None,
+    labels: bool = True,
 ) -> Image.Image:
     """One frame: the window enlarged to `size`, the ring (if the object is in this pass), the dates of the pass and the width of
     the window. `motion` = (the measured rate as text, the direction as a position angle in degrees east of north or None): the rate is
@@ -350,6 +352,8 @@ def draw_frame(
             d.polygon(head, fill=(127, 240, 228, 255))
     over = over.resize((size, size), Image.Resampling.LANCZOS)
     img = Image.alpha_composite(img.convert("RGBA"), over)
+    if not labels:  # a small picture (a row of a list): the text would not be readable
+        return img.convert("RGB")
     d2 = ImageDraw.Draw(img)
     _text(d2, (8, size - 8), label, 13, "ls")
     if motion is not None and size >= 200:
@@ -372,7 +376,12 @@ _LOOKS: OrderedDict[tuple[str, int], PassLook] = OrderedDict()
 
 
 def render(
-    find: dict[str, Any], src: Source, window_arcmin: float = WINDOW_ARCMIN, size: int = SIZE, with_ring: bool = True
+    find: dict[str, Any],
+    src: Source,
+    window_arcmin: float = WINDOW_ARCMIN,
+    size: int = SIZE,
+    with_ring: bool = True,
+    labels: bool = True,
 ) -> tuple[bytes, dict[str, Any]]:
     """The clip of `find` cut from the field `src`: (animated WebP, what it shows). Raises ClipUnavailable when the field has no pass
     there."""
@@ -415,9 +424,8 @@ def render(
         if with_ring and -0.5 <= rx - x0 <= w - 0.5 and -0.5 <= ry - y0 <= w - 0.5:
             ring = (rx - x0, ry - y0)
         label = date_label(float(p["mjd0"]), float(p["mjd1"]))
-        frames.append(
-            draw_frame(pic, ring, RING_ARCSEC / grid.step_arcsec, label, f"{window_arcmin:g} arcmin", size, motion if ring else None)
-        )
+        mot = motion if ring else None
+        frames.append(draw_frame(pic, ring, RING_ARCSEC / grid.step_arcsec, label, f"{window_arcmin:g} arcmin", size, mot, labels))
         shown.append({"pass": int(p["index"]), "mjd0": p["mjd0"], "mjd1": p["mjd1"], "label": label, "ra": ra, "dec": dec})
     if not frames:
         raise ClipUnavailable("no pass of the field covers this place")
@@ -735,11 +743,12 @@ class Clips:
                 atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
         return p
 
-    async def place(self, ra: float, dec: float, size: int = 170, ring: bool = False) -> Path:
+    async def place(self, ra: float, dec: float, size: int = 170, ring: bool = False, labels: bool = True) -> Path:
         """The same time-lapse centred on a place (a mark, a row of the cabinet), cut ONLY from a field that is already finished: it
         never starts a field job. The place is rounded to 1e-4°. Raises ClipUnavailable when no finished field holds it."""
         ra, dec = round(ra % 360.0, 4), round(dec, 4)
-        fid = f"place_{ra:.4f}_{dec:+.4f}_s{size}{'_r' if ring else ''}"
+        labels = labels and size >= LABELS_MIN_SIZE  # the dates do not fit a small picture: it carries no text
+        fid = f"place_{ra:.4f}_{dec:+.4f}_s{size}{'_r' if ring else ''}{'' if labels else '_t0'}"
         p = self.path(fid)
         if p.is_file():
             return p
@@ -749,7 +758,7 @@ class Clips:
             raise ClipUnavailable("no SPHEREx field covers this place yet")
         async with self.gate:
             if not p.is_file():
-                data, info = await asyncio.to_thread(render, find, src, WINDOW_ARCMIN, size, ring)
+                data, info = await asyncio.to_thread(render, find, src, WINDOW_ARCMIN, size, ring, labels)
                 atomic_write_bytes(p, data)
                 atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
         return p

@@ -218,6 +218,14 @@ def test_the_routes_serve_the_clip_once_rendered_and_say_why_there_is_none(tmp_p
     # a place (a row of the cabinet): the same picture without a ring, only from a finished field, never a field job
     pl = client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=96")
     assert pl.status_code == 200 and pl.headers["content-type"] == "image/webp" and _frames(pl.content)[0].shape == (96, 96, 3)
+    # labels=0 and a small picture carry no text: the date is on the 320 px frame and not on the bare one
+    big, bare = (client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=320{q}").content for q in ("", "&labels=0"))
+
+    def strip(b: bytes) -> np.ndarray:
+        return _frames(b)[0][-22:-4, 4:150]
+
+    assert float(np.abs(strip(big) - strip(bare)).max()) > 100.0
+    assert st.clips.path(f"place_{RA0:.4f}_{DEC0:+.4f}_s96_t0").is_file()  # 96 px: made without text whatever was asked
     off = client.get(f"/api/clips/place.webp?ra={RA0 + 5}&dec={DEC0}")
     assert off.status_code == 404 and off.json()["state"] == "none" and not st.clips.building
     assert client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=97").status_code == 422
