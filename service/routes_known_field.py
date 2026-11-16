@@ -35,20 +35,24 @@ def make_known_field_router(st: Any, prefix: str = "/api") -> APIRouter:
         size_arcmin: float = Query(..., ge=1.0, le=60.0),
         epochs: str = Query(..., max_length=800),
         compact: int = Query(0, ge=0, le=1),
+        match: int = Query(1, ge=0, le=1),
     ) -> Any:
         """Every Gaia DR3 star, SIMBAD object and JPL body of the square frame, with its place at each epoch (a Julian year such as
         2025.93, or an MJD above 3000: the pass date, which JPL bodies need). `answered` says which catalogue answered.
-        `compact=1`: objects without a label carry only id, source, positions, mag. Sent gzip-compressed."""
+        `compact=1`: objects without a label carry only id, source, positions, mag. `match` (unless `match=0`): the sources of the
+        deeper catalogues (Gaia to G 21, CatWISE2020, AllWISE, 2MASS) merged by position, for matching only, never drawn; their states
+        in `status.match`. Sent gzip-compressed."""
         try:
             eps = [float(x) for x in epochs.split(",") if x.strip()]
         except ValueError:
             raise HTTPException(400, "epochs: numbers separated by commas") from None
         if not eps or len(eps) > MAX_EPOCHS or not all(1990.0 <= e <= 2100.0 or 48000.0 <= e <= 90000.0 for e in eps):
             raise HTTPException(400, f"epochs: 1 to {MAX_EPOCHS} Julian years (1990-2100) or MJDs")
-        out = await known_field_of(st).objects(round(ra, 5), round(dec, 5), round(size_arcmin, 1), eps)
+        out = await known_field_of(st).objects(round(ra, 5), round(dec, 5), round(size_arcmin, 1), eps, match=bool(match))
         if compact:  # objects without a label keep only what a thin ring needs
             keep = ("id", "source", "positions", "mag", "label")
             out = {**out, "objects": [o if o["label"] else {k: o[k] for k in keep} for o in out["objects"]]}
+            out["match"] = [{k: m[k] for k in ("id", "catalogues", "positions", "mag")} for m in out.get("match", [])]
         body = json.dumps(out, separators=(",", ":")).encode()
         headers = {"Vary": "Accept-Encoding"}
         if len(body) > 1000 and "gzip" in request.headers.get("accept-encoding", ""):

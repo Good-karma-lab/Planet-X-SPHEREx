@@ -205,3 +205,24 @@ def test_route(tmp_path: Path) -> None:
         assert set(thin) == {"id", "source", "positions", "mag", "label"} and len(small["objects"]) == len(r.json()["objects"])
         assert c.get("/api/known", params={"ra": 1, "dec": 1, "size_arcmin": 6, "epochs": "x"}).status_code == 400
         assert c.get("/api/known", params={"ra": 1, "dec": 1, "size_arcmin": 600, "epochs": "2026"}).status_code == 422
+
+
+def test_match_list_merges_the_deep_catalogues_and_leaves_out_the_drawn() -> None:
+    from service.known_field import match_list
+
+    ra, dec = 133.78, -7.24
+    deep = {
+        # an infrared star in CatWISE, AllWISE and 2MASS (1″ apart), one in 2MASS alone, and one on a drawn Gaia star
+        "catwise": {"state": "ok", "rows": [["J0855a", ra, dec, 0.0, 0.0, 14.1]]},
+        "allwise": {"state": "ok", "rows": [["J0855b", ra + 1.0 / 3600.0, dec, 0.0, 0.0, 14.2]]},
+        "twomass": {
+            "state": "ok",
+            "rows": [["J0855c", ra, dec + 1.0 / 3600.0, 0.0, 0.0, 15.0], ["J0855d", ra + 0.01, dec, 0.0, 0.0, 16.0]],
+        },
+        "gaia": {"state": "unavailable", "error": "down"},
+    }
+    drawn = [{"positions": [{"epoch": 2025.4, "ra": ra + 0.01, "dec": dec}]}]
+    out, status = match_list(ra, dec, 5.0, [2025.4, 2025.9], drawn, deep)
+    assert len(out) == 1
+    assert out[0]["catalogues"] == ["2MASS", "AllWISE", "CatWISE2020"] and out[0]["id"] == "catwise:J0855a"
+    assert status["gaia"]["state"] == "unavailable" and status["catwise"]["merged_into"] == 1

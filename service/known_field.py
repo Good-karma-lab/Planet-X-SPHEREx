@@ -8,6 +8,16 @@ object and JPL Solar System body inside a square frame, each with its place at e
     JPL      Small-Body Identification at the time of each epoch (geocentric, V <= 20.5): the bodies in the frame at that time, with the
              place JPL gives; an epoch given as a year with one decimal is 36 days wide, so the caller gives the pass date (MJD)
 
+For MATCHING only (never drawn: the `match` list beside `objects`), the frame is also asked of deeper catalogues, so that a
+lab "no catalogue match" means unknown, not merely fainter than the drawn rings:
+    Gaia     the stars of GAIA_MAG_LIMIT < G <= GAIA_MATCH_MAG (moved by proper motion as above)
+    CatWISE2020  W1/W2 sources with their own proper motion (epoch 2015.4): the infrared stars Gaia does not see
+    AllWISE  W1-W4 sources (epoch 2010.5, no motion)
+    2MASS    J/H/Ks point sources (epoch 1999.5, no motion)
+merged by position (MATCH_MERGE_ARCSEC at the first epoch; one entry lists every catalogue that has the source) and without the
+sources already in `objects`. Each deep catalogue says its own state in `status.match`; one that did not answer is said, never taken
+for "nothing there".
+
 The catalogue rows are kept on disk per field (the propagation is done per request, in numpy); a catalogue that did not answer is said
 in `answered` and `status`, never shown as an empty field. JPL allows one identification every 15 s: epochs not answered within
 JPL_WAIT_S stay `pending`, are asked in the background and kept, so the next request has them.
@@ -41,6 +51,18 @@ from service.upstream.breaker import Breaker, BreakerOpenError
 GAIA_EPOCH, SIMBAD_EPOCH = 2016.0, 2000.0
 GAIA_MAG_LIMIT = 19.0  # fainter Gaia stars are not seen in one SPHEREx pass; a fast one is kept whatever its magnitude
 GAIA_FAST_KEEP_MAS = 100.0
+GAIA_MATCH_MAG = 21.0  # matching goes this deep in Gaia (the drawn rings stop at GAIA_MAG_LIMIT)
+MATCH_MAX_ROWS = 30000  # per deep catalogue (said in `status.match.<cat>.truncated`)
+MATCH_MERGE_ARCSEC = 2.5  # one source in several catalogues: WISE places are good to about an arcsecond, the pixel is 6″
+MATCH_WAIT_S = 25.0  # a deep catalogue that has not answered by then is `pending` (asked on in the background, kept for the next ask)
+IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
+# deep catalogue -> (IRSA table, columns, epoch, magnitude column, its band, proper motion unit in mas/yr or None)
+IRSA_MATCH: dict[str, tuple[str, str, float, str, str, float | None]] = {
+    "catwise": ("catwise_2020", "source_name AS id, ra, dec, w1mpro AS mag, pmra, pmdec", 2015.4, "mag", "W1", 1000.0),
+    "allwise": ("allwise_p3as_psd", "designation AS id, ra, dec, w1mpro AS mag", 2010.5, "mag", "W1", None),
+    "twomass": ("fp_psc", "designation AS id, ra, dec, k_m AS mag", 1999.5, "mag", "Ks", None),
+}
+MATCH_NAMES = {"gaia": "Gaia DR3", "catwise": "CatWISE2020", "allwise": "AllWISE", "twomass": "2MASS"}
 GAIA_MAX_ROWS = 20000  # the brightest this many of a crowded field (said in `status.gaia.truncated`)
 SIMBAD_MAX_ROWS = 5000
 FAST_MAS = 200.0  # `label: true` at or above this total proper motion (mas/yr): 0.2″ a year, the stars that visibly shift over the mission
@@ -145,7 +167,7 @@ class KnownField:
         self.dir = cache_dir(store_dir)
         self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(45, connect=6), headers={"User-Agent": "spherex-sky/0.1"})
         shared = breakers or {}
-        self.breakers = {k: shared.get(k) or Breaker(k) for k in ("simbad", "simbad2", "gaia")}
+        self.breakers = {k: shared.get(k) or Breaker(k) for k in ("simbad", "simbad2", "gaia", "irsa")}
         self.breakers["jpl"] = Breaker("JPL Small-Body Identification")
         self.memory: dict[str, tuple[float, dict[str, Any]]] = {}
         self.tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
@@ -370,16 +392,113 @@ class KnownField:
         return await self._kept(name, fetch, wait_s)
 
     # ---- the frame --------------------------------------------------------------------------------------------------------------------
+    # ---- the deeper catalogues, for matching -----------------------------------------------------------------------------------------
+    async def gaia_deep(self, ra: float, dec: float, size_arcmin: float, wait_s: float | None = MATCH_WAIT_S) -> dict[str, Any]:
+        """Gaia stars of GAIA_MAG_LIMIT < G <= GAIA_MATCH_MAG in the frame (rows as in `gaia`)."""
+        radius = (size_arcmin * 60.0 / 2.0 * math.sqrt(2.0) + GAIA_MARGIN_ARCSEC) / 3600.0
+
+        async def fetch() -> dict[str, Any]:
+            err: Exception | None = None
+            for url, table, label in GAIA_TAPS:
+                adql = (
+                    f"SELECT TOP {MATCH_MAX_ROWS + 1} source_id, ra, dec, pmra, pmdec, parallax, phot_g_mean_mag FROM {table} "
+                    f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {radius:.6f})) "
+                    f"AND phot_g_mean_mag > {GAIA_MAG_LIMIT} AND phot_g_mean_mag <= {GAIA_MATCH_MAG}"
+                )
+                try:
+                    body = await self._post("gaia", url, {"REQUEST": "doQuery", "LANG": "ADQL", "FORMAT": "csv", "QUERY": adql})
+                    if body.lstrip().startswith("<"):
+                        raise ValueError("the archive answered an error page")
+                    rows = []
+                    for r in csv.DictReader(io.StringIO(body)):
+                        a, d = _num(r.get("ra")), _num(r.get("dec"))
+                        if a is None or d is None:
+                            continue
+                        rows.append(
+                            [
+                                str(r.get("source_id")),
+                                a,
+                                d,
+                                _num(r.get("pmra")) or 0.0,
+                                _num(r.get("pmdec")) or 0.0,
+                                0.0,
+                                _num(r.get("phot_g_mean_mag")),
+                            ]
+                        )
+                    return {"state": "ok", "via": label, "truncated": len(rows) > MATCH_MAX_ROWS, "rows": rows[:MATCH_MAX_ROWS]}
+                except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
+                    err = e
+            raise err or RuntimeError("no Gaia archive answered")
+
+        return await self._kept(f"gaiadeep_{ra:.4f}_{dec:.4f}_{size_arcmin:.1f}", fetch, wait_s)
+
+    async def irsa_match(self, cat: str, ra: float, dec: float, size_arcmin: float, wait_s: float | None = MATCH_WAIT_S) -> dict[str, Any]:
+        """One IRSA catalogue over the frame: rows [id, ra, dec, pmra_mas, pmdec_mas, mag] at the catalogue's epoch."""
+        table, cols, _, _, _, pm_unit = IRSA_MATCH[cat]
+        margin = SIMBAD_MARGIN_ARCSEC if pm_unit else EDGE_ARCSEC + MATCH_MERGE_ARCSEC
+        radius = (size_arcmin * 60.0 / 2.0 * math.sqrt(2.0) + margin) / 3600.0
+
+        async def fetch() -> dict[str, Any]:
+            adql = (
+                f"SELECT TOP {MATCH_MAX_ROWS + 1} {cols} FROM {table} "
+                f"WHERE CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {radius:.6f})) = 1"
+            )
+            br = self.breakers["irsa"]
+            br.before()
+            try:
+                r = await self.client.post(IRSA_TAP, data={"LANG": "ADQL", "FORMAT": "csv", "QUERY": adql}, timeout=90.0)
+                r.raise_for_status()
+                if r.text.lstrip().startswith("<"):
+                    raise ValueError("IRSA answered an error page")
+            except Exception:
+                br.failure()
+                raise
+            br.success()
+            rows = []
+            for row in csv.DictReader(io.StringIO(r.text)):
+                a, d = _num(row.get("ra")), _num(row.get("dec"))
+                if a is None or d is None:
+                    continue
+                k = pm_unit or 0.0
+                rows.append(
+                    [
+                        str(row.get("id") or "").strip(),
+                        a,
+                        d,
+                        (_num(row.get("pmra")) or 0.0) * k,
+                        (_num(row.get("pmdec")) or 0.0) * k,
+                        _num(row.get("mag")),
+                    ]
+                )
+            return {"state": "ok", "via": f"IRSA {table}", "truncated": len(rows) > MATCH_MAX_ROWS, "rows": rows[:MATCH_MAX_ROWS]}
+
+        return await self._kept(f"{cat}_{ra:.4f}_{dec:.4f}_{size_arcmin:.1f}", fetch, wait_s)
+
+    def _deep_parts(self, ra: float, dec: float, size_arcmin: float, wait_s: float | None) -> list[Any]:
+        return [self.gaia_deep(ra, dec, size_arcmin, wait_s), *(self.irsa_match(c, ra, dec, size_arcmin, wait_s) for c in IRSA_MATCH)]
+
     async def objects(
-        self, ra: float, dec: float, size_arcmin: float, epochs: list[float], jpl_wait_s: float | None = JPL_WAIT_S
+        self,
+        ra: float,
+        dec: float,
+        size_arcmin: float,
+        epochs: list[float],
+        jpl_wait_s: float | None = JPL_WAIT_S,
+        match: bool = True,
+        match_wait_s: float | None = MATCH_WAIT_S,
     ) -> dict[str, Any]:
         epochs = epochs[:MAX_EPOCHS]
-        gaia, simbad, *bodies = await asyncio.gather(
+        deep: dict[str, Any] = {}
+        gaia, simbad, *rest = await asyncio.gather(
             self.gaia(ra, dec, size_arcmin),
             self.simbad(ra, dec, size_arcmin),
             *(self.jpl_at(ra, dec, size_arcmin, epoch_mjd(e), jpl_wait_s) for e in epochs),
+            *(self._deep_parts(ra, dec, size_arcmin, match_wait_s) if match else []),
         )
-        return await asyncio.to_thread(assemble, ra, dec, size_arcmin, epochs, gaia, simbad, bodies)
+        bodies = rest[: len(epochs)]
+        if match:
+            deep = {"gaia": rest[len(epochs)], **dict(zip(IRSA_MATCH, rest[len(epochs) + 1 :], strict=True))}
+        return await asyncio.to_thread(assemble, ra, dec, size_arcmin, epochs, gaia, simbad, bodies, deep)
 
 
 def _status(part: dict[str, Any]) -> dict[str, Any]:
@@ -397,8 +516,10 @@ def assemble(
     gaia: dict[str, Any],
     simbad: dict[str, Any],
     bodies: list[dict[str, Any]],
+    deep: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The answer of `GET /api/known` from the kept catalogue rows: places at every epoch, the frame cut, SIMBAD names on Gaia stars."""
+    """The answer of `GET /api/known` from the kept catalogue rows: places at every epoch, the frame cut, SIMBAD names on Gaia stars;
+    with `deep` (the deeper catalogues) also the `match` list."""
     half = size_arcmin * 60.0 / 2.0 + EDGE_ARCSEC
     objects: list[dict[str, Any]] = []
 
@@ -502,14 +623,16 @@ def assemble(
     err = next((b.get("error") for b in bodies if b.get("error")), None)
     if err:
         jpl_status["error"] = err
+    out_match, match_status = match_list(ra, dec, size_arcmin, epochs, objects, deep) if deep else ([], {})
     return {
         "objects": objects,
+        "match": out_match,
         "answered": {
             "gaia": gaia.get("state") == "ok",
             "simbad": simbad.get("state") == "ok",
             "jpl": bool(epochs) and jpl_status["state"] == "ok",
         },
-        "status": {"gaia": _status(gaia), "simbad": _status(simbad), "jpl": jpl_status},
+        "status": {"gaia": _status(gaia), "simbad": _status(simbad), "jpl": jpl_status, **({"match": match_status} if deep else {})},
         "frame": {"ra": ra, "dec": dec, "size_arcmin": size_arcmin, "epochs": epochs},
         "thresholds": {
             "label_pm_mas_yr": FAST_MAS,
@@ -517,5 +640,85 @@ def assemble(
             "gaia_mag_limit": GAIA_MAG_LIMIT,
             "gaia_fast_keep_mas_yr": GAIA_FAST_KEEP_MAS,
             "jpl_v_limit": V_LIMIT,
+            "gaia_match_mag": GAIA_MATCH_MAG,
+            "match_merge_arcsec": MATCH_MERGE_ARCSEC,
         },
     }
+
+
+def match_list(
+    ra: float, dec: float, size_arcmin: float, epochs: list[float], objects: list[dict[str, Any]], deep: dict[str, Any]
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """The deeper catalogues merged by position, without the sources already in `objects`: [{id, catalogues, ids, mag, mag_band,
+    pm_total, positions}] and the state of each catalogue. Sources are taken in the order CatWISE2020 (it has its own motion), Gaia,
+    AllWISE, 2MASS: the first one's place and motion stand for the merged source."""
+    status = {c: _status(deep.get(c) or {"state": "unavailable"}) for c in ("gaia", "catwise", "allwise", "twomass")}
+    if not epochs:
+        return [], status
+    half = size_arcmin * 60.0 / 2.0 + EDGE_ARCSEC
+    src: list[tuple[str, str, float | None, str, float]] = []  # (catalogue, id, mag, band, pm_total)
+    pos_r: list[np.ndarray] = []
+    pos_d: list[np.ndarray] = []
+    for cat in ("catwise", "gaia", "allwise", "twomass"):
+        part = deep.get(cat) or {}
+        rows = (part.get("rows") or []) if part.get("state") == "ok" else []
+        if not rows:
+            continue
+        if cat == "gaia":
+            a = np.array([r[1:6] for r in rows], float).reshape(-1, 5)
+            pr, pd = propagate(a[:, 0], a[:, 1], a[:, 2], a[:, 3], a[:, 4], GAIA_EPOCH, epochs)
+            mags, band = [r[6] for r in rows], "G"
+        else:
+            _, _, epoch, _, band, _ = IRSA_MATCH[cat]
+            a = np.array([r[1:5] for r in rows], float).reshape(-1, 4)
+            pr, pd = propagate(a[:, 0], a[:, 1], a[:, 2], a[:, 3], np.zeros(len(a)), epoch, epochs)
+            mags = [r[5] for r in rows]
+        for i, r in enumerate(rows):
+            src.append((cat, str(r[0]), mags[i], band, float(math.hypot(a[i, 2], a[i, 3]))))
+        pos_r.append(pr)
+        pos_d.append(pd)
+    if not src:
+        return [], status
+    pr = np.vstack(pos_r)
+    pd = np.vstack(pos_d)
+    east, north = offsets_arcsec(pr, pd, ra, dec)
+    keep = ((np.abs(east) <= half) & (np.abs(north) <= half)).any(axis=1)
+    # the sources already drawn (objects) at the first epoch: a deep source on one of them is that object
+    drawn = [(o["positions"][0]["ra"], o["positions"][0]["dec"]) for o in objects if o.get("positions")]
+    xy = np.column_stack(offsets_arcsec(pr[:, 0], pd[:, 0], ra, dec))
+    if drawn:
+        dr = np.array(drawn, float)
+        d_tree = cKDTree(np.column_stack(offsets_arcsec(dr[:, 0], dr[:, 1], ra, dec)))
+        dist, _ = d_tree.query(xy, distance_upper_bound=MATCH_MERGE_ARCSEC)
+        keep &= ~np.isfinite(dist)
+    idx = np.flatnonzero(keep)
+    out: list[dict[str, Any]] = []
+    if not len(idx):
+        return out, status
+    tree = cKDTree(xy[idx])
+    taken = np.zeros(len(idx), bool)
+    for k in range(len(idx)):  # in catalogue order: the first source of a group stands for it
+        if taken[k]:
+            continue
+        group = [j for j in tree.query_ball_point(xy[idx[k]], MATCH_MERGE_ARCSEC) if not taken[j]]
+        for j in group:
+            taken[j] = True
+        i = int(idx[k])
+        cat, sid, mag, band, pm = src[i]
+        members = [src[int(idx[j])] for j in sorted(group)]
+        out.append(
+            {
+                "id": f"{cat}:{sid}",
+                "catalogues": sorted({MATCH_NAMES[m[0]] for m in members}),
+                "ids": [f"{m[0]}:{m[1]}" for m in members],
+                "mag": None if mag is None else round(float(mag), 2),
+                "mag_band": band,
+                "pm_total": round(pm, 1),
+                "positions": [
+                    {"epoch": e, "ra": round(float(pr[i, n]), 6), "dec": round(float(pd[i, n]), 6)} for n, e in enumerate(epochs)
+                ],
+            }
+        )
+    for c in status:
+        status[c]["merged_into"] = sum(1 for o in out if MATCH_NAMES[c] in o["catalogues"])
+    return out, status
