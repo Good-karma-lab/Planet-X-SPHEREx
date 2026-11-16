@@ -14,6 +14,8 @@ export interface Mark {
   dec: number;
   /** the pass on show when the mark was put (its index in the field), null when it belongs to no pass */
   pass: number | null;
+  /** the date of the frame the mark was put on, MJD (the middle of the pass, or the visit's time in Days) */
+  mjd?: number | null;
   label: string;
   level: MarkLevel;
   note: string;
@@ -175,9 +177,9 @@ export async function setMarksSync(r: MarksRemote | null): Promise<void> {
   }
 }
 
-/** The key of a lab field: its centre to 1e-4° and its size in arcminutes ("269.4486,+4.7379,5"). */
+/** The key of a lab field, "ra,dec,fov": its centre to 1e-5° and its size in arcminutes ("269.44629,4.76792,5"). */
 export function fieldKey(ra: number, dec: number, fov: number): string {
-  return `${ra.toFixed(4)},${dec >= 0 ? '+' : ''}${dec.toFixed(4)},${fov}`;
+  return `${ra.toFixed(5)},${dec.toFixed(5)},${fov}`;
 }
 
 /** For tests: another store (or none) and a clean state. */

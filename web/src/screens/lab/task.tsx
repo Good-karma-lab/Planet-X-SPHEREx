@@ -87,7 +87,9 @@ export function useChecks(): { view: ChecksView; start: (fieldKey: string, ra: n
             field_key: fieldKey,
             ra,
             dec,
-            marks: marks.filter((m) => m.pass != null && m.level !== 'artefact').map((m) => ({ pass: m.pass, ra: m.ra, dec: m.dec })),
+            marks: marks
+              .filter((m) => m.pass != null && m.level !== 'artefact')
+              .map((m) => ({ pass: m.pass, ra: m.ra, dec: m.dec, ...(m.mjd != null ? { mjd: m.mjd } : {}) })),
           }),
         });
         if (!r.ok) throw new Error(String(r.status));
