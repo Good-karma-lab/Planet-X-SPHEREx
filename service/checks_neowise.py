@@ -42,6 +42,7 @@ TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 WISE_MID_MJD = 58300.0  # the middle of the NEOWISE years
 MIN_FRAMES, MIN_EPOCHS = 20, 4
 THREADS = 8  # resampling of the cutouts already on disk
+RETRY_ROUNDS, RETRY_PAUSE_S = 4, 20.0
 FETCH_THREADS, RETRY_THREADS = 6, 2  # requests to IRSA at a time: first round, then the cutouts that failed
 RULED_OUT_SIGMA = 5.0  # a body of the candidate's flux must stand at least this high in the archive for its absence to count
 RULED_OUT_BELOW = 3.0  # and the measured flux must be this many errors below the candidate's flux
@@ -166,9 +167,12 @@ def orbit_check(o: dict[str, Any], cache: Path, progress: Callable[[str], None] 
                 return False
             return True
 
-        # the cutouts first, a few at a time (IRSA answers 502 when pressed); those that failed are asked once more, two at a time
+        # the cutouts first, a few at a time (IRSA answers 502 when pressed); those that failed are asked again, two at a time, in up to
+        # RETRY_ROUNDS more rounds, until the set is complete
         missing = frames
-        for threads in (FETCH_THREADS, RETRY_THREADS):
+        for round_no, threads in enumerate((FETCH_THREADS, *[RETRY_THREADS] * RETRY_ROUNDS)):
+            if round_no:
+                time.sleep(RETRY_PAUSE_S)  # IRSA is given a rest before the cutouts that failed are asked again
             got_n = 0
             with ThreadPoolExecutor(threads) as pool:
                 oks = []
