@@ -42,10 +42,11 @@ from service.products.store import Store
 from service.products.sxp import decode
 from service.storage import atomic_write_bytes
 
-VERSION = "c1"
+VERSION = "c2"
 WINDOW_ARCMIN = 3.0  # the side of the clip on the sky
 SIZE = 320  # the side of the clip in pixels
-FRAME_MS = 800  # one pass on screen
+FRAME_MS = 1000  # one pass on screen
+LAST_HOLD_MS = 1800  # the last pass stays a little longer before the clip starts again
 QUALITY = 82
 CLIP_FOV = 5.0  # the field built for a clip when no finished field will do
 MAX_BUILDS = 2  # fields being built for clips at once (running or queued); further clips wait their turn and are asked for again
@@ -224,6 +225,26 @@ def date_label(mjd0: float, mjd1: float) -> str:
     return f"{a.day} {a:%b %Y} - {b.day} {b:%b %Y}"
 
 
+def motion_of(find: dict[str, Any]) -> tuple[str, float | None] | None:
+    """The measured motion of a find for the picture: ('8.84"/yr', position angle) from the line through its measured places; a find
+    that only carries a rate gets the text without an arrow; a find that stands still gets nothing."""
+    tr = track_of(find)
+    if len(tr) >= 2 and tr[-1][0] - tr[0][0] >= 1.0:
+        t0, t1 = tr[0][0], tr[-1][0]
+        (ra0, dec0), (ra1, dec1) = place_at(find, t0), place_at(find, t1)
+        de = ((ra1 - ra0 + 540.0) % 360.0 - 180.0) * math.cos(math.radians(0.5 * (dec0 + dec1))) * 3600.0
+        dn = (dec1 - dec0) * 3600.0
+        rate = math.hypot(de, dn) / ((t1 - t0) / 365.25)
+        if rate > 0:
+            return f'{rate:.2f}"/yr', math.degrees(math.atan2(de, dn)) % 360.0
+    if find.get("kind") == "film" and find.get("rate"):
+        pa = ((find.get("data") or {}).get("track") or {}).get("pa")
+        return f'{float(find["rate"]):.1f}"/h', float(pa) if pa is not None else None
+    if find.get("kind") in ("mover", "browndwarf") and find.get("rate"):
+        return f'{float(find["rate"]):.2f}"/yr', None
+    return None
+
+
 def track_of(find: dict[str, Any]) -> list[tuple[float, float, float]]:
     """(mjd, ra, dec) of the object in the passes it was measured in; empty for a find that stands still or has no measured path.
     A Planet X peak has none on purpose: its other passes lie a degree away (a body at tens of au), outside any clip."""
@@ -291,9 +312,18 @@ def _text(draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, px: int
     draw.text(xy, text, font=font, fill=(255, 255, 255, 235), anchor=anchor)
 
 
-def draw_frame(pic: F, ring: tuple[float, float] | None, ring_px: float, label: str, corner: str, size: int = SIZE) -> Image.Image:
+def draw_frame(
+    pic: F,
+    ring: tuple[float, float] | None,
+    ring_px: float,
+    label: str,
+    corner: str,
+    size: int = SIZE,
+    motion: tuple[str, float | None] | None = None,
+) -> Image.Image:
     """One frame: the window enlarged to `size`, the ring (if the object is in this pass), the dates of the pass and the width of
-    the window."""
+    the window. `motion` = (the measured rate as text, the direction as a position angle in degrees east of north or None): the rate is
+    written above the dates and a short arrow leaves the ring the way the object goes (north is up, east is left)."""
     h = pic.shape[0]
     img = Image.fromarray(np.clip(np.round(pic * 255.0), 0, 255).astype(np.uint8), "RGB").resize((size, size), Image.Resampling.BICUBIC)
     k = 3  # the overlay is drawn three times larger and reduced: smooth ring, crisp text
@@ -304,10 +334,26 @@ def draw_frame(pic: F, ring: tuple[float, float] | None, ring_px: float, label: 
         cx, cy, rr = (ring[0] + 0.5) * s, (ring[1] + 0.5) * s, ring_px * s
         d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), outline=(0, 0, 0, 140), width=2 * k + 1)
         d.ellipse((cx - rr, cy - rr, cx + rr, cy + rr), outline=(127, 240, 228, 255), width=k)
+        if motion is not None and motion[1] is not None:
+            a = math.radians(motion[1])
+            ux, uy = -math.sin(a), -math.cos(a)
+            x1, y1 = cx + ux * rr * 1.2, cy + uy * rr * 1.2
+            x2, y2 = cx + ux * (rr * 1.2 + 0.085 * size * k), cy + uy * (rr * 1.2 + 0.085 * size * k)
+            hd = 0.03 * size * k
+            head = [
+                (x2, y2),
+                (x2 - ux * hd - uy * hd * 0.55, y2 - uy * hd + ux * hd * 0.55),
+                (x2 - ux * hd + uy * hd * 0.55, y2 - uy * hd - ux * hd * 0.55),
+            ]
+            d.line((x1, y1, x2, y2), fill=(0, 0, 0, 150), width=2 * k + 1)
+            d.line((x1, y1, x2 - ux * hd * 0.6, y2 - uy * hd * 0.6), fill=(127, 240, 228, 255), width=k)
+            d.polygon(head, fill=(127, 240, 228, 255))
     over = over.resize((size, size), Image.Resampling.LANCZOS)
     img = Image.alpha_composite(img.convert("RGBA"), over)
     d2 = ImageDraw.Draw(img)
     _text(d2, (8, size - 8), label, 13, "ls")
+    if motion is not None and size >= 200:
+        _text(d2, (8, size - 26), motion[0], 14, "ls")
     _text(d2, (size - 8, size - 8), corner, 12, "rs")
     return img.convert("RGB")
 
@@ -343,6 +389,7 @@ def render(
     x0, y0 = round(cx - w / 2.0), round(cy - w / 2.0)
     frames: list[Image.Image] = []
     shown: list[dict[str, Any]] = []
+    motion = motion_of(find) if with_ring else None
     for p in passes:
         raw = src.store.read_part(FIELD, src.key, f"picture_p{p['index']}.sxp")
         if raw is None:
@@ -368,12 +415,15 @@ def render(
         if with_ring and -0.5 <= rx - x0 <= w - 0.5 and -0.5 <= ry - y0 <= w - 0.5:
             ring = (rx - x0, ry - y0)
         label = date_label(float(p["mjd0"]), float(p["mjd1"]))
-        frames.append(draw_frame(pic, ring, RING_ARCSEC / grid.step_arcsec, label, f"{window_arcmin:g} arcmin", size))
+        frames.append(
+            draw_frame(pic, ring, RING_ARCSEC / grid.step_arcsec, label, f"{window_arcmin:g} arcmin", size, motion if ring else None)
+        )
         shown.append({"pass": int(p["index"]), "mjd0": p["mjd0"], "mjd1": p["mjd1"], "label": label, "ra": ra, "dec": dec})
     if not frames:
         raise ClipUnavailable("no pass of the field covers this place")
     buf = io.BytesIO()
-    frames[0].save(buf, "WEBP", save_all=True, append_images=frames[1:], duration=FRAME_MS, loop=0, quality=QUALITY, method=4)
+    hold = [FRAME_MS] * (len(frames) - 1) + [LAST_HOLD_MS if len(frames) > 1 else FRAME_MS]
+    frames[0].save(buf, "WEBP", save_all=True, append_images=frames[1:], duration=hold, loop=0, quality=QUALITY, method=4)
     data = buf.getvalue()
     info = {
         "version": VERSION,
@@ -464,11 +514,12 @@ def render_film(find: dict[str, Any], store: Store, key: str, meta: dict[str, An
         mjd = float(frames_meta[i]["mjd"])
         label = f"{_mjd_date(mjd).day} {_mjd_date(mjd):%b %Y %H:%M} UT"
         ring = (rx - x0, ry - y0) if -0.5 <= rx - x0 <= w - 0.5 and -0.5 <= ry - y0 <= w - 0.5 else None
-        frames.append(draw_frame(pic, ring, ring_px, label, f"{window:.0f} arcmin", size))
+        frames.append(draw_frame(pic, ring, ring_px, label, f"{window:.0f} arcmin", size, motion_of(find) if ring else None))
         ra, dec = (float(v) for v in grid.grid_to_sky(rx, ry))
         shown.append({"frame": i, "visit": frames_meta[i].get("visit"), "det": det, "mjd": mjd, "label": label, "ra": ra, "dec": dec})
     buf = io.BytesIO()
-    frames[0].save(buf, "WEBP", save_all=True, append_images=frames[1:], duration=FILM_FRAME_MS, loop=0, quality=QUALITY, method=4)
+    hold = [FILM_FRAME_MS] * (len(frames) - 1) + [LAST_HOLD_MS]
+    frames[0].save(buf, "WEBP", save_all=True, append_images=frames[1:], duration=hold, loop=0, quality=QUALITY, method=4)
     data = buf.getvalue()
     info = {
         "version": VERSION,
@@ -509,6 +560,9 @@ class Clips:
         self.building: dict[str, asyncio.Task[str | None]] = {}
         self.failed: dict[str, str] = {}
         self._fields: tuple[float, list[Source]] = (0.0, [])
+        self._visits: tuple[float, list[tuple[str, dict[str, Any], dict[str, Any]]]] = (0.0, [])
+        self.pre: dict[str, Any] = {"running": False, "rounds": 0, "made": 0, "left": None, "now": None}
+        self._pre_task: asyncio.Task[None] | None = None
 
     # -- files
 
@@ -572,20 +626,63 @@ class Clips:
         want = d.get("film")
         first = (d.get("visits") or [{}])[0]
         ra, dec = float(first.get("ra", find["ra"])), float(first.get("dec", find["dec"]))
-        for row in self.store.listing((FILM,)):
-            p = row["params"]
-            if not row["complete"] or want is None or abs(float(p.get("mjd", -1e9)) - float(want)) > 0.06:
+        t, have = self._visits
+        if time.time() - t > 30.0:
+            have = []
+            for row in self.store.listing((FILM,)):
+                meta = self.store.read_meta(FILM, row["key"]) if row["complete"] else None
+                if meta and meta.get("frames"):
+                    have.append((row["key"], row["params"], meta))
+            self._visits = (time.time(), have)
+        for key, p, meta in have:
+            if want is None or abs(float(p.get("mjd", -1e9)) - float(want)) > 0.06:
                 continue
             if find.get("fov") is not None and abs(float(p.get("fov", 0.0)) - float(find["fov"])) > 0.01:
-                continue
-            meta = self.store.read_meta(FILM, row["key"])
-            if not meta or not meta.get("frames"):
                 continue
             g = meta["grid"]
             x, y = Grid(float(g["ra0"]), float(g["dec0"]), float(g["step_arcsec"]), int(g["n"])).sky_to_grid(ra, dec)
             if -1 <= float(x) <= g["n"] and -1 <= float(y) <= g["n"]:
-                return row["key"], meta
+                return key, meta
         return None
+
+    def rank(self, find: dict[str, Any]) -> int:
+        """For the order of the page: 0 the clip is ready, 1 it can be made, 2 it cannot (nothing covers the place; a track whose visits
+        are not kept)."""
+        st = self.state(str(find["id"]))
+        if st == "ready":
+            return 0
+        if st == "none" or (find.get("kind") == "film" and self.visits_for(find) is None):
+            return 2
+        return 1
+
+    def prerender(self, finds: Callable[[], Awaitable[list[dict[str, Any]]]], build_kinds: tuple[str, ...] = MOVING) -> None:
+        """Starts (once) the background queue that makes every clip before anybody asks: the finds in the order of the page, one at a
+        time. A 5′ field is built in the background only for the kinds in `build_kinds` (the few that move between passes); a find
+        that stands still is rendered when a finished field holds it, and otherwise waits until somebody opens its card."""
+        if self._pre_task is not None and not self._pre_task.done():
+            return
+
+        async def loop() -> None:
+            while True:
+                todo = [f for f in await finds() if not self.ready(str(f["id"])) and str(f["id"]) not in self.failed]
+                self.pre.update({"running": True, "left": len(todo)})
+                for f in todo:
+                    self.pre["now"] = f["id"]
+                    if f.get("kind") != "film" and f.get("kind") not in build_kinds and self.wants_own(f, self.source_for(f)):
+                        continue
+                    try:
+                        await self.get(f, wait=True)
+                        self.pre["made"] += 1
+                    except (ClipUnavailable, ClipPending):
+                        pass
+                    except Exception as e:  # one clip that fails does not stop the queue
+                        self.failed[str(f["id"])] = f"the clip could not be made: {e}"[:200]
+                    self.pre["left"] = max(0, int(self.pre["left"] or 0) - 1)
+                    await asyncio.sleep(0)
+                self.pre.update({"running": False, "now": None, "rounds": self.pre["rounds"] + 1})
+                await asyncio.sleep(300.0)
+
+        self._pre_task = asyncio.create_task(loop())
 
     def wants_own(self, find: dict[str, Any], src: Source | None) -> bool:
         """A place no finished field holds, and a slow mover that only the coarse grid of a 60′ field holds, get a 5′ field of their own."""

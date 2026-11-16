@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 
-from service.clips import ClipPending, Clips, ClipUnavailable, clips_dir
+from service.clips import VERSION, ClipPending, Clips, ClipUnavailable, clips_dir
 from service.findings import find_row
 from service.jobs.scheduler import Priority
 from service.products.store import Store, product_key
@@ -103,7 +103,13 @@ def make_clips_router(st: Any) -> APIRouter:
             return JSONResponse({"state": "none", "reason": str(e)}, 404, headers={"Cache-Control": "no-store"})
         return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
+    async def status() -> Any:
+        """The background queue that makes the clips: {running, made, left, now, rounds, building, failed}."""
+        c = clips_of(st)
+        return {**c.pre, "building": list(c.building), "failed": len(c.failed), "version": VERSION}
+
     for prefix in ("/api", "/api/v1"):
+        router.add_api_route(f"{prefix}/clips/status", status, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/clips/place.webp", place_clip, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/findings/{{find_id}}/clip.webp", clip, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/findings/{{find_id}}/clip", clip_info, methods=["GET"], include_in_schema=prefix == "/api")

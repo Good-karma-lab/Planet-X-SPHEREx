@@ -89,8 +89,8 @@
 .fcard-stage { position: absolute; top: 8px; left: 8px; background-color: rgba(4, 12, 16, 0.78); backdrop-filter: blur(4px); }
 .fcard-promise { position: absolute; top: 8px; right: 8px; min-width: 26px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--edge); background: rgba(4, 12, 16, 0.78); color: var(--accent); font: 700 11px var(--mono); text-align: center; }
 .fcard-body { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 12px; min-width: 0; flex: 1; }
-.fcard-title { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.fcard-sub, .fcard-credit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcard-title { font-size: 13.5px; font-weight: 600; line-height: 1.3; min-height: 2.6em; overflow-wrap: anywhere; }
+.fcard-sub, .fcard-credit { overflow-wrap: anywhere; line-height: 1.35; }
 .fcard-meta { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--ink); margin-top: 2px; }
 .fcard-meta > span { display: inline-flex; gap: 5px; align-items: center; }
 .fcard-meta .wait { color: var(--amber); }
@@ -102,7 +102,7 @@
 @media (max-width: 600px) {
   .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .fcard-body { padding: 8px 9px 10px; }
-  .fcard-title { font-size: 12.5px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .fcard-title { font-size: 12.5px; }
   .fcard-promise { display: none; }
   .fbar { padding: 10px 10px 6px; }
 }

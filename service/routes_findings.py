@@ -52,15 +52,41 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
     def enrich(body: dict[str, Any]) -> dict[str, Any]:
         idn = getattr(st, "fpx_known", None)
         body = idn.enrich_findings(body) if idn is not None else body
+        clips = clips_or_none()
+        people = credits([f["id"] for f in body["finds"]])
+        for f in body["finds"]:
+            f["clip"] = clips.summary(f, detail=False) if clips is not None else None
+            who = people.get(f["id"]) or []
+            if who:  # the accounts of the service: who closed a task on it, who marked or submitted it (names only)
+                checked = [c["name"] for c in who if c.get("role") == "checked"]
+                first = next((c["name"] for c in who if c.get("role") != "checked"), None)
+                f["credit"] = {**f["credit"], "people": who, "checked_by": list(dict.fromkeys(checked)), "first_marked_by": first}
+                f["viewers"] = max(int(f.get("viewers") or 0), len(checked))
+                if f.get("stage") == "new" and checked:
+                    f["stage"] = "in_review"
+        return body
+
+    def credits(ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        acc = getattr(st, "accounts", None)  # set by the accounts stream when its routes are registered
+        if acc is None or not ids:
+            return {}
+        try:
+            return dict(acc.db.credits_of(ids))
+        except Exception:  # the credit line is an extra: the list is served without it
+            return {}
+
+    def clips_or_none() -> Any:
         try:
             from service.routes_clips import clips_of
 
-            clips = clips_of(st)
+            return clips_of(st)
         except HTTPException:
-            clips = None
-        for f in body["finds"]:
-            f["clip"] = clips.summary(f, detail=False) if clips is not None else None
-        return body
+            return None
+
+    async def every_find() -> list[dict[str, Any]]:
+        f = need()
+        body = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), sort="promise"))
+        return list(body["finds"])
 
     async def findings(
         kind: str | None = Query(None),
@@ -85,9 +111,24 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         if any(k not in KINDS for k in many):
             raise HTTPException(422, f"kinds are of {', '.join(KINDS)}")
         f = need()
+        clips = clips_or_none()
+        if clips is not None and os.environ.get("SKY_CLIPS_PRERENDER", "1") == "1":
+            clips.prerender(every_find)  # the background queue starts with the first look at the list
+        rank = clips.rank if clips is not None else None
         body: dict[str, Any] = await asyncio.to_thread(
             lambda: query(
-                f.db, kind, status, place, limit, offset, flow=flow_of(st), sort=sort, stage=stage, waiting=waiting, kinds=many or None
+                f.db,
+                kind,
+                status,
+                place,
+                limit,
+                offset,
+                flow=flow_of(st),
+                sort=sort,
+                stage=stage,
+                waiting=waiting,
+                kinds=many or None,
+                clip_rank=rank,
             )
         )
         body = enrich(body)

@@ -97,7 +97,18 @@ def test_the_mover_moves_and_the_background_stands_still(tmp_path: Path) -> None
         v = f[c - 50 : c + 50, c - 3 : c + 4].mean(axis=(1, 2))
         return float((v * np.arange(v.size)).sum() / v.sum())
 
-    assert abs(row(fr[0]) - row(fr[2]) - 2 * MOTION_ARCSEC * scale) <= 3.0
+    bare = _frames(render(_mover(), Source(store, "k" * 24, meta, False), with_ring=False)[0])  # no ring, no arrow: the light alone
+    assert abs(row(bare[0]) - row(bare[2]) - 2 * MOTION_ARCSEC * scale) <= 3.0
+    # the motion is written on the picture and the arrow points the way it goes (north)
+    from service.clips import motion_of
+
+    text, pa = motion_of(_mover()) or ("", None)
+    assert (
+        text.endswith('"/yr')
+        and abs(float(text.split('"')[0]) - MOTION_ARCSEC / (180.0 / 365.25)) < 0.05
+        and pa is not None
+        and min(pa, 360 - pa) < 1.0
+    )
     # the background stands still: away from the mover, the ring and the labels the frames differ only by noise and compression
     quiet = np.ones((SIZE, SIZE), bool)
     quiet[c - 60 : c + 60, c - 60 : c + 60] = False
