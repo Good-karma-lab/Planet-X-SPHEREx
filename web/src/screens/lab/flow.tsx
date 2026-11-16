@@ -443,7 +443,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     const y = v * a.side;
     // right of the mark, else left; below it, else above: always inside the picture
     const left = x + 14 + W > a.side - 6 ? Math.max(6, x - 14 - W) : x + 14;
-    const top = Math.max(50, Math.min(a.side - 190, y - 20));
+    const top = Math.max(50, Math.min(a.side - 262, y - 20)); // clear of the status line and the band chips at the bottom
     floats = (
       <div class="float markedit" style={{ left: `${left}px`, top: `${top}px`, width: `${W}px` }} data-testid="mark-editor">
         <div class="me-row">
