@@ -218,6 +218,8 @@ interface Tile {
   /** from the baked tiles: its tone is already applied */
   baked?: boolean;
 }
+/** The pixels of one tile (RGBA rows), as a painter outside this module reads them. */
+export type TilePixels = Tile;
 /** null: the tile does not exist (outside the survey) */
 type Slot = Tile | null;
 
@@ -641,6 +643,51 @@ export class Sampler {
     }
     // and under everything the Allsky image, asked for first: one request gives a picture of the whole sky
     return this.allsky(f, out, k, true);
+  }
+
+  /** the order of the tile `resolve` answered last */
+  resolvedOrder = 0;
+
+  /**
+   * The tile that paints the cell (tx, ty) of a base face at this sampler's order: the tile itself, or the nearest shallower tile at hand (the same choice `at`
+   * makes); null when there is none. With `ask`, the missing tiles are asked for as `at` asks. For a painter that reads the tiles itself (the GPU painter).
+   */
+  resolve(face: number, tx: number, ty: number, ask: boolean): TilePixels | null {
+    const n = this.order;
+    if (n < 0) return null;
+    const N = 1 << n;
+    const pix = face * N * N + spread(tx) + 2 * spread(ty);
+    const t = this.L.levels[n]!.get(pix);
+    if (t) {
+      t.used = stamp;
+      this.resolvedOrder = n;
+      return t;
+    }
+    const floor = this.floor;
+    if (t === undefined && ask) {
+      this.unresolved++;
+      if (n >= floor) want(this.id, n, pix, 2);
+      const c = n - 3;
+      if (c > floor) {
+        const cp = face * 4 ** c + spread(tx >> 3) + 2 * spread(ty >> 3);
+        if (this.L.levels[c]!.get(cp) === undefined) want(this.id, c, cp, 3);
+      }
+    }
+    for (let m = n - 1; m >= (baked.get(this.id)?.min ?? this.s.min); m--) {
+      const sh = n - m;
+      const u = this.L.levels[m]!.get(face * 4 ** m + spread(tx >> sh) + 2 * spread(ty >> sh));
+      if (u) {
+        u.used = stamp;
+        this.resolvedOrder = m;
+        return u;
+      }
+    }
+    if (ask && floor < 3 && n > floor) {
+      const sh = n - floor;
+      const bp = face * 4 ** floor + spread(tx >> sh) + 2 * spread(ty >> sh);
+      if (this.L.levels[floor]!.get(bp) === undefined) want(this.id, floor, bp, baked.has(this.id) ? 5 : 1);
+    }
+    return null;
   }
 
   private rf: FacePt = { face: 0, x: 0, y: 0 };

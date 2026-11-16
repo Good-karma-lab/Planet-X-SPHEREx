@@ -15,6 +15,7 @@ import {
   loadCoverage,
   parseId,
   pickCell,
+  setScheme,
   type CovView,
 } from '../../src/screens/globe/coverage';
 
@@ -79,12 +80,13 @@ afterEach(() => vi.unstubAllGlobals());
 describe('the coverage list', () => {
   it('reads the grid API', async () => {
     fakeApi({
-      '/api/grid/meta': { scheme: 'dec20', total: 371272, counts: { searched: 2, viewed: 1, with_finds: 1 }, rate_per_hour: 12 },
-      '/api/grid/coverage': { cells: [{ id: '284-0805', state: 'searched', finds: 14, viewers: 1 }, { id: '283-0806', state: 'searching', finds: 0, viewers: 0 }, { id: 'junk', state: 'searched', finds: 0, viewers: 0 }] },
+      '/api/grid/meta': { scheme: 'dec20', scheme_params: { name: 'dec20', cell_deg: 1 / 3, n_bands: 540, dec0: -90 }, total: 371272, counts: { searched: 2, viewed: 1, with_finds: 1 }, rate_per_hour: 12 },
+      '/api/grid/coverage': { cells: [{ id: '284-0805', ra: 269.498141, dec: 4.833333, corners: [[269.330855, 4.666667], [269.665428, 4.666667], [269.665428, 5.0], [269.330855, 5.0]], state: 'searched', finds: 14, viewers: 1 }, { id: '283-0806', state: 'searching', finds: 0, viewers: 0 }, { id: 'junk', state: 'searched', finds: 0, viewers: 0 }] },
       '/api/grid/cell/284-0805': { id: '284-0805', ra: 269.498141, dec: 4.833333, state: 'searched', finds: ['mover:1', 'film:2'], n_finds: 14, viewers: 1, bar: { kind: 'sweep', passes: 3 }, searched_at: '2026-11-16T15:58:50Z', field_key: 'k', open: { ra: 269.49814, dec: 4.83333, fov: 20 } },
     });
     const c = (await loadCoverage(true))!;
     expect(c.source).toBe('grid');
+    expect(c.cells.get('284-0805')!.corners).toHaveLength(4);
     expect(c.cells.size).toBe(2);
     expect(c.counts?.searched).toBe(2);
     const card = (await loadCell('284-0805'))!;
@@ -96,6 +98,16 @@ describe('the coverage list', () => {
     const none = (await loadCell('283-0805'))!;
     expect(none.state).toBe('new');
     expect(none.dec).toBeCloseTo(4.5, 5);
+  });
+  it('leaves a scheme it does not know to the list of searched fields', async () => {
+    fakeApi({
+      '/api/grid/meta': { scheme: 'dec20', scheme_params: { name: 'hex7', cell_deg: 0.5, n_bands: 360, dec0: -90 }, total: 1 },
+      '/api/grid/coverage': { cells: [{ id: '284-0805', state: 'searched', finds: 1, viewers: 0 }] },
+      '/api/v1/searched': { count: 1, fields: [{ ra: 10, dec: 10, state: 'done', found: 0 }] },
+    });
+    expect((await loadCoverage(true))!.source).toBe('searched');
+    expect(setScheme({ name: 'dec20', cell_deg: 1 / 3, n_bands: 540, dec0: -90 })).toBe(true);
+    expect(TOTAL).toBe(371272);
   });
   it('falls back to the list of searched fields when the service has no grid', async () => {
     fakeApi({ '/api/v1/searched': { count: 2, fields: [{ ra: 269.45, dec: 4.75, state: 'done', found: 3 }, { ra: 10, dec: 10, state: 'running', found: 0 }] } });
