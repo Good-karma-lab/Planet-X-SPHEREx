@@ -4,7 +4,7 @@
     straight_line  the marks lie on the line from the first to the last mark (largest distance from it against LINE_PASS / LINE_WARN)
     gaia           no Gaia DR3 star, carried to the date of each pass by proper motion and parallax, stands at the marks
     simbad         the same for SIMBAD objects
-    jpl            no Solar System body of JPL's Small-Body Identification passes the marks during the pass
+    jpl            no Solar System body of JPL's Small-Body Identification passes a mark during a visit of its pass
     edge_bright    the marks are not at the edge of the field and not on or beside a star that saturates SPHEREx
     above_bar      the machine's own search of this field has the track above its bar
     neowise        the NEOWISE archive (2014-2024): with an orbit, the W1 exposures added along it (service.checks_neowise, minutes);
@@ -45,6 +45,8 @@ HALO_ARCSEC, HALO_BRIGHT_ARCSEC, HALO_BRIGHT_MAG = 60.0, 120.0, 6.0  # beside a 
 JPL_MATCH_ARCSEC = 12.0  # two pixels: the mark is put on a pass image in which a body trails
 JPL_MARGIN_RATE = 40.0  # ″/h: a fast main-belt body; the identification field is widened by this rate over half the pass
 JPL_MAX_HALF_DEG = 1.0
+JPL_MAX_ASKS = 24  # identifications of one job (JPL allows 20 in five minutes)
+VISIT_GAP_DAYS = 0.6  # exposures of a place closer in time than this are one visit
 JPL_TRIES, JPL_RETRY_S = 3, 20.0
 TRACK_MATCH_ARCSEC = 6.2
 STAR_MAX_ARCSEC_YR = 30.0  # faster than any star (Barnard's Star: 10.4): a straight path is not carried back ten years
@@ -401,7 +403,8 @@ class Checks:
         for m in req["marks"]:
             p = passes.get(int(m["pass"])) or {}
             own = m.get("mjd")
-            marks.append({**m, "mjd": own if own is not None else p.get("mjd_mid"), "t0": own or p.get("mjd0"), "t1": own or p.get("mjd1")})
+            dated_by = {"mjd": own if own is not None else p.get("mjd_mid"), "t0": own or p.get("mjd0"), "t1": own or p.get("mjd1")}
+            marks.append({**m, **dated_by, "own_date": own is not None})
         dated = bool(marks) and all(m["mjd"] is not None for m in marks)
         ra, dec, size = float(req["ra"]), float(req["dec"]), 6.0
         if marks:
@@ -464,7 +467,8 @@ class Checks:
             try:
                 state, detail = await runners[cid]()
             except Exception as e:  # a check that broke has not answered: said, and run again when asked again
-                state, detail = "no_answer", f"The check could not be made ({type(e).__name__}: {str(e)[:120]}): run again."
+                why = (str(e).splitlines() or [""])[0][:100]
+                state, detail = "no_answer", f"The check could not be made ({type(e).__name__}: {why}): run again."
             job.checks[cid] = {**{k: v for k, v in job.checks[cid].items() if k == "result"}, "id": cid, "state": state, "detail": detail}
 
         await asyncio.gather(*(one(c) for c in todo))
@@ -483,23 +487,47 @@ class Checks:
             return None
 
     # ---- JPL --------------------------------------------------------------------------------------------------------------------------
+    def _visits(self, mark: Mark) -> list[tuple[float, float]] | None:
+        """The visits of a mark's pass: (first, last MJD) of the runs of exposures that hold the mark's place (runs are cut at gaps of
+        VISIT_GAP_DAYS). A mark with its own date is one instant. None when the exposure index cannot say."""
+        if mark.get("own_date"):
+            return [(float(mark["mjd"]), float(mark["mjd"]))]
+        index = getattr(self.st, "index", None)
+        if index is None:
+            return None
+        spans = sorted((e.mjd0, e.mjd1) for e in index.containing(mark["ra"], mark["dec"], float(mark["t0"]), float(mark["t1"])))
+        out: list[list[float]] = []
+        for m0, m1 in spans:
+            if out and m0 - out[-1][1] <= VISIT_GAP_DAYS:
+                out[-1][1] = max(out[-1][1], m1)
+            else:
+                out.append([m0, m1])
+        return [(v0, v1) for v0, v1 in out] or None
+
     async def _jpl(self, job: Job, marks: list[Mark]) -> Answer:
-        """One identification per pass: the field around the pass's marks, widened by how far a main-belt body goes in half the pass;
-        a body whose straight track passes a mark during the pass is the marked point."""
-        groups: dict[tuple[float, float], list[Mark]] = {}
+        """A pass lasts weeks and a body crosses the field in hours, so JPL is asked once per visit of each mark's pass (the exposures
+        that hold the mark, from the index): the bodies around the mark at the middle of the visit, the field widened by how far a
+        main-belt body goes in half the visit; a body whose straight track passes the mark during the visit is the marked point."""
+        asks: list[tuple[Mark, float, float]] = []
+        unknown = 0
         for m in marks:
-            groups.setdefault((float(m["t0"]), float(m["t1"])), []).append(m)
+            visits = await asyncio.to_thread(self._visits, m)
+            if visits is None:  # the middle of the pass is all that can be asked
+                unknown += 1
+                visits = [(float(m["mjd"]), float(m["mjd"]))]
+            asks.extend((m, v0, v1) for v0, v1 in visits)
+        total = len(asks)
+        asks = asks[:JPL_MAX_ASKS]
         hits: list[tuple[float, str]] = []
         seen = 0
-        for n, ((t0, t1), ms) in enumerate(sorted(groups.items())):
+        for n, (m, t0, t1) in enumerate(asks):
             mid = 0.5 * (t0 + t1)
             half = min(JPL_MAX_HALF_DEG, 2.0 / 60.0 + JPL_MARGIN_RATE * 12.0 * (t1 - t0) / 3600.0)
-            ra, dec = round(float(np.mean([m["ra"] for m in ms])), 4), round(float(np.mean([m["dec"] for m in ms])), 4)
             part: dict[str, Any] = {}
             for attempt in range(JPL_TRIES):
                 again = ", again" if attempt else ""
-                job.checks["jpl"]["detail"] = f"Asking JPL for the bodies of pass {n + 1} of {len(groups)}{again}."
-                part = await self.known.jpl_at(ra, dec, round(2.0 * half * 60.0, 1), round(mid, 3), None)
+                job.checks["jpl"]["detail"] = f"Asking JPL for the bodies of visit {n + 1} of {len(asks)}{again}."
+                part = await self.known.jpl_at(round(m["ra"], 4), round(m["dec"], 4), round(2.0 * half * 60.0, 1), round(mid, 3), None)
                 if part.get("state") == "ok":
                     break
                 await asyncio.sleep(JPL_RETRY_S)
@@ -507,18 +535,22 @@ class Checks:
                 return "no_answer", f"JPL did not answer ({part.get('error') or part.get('state')}): asked again on the next run."
             seen += len(part["rows"])
             for body in part["rows"]:
-                for m in ms:
-                    miss = track_miss(body, m, t0, t1, mid)
-                    if miss <= JPL_MATCH_ARCSEC:
-                        rate = math.hypot(body[4] or 0.0, body[5] or 0.0)
-                        v = "" if body[3] is None else f"V {body[3]:.1f}, "
-                        hits.append((miss, f"{body[0]} ({v}{rate:.0f}″/h) passes {miss:.0f}″ from the mark of pass {int(m['pass'])}"))
+                miss = track_miss(body, m, t0, t1, mid)
+                if miss <= JPL_MATCH_ARCSEC:
+                    rate = math.hypot(body[4] or 0.0, body[5] or 0.0)
+                    v = "" if body[3] is None else f"V {body[3]:.1f}, "
+                    hits.append((miss, f"{body[0]} ({v}{rate:.0f}″/h) passes {miss:.0f}″ from the mark of pass {int(m['pass'])}"))
         if hits:
             return "fail", f"JPL: {min(hits)[1]}: a known Solar System body."
-        return (
-            "pass",
-            f"None of {seen} bodies JPL puts around the marks (V ≤ 20.5) passes within {JPL_MATCH_ARCSEC:.0f}″ of a mark during its pass.",
-        )
+        said = f"None of {seen} bodies JPL puts around the marks (V ≤ 20.5) passes within {JPL_MATCH_ARCSEC:.0f}″ of a mark"
+        if total > len(asks):
+            return "warn", f"{said} in the {len(asks)} visits asked, of {total}: the other visits were not asked."
+        if unknown:
+            return (
+                "warn",
+                f"{said} at the middle of its pass; the dates of the visits are not known, so the rest of the pass was not asked.",
+            )
+        return "pass", f"{said} in the {total} visits of the passes."
 
     # ---- NEOWISE ----------------------------------------------------------------------------------------------------------------------
     async def _neowise(self, job: Job, marks: list[Mark], orbit: dict[str, Any] | None) -> Answer:
