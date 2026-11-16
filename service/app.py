@@ -49,7 +49,7 @@ from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
 from service.routes_brightness import make_brightness_router
-from service.routes_checks import make_checks_router
+from service.routes_checks import checks_of, make_checks_router
 from service.routes_clips import make_clips_router
 from service.routes_dwarfs import make_dwarfs_router
 from service.routes_export import make_export_router
@@ -207,6 +207,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.fpx_known = FpxIdentifier(st.store, cfg.store_dir / "fpx_known")
         if not STANDBY:  # one process asks JPL (the standby only reads the kept answers): two would double the rate JPL sees
             st.fpx_known.start()
+        checks_of(st).resume()  # check jobs a restart interrupted run again at once, not on the first request
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         if st.index is not None:
