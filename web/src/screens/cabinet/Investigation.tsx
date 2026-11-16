@@ -106,6 +106,7 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
   const rows = checks?.checks ?? [];
   const waiting = rows.filter((c) => ['running', 'queued', 'waiting'].includes(c.state));
   const said = waiting.find((c) => c.state === 'running' && c.detail)?.detail ?? '';
+  // a job that ended with a check to ask again keeps the server's own line ("JPL did not answer and is asked again")
   const progress = checks && checks.state !== 'done' ? `${rows.length - waiting.length} of ${rows.length} checks answered${said ? ` · ${said}` : ''}` : inv.progress;
   const warns = rows.filter((c) => c.state === 'warn');
   const need = Math.max(0, warns.length - inv.notes.length);

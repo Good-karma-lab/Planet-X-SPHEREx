@@ -42,11 +42,18 @@ def rows_of(body: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 
 def progress_of(body: dict[str, Any] | None) -> str:
-    """One line about the running checks: how many have answered, and what the slowest one says it is doing."""
+    """One line about the checks still to answer: how many have answered, and what the slowest one says it is doing; for a
+    check that gave no answer and is asked again by the job, what it said."""
     rows = rows_of(body)
-    if not rows or (body or {}).get("state") == "done":
+    if not rows:
         return ""
     waiting = [c for c in rows if c.get("state") in ("running", "queued", "waiting")]
+    if (body or {}).get("state") == "done":
+        again = [c for c in rows if c.get("state") == "no_answer"] if (body or {}).get("next_try_at") else []
+        if not again:
+            return ""
+        name = WORD.get(str(again[0].get("id")), str(again[0].get("id")))
+        return f"{len(rows) - len(again)} of {len(rows)} checks answered · {name} did not answer and is asked again"
     said = next((str(c.get("detail") or "") for c in waiting if c.get("state") == "running" and c.get("detail")), "")
     return f"{len(rows) - len(waiting)} of {len(rows)} checks answered" + (f" · {said}" if said else "")
 
@@ -61,7 +68,8 @@ def state_of(inv: dict[str, Any], body: dict[str, Any] | None) -> str:
     if body is None or body.get("state") != "done":
         return "checking"
     if body.get("can_submit") is not True:
-        return "blocked"
+        # a check without an answer that the job itself will ask again (`next_try_at`) is not a refusal: the submit keeps waiting
+        return "checking" if body.get("next_try_at") else "blocked"
     warns = [c for c in rows_of(body) if c.get("state") == "warn"]
     return "needs_comment" if len(inv.get("notes") or []) < len(warns) else "ready"
 
