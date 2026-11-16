@@ -145,6 +145,7 @@ async def test_a_catalogue_that_fails_is_said_and_not_kept(tmp_path: Path, monke
     k.client = httpx.AsyncClient(transport=transport())
     for b in k.breakers.values():
         b.success()
+    k.failed.clear()
     out = await k.objects(269.449, 4.741, 6.0, [61026.5])
     assert out["answered"] == {"gaia": True, "simbad": True, "jpl": True}
     await k.client.aclose()
@@ -186,5 +187,9 @@ def test_route(tmp_path: Path) -> None:
         assert r.status_code == 200 and set(r.json()) >= {"objects", "answered"}
         o = r.json()["objects"][0]
         assert set(o) >= {"id", "source", "name", "type", "mag", "pm_total", "positions", "label"}
+        assert r.headers.get("content-encoding") == "gzip"
+        small = c.get("/api/known", params={"ra": 269.449, "dec": 4.741, "size_arcmin": 6, "epochs": "2025.9,2026.6", "compact": 1}).json()
+        thin = next(x for x in small["objects"] if not x["label"])
+        assert set(thin) == {"id", "source", "positions", "mag", "label"} and len(small["objects"]) == len(r.json()["objects"])
         assert c.get("/api/known", params={"ra": 1, "dec": 1, "size_arcmin": 6, "epochs": "x"}).status_code == 400
         assert c.get("/api/known", params={"ra": 1, "dec": 1, "size_arcmin": 600, "epochs": "2026"}).status_code == 422

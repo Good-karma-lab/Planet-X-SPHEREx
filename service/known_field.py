@@ -52,6 +52,7 @@ SIMBAD_MARGIN_ARCSEC = 300.0  # the same from 2000.0
 V_LIMIT = 20.5
 SB_IDENT = "https://ssd-api.jpl.nasa.gov/sb_ident.api"
 JPL_WAIT_S = 6.0
+RETRY_AFTER_S = 60.0  # a catalogue that just failed is not asked again by the route for this long
 JPL_TIMEOUT_S = 240.0  # an identification takes JPL up to two minutes
 TTL_S = 30 * 86400.0
 MAX_EPOCHS = 40
@@ -147,6 +148,7 @@ class KnownField:
         self.breakers["jpl"] = Breaker("JPL Small-Body Identification")
         self.memory: dict[str, tuple[float, dict[str, Any]]] = {}
         self.tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
+        self.failed: dict[str, tuple[float, str]] = {}
 
     # ---- kept answers -----------------------------------------------------------------------------------------------------------------
     def _read(self, name: str) -> dict[str, Any] | None:
@@ -201,13 +203,23 @@ class KnownField:
         hit = self._read(name)
         if hit is not None:
             return hit
+        running = self.tasks.get(name)
+        if wait_s is not None and running is not None and not running.done():
+            return {"state": "pending"}  # already being asked in the background: only the first ask waits
+        failed = self.failed.get(name)
+        if wait_s is not None and failed is not None and time.time() - failed[0] < RETRY_AFTER_S:
+            return {"state": "unavailable", "error": failed[1]}  # it failed a moment ago: said at once, asked again later
         t = self._task(name, fetch)
         try:
             return await asyncio.wait_for(asyncio.shield(t), wait_s)
         except TimeoutError:
             return {"state": "pending"}
         except Exception as e:
-            return {"state": "unavailable", "error": f"{type(e).__name__}: {str(e)[:120]}"}
+            err = f"{type(e).__name__}: {str(e)[:120]}"
+            self.failed[name] = (time.time(), err)
+            while len(self.failed) > 500:
+                self.failed.pop(next(iter(self.failed)))
+            return {"state": "unavailable", "error": err}
 
     async def _post(self, which: str, url: str, data: dict[str, str]) -> str:
         br = self.breakers[which]

@@ -144,12 +144,15 @@ class FakeKnown:
         return {"state": "ok", "rows": self.bodies}
 
 
-def make(tmp_path: Path, known: Any, irsa: str = "ra,dec,mjd\n", movers: dict[str, Any] | None = None) -> ck.Checks:
+def make(tmp_path: Path, known: Any, irsa: str = "ra,dec,mjd\n", result: dict[str, Any] | None = None) -> ck.Checks:
     store = SimpleNamespace(read_meta=lambda kind, key: {"passes": PASSES, "grid": GRID} if key == "f1" else None)
-    st = SimpleNamespace(cfg=SimpleNamespace(store_dir=tmp_path), store=store, movers=SimpleNamespace(key_of=lambda k: "m" + k))
-    if movers is not None:
+    # every pass has one visit of a day, in the exposure index
+    index = SimpleNamespace(containing=lambda ra, dec, t0, t1: [SimpleNamespace(mjd0=t0 + 0.5, mjd1=t0 + 1.5)])
+    movers = SimpleNamespace(key_of=lambda k: "m" + k)
+    st = SimpleNamespace(cfg=SimpleNamespace(store_dir=tmp_path), store=store, movers=movers, index=index)
+    if result is not None:
         (tmp_path / "movers").mkdir(exist_ok=True)
-        (tmp_path / "movers" / "mf1.json").write_text(json.dumps(movers))
+        (tmp_path / "movers" / "mf1.json").write_text(json.dumps(result))
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=irsa)))
     return ck.Checks(st, known, client)
 
@@ -169,7 +172,7 @@ async def test_job_on_a_known_star_cannot_be_submitted(tmp_path: Path, monkeypat
     monkeypatch.setattr(ck, "JPL_RETRY_S", 0.0)
     known = FakeKnown({"state": "ok", "rows": [BARNARD, FAINT]}, {"state": "ok", "rows": []}, [])
     marks = [{k: v for k, v in m.items() if k != "mjd"} for m in star_marks(BARNARD)]  # the dates come from the field's passes
-    c = make(tmp_path, known, movers={"tracks": []})
+    c = make(tmp_path, known, result={"tracks": []})
     job = c.start({"field_key": "f1", "ra": 269.4485, "dec": 4.74, "marks": marks})
     assert job.view()["state"] == "running" and job.view()["can_submit"] is False
     view = await finished(job)
@@ -187,7 +190,7 @@ async def test_job_on_an_unknown_mover_can_be_submitted_with_comments(tmp_path: 
     marks = moving_marks()
     track = {"passes": [0, 1, 2], "ra": [m["ra"] for m in marks], "dec": [m["dec"] for m in marks], "snr": [12.0, 9.5, 10.1]}
     known = FakeKnown({"state": "ok", "rows": [FAINT]}, {"state": "ok", "rows": []}, [])
-    c = make(tmp_path, known, movers={"tracks": [track]})
+    c = make(tmp_path, known, result={"tracks": [track]})
     view = await finished(c.start({"field_key": "f1", "ra": 269.4, "dec": 4.7, "marks": marks}))
     got = states(view)
     assert all(got[k] == "pass" for k in ("two_passes", "straight_line", "gaia", "simbad", "jpl", "edge_bright", "above_bar"))
@@ -254,6 +257,7 @@ def test_routes(tmp_path: Path) -> None:
             if v["state"] == "done":
                 break
         assert v["state"] == "done" and set(v) >= {"state", "checks", "can_submit"}
+        assert st.checks_status(job) == v and v["field_key"] == "f1" and v["ra"] == 269.4 and st.checks_status("nope") is None
         assert [x["id"] for x in v["checks"]] == list(ck.CHECK_IDS)
         assert all(set(x) >= {"id", "state", "detail"} and x["detail"] for x in v["checks"])
         assert c.post("/api/checks", json=body).json()["job"] == job  # the same request is the same job
