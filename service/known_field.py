@@ -201,6 +201,9 @@ class KnownField:
         hit = self._read(name)
         if hit is not None:
             return hit
+        running = self.tasks.get(name)
+        if wait_s is not None and running is not None and not running.done():
+            return {"state": "pending"}  # already being asked in the background: only the first ask waits
         t = self._task(name, fetch)
         try:
             return await asyncio.wait_for(asyncio.shield(t), wait_s)

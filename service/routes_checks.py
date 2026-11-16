@@ -51,8 +51,16 @@ def checks_of(st: Any) -> Checks:
     return ch
 
 
+def checks_status(st: Any, job: str) -> dict[str, Any] | None:
+    """The body of `GET /api/checks/{job}`, or None when there is no such job (what `POST /api/findings/submit` asks through
+    `st.checks_status`)."""
+    found = checks_of(st).get(job) if re.fullmatch(r"[0-9a-f]{20}", job or "") else None
+    return None if found is None else found.view()
+
+
 def make_checks_router(st: Any, prefix: str = "/api") -> APIRouter:
     r = APIRouter()
+    st.checks_status = lambda job: checks_status(st, job)  # for POST /api/findings/submit (accounts stream)
 
     @r.post(f"{prefix}/checks")
     async def start(body: ChecksIn) -> Any:
@@ -76,9 +84,9 @@ def make_checks_router(st: Any, prefix: str = "/api") -> APIRouter:
 
     @r.get(f"{prefix}/checks/{{job}}")
     async def view(job: str) -> Any:
-        found = checks_of(st).get(job) if re.fullmatch(r"[0-9a-f]{20}", job) else None
+        found = checks_status(st, job)
         if found is None:
             raise HTTPException(404, "no such job")
-        return found.view()
+        return found
 
     return r

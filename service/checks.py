@@ -332,6 +332,9 @@ class Job:
         answered = all(c["state"] in ANSWERED for c in checks)
         return {
             "job": self.id,
+            "field_key": self.request.get("field_key", ""),
+            "ra": self.request.get("ra"),
+            "dec": self.request.get("dec"),
             "state": self.state,
             "checks": checks,
             "can_submit": bool(self.state == "done" and answered and not any(c["state"] == "fail" for c in checks)),

@@ -257,6 +257,7 @@ def test_routes(tmp_path: Path) -> None:
             if v["state"] == "done":
                 break
         assert v["state"] == "done" and set(v) >= {"state", "checks", "can_submit"}
+        assert st.checks_status(job) == v and v["field_key"] == "f1" and v["ra"] == 269.4 and st.checks_status("nope") is None
         assert [x["id"] for x in v["checks"]] == list(ck.CHECK_IDS)
         assert all(set(x) >= {"id", "state", "detail"} and x["detail"] for x in v["checks"])
         assert c.post("/api/checks", json=body).json()["job"] == job  # the same request is the same job
