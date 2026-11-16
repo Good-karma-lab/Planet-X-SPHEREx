@@ -20,7 +20,9 @@ import hashlib
 import json
 import math
 import sqlite3
+import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +42,7 @@ KIND_LABEL = {
     "red": "Red source",
     "anomaly": "Spectral anomaly",
     "pair": "Pair changing in place",
-    "film": "Moving object in a pass (film search)",
+    "film": "Moving object in a pass (time-lapse search)",
     "peak": "Find Planet X candidate",
 }
 CATALOGUES = ("simbad", "gaia", "twomass", "allwise", "vsx", "ned")
@@ -1369,11 +1371,168 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
     return text
 
 
-def query(db: FindingsDB, kind: str | None, status: str | None, place: str | None, limit: int, offset: int) -> dict[str, Any]:
-    rows = db.db.execute("SELECT * FROM finds").fetchall()
-    ids = [r["id"] for r in rows]
-    idents = db.idents_of(ids)
-    rel = db.related(ids)
+# ---------------------------------------------------------------- the product flow (docs: PRODUCT_SPEC §3, §5 Findings)
+
+STAGES = ("new", "in_review", "submitted", "known", "artefact", "candidate", "confirmed")
+# what the catalogues said (`status`) -> where the finding stands in the flow (`stage`) before any person has looked
+STAGE_OF_STATUS = {
+    "unexplained": "new",
+    "unchecked": "new",
+    "known": "known",
+    "residual": "artefact",
+    "galaxy": "artefact",
+    "below": "artefact",
+    "halo": "artefact",
+}
+VIEW_RESULTS = ("moves", "artefact", "known", "nothing", "marks")
+# the promise of a finding, 0..100: what a person should look at first
+PROMISE_BASE = {"browndwarf": 70.0, "peak": 65.0, "mover": 60.0, "film": 50.0, "pair": 30.0, "red": 10.0, "anomaly": 10.0}
+PROMISE_STATUS = {"unexplained": 1.0, "unchecked": 0.8, "known": 0.25}  # anything else (a residual, a galaxy, a halo, below the bar): 0.05
+PROMISE_SIGMA_MAX = 20.0
+PROMISE_UNSEEN = 5.0
+PROMISING_KINDS = (
+    "mover",
+    "browndwarf",
+    "peak",
+    "film",
+    "pair",
+)  # the default view of the page; red sources and anomalies are behind a filter
+FOUND_BY = {
+    "mover": "the mover search",
+    "browndwarf": "the brown dwarf search",
+    "red": "the red source search",
+    "anomaly": "the spectral anomaly search",
+    "pair": "the changing pair search",
+    "film": "the time-lapse track search",
+    "peak": "the Find Planet X search",
+}
+
+
+def promise_of(kind: str, status: str, sigma: float | None, viewers: int) -> int:
+    """promise = round(f × (base + min(20, 2σ)) + 5 if nobody has looked and f ≥ 0.8), where base is by kind (brown dwarf candidate 70,
+    Planet X peak 65, mover 60, time-lapse track 50, changing pair 30, red source 10, spectral anomaly 10), σ is the find's own
+    significance (its score, else its signal to noise), and f is by what the catalogues said (unexplained 1, not yet checked 0.8,
+    known 0.25, an artefact 0.05). So an unexplained mover the catalogues do not name stands above every known one, and every mover,
+    dwarf, peak and track that is still a lead stands above every red source and anomaly."""
+    f = PROMISE_STATUS.get(status, 0.05)
+    s = min(PROMISE_SIGMA_MAX, 2.0 * max(0.0, float(sigma or 0.0)))
+    return round(f * (PROMISE_BASE.get(kind, 10.0) + s) + (PROMISE_UNSEEN if viewers == 0 and f >= 0.8 else 0.0))
+
+
+class FlowDB:
+    """What people did with the findings: one row per look (the product database, `SKY_PRODUCT_DB`, default `<store>/product.sqlite`;
+    this table belongs to the findings). A look is recorded when a person closes the task "Check a machine finding" in the lab."""
+
+    def __init__(self, path: Path) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.db = sqlite3.connect(path, check_same_thread=False, timeout=10.0)
+        self.db.execute("PRAGMA journal_mode=WAL")
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS finding_views (find_id TEXT NOT NULL, at REAL NOT NULL, result TEXT, user_id TEXT, user_name TEXT)"
+        )
+        self.db.execute("CREATE INDEX IF NOT EXISTS finding_views_find ON finding_views(find_id)")
+        self.db.commit()
+
+    def add_view(self, find_id: str, result: str | None, user_id: str | None = None, user_name: str | None = None) -> int:
+        with _READ:
+            self.db.execute("INSERT INTO finding_views VALUES (?,?,?,?,?)", (find_id, time.time(), result, user_id, user_name))
+            self.db.commit()
+            return int(self.db.execute("SELECT COUNT(*) FROM finding_views WHERE find_id = ?", (find_id,)).fetchone()[0])
+
+    def views(self) -> dict[str, dict[str, Any]]:
+        """{find id: {viewers, results{result: n}, checked_by[names, the first first]}}."""
+        out: dict[str, dict[str, Any]] = {}
+        for fid, result, name in self.db.execute("SELECT find_id, result, user_name FROM finding_views ORDER BY at"):
+            v = out.setdefault(fid, {"viewers": 0, "results": {}, "checked_by": []})
+            v["viewers"] += 1
+            if result:
+                v["results"][result] = v["results"].get(result, 0) + 1
+            if name and name not in v["checked_by"]:
+                v["checked_by"].append(name)
+        return out
+
+
+def flow_fields(f: dict[str, Any], view: dict[str, Any] | None) -> dict[str, Any]:
+    """The product-flow fields of a find: `stage`, `promise`, `viewers`, `credit`."""
+    viewers = int((view or {}).get("viewers", 0))
+    stage = STAGE_OF_STATUS.get(f["status"], "new")
+    if stage == "new" and viewers > 0:
+        stage = "in_review"  # a person has looked; the verdict is not given by a look alone
+    return {
+        "stage": stage,
+        "promise": promise_of(f["kind"], f["status"], f.get("score") or f.get("snr"), viewers),
+        "viewers": viewers,
+        "credit": {
+            "found_by": f"SPHEREx Space, {FOUND_BY.get(f['kind'], 'the search')}",
+            "machine": True,
+            "first_marked_by": None,
+            "checked_by": list((view or {}).get("checked_by", [])),
+            "looks": dict((view or {}).get("results", {})),
+        },
+    }
+
+
+_NOTES: dict[str, str] | None = None
+
+
+def machine_notes() -> dict[str, str]:
+    """{find id: note}: what the review of the rendered clips saw (data/finding_notes.json). A note sets no status: it only lets the page
+    show together the finds that look like an artefact, for a person to judge."""
+    global _NOTES
+    if _NOTES is None:
+        try:
+            raw = json.loads((Path(__file__).resolve().parent.parent / "data" / "finding_notes.json").read_text(encoding="utf-8"))
+            _NOTES = {str(k): str(v) for k, v in (raw.get("notes") or {}).items()}
+        except (OSError, ValueError):
+            _NOTES = {}
+    return _NOTES
+
+
+LITE_KEYS = (
+    "id", "kind", "place", "fov", "ra", "dec", "rate", "snr", "score", "chance", "status", "verdict", "identity", "updated",
+    "stage", "promise", "viewers", "credit", "clip", "note",
+)  # fmt: skip
+
+
+# the page asks for many clips and the list at once, each in its own thread: one connection is read by one thread at a time
+_READ = threading.Lock()
+
+
+def find_row(db: FindingsDB, find_id: str) -> dict[str, Any] | None:
+    """One find as the table keeps it (no catalogue answers): what a clip needs to know about it."""
+    with _READ:
+        r = db.db.execute("SELECT id, kind, place, fov, ra, dec, rate, data FROM finds WHERE id = ?", (find_id,)).fetchone()
+    if r is None:
+        return None
+    return {**{k: r[k] for k in ("id", "kind", "place", "fov", "ra", "dec", "rate")}, "data": json.loads(r["data"] or "{}")}
+
+
+def query(
+    db: FindingsDB,
+    kind: str | None,
+    status: str | None,
+    place: str | None,
+    limit: int,
+    offset: int,
+    *,
+    flow: FlowDB | None = None,
+    sort: str | None = None,
+    stage: str | None = None,
+    waiting: bool = False,
+    kinds: tuple[str, ...] | None = None,
+    clip_rank: Callable[[dict[str, Any]], int] | None = None,
+    only: frozenset[str] | None = None,
+    noted: bool = False,
+) -> dict[str, Any]:
+    """The finds with what the catalogues said. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
+    stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
+    the old one). Every find also carries the flow fields (flow_fields)."""
+    with _READ:
+        views = flow.views() if flow is not None else {}
+        rows = db.db.execute("SELECT * FROM finds").fetchall()
+        ids = [r["id"] for r in rows]
+        idents = db.idents_of(ids)
+        rel = db.related(ids)
     items: list[dict[str, Any]] = []
     for r in rows:
         f = {
@@ -1406,6 +1565,8 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         f["status"] = st
         f["idents"] = ids_
         f["verdict"] = verdict_of(f, ids_, st)
+        f.update(flow_fields(f, views.get(f["id"])))
+        f["note"] = machine_notes().get(f["id"])
         items.append(f)
     counts: dict[str, dict[str, int]] = {
         k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "halo": 0, "leads": 0}
@@ -1431,9 +1592,21 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
             else f["status"] == status
         )
         and (not place or f["place"] == place)
+        and (not kinds or f["kind"] in kinds)
+        and (not stage or f["stage"] == stage)
+        and (not waiting or (f["viewers"] == 0 and f["stage"] == "new"))
+        and (only is None or f["id"] in only)
+        and (not noted or f["note"] is not None)
     ]
     rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
+    if sort == "promise":
+        # a find that can have no clip (a track whose visits are not kept, a place no field covers) goes below every find that can;
+        # within equal promise the finds whose clip is ready come first: the first screen shows pictures, not empty cards
+        cr = {f["id"]: clip_rank(f) for f in sel} if clip_rank is not None else {}
+        sel.sort(key=lambda f: (cr.get(f["id"], 0) == 2, -f["promise"], cr.get(f["id"], 0), -(f["score"] or f["snr"] or 0.0), f["id"]))
+    shown = [f for f in items if f["status"] not in HIDDEN]
+    stages = {s: sum(1 for f in items if f["stage"] == s) for s in STAGES}
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
     unavailable = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable")
     deciding = {f["id"]: set(decisive_of(f["kind"], f["ra"], f["dec"], f["data"])) for f in items}
@@ -1443,6 +1616,12 @@ def query(db: FindingsDB, kind: str | None, status: str | None, place: str | Non
         "total": sum(1 for f in items if f["status"] not in HIDDEN),
         "counts": counts,
         "labels": KIND_LABEL,
+        "stages": stages,
+        "waiting": sum(1 for f in shown if f["viewers"] == 0 and f["stage"] == "new"),
+        "waiting_promising": sum(1 for f in shown if f["viewers"] == 0 and f["stage"] == "new" and f["kind"] in PROMISING_KINDS),
+        "promising": sum(1 for f in shown if f["kind"] in PROMISING_KINDS),
+        "promising_kinds": list(PROMISING_KINDS),
+        "noted": sum(1 for f in shown if f["note"] is not None),
         "identification": {
             "pending": pending,
             "unavailable": unavailable,

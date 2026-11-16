@@ -6,6 +6,7 @@ import { icon } from '../ui/icons';
 import { backdropYear, coldNote, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, STAR_MAP_TO_VISIBLE, type SkyLayer } from './globe/sky';
 import { catalogNow, kept, loadCatalog, type Obj, type SurveyId } from './globe/store';
+import { CELL_DEG, KIND_COLOUR, KIND_SHORT, KIND_WORD, barText, cellCentre, coverageNow, drawCoverage, kindOf, loadCell, loadCoverage, parseId, pickCell, type CellCard, type Kind } from './globe/coverage';
 import { equiOf, onEquiTile } from '../lib/equi';
 import { HIPS, bakedOf, loadManifest, manifestKnown, tiles } from '../lib/hips';
 import { KnownList } from './search/known';
@@ -269,6 +270,21 @@ function hashAim(): { ra: number; dec: number } | null {
   return { ra: ((ra % 360) + 360) % 360, dec };
 }
 
+const covKind = (c: CellCard): Kind | null => kindOf({ state: c.state, finds: c.n_finds, viewers: c.viewers });
+/** The state of a square in the words of its card. */
+function covStateWord(c: CellCard): string {
+  const base =
+    c.state === 'searched' ? 'Searched by the machine' : c.state === 'searching' ? 'Being searched now' : c.state === 'queued' ? 'In the queue of the search' : c.state === 'failed' ? 'The search failed' : 'Not searched yet';
+  return `${base}${c.n_finds > 0 ? ' · has finds' : ''}${c.viewers > 0 ? ' · viewed by people' : ''}`;
+}
+/** The line of the legend: how much of the sky is done (from the list on hand; the argument only says "read again"). */
+function covLine(_tick: number): string {
+  const c = coverageNow();
+  if (!c) return 'reading the grid…';
+  const searched = c.counts?.searched ?? [...c.cells.values()].filter((x) => x.state === 'searched').length;
+  return `${searched.toLocaleString('en-US')} of ${c.total.toLocaleString('en-US')} squares searched`;
+}
+
 export function Globe() {
   const linked0 = useRef<{ ra: number; dec: number } | null | undefined>(undefined);
   if (linked0.current === undefined) linked0.current = hashAim();
@@ -308,11 +324,17 @@ export function Globe() {
   const [raIn, setRaIn] = useState(formatRA(a.ra));
   const [decIn, setDecIn] = useState(formatDec(a.dec));
   const [, setDatesTick] = useState(0);
+  // the Coverage layer (the grid of squares over any background): on from the switch, or from a link with cov=1 (the landing's "Start searching")
+  const [covOn, setCovOn] = useState(() => kept.covOn || new URLSearchParams(location.hash.split('?')[1] ?? '').get('cov') === '1');
+  const [covTick, setCovTick] = useState(0);
+  // the square whose card is open: its id at once, its card when the service has answered
+  const [cellId, setCellId] = useState<string | null>(null);
+  const [cell, setCell] = useState<CellCard | null>(null);
   const cv = useRef<HTMLCanvasElement>(null);
   // a comet or asteroid chosen in the list: its path since April 2025 and where it is today
   const [bodyPath, setBodyPath] = useState<BodyPath | null>(null);
-  const live = useRef({ survey, proj, inside, a, sel, catalog, bodyPath });
-  live.current = { survey, proj, inside, a, sel, catalog, bodyPath };
+  const live = useRef({ survey, proj, inside, a, sel, catalog, bodyPath, covOn, cellId });
+  live.current = { survey, proj, inside, a, sel, catalog, bodyPath, covOn, cellId };
   const dirty = useRef(true);
   // the globe opens wide: a view kept from a deep zoom (a 5′ frame) comes back as about 50° across, centred on the same place (decided once, when it opens)
   const view = useRef(
@@ -327,8 +349,8 @@ export function Globe() {
 
   // the choices survive a visit to another screen
   useEffect(() => {
-    Object.assign(kept, { survey: autoVisible.current ? 'svs' : surveyPick, proj, inside, catOpen, filter, query, page, per, sel: sel?.n ?? null });
-  }, [surveyPick, proj, inside, catOpen, filter, query, page, per, sel]);
+    Object.assign(kept, { survey: autoVisible.current ? 'svs' : surveyPick, proj, inside, covOn, catOpen, filter, query, page, per, sel: sel?.n ?? null });
+  }, [surveyPick, proj, inside, covOn, catOpen, filter, query, page, per, sel]);
 
   useEffect(() => {
     void loadCatalog().then((c) => setCatalog((old) => (old === c ? old : c)));
@@ -375,7 +397,33 @@ export function Globe() {
 
   useEffect(() => {
     dirty.current = true;
-  }, [survey, proj, inside, sel, catalog, bodyPath]);
+  }, [survey, proj, inside, sel, catalog, bodyPath, covOn, cellId, covTick]);
+
+  // the coverage list: read when the layer is switched on, and again every minute while it is on (the machine keeps searching)
+  useEffect(() => {
+    if (!covOn) return;
+    let on = true;
+    const read = (fresh: boolean) => void loadCoverage(fresh).then(() => on && setCovTick((t) => t + 1));
+    read(false);
+    const iv = setInterval(() => read(true), 60000);
+    return () => {
+      on = false;
+      clearInterval(iv);
+    };
+  }, [covOn]);
+  // the card of the chosen square
+  useEffect(() => {
+    setCell(null);
+    if (!cellId) return;
+    let on = true;
+    void loadCell(cellId).then((c) => on && setCell(c));
+    return () => {
+      on = false;
+    };
+  }, [cellId, covTick]);
+  useEffect(() => {
+    if (!covOn) setCellId(null);
+  }, [covOn]);
 
   // the sky canvas
   useEffect(() => {
@@ -471,6 +519,8 @@ export function Globe() {
       return [(((Math.atan2(v[1]!, v[0]!) / D2R) % 360) + 360) % 360, Math.asin(Math.max(-1, Math.min(1, v[2]!))) / D2R];
     };
 
+    /** the size of one square of the grid on screen (at the centre of the globe; along the equator of the map), CSS pixels */
+    const cellPx = () => (live.current.proj === 'moll' ? (mw() / 360) * CELL_DEG : R() * CELL_DEG * D2R);
     // where each test target's pin and the selected object's pin were drawn: the click finds them there
     let pins: { o: Obj; x: number; y: number }[] = [];
     const font = getComputedStyle(document.body).fontFamily;
@@ -528,6 +578,21 @@ export function Globe() {
       else if (st.proj === 'globe') ctx.rect(-5, -5, 1, 1);
       else ctx.ellipse(mcx(), mcy(), mw() / 2, mw() / 4, 0, 0, 7);
       ctx.stroke();
+      if (st.covOn) {
+        const half = Math.hypot(W, H) / 2 / R();
+        drawCoverage(ctx, coverageNow(), {
+          project: (ra, dec) => project(ra, dec, b),
+          ra: view.current.ra,
+          dec: view.current.dec,
+          radius: st.proj === 'moll' ? 180 : inn() ? Math.atan(half) / D2R : half >= 1 ? 90 : Math.asin(half) / D2R,
+          cellPx: cellPx(),
+          W,
+          H,
+          flat: st.proj === 'moll',
+          selected: st.cellId,
+          font,
+        });
+      }
       const near = st.proj === 'globe' && view.current.zoom > ZOOM_NEAR;
       // zoomed past the star map DSS2 shows over it: the pins and the path stand on the DSS2 plate's date, not on Gaia's
       // and on the layer whose picture is ON SHOW: a new layer's date is taken only when its tiles are under the view (a pin never jumps to an empty sky)
@@ -822,7 +887,14 @@ export function Globe() {
           aim.set({ ra, dec }, 'map');
         } else {
           const s = unproject(px, py);
-          if (s) {
+          if (s && live.current.covOn) {
+            // the Coverage layer is on: the click opens the card of the square under it, and the aim frame takes the square (20′)
+            const id = pickCell(coverageNow(), s[0], s[1], cellPx());
+            const p = parseId(id)!;
+            setSel(null);
+            setCellId(id);
+            aim.set({ ...cellCentre(p.band, p.col), fov: 20 }, 'map');
+          } else if (s) {
             setSel(null);
             aim.set({ ra: s[0], dec: s[1] }, 'map');
           }
@@ -954,6 +1026,7 @@ export function Globe() {
     const onHash = () => {
       const h = hashAim();
       if (h) flyRef.current(h.ra, h.dec, 50);
+      if (new URLSearchParams(location.hash.split('?')[1] ?? '').get('cov') === '1') setCovOn(true);
     };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
@@ -1157,13 +1230,13 @@ export function Globe() {
             </label>
           </div>
           <div class="seg" role="group" aria-label="Projection">
-            <button class={proj === 'globe' ? 'on' : ''} onClick={() => setProj('globe')}>
+            <button class={proj === 'globe' ? 'on' : ''} title="3D globe" aria-label="3D globe" onClick={() => setProj('globe')}>
               <span dangerouslySetInnerHTML={{ __html: icon('globe', 16) }} style={{ display: 'contents' }} />
-              3D globe
+              <span class="lbl">3D globe</span>
             </button>
-            <button class={proj === 'moll' ? 'on' : ''} onClick={() => setProj('moll')}>
+            <button class={proj === 'moll' ? 'on' : ''} title="Mollweide map" aria-label="Mollweide map" onClick={() => setProj('moll')}>
               <span dangerouslySetInnerHTML={{ __html: icon('map-trifold', 16) }} style={{ display: 'contents' }} />
-              Mollweide map
+              <span class="lbl">Mollweide map</span>
             </button>
           </div>
           {proj === 'globe' && (
@@ -1189,7 +1262,64 @@ export function Globe() {
               </button>
             ))}
           </div>
+          <div class="seg sm" role="group" aria-label="Grid of squares">
+            <button class={covOn ? 'on' : ''} aria-pressed={covOn} aria-label="Coverage" data-testid="cov-toggle" title="Coverage: the grid of 20′ squares over the sky: searched by the machine, viewed by people, has finds, being searched. Click a square for its card." onClick={() => setCovOn(!covOn)}>
+              <span dangerouslySetInnerHTML={{ __html: icon('scan', 14) }} style={{ display: 'contents' }} />
+              <span class="lbl">Coverage</span>
+            </button>
+          </div>
         </div>
+        {covOn && cellId && (
+          <div class="cov-card dark-glass" data-testid="cov-card" role="dialog" aria-label={`Square ${cellId}`}>
+            <div class="cov-head">
+              <b>Square {cellId}</b>
+              <button class="cov-x" aria-label="Close the card" onClick={() => setCellId(null)}>
+                ×
+              </button>
+            </div>
+            {cell && cell.id === cellId ? (
+              <>
+                <div class="cov-state" data-testid="cov-state">
+                  <i class="cov-sw" style={{ background: covKind(cell) ? KIND_COLOUR[covKind(cell)!] : 'transparent' }} />
+                  {covStateWord(cell)}
+                </div>
+                <dl class="cov-facts">
+                  <dt>Finds</dt>
+                  <dd data-testid="cov-finds">{cell.state === 'searched' || cell.n_finds ? cell.n_finds.toLocaleString('en-US') : '—'}</dd>
+                  <dt>Bar</dt>
+                  <dd data-testid="cov-bar">{barText(cell.bar) || (cell.state === 'searched' ? 'not kept' : '—')}</dd>
+                  <dt>Viewed by</dt>
+                  <dd data-testid="cov-viewers">{cell.viewers === 1 ? '1 person' : `${cell.viewers.toLocaleString('en-US')} people`}</dd>
+                  <dt>Centre</dt>
+                  <dd>{shortCoords(cell.ra, cell.dec)}</dd>
+                  {cell.searched_at && (
+                    <>
+                      <dt>Searched</dt>
+                      <dd>{cell.searched_at.slice(0, 10)}</dd>
+                    </>
+                  )}
+                </dl>
+                <div class="cov-btns">
+                  <button class="btn sm" data-testid="cov-open" onClick={() => openLab(cell.open.ra, cell.open.dec, cell.open.fov)}>
+                    Open in the lab
+                  </button>
+                  <button
+                    class="btn sm primary"
+                    data-testid="cov-take"
+                    title="Open the lab with the task: look through this square"
+                    onClick={() => {
+                      location.hash = formatHash({ screen: 'lab', params: { ra: cell.open.ra.toFixed(5), dec: cell.open.dec.toFixed(5), fov: String(cell.open.fov), task: 'cell', cell: cell.id } });
+                    }}
+                  >
+                    Take this square
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div class="cov-state faint">Asking for the square…</div>
+            )}
+          </div>
+        )}
         <div class="map-bl">
           {(count || sel) && (
             <div class="map-read">
@@ -1222,6 +1352,18 @@ export function Globe() {
               ) : (
                 <span class="faint"> · IRSA gave no image dates; survey middles used</span>
               )}
+            </div>
+          )}
+          {covOn && (
+            <div class="map-read cov-legend" data-testid="cov-legend">
+              {(['searched', 'viewed', 'finds', 'searching'] as Kind[]).map((k) => (
+                <span key={k} class="cov-key" title={KIND_WORD[k]}>
+                  <i class={`cov-sw${k === 'searching' ? ' dash' : ''}`} style={{ background: k === 'searching' ? 'transparent' : KIND_COLOUR[k], borderColor: KIND_COLOUR[k] }} />
+                  {KIND_SHORT[k]}
+                </span>
+              ))}
+              <span class="faint" data-testid="cov-count">{covLine(covTick)}</span>
+              <span class="cov-do" data-testid="cov-do">click a square to take it</span>
             </div>
           )}
           <div class="map-credit" data-testid="map-credit">

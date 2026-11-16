@@ -218,6 +218,8 @@ interface Tile {
   /** from the baked tiles: its tone is already applied */
   baked?: boolean;
 }
+/** The pixels of one tile (RGBA rows), as a painter outside this module reads them. */
+export type TilePixels = Tile;
 /** null: the tile does not exist (outside the survey) */
 type Slot = Tile | null;
 
@@ -641,6 +643,149 @@ export class Sampler {
     }
     // and under everything the Allsky image, asked for first: one request gives a picture of the whole sky
     return this.allsky(f, out, k, true);
+  }
+
+  /** the order of the tile `resolve` answered last */
+  resolvedOrder = 0;
+
+  /**
+   * The tile that paints the cell (tx, ty) of a base face at this sampler's order: the tile itself, or the nearest shallower tile at hand (the same choice `at`
+   * makes); null when there is none. With `ask`, the missing tiles are asked for as `at` asks. For a painter that reads the tiles itself (the GPU painter).
+   */
+  resolve(face: number, tx: number, ty: number, ask: boolean): TilePixels | null {
+    const n = this.order;
+    if (n < 0) return null;
+    const N = 1 << n;
+    const pix = face * N * N + spread(tx) + 2 * spread(ty);
+    const t = this.L.levels[n]!.get(pix);
+    if (t) {
+      t.used = stamp;
+      this.resolvedOrder = n;
+      return t;
+    }
+    const floor = this.floor;
+    if (t === undefined && ask) {
+      this.unresolved++;
+      if (n >= floor) want(this.id, n, pix, 2);
+      const c = n - 3;
+      if (c > floor) {
+        const cp = face * 4 ** c + spread(tx >> 3) + 2 * spread(ty >> 3);
+        if (this.L.levels[c]!.get(cp) === undefined) want(this.id, c, cp, 3);
+      }
+    }
+    for (let m = n - 1; m >= (baked.get(this.id)?.min ?? this.s.min); m--) {
+      const sh = n - m;
+      const u = this.L.levels[m]!.get(face * 4 ** m + spread(tx >> sh) + 2 * spread(ty >> sh));
+      if (u) {
+        u.used = stamp;
+        this.resolvedOrder = m;
+        return u;
+      }
+    }
+    if (ask && floor < 3 && n > floor) {
+      const sh = n - floor;
+      const bp = face * 4 ** floor + spread(tx >> sh) + 2 * spread(ty >> sh);
+      if (this.L.levels[floor]!.get(bp) === undefined) want(this.id, floor, bp, baked.has(this.id) ? 5 : 1);
+    }
+    return null;
+  }
+
+  private rf: FacePt = { face: 0, x: 0, y: 0 };
+  private rc = new Float32Array(3);
+  private rTile: Tile | null = null;
+  private rTx = -1;
+  private rTy = -1;
+  private rFace = -1;
+
+  /**
+   * A run of `count` pixels of one screen row inside one base face: the face point starts at (x, y) and moves by (dx, dy) per pixel. Writes RGBA into o from
+   * index q with the tone applied, (value − black) × gain: `blackBaked`/`gainBaked` for a baked tile, `blackLive`/`gainLive` for a live one. Returns how many
+   * pixels it painted. The picture is the one `at` gives pixel by pixel; the tile is looked up only when the run enters another one (the globe paints a million
+   * pixels a frame while it turns, so the per-pixel work is kept to the four texel reads).
+   */
+  run(face: number, x: number, y: number, dx: number, dy: number, count: number, o: Uint8ClampedArray, q: number, blackBaked: number, gainBaked: number, blackLive: number, gainLive: number): number {
+    const n = this.order;
+    const N = n >= 0 ? 1 << n : 0;
+    const lv = n >= 0 ? this.L.levels[n]! : undefined;
+    const base = face * N * N;
+    let t = this.rFace === face ? this.rTile : null;
+    let ltx = this.rFace === face ? this.rTx : -1;
+    let lty = this.rTy;
+    this.rFace = face;
+    let painted = 0;
+    for (let i = 0; i < count; i++, q += 4, x += dx, y += dy) {
+      if (lv) {
+        const X = x * N;
+        const Y = y * N;
+        let tx = Math.floor(X);
+        let ty = Math.floor(Y);
+        if (tx >= N) tx = N - 1;
+        else if (tx < 0) tx = 0;
+        if (ty >= N) ty = N - 1;
+        else if (ty < 0) ty = 0;
+        if (tx !== ltx || ty !== lty) {
+          ltx = tx;
+          lty = ty;
+          const s = lv.get(base + spread(tx) + 2 * spread(ty));
+          t = s ? s : null;
+          if (t) t.used = stamp;
+        }
+        if (t) {
+          const w = t.w;
+          const last = w - 1;
+          let u = (X - tx) * w - 0.5;
+          let v = (Y - ty) * w - 0.5;
+          if (u < 0) u = 0;
+          else if (u > last) u = last;
+          if (v < 0) v = 0;
+          else if (v > last) v = last;
+          const i0 = u | 0;
+          const j0 = v | 0;
+          const i1 = i0 < last ? i0 + 1 : i0;
+          const j1 = j0 < last ? j0 + 1 : j0;
+          const fu = u - i0;
+          const fv = v - j0;
+          const d = t.d;
+          const q00 = (i0 * w + j0) * 4;
+          const q01 = (i0 * w + j1) * 4;
+          const q10 = (i1 * w + j0) * 4;
+          const q11 = (i1 * w + j1) * 4;
+          const w00 = (1 - fu) * (1 - fv);
+          const w01 = (1 - fu) * fv;
+          const w10 = fu * (1 - fv);
+          const w11 = fu * fv;
+          const bl = t.baked ? blackBaked : blackLive;
+          const gg = t.baked ? gainBaked : gainLive;
+          const r = d[q00]! * w00 + d[q01]! * w01 + d[q10]! * w10 + d[q11]! * w11 - bl;
+          const g = d[q00 + 1]! * w00 + d[q01 + 1]! * w01 + d[q10 + 1]! * w10 + d[q11 + 1]! * w11 - bl;
+          const b = d[q00 + 2]! * w00 + d[q01 + 2]! * w01 + d[q10 + 2]! * w10 + d[q11 + 2]! * w11 - bl;
+          o[q] = r > 0 ? r * gg : 0;
+          o[q + 1] = g > 0 ? g * gg : 0;
+          o[q + 2] = b > 0 ? b * gg : 0;
+          o[q + 3] = 255;
+          painted++;
+          continue;
+        }
+      }
+      // the tile of the order asked for is not here: the general way (a shallower tile, the Allsky image; the missing tiles are asked for)
+      const f = this.rf;
+      const c = this.rc;
+      f.face = face;
+      f.x = x;
+      f.y = y;
+      if (this.at(f, c, 0) === FROM_NOTHING) continue;
+      const bl = this.lastBaked ? blackBaked : blackLive;
+      const gg = this.lastBaked ? gainBaked : gainLive;
+      o[q] = Math.max(0, c[0]! - bl) * gg;
+      o[q + 1] = Math.max(0, c[1]! - bl) * gg;
+      o[q + 2] = Math.max(0, c[2]! - bl) * gg;
+      o[q + 3] = 255;
+      painted++;
+    }
+    this.rTile = t;
+    this.rTx = ltx;
+    this.rTy = lty;
+    return painted;
   }
 
   private read(t: Tile, n: number, f: FacePt, out: Float32Array | number[], k: number): number {

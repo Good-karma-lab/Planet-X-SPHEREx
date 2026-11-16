@@ -516,3 +516,49 @@ def test_halo_peaks_and_motion_identity() -> None:
     assert bd["identity"]["name"].startswith("WISEA J0855") and "neighbour" in ids[1]["note"]
     text = verdict_of(bd, ids, status_of(bd, ids))
     assert "WISEA J085510" in text and "5756956644387831296" not in text
+
+
+def test_flow_fields_promise_first_and_the_looks_people_gave(tmp_path: Path) -> None:
+    from service.findings import PROMISING_KINDS, STAGES, FlowDB, flow_fields, promise_of
+
+    # every lead that moves stands above every red source and anomaly, and an unexplained find above the same find when known
+    weakest_mover = min(promise_of(k, "unchecked", 0.0, 3) for k in ("mover", "browndwarf", "peak", "film"))
+    assert weakest_mover > max(promise_of(k, "unexplained", 99.0, 0) for k in ("red", "anomaly"))
+    assert promise_of("mover", "unexplained", 6.0, 0) > promise_of("mover", "known", 6.0, 0) > promise_of("mover", "residual", 6.0, 0)
+    assert promise_of("mover", "unexplained", 6.0, 0) - promise_of("mover", "unexplained", 6.0, 1) == 5  # nobody has looked yet
+    assert promise_of("anomaly", "halo", None, 0) >= 0 and promise_of("browndwarf", "unexplained", 50.0, 0) <= 100
+
+    rows, keys = _store(tmp_path)
+    finds, _ = collect(tmp_path, rows, keys, TARGETS)
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds(finds)
+    flow = FlowDB(tmp_path / "product.sqlite")
+    out = query(db, None, "all", None, 100, 0, flow=flow, sort="promise")
+    assert [f["promise"] for f in out["finds"]] == sorted((f["promise"] for f in out["finds"]), reverse=True)
+    assert set(out["stages"]) == set(STAGES) and out["stages"]["known"] == 1 and out["stages"]["new"] == 4
+    assert out["waiting"] == 4 and all(f["viewers"] == 0 and f["credit"]["machine"] for f in out["finds"])
+    assert out["finds"][0]["kind"] in PROMISING_KINDS and out["finds"][-1]["kind"] in ("red", "anomaly", "mover")
+    lead = next(f for f in out["finds"] if f["stage"] == "new")
+    assert flow.add_view(lead["id"], "moves", "u1", "Ada") == 1 and flow.add_view(lead["id"], None) == 2
+    again = query(db, None, "all", None, 100, 0, flow=flow, sort="promise")
+    seen = next(f for f in again["finds"] if f["id"] == lead["id"])
+    assert (
+        seen["stage"] == "in_review"
+        and seen["viewers"] == 2
+        and seen["credit"]["checked_by"] == ["Ada"]
+        and seen["credit"]["looks"] == {"moves": 1}
+    )
+    assert again["waiting"] == 3 and again["stages"]["in_review"] == 1
+    assert query(db, None, "all", None, 100, 0, flow=flow, waiting=True)["count"] == 3
+    assert query(db, None, "all", None, 100, 0, flow=flow, stage="in_review")["count"] == 1
+    assert {f["kind"] for f in query(db, None, "all", None, 100, 0, flow=flow, kinds=("red", "anomaly"))["finds"]} == {"red", "anomaly"}
+    # finds that can have no clip go to the end; within equal promise a ready clip comes first
+    order = query(db, None, "all", None, 100, 0, flow=flow, sort="promise", clip_rank=lambda f: 2 if f["kind"] == "mover" else 0)
+    assert order["finds"][-1]["kind"] == "mover" and order["count"] == again["count"]
+    # only the named finds; only the finds that carry a machine note (none of this test's finds does)
+    assert query(db, None, "all", None, 100, 0, only=frozenset({lead["id"]}))["count"] == 1
+    assert query(db, None, "all", None, 100, 0, noted=True)["count"] == 0 and again["noted"] == 0 and seen["note"] is None
+    # the old call and the old fields stay as they were
+    old = query(db, None, "all", None, 100, 0)
+    assert old["total"] == 5 and {"status", "verdict", "idents"} <= set(old["finds"][0])
+    assert flow_fields({"kind": "peak", "status": "halo", "score": 7.0}, None)["stage"] == "artefact"

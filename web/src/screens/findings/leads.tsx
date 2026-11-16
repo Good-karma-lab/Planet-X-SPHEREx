@@ -345,7 +345,7 @@ function PanelShell({
       </dl>
       <div class="chips">
         <a class="btn sm primary" href={labHref(lead)}>
-          {lead.atlas ? 'Open the film in the lab' : 'Open in the lab'}
+          {lead.atlas ? 'Open the time-lapse in the lab' : 'Open in the lab'}
         </a>
         <a
           class="btn sm"
@@ -379,7 +379,7 @@ function AtlasPanel({ lead, onClose, inline }: { lead: Lead; onClose: () => void
       .catch(() => {});
   }, [lead.ra, lead.dec]);
   const rows: [string, string][] = [
-    ['SPHEREx', "55 exposures on 14 Dec 2025 (IRSA's exposure table); the film rings the comet where JPL predicts it on every visit"],
+    ['SPHEREx', "55 exposures on 14 Dec 2025 (IRSA's exposure table); the time-lapse rings the comet where JPL predicts it on every visit"],
     ...(c
       ? ([
           ['NEOSSat (CSA)', `${c.date_obs.replace('T', ' ').slice(0, 16)} UT, ${c.exposure_s.toFixed(0)} s exposure`],
