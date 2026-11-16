@@ -44,6 +44,7 @@ from service.context import BRIGHT_MAG, BRIGHT_RADIUS, display_name
 from service.known_field import GAIA_EPOCH, SIMBAD_EPOCH, KnownField, cache_dir, epoch_year, offsets_arcsec, propagate
 from service.storage import digest
 
+VERSION = "c2"  # the rules' version: part of the job id, so answers made under older rules are not served
 CHECK_IDS = ("two_passes", "straight_line", "gaia", "jpl", "simbad", "edge_bright", "above_bar", "neowise")
 ANSWERED = ("pass", "warn", "fail")
 MATCH_ARCSEC = 4.0  # a catalogue object this close to a mark (two thirds of a SPHEREx pixel) is the marked point
@@ -65,6 +66,7 @@ IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 MAX_MARKS = 40
 FAST_MIN_VISITS = 3  # a fast mover (inside one pass) needs this many dated visits
 FAST_CURVE_MIN_VISITS = 5  # a curved path is taken (with a warning) only with this many visits
+ORBIT_RMS_MAX = 2.0  # the track search's own limit for a track fitted by an orbit (engine.filmsearch.RMS_MAX)
 VISIT_SAME_DAYS = 0.02  # dates closer than half an hour are one visit
 
 Answer = tuple[str, str]
@@ -141,7 +143,7 @@ def fit_motion(marks: list[Mark], degree: int) -> tuple[float, float, float]:
     return resid, math.hypot(ve, vn), math.degrees(math.atan2(ve, vn)) % 360.0
 
 
-def check_fast_line(marks: list[Mark]) -> Answer:
+def check_fast_line(marks: list[Mark], searches: list[dict[str, Any]] | None = None) -> Answer:
     n = visits_of(marks)
     if n < FAST_MIN_VISITS:
         return "fail", f"A line at a constant rate needs at least {FAST_MIN_VISITS} dated visits; these marks have {n}."
@@ -157,16 +159,28 @@ def check_fast_line(marks: list[Mark]) -> Answer:
                 f"Not a straight line at a constant rate ({resid:.0f}″ off), but the {n} visits lie on a smooth curve within {curved:.1f}″ "
                 f"({rate2:.1f}″/h toward {pa2:.0f}° at the middle): the path of a near body bends over days.",
             )
+    found = best_track(marks, searches)
+    if (
+        found is not None
+        and found[0] == len(marks)
+        and found[1].get("method") == "orbit"
+        and float(found[1].get("rms") or 99.0) <= ORBIT_RMS_MAX
+    ):
+        t = found[1]
+        return (
+            "warn",
+            f"Not a straight line at a constant rate ({resid:.0f}″ off over {float(t.get('hours') or 0.0):.0f} hours), but the time-lapse "
+            f"track search fits all {n} visits with one orbit within {float(t['rms']):.2f}″ ({float(t.get('rate') or 0.0):.1f}″/h): "
+            "the path of a near body bends.",
+        )
     state = "warn" if resid <= LINE_WARN_ARCSEC else "fail"
     return state, f"A visit is {resid:.1f}″ off the line at a constant rate through the others ({said})."
 
 
-def check_fast_bar(marks: list[Mark], searches: list[dict[str, Any]] | None) -> Answer:
-    """The time-lapse track search (filmsearch) of the place: a track that has the marks, with its own significance."""
-    if not searches:
-        return "no_answer", "The time-lapse track search has not run on this place and pass: there is no bar to compare with."
+def best_track(marks: list[Mark], searches: list[dict[str, Any]] | None) -> tuple[int, dict[str, Any]] | None:
+    """The track of the time-lapse track searches that has the most marks (same visit, within TRACK_MATCH_ARCSEC): (marks, track)."""
     best: tuple[int, dict[str, Any]] | None = None
-    for meta in searches:
+    for meta in searches or []:
         g = meta["grid"]
         grid = Grid(g["ra0"], g["dec0"], g["step_arcsec"], g["n"])
         frames = meta.get("frames") or []
@@ -183,6 +197,14 @@ def check_fast_bar(marks: list[Mark], searches: list[dict[str, Any]] | None) -> 
                         break
             if hit and (best is None or hit > best[0]):
                 best = (hit, t)
+    return best
+
+
+def check_fast_bar(marks: list[Mark], searches: list[dict[str, Any]] | None) -> Answer:
+    """The time-lapse track search (filmsearch) of the place: a track that has the marks, with its own significance."""
+    if not searches:
+        return "no_answer", "The time-lapse track search has not run on this place and pass: there is no bar to compare with."
+    best = best_track(marks, searches)
     bar = f"{TRACK_NSIG:.0f}σ for the visits together"
     if best is None:
         return "warn", f"The time-lapse track search has no track above its bar ({bar}) at the marks: seen by eye only."
@@ -417,7 +439,7 @@ def neowise_orbit_answer(res: dict[str, Any], orbit: dict[str, Any]) -> Answer:
         f"{res['flux_mjy']:+.4f} ± {res['err_mjy']:.4f} mJy"
     )
     sc = res.get("scan")
-    if sc:
+    if sc and "orbits" in sc:
         said += (
             f"; {sc['orbits']} orbits around it reach {sc['sn_at_place']:.1f}σ at the place, shifted places {sc['noise_median']:.1f}σ "
             f"(median) to {sc['noise_max']:.1f}σ, {sc['places_not_below']} of {sc['places']} not below it"
@@ -507,7 +529,7 @@ class Checks:
 
     def start(self, request: dict[str, Any]) -> Job:
         """The job of a request (the same request is the same job); checks that have not answered are run (again)."""
-        job_id = digest(json.dumps(request, sort_keys=True))[:20]
+        job_id = digest(VERSION, json.dumps(request, sort_keys=True))[:20]
         job = self.get(job_id) or Job(job_id, request)
         self.jobs[job_id] = job
         while len(self.jobs) > 500:
@@ -562,7 +584,9 @@ class Checks:
             return check_fast_visits(marks) if fast else check_two_passes(marks)
 
         async def straight_line() -> Answer:
-            return blocked or (check_fast_line(marks) if fast else check_straight_line(marks))
+            if blocked or not fast:
+                return blocked or check_straight_line(marks)
+            return check_fast_line(marks, await asyncio.to_thread(self._track_searches, marks))
 
         async def gaia() -> Answer:
             return blocked or check_catalogue(await catalogue("gaia"), marks, GAIA_EPOCH, gaia_label)

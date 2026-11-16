@@ -250,30 +250,33 @@ def orbit_check(o: dict[str, Any], cache: Path, progress: Callable[[str], None] 
     if o.get("scan"):
         # the orbit's uncertainty: distance, radial speed and own motion around the nominal orbit, each orbit also shifted on the
         # sky (a box of 61 x 121 grid points): what the shifted places reach is what noise alone gives
-        say("scanning the orbits around the nominal one")
-        r = earc.run_scan(
-            dv,
-            g,
-            tw,
-            (0.0, 0.0),
-            float(o["d_au"]),
-            tuple(o["mu"]),
-            d_half=SCAN_D_HALF_AU,
-            n_d=SCAN_N_D,
-            mu_half=SCAN_MU_HALF,
-            vr=SCAN_VR,
-            workers=SCAN_WORKERS,
-            progress=lambda i, n: say(f"scanning the orbits around the nominal one: {i} of {n} parts"),
-        )
-        blocks = r["blocks"]
-        res["scan"] = {
-            "orbits": int(r["n_orbits"]),
-            "sn_at_place": round(float(r["centre"][0]), 2),
-            "hypothesis": [round(float(x), 4) for x in r["centre"][1]],  # distance (au), radial speed (km/s), own motion u, v (″/day)
-            "noise_median": round(float(np.median(blocks)), 2) if len(blocks) else None,
-            "noise_p97": round(float(np.percentile(blocks, 97.5)), 2) if len(blocks) else None,
-            "noise_max": round(float(blocks.max()), 2) if len(blocks) else None,
-            "places": len(blocks),
-            "places_not_below": int((blocks >= r["centre"][0]).sum()),
-        }
+        try:
+            say("scanning the orbits around the nominal one")
+            r = earc.run_scan(
+                dv,
+                g,
+                tw,
+                (0.0, 0.0),
+                float(o["d_au"]),
+                tuple(o["mu"]),
+                d_half=SCAN_D_HALF_AU,
+                n_d=SCAN_N_D,
+                mu_half=SCAN_MU_HALF,
+                vr=SCAN_VR,
+                workers=SCAN_WORKERS,
+                progress=lambda i, n: say(f"scanning the orbits around the nominal one: {i} of {n} parts"),
+            )
+            blocks = r["blocks"]
+            res["scan"] = {
+                "orbits": int(r["n_orbits"]),
+                "sn_at_place": round(float(r["centre"][0]), 2),
+                "hypothesis": [round(float(x), 4) for x in r["centre"][1]],  # distance (au), radial speed (km/s), own motion u, v (″/day)
+                "noise_median": round(float(np.median(blocks)), 2) if len(blocks) else None,
+                "noise_p97": round(float(np.percentile(blocks, 97.5)), 2) if len(blocks) else None,
+                "noise_max": round(float(blocks.max()), 2) if len(blocks) else None,
+                "places": len(blocks),
+                "places_not_below": int((blocks >= r["centre"][0]).sum()),
+            }
+        except Exception as e:  # the scan is extra: its failure is said, the answer of the nominal orbit stands
+            res["scan"] = {"error": f"{type(e).__name__}: {str(e)[:120]}"}
     return res
