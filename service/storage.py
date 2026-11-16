@@ -51,3 +51,10 @@ def load_npz(path: Path) -> dict[str, np.ndarray[Any, Any]] | None:
             return {k: z[k] for k in z.files}
     except (OSError, ValueError):
         return None
+
+
+def product_db_path(store_dir: Path) -> Path:
+    """The product database (users, marks, tasks, squares and their human views): `SKY_PRODUCT_DB`, else `<store>/product.sqlite`.
+    One SQLite file shared by every product module; each module keeps its own tables in it."""
+    env = os.environ.get("SKY_PRODUCT_DB")
+    return Path(env).resolve() if env else Path(store_dir) / "product.sqlite"

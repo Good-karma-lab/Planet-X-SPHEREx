@@ -90,7 +90,7 @@ export async function loadFilm(
   const r = await fetchRetry(`/api/v1/film?ra=${ra}&dec=${dec}&fov=${fov}${mjd ? `&mjd=${mjd}` : ''}`, stop);
   if (!r.ok) throw new Error(`the sky service answered ${r.status}`);
   const body = (await r.json()) as { key?: string; state?: string; note?: string; job?: { id: string } };
-  if (body.state === 'none') return { state: 'none', note: body.note ?? 'this pass has too few visits for a film' };
+  if (body.state === 'none') return { state: 'none', note: body.note ?? 'this pass has too few visits for a time-lapse' };
   let state = body.state;
   while (!stop() && state !== 'done') {
     const jr = await fetchRetry(`/api/v1/jobs/${body.job!.id}`, stop);
@@ -106,7 +106,7 @@ export async function loadFilm(
   }
   if (stop()) return null;
   const pr = await fetchRetry(`/api/v1/film/${body.key}/parts/film`, stop);
-  if (!pr.ok) throw new Error(`the film part answered ${pr.status}`);
+  if (!pr.ok) throw new Error(`the time-lapse part answered ${pr.status}`);
   const p = parseSxp(await pr.arrayBuffer());
   const meta = p.meta as unknown as FilmMeta;
   const n = meta.grid.n;

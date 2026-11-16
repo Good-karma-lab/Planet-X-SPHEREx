@@ -42,6 +42,7 @@ import {
 import { useDistantPlan } from './search/distant';
 import { FPX_AUTO } from '../lib/flags';
 import { useAsteroidSearch } from './asteroids';
+import { useLabFlow, type LabFlow } from './lab/flow';
 
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
@@ -163,6 +164,8 @@ interface Opts {
   mono: boolean;
   artifacts: boolean;
   motion: boolean;
+  /** Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame */
+  known: boolean;
 }
 
 interface Track {
@@ -436,6 +439,7 @@ export function Lab({ route }: { route: Route }) {
     mono: p['blend'] === 'mono',
     artifacts: p['art'] === '1',
     motion: p['mot'] === '1',
+    known: p['known'] === '1',
   };
 
   const set = (params: Record<string, string | null>) => {
@@ -556,6 +560,7 @@ export function Lab({ route }: { route: Route }) {
   const bodiesRef = useRef<{ state: string; bodies: KnownBody[]; vLimit: number } | null>(null);
   bodiesRef.current = filmBodies;
   const rendRef = useRef<Renderer | null>(null);
+  const flowRef = useRef<LabFlow | null>(null);
   const layoutRef = useRef<{
     rects: { x: number; y: number; w: number; h: number }[];
     inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number } } | null;
@@ -999,7 +1004,11 @@ export function Lab({ route }: { route: Route }) {
         setBandsWait((w) => (w === bandsPending ? w : bandsPending));
         const all = r.loaded(stack);
         // Difference: the reference pass shows no change, so the loop plays the passes compared with it
-        const loaded = st.time === 'diff' && all.length > 1 && st.frame === null ? all.filter((k) => k > 0) : all;
+        const loaded0 = st.time === 'diff' && all.length > 1 && st.frame === null ? all.filter((k) => k > 0) : all;
+        // Blink of two chosen passes (Tools): only those two play
+        const bl = flowRef.current?.blink;
+        const two = bl && st.time === 'loop' ? loaded0.filter((k) => k === bl[0] || k === bl[1]) : [];
+        const loaded = two.length === 2 ? two : loaded0;
         const waiting = st.view !== 'picture' && !all.length;
         setWallWait((w) => (w === waiting ? w : waiting));
         if (loaded.length) {
@@ -1525,7 +1534,7 @@ export function Lab({ route }: { route: Route }) {
         }
       };
       // the status line floats over the bottom of the picture: a name is kept above it (not cut by it)
-      const statusRoom = !days && st.view !== 'picture' ? 0 : 50;
+      const statusRoom = !days && st.view !== 'picture' ? 0 : 76;
       const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
         // only the name or number at the ring; the rate, the checks and the rest are on the selected mark and in the Candidates list (the test target keeps its line)
         let lines = [mk.name, ...(mk.kind === 'target' || mk.selected ? mk.lines : [])].filter(Boolean);
@@ -1753,6 +1762,20 @@ export function Lab({ route }: { route: Route }) {
         }
       }
       ctx.restore();
+      // the product flow's layer (Known objects, marks, the ruler): on top of the lab's own rings, at the date shown
+      const fpic = !days && st.view === 'picture' ? pictures.current.get(shownPass) : undefined;
+      const fnoise = noiseRef.current.get(shownPass);
+      flowRef.current?.draw({
+        ctx,
+        rects,
+        wall,
+        uvOf,
+        year,
+        fovArc,
+        placed,
+        hidden: underInset,
+        picture: fpic && fnoise && fpic.n === grid.n ? { pass: shownPass, n: fpic.n, rgb: fpic.rgb, bg: fnoise.bg, sigma: fnoise.sigma, step: grid.step_arcsec } : null,
+      });
       if (!st.opts.rings) return;
       // speed rings, centred on the field: how far a body of that speed moves between the first and the last season
       // (in the Days scale: between the first and the last visit, in ″ per hour)
@@ -2236,6 +2259,47 @@ export function Lab({ route }: { route: Route }) {
     window.addEventListener('keydown', on);
     return () => window.removeEventListener('keydown', on);
   }, [meta, shown, speed, p, visit]);
+
+  // the product flow (Known objects, marks, the ruler): the dates on show are the passes, or in Days the visits of the pass
+  const yearOf = (mjd: number) => 2000 + (mjd - 51544.5) / 365.25;
+  const flowDays = film !== null && !!filmData;
+  const flow = useLabFlow({
+    ra,
+    dec,
+    fov,
+    grid: flowDays ? filmData.meta.grid : film === null ? (meta?.grid ?? null) : null,
+    epochs: flowDays ? filmData.meta.frames.map((f) => f.mjd) : film === null ? (meta?.passes ?? []).map((q) => q.mjd_mid) : [],
+    epochNow: flowDays
+      ? yearOf(filmData.meta.frames[visit]?.mjd ?? filmData.meta.pass.mjd0)
+      : ((q) => (q ? yearOf(q.mjd_mid) : null))(meta?.passes.find((x) => x.index === (shown?.pass ?? 0)) ?? meta?.passes[0]),
+    pass: film === null ? (shown?.pass ?? 0) : null,
+    single: film !== null || view === 'picture',
+    side,
+    known: opts.known,
+    fieldKey: clientRef.current?.key ?? null,
+    params: p,
+    open: (q) => {
+      location.hash = formatHash({ screen: 'lab', params: q });
+    },
+    passes: (meta?.passes ?? []).map((q) => ({ index: q.index, label: season(q.mjd_mid) })),
+    thumb: () => {
+      // the picture with its rings, 240 px wide
+      const c = canvas.current;
+      if (!c || !c.width) return null;
+      try {
+        const t = document.createElement('canvas');
+        t.width = 240;
+        t.height = Math.round((240 * c.height) / c.width);
+        const g = t.getContext('2d')!;
+        g.drawImage(c, 0, 0, t.width, t.height);
+        if (overlay.current?.width) g.drawImage(overlay.current, 0, 0, t.width, t.height);
+        return t.toDataURL('image/jpeg', 0.8);
+      } catch {
+        return null;
+      }
+    },
+  });
+  flowRef.current = flow;
 
   if (!valid) {
     return (
@@ -2945,6 +3009,11 @@ export function Lab({ route }: { route: Route }) {
                   return;
                 }
                 if ((e.target as HTMLElement).closest('.float')) return;
+                {
+                  // a mark put or opened, a ruler point: the click is the flow's, not a pick
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  if (flow.click(e.clientX - r.left, e.clientY - r.top)) return;
+                }
                 if (film !== null && filmData && ft.state === 'ok') {
                   // a click on a track's badge selects the track and opens the findings
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2963,15 +3032,17 @@ export function Lab({ route }: { route: Route }) {
                 }
                 pick(e);
               }}
+              onPointerLeave={() => flow.pointer(null)}
               onPointerDown={(e) => {
-                if (film !== null || view !== 'picture' || !meta || (e.target as HTMLElement).closest('.float')) return;
+                if (film !== null || view !== 'picture' || !meta || flow.tool || (e.target as HTMLElement).closest('.float')) return;
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
                 dragFrom.current = { x: e.clientX - r.left, y: e.clientY - r.top };
               }}
               onPointerMove={(e) => {
                 const f = dragFrom.current;
-                if (!f) return;
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                flow.pointer((e.target as HTMLElement).closest('.float') ? null : { x: e.clientX - r.left, y: e.clientY - r.top });
+                if (!f) return;
                 const x = e.clientX - r.left;
                 const y = e.clientY - r.top;
                 if (Math.hypot(x - f.x, y - f.y) > 12) setDragBox({ x0: f.x, y0: f.y, x1: x, y1: y });
@@ -3014,6 +3085,7 @@ export function Lab({ route }: { route: Route }) {
                 data-testid="picture"
               />
               <canvas ref={overlay} class="ov" />
+              {flow.floats}
               {labels.map((l) =>
                 l.empty ? (
                   <div
@@ -3095,6 +3167,7 @@ export function Lab({ route }: { route: Route }) {
                         : film !== null
                           ? daysShort
                           : dateLabel)}
+                {!note && flow.status && <span data-testid="flow-status"> · {flow.status}</span>}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
                     <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter
@@ -3373,6 +3446,7 @@ export function Lab({ route }: { route: Route }) {
           </div>
         </div>
         <aside class="panel">
+          {flow.taskPanel}
           <div class="panel-head">
             <div class="seg sm" role="group" aria-label="Panel">
               {(
@@ -3478,6 +3552,13 @@ export function Lab({ route }: { route: Route }) {
                     an?.result
                       ? 'the anomaly search found no anomaly in this field'
                       : 'the anomaly search of this field has not finished yet',
+                  )}
+                  {sw(
+                    'knownChk',
+                    'Known objects',
+                    'Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame, at its place on the date shown. What moves and has no ring is unknown',
+                    opts.known,
+                    (v) => set({ known: v ? '1' : null }),
                   )}
                   {sw(
                     'maskChk',
@@ -3601,13 +3682,14 @@ export function Lab({ route }: { route: Route }) {
                 </div>
                 {sw(
                   'archChk',
-                  `Archive images · ${ARCHIVE.length} · 1985–2010`,
-                  'Archive images: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
+                  `Old surveys · ${ARCHIVE.length} · 1985–2010`,
+                  'Old surveys: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
                   opts.archive,
                   film !== null ? null : (v) => set({ arch: v ? '1' : null }),
                   'Months scale only',
                 )}
               </section>
+              {flow.tools}
             </div>
           )}
           {tab === 'obj' && (
