@@ -66,7 +66,7 @@ def make_checks_router(st: Any, prefix: str = "/api") -> APIRouter:
     async def start(body: ChecksIn) -> Any:
         """Start (or find) the checks of a set of marks: `{job}`. The same request is the same job; a job with checks that did not
         answer runs them again."""
-        if not re.fullmatch(r"[A-Za-z0-9_-]*", body.field_key):
+        if not re.fullmatch(r"[A-Za-z0-9_,.+-]*", body.field_key):  # a store key, or the lab's "ra,dec,fov"
             raise HTTPException(400, "bad field_key")
         request: dict[str, Any] = {
             "field_key": body.field_key,

@@ -327,6 +327,7 @@ class Job:
         self.state = "running"
         self.started = time.time()
         self.seconds: float | None = None
+        self.field = ""  # the store key the request's field resolved to
         self.task: asyncio.Task[None] | None = None
 
     def view(self) -> dict[str, Any]:
@@ -335,6 +336,7 @@ class Job:
         return {
             "job": self.id,
             "field_key": self.request.get("field_key", ""),
+            "field": self.field,
             "ra": self.request.get("ra"),
             "dec": self.request.get("dec"),
             "state": self.state,
@@ -364,14 +366,18 @@ class Checks:
             return None
         job = Job(job_id, kept["request"])
         job.checks = {c: kept["checks"].get(c) or job.checks[c] for c in CHECK_IDS}
-        job.state, job.seconds = "done", kept.get("seconds")
+        job.state, job.seconds, job.field = "done", kept.get("seconds"), kept.get("field", "")
         return job
 
     def _keep(self, job: Job) -> None:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{job.id}.part"
-            tmp.write_text(json.dumps({"request": job.request, "checks": job.checks, "seconds": job.seconds}, separators=(",", ":")))
+            tmp.write_text(
+                json.dumps(
+                    {"request": job.request, "checks": job.checks, "seconds": job.seconds, "field": job.field}, separators=(",", ":")
+                )
+            )
             tmp.replace(self.dir / f"{job.id}.json")
         except OSError:
             pass
@@ -401,8 +407,10 @@ class Checks:
         req = job.request
         meta: dict[str, Any] | None = None
         store = getattr(self.st, "store", None)
-        if store is not None and req.get("field_key"):
-            meta = await asyncio.to_thread(store.read_meta, "field", req["field_key"])
+        field = await asyncio.to_thread(self._resolve, req)
+        job.field = field
+        if store is not None and field:
+            meta = await asyncio.to_thread(store.read_meta, "field", field)
         passes = {int(p["index"]): p for p in (meta or {}).get("passes", [])}
         marks: list[Mark] = []
         for m in req["marks"]:
@@ -452,7 +460,7 @@ class Checks:
         async def above_bar() -> Answer:
             if not marks:
                 return "fail", "No marks."
-            return check_above_bar(marks, await asyncio.to_thread(self._movers, req.get("field_key")))
+            return check_above_bar(marks, await asyncio.to_thread(self._movers, field))
 
         async def neowise() -> Answer:
             return await self._neowise(job, marks if dated else [], req.get("orbit"))
@@ -480,6 +488,46 @@ class Checks:
         job.seconds = round(time.time() - job.started, 1)
         job.state = "done"
         await asyncio.to_thread(self._keep, job)
+
+    def _resolve(self, req: dict[str, Any]) -> str:
+        """The store key of the request's field. `field_key` is a store key, or the lab's "ra,dec,fov": the stored field of that size
+        whose centre is nearest (within a twentieth of the size, the service's own snap); without a size, or with no key at all, the
+        smallest stored field that holds every mark FIELD_EDGE_ARCSEC inside its edge. "" when the store has no such field."""
+        raw = str(req.get("field_key") or "")
+        if raw and "," not in raw:
+            return raw  # a store key
+        store = getattr(self.st, "store", None)
+        if store is None:
+            return ""
+        nums: list[float] = []
+        for x in raw.split(","):
+            try:
+                nums.append(float(x))
+            except ValueError:
+                break
+        fields = [r for r in store.listing(("field",)) if r["complete"] and {"ra", "dec", "fov"} <= r["params"].keys()]
+        fields.reverse()  # the newest first: a field built again with more passes wins
+        if len(nums) >= 3:
+            ra, dec, fov = nums[:3]
+            best: tuple[float, str] | None = None
+            for r in fields:
+                pp = r["params"]
+                if abs(float(pp["fov"]) - fov) > 0.01:
+                    continue
+                dist = math.hypot(*_sep(float(pp["ra"]), float(pp["dec"]), ra, dec))
+                if dist <= fov * 60.0 / 20.0 and (best is None or dist < best[0] - 1e-6):
+                    best = (dist, str(r["key"]))
+            return best[1] if best else ""
+        places = [(m["ra"], m["dec"]) for m in req["marks"]] or [(float(req["ra"]), float(req["dec"]))]
+        found: tuple[float, str] | None = None
+        for r in fields:
+            pp = r["params"]
+            half = float(pp["fov"]) * 30.0 - FIELD_EDGE_ARCSEC
+            if all(max(abs(v) for v in _sep(a, d, float(pp["ra"]), float(pp["dec"]))) <= half for a, d in places) and (
+                found is None or float(pp["fov"]) < found[0]
+            ):
+                found = (float(pp["fov"]), str(r["key"]))
+        return found[1] if found else ""
 
     def _movers(self, field_key: str | None) -> dict[str, Any] | None:
         movers = getattr(self.st, "movers", None)
