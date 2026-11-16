@@ -99,3 +99,10 @@ def test_watchdog_kills_a_tree_over_the_cap(tmp_path: Path) -> None:
     while p.poll() is None and time.monotonic() - t0 < 20:
         time.sleep(0.1)
     assert dog.tripped and p.poll() is not None
+
+
+def test_bar_at(tmp_path: Path) -> None:
+    db = GridDB(tmp_path / "p.sqlite")
+    assert grid.bar_at(db, 50, 8) is None
+    db.put(grid.cell_at(50, 8).id, "searched", bar={"kind": "sweep", "mover_sigma": 5.0}, source="sweep")
+    assert grid.bar_at(db, 50.01, 8.01) == {"kind": "sweep", "mover_sigma": 5.0}

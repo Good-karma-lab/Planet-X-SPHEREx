@@ -411,3 +411,14 @@ def import_searched(db: GridDB, fields: list[dict[str, Any]]) -> int:
         )
         n += 1
     return n
+
+
+def bar_at(db: GridDB, ra: float, dec: float) -> dict[str, Any] | None:
+    """The bar the search of the square at (ra, dec) used (None while the square is not searched): for the `above_bar` check.
+    Keys of a sweep bar: kind="sweep", mover_sigma, mover_shift_arcsec, passes, passes_used, sources_per_pass, chance_any,
+    known_movers; of an imported place: kind="import", searches, fov_arcmin, partial."""
+    row = db.get(cell_at(ra, dec).id)
+    if not row or row.get("state") != "searched" or not row.get("bar"):
+        return None
+    bar: dict[str, Any] = json.loads(row["bar"])
+    return bar
