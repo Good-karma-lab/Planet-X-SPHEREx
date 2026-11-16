@@ -471,6 +471,11 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_brightness_router(st))
     app.include_router(make_export_router(st))
     app.include_router(make_planetx_router(st))
+    # >>> flow-accounts (stream B3): registered here to test the branch alone; the integrator resolves these three lines
+    from service.accounts import register_accounts
+
+    register_accounts(app, st)
+    # <<< flow-accounts
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
     register_extras(app)
 
