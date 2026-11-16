@@ -312,12 +312,12 @@ def test_a_planet_x_peak_blinks_between_one_pass_and_the_sum_along_the_orbit(tmp
     path = asyncio.run(clips.get(peak))
     fr = _frames(path.read_bytes())
     info = clips.info("peak:t") or {}
-    assert len(fr) == 2 and info["blink"] == ["one pass", "sum along the orbit"] and info["sum_sn_at_place"] == 12.0
+    assert len(fr) == 2 and info["blink"] == ["sum along the orbit", "one pass"] and info["sum_sn_at_place"] == 12.0
     assert info["pass"]["pass"] == 1  # the pass of the search's date
     c = SIZE // 2
-    assert float(fr[1][c - 6 : c + 7, c - 6 : c + 7].max()) > 230.0  # the peak stands in the middle of the ring in the sum
-    assert float(fr[1][20:60, 20:60].mean()) < 40.0  # and the noise round it is dark
-    assert clips.summary(peak)["blink"] == ["one pass", "sum along the orbit"]
+    assert float(fr[0][c - 6 : c + 7, c - 6 : c + 7].max()) > 230.0  # the peak stands in the middle of the ring in the sum
+    assert float(fr[0][20:60, 20:60].mean()) < 40.0  # and the noise round it is dark
+    assert clips.summary(peak)["blink"] == ["sum along the orbit", "one pass"]
 
 
 def test_a_faint_track_is_seen_only_when_the_visits_are_added_along_its_motion(tmp_path: Path) -> None:

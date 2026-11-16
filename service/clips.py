@@ -42,7 +42,7 @@ from service.products.store import Store
 from service.products.sxp import decode
 from service.storage import atomic_write_bytes
 
-VERSION = "c4"
+VERSION = "c5"
 WINDOW_ARCMIN = 3.0  # the side of the clip on the sky
 SIZE = 320  # the side of the clip in pixels
 FRAME_MS = 1000  # one pass on screen
@@ -764,18 +764,19 @@ def render_peak(
     _text(d2, (8, size - 8), f"S/N {float(sn):.1f} in the search" if sn is not None else f"S/N {sn_here:.1f} here", 13, "ls")
     _text(d2, (size - 8, size - 8), f"{WINDOW_ARCMIN:g} arcmin", 12, "rs")
     buf = io.BytesIO()
-    one.save(buf, "WEBP", save_all=True, append_images=[summed], duration=[PEAK_FRAME_MS, PEAK_FRAME_MS], loop=0, quality=QUALITY, method=4)
+    # the picture that shows the object comes first: the first impression of a card is never an empty ring
+    summed.save(buf, "WEBP", save_all=True, append_images=[one], duration=[PEAK_FRAME_MS, PEAK_FRAME_MS], loop=0, quality=QUALITY, method=4)
     out = buf.getvalue()
     info.update(
         {
-            "blink": ["one pass", "sum along the orbit"],
+            "blink": ["sum along the orbit", "one pass"],
             "pass": passes[k],
             "sum_product": sum_meta.get("key"),
             "sum_params": pr,
             "sum_sn_at_place": round(sn_here, 1),
             "visible_sn": round(sn_here, 1),
             "visible": bool(sn_here >= VISIBLE_SN),
-            "frames": [passes[k], {"label": "sum along the orbit"}],
+            "frames": [{"label": "sum along the orbit"}, passes[k]],
             "frame_ms": PEAK_FRAME_MS,
             "bytes": len(out),
             "render_s": round(time.time() - t0, 3),
