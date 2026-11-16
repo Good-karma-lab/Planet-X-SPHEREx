@@ -170,6 +170,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     for pre in dict.fromkeys((prefix, "/api")):
         router.add_api_route(f"{pre}/findings", findings, methods=["GET"], include_in_schema=pre == prefix)
-        router.add_api_route(f"{pre}/findings/{{find_id}}", one, methods=["GET"], include_in_schema=pre == prefix)
+        if pre == prefix:  # one find by id answers under /api/v1 only: /api/findings/submitted and its like belong to the accounts
+            router.add_api_route(f"{pre}/findings/{{find_id}}", one, methods=["GET"])
         router.add_api_route(f"{pre}/findings/{{find_id}}/viewed", viewed, methods=["POST"], include_in_schema=pre == prefix)
     return router
