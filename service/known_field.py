@@ -52,6 +52,7 @@ SIMBAD_MARGIN_ARCSEC = 300.0  # the same from 2000.0
 V_LIMIT = 20.5
 SB_IDENT = "https://ssd-api.jpl.nasa.gov/sb_ident.api"
 JPL_WAIT_S = 6.0
+JPL_429_TRIES = 6
 RETRY_AFTER_S = 60.0  # a catalogue that just failed is not asked again by the route for this long
 JPL_TIMEOUT_S = 240.0  # an identification takes JPL up to two minutes
 TTL_S = 30 * 86400.0
@@ -326,7 +327,12 @@ class KnownField:
             br = self.breakers["jpl"]
             br.before()
             try:
-                r = await jpl.turn(lambda: self.client.get(SB_IDENT, params=params, timeout=JPL_TIMEOUT_S), "sbident")
+                for _ in range(JPL_429_TRIES):
+                    # a 429 (JPL's limit of 20 identifications in five minutes) is not a failure: the lane waits the time JPL asks
+                    # (service.upstream.jpl) and the same request is made again
+                    r = await jpl.turn(lambda: self.client.get(SB_IDENT, params=params, timeout=JPL_TIMEOUT_S), "sbident")
+                    if r.status_code != 429:
+                        break
                 r.raise_for_status()
                 body = r.json()
                 if "fields_second" not in body and "n_second_pass" not in body:
