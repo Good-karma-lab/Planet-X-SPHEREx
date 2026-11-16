@@ -34,7 +34,9 @@ export function App() {
   const route = useRoute();
   const [health, setHealth] = useState<Health | null>(null);
   useEffect(() => {
-    void getHealth().then(setHealth).catch(() => setHealth(null));
+    void getHealth()
+      .then(setHealth)
+      .catch(() => setHealth(null));
   }, []);
   // the Lab keeps its own place in the address; returning to it from another screen restores the last field
   const [lastLab, setLastLab] = useState('#/lab');
@@ -54,7 +56,13 @@ export function App() {
     <div class="app">
       <nav class="rail">
         <a class="brand" href="#/" title="SPHEREx Space: the front page">
-          <span class="logo" dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/></svg>' }} />
+          <span
+            class="logo"
+            dangerouslySetInnerHTML={{
+              __html:
+                '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/></svg>',
+            }}
+          />
         </a>
         <div class="tabs">
           {NAV.map((n) => (
@@ -73,7 +81,17 @@ export function App() {
         </div>
       </nav>
       <main data-screen={route.screen}>
-        {route.screen === 'lab' ? <Lab route={route} /> : route.screen === 'globe' ? <Globe /> : route.screen === 'planetx' ? <PlanetXPage /> : route.screen === 'me' ? <Cabinet route={route} /> : <InfoPage screen={route.screen} health={health} />}
+        {route.screen === 'lab' ? (
+          <Lab route={route} />
+        ) : route.screen === 'globe' ? (
+          <Globe />
+        ) : route.screen === 'planetx' ? (
+          <PlanetXPage />
+        ) : route.screen === 'me' ? (
+          <Cabinet route={route} />
+        ) : (
+          <InfoPage screen={route.screen} health={health} />
+        )}
       </main>
     </div>
   );
