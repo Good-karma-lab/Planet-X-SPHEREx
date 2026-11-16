@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHECK_IDS, checksStatus, parseChecks, taskOfParams, taskParams } from '../../src/screens/lab/task';
+import { CHECK_IDS, checksStatus, declaredWord, parseChecks, taskOfParams, taskParams } from '../../src/screens/lab/task';
 
 describe('the lab task of an address', () => {
   it('is absent without a task parameter', () => {
@@ -51,5 +51,17 @@ describe('the checks before submit', () => {
     expect(parseChecks(all('pass'), 'j').can_submit).toBe(true);
     expect(checksStatus(parseChecks(all('warn'), 'j'))).toBe('All answered · a warning needs a comment');
     expect(checksStatus(parseChecks(all('fail'), 'j'))).toBe('8 of 8 answered · a failed check blocks the submit');
+  });
+});
+
+describe('a declared submit', () => {
+  it('says what the server is doing, so the user may leave', () => {
+    expect(declaredWord({ id: 'i', state: 'checking', progress: '5 of 8 checks answered · NEOWISE 2 of 5' })).toBe(
+      'Submit declared · checking: 5 of 8 checks answered · NEOWISE 2 of 5',
+    );
+    expect(declaredWord({ id: 'i', state: 'needs_comment' })).toBe('Submit declared · a warning needs a comment');
+    expect(declaredWord({ id: 'i', state: 'blocked' })).toBe('Not submitted: a check failed');
+    expect(declaredWord({ id: 'i', state: 'submitted', submitted: 'user:abc' })).toBe('Submitted: user:abc');
+    expect(declaredWord(null, 401)).toBe('Sign in to submit');
   });
 });
