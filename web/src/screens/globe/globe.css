@@ -179,3 +179,12 @@
   .cov-card { left: 10px; right: 44px; top: auto; bottom: 148px; width: auto; max-width: none; padding: 10px 12px 12px; }
   .cov-legend { font-size: 11px; gap: 2px 9px; }
 }
+
+.cov-legend .cov-do { color: var(--accent-l); white-space: nowrap; }
+
+/* the bar stays one row from 1280 px up: between a phone and 1500 px the projection buttons and the Coverage switch are icons (their names are the tooltips) */
+@media (min-width: 861px) and (max-width: 1499px) and (min-aspect-ratio: 1/1) {
+  .map-ui.map-bar { flex-wrap: nowrap; }
+  .map-ui.map-bar > .seg:not(.sm) .lbl, .map-ui.map-bar > .seg[aria-label='Grid of squares'] .lbl { display: none; }
+  .map-ui.map-bar > .seg:not(.sm) button { padding: 6px 10px; }
+}

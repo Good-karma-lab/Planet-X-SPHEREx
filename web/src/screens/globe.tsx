@@ -1230,13 +1230,13 @@ export function Globe() {
             </label>
           </div>
           <div class="seg" role="group" aria-label="Projection">
-            <button class={proj === 'globe' ? 'on' : ''} onClick={() => setProj('globe')}>
+            <button class={proj === 'globe' ? 'on' : ''} title="3D globe" aria-label="3D globe" onClick={() => setProj('globe')}>
               <span dangerouslySetInnerHTML={{ __html: icon('globe', 16) }} style={{ display: 'contents' }} />
-              3D globe
+              <span class="lbl">3D globe</span>
             </button>
-            <button class={proj === 'moll' ? 'on' : ''} onClick={() => setProj('moll')}>
+            <button class={proj === 'moll' ? 'on' : ''} title="Mollweide map" aria-label="Mollweide map" onClick={() => setProj('moll')}>
               <span dangerouslySetInnerHTML={{ __html: icon('map-trifold', 16) }} style={{ display: 'contents' }} />
-              Mollweide map
+              <span class="lbl">Mollweide map</span>
             </button>
           </div>
           {proj === 'globe' && (
@@ -1263,9 +1263,9 @@ export function Globe() {
             ))}
           </div>
           <div class="seg sm" role="group" aria-label="Grid of squares">
-            <button class={covOn ? 'on' : ''} aria-pressed={covOn} data-testid="cov-toggle" title="The grid of 20′ squares over the sky: searched by the machine, viewed by people, has finds, being searched. Click a square for its card." onClick={() => setCovOn(!covOn)}>
+            <button class={covOn ? 'on' : ''} aria-pressed={covOn} aria-label="Coverage" data-testid="cov-toggle" title="Coverage: the grid of 20′ squares over the sky: searched by the machine, viewed by people, has finds, being searched. Click a square for its card." onClick={() => setCovOn(!covOn)}>
               <span dangerouslySetInnerHTML={{ __html: icon('scan', 14) }} style={{ display: 'contents' }} />
-              Coverage
+              <span class="lbl">Coverage</span>
             </button>
           </div>
         </div>
@@ -1363,6 +1363,7 @@ export function Globe() {
                 </span>
               ))}
               <span class="faint" data-testid="cov-count">{covLine(covTick)}</span>
+              <span class="cov-do" data-testid="cov-do">click a square to take it</span>
             </div>
           )}
           <div class="map-credit" data-testid="map-credit">
