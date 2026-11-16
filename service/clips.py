@@ -325,7 +325,9 @@ def _window(a: NDArray[Any], x0: int, y0: int, w: int, fill: float) -> NDArray[A
 _LOOKS: OrderedDict[tuple[str, int], PassLook] = OrderedDict()
 
 
-def render(find: dict[str, Any], src: Source, window_arcmin: float = WINDOW_ARCMIN, size: int = SIZE) -> tuple[bytes, dict[str, Any]]:
+def render(
+    find: dict[str, Any], src: Source, window_arcmin: float = WINDOW_ARCMIN, size: int = SIZE, with_ring: bool = True
+) -> tuple[bytes, dict[str, Any]]:
     """The clip of `find` cut from the field `src`: (animated WebP, what it shows). Raises ClipUnavailable when the field has no pass
     there."""
     t0 = time.time()
@@ -363,7 +365,7 @@ def render(find: dict[str, Any], src: Source, window_arcmin: float = WINDOW_ARCM
         ring: tuple[float, float] | None = None
         ra, dec = place_at(find, float(p["mjd_mid"]))
         rx, ry = (float(v) for v in grid.sky_to_grid(ra, dec))
-        if -0.5 <= rx - x0 <= w - 0.5 and -0.5 <= ry - y0 <= w - 0.5:
+        if with_ring and -0.5 <= rx - x0 <= w - 0.5 and -0.5 <= ry - y0 <= w - 0.5:
             ring = (rx - x0, ry - y0)
         label = date_label(float(p["mjd0"]), float(p["mjd1"]))
         frames.append(draw_frame(pic, ring, RING_ARCSEC / grid.step_arcsec, label, f"{window_arcmin:g} arcmin", size))
@@ -632,6 +634,25 @@ class Clips:
                 except ClipUnavailable as e:
                     self.failed[fid] = str(e)
                     raise
+                atomic_write_bytes(p, data)
+                atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
+        return p
+
+    async def place(self, ra: float, dec: float, size: int = 170, ring: bool = False) -> Path:
+        """The same time-lapse centred on a place (a mark, a row of the cabinet), cut ONLY from a field that is already finished: it
+        never starts a field job. The place is rounded to 1e-4°. Raises ClipUnavailable when no finished field holds it."""
+        ra, dec = round(ra % 360.0, 4), round(dec, 4)
+        fid = f"place_{ra:.4f}_{dec:+.4f}_s{size}{'_r' if ring else ''}"
+        p = self.path(fid)
+        if p.is_file():
+            return p
+        find = {"id": fid, "kind": "place", "ra": ra, "dec": dec, "data": {}}
+        src = self.source_for(find)
+        if src is None:
+            raise ClipUnavailable("no SPHEREx field covers this place yet")
+        async with self.gate:
+            if not p.is_file():
+                data, info = await asyncio.to_thread(render, find, src, WINDOW_ARCMIN, size, ring)
                 atomic_write_bytes(p, data)
                 atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
         return p
