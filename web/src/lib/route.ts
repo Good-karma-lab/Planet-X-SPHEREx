@@ -1,7 +1,7 @@
 // Hash routes hold the whole state of a screen so that any view opens by a link (docs/plan/04-ui.md, 4.1 rule 9).
 
-// 'me' is the cabinet (flow-accounts, stream B3)
-export const SCREENS = ['landing', 'globe', 'lab', 'planetx', 'findings', 'index', 'method', 'about', 'me'] as const;
+// 'me' is the cabinet, 'leaders' the public leaderboard (#/leaders)
+export const SCREENS = ['landing', 'globe', 'lab', 'planetx', 'findings', 'index', 'method', 'about', 'me', 'leaders'] as const;
 export type Screen = (typeof SCREENS)[number];
 
 export interface Route {

@@ -9,6 +9,7 @@ import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
 import { Cabinet } from './screens/cabinet/Cabinet';
 import { FindingPage } from './screens/findings/page';
+import { Leaders } from './screens/cabinet/Score';
 import { useUnread } from './lib/account';
 
 const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
@@ -103,6 +104,8 @@ export function App() {
               <FindingPage id={route.params['id']} />
             </div>
           </div>
+        ) : route.screen === 'leaders' ? (
+          <Leaders route={route} />
         ) : (
           <InfoPage screen={route.screen} health={health} />
         )}

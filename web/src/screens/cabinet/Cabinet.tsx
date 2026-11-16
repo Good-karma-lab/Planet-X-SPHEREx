@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 import { api, loadUser, nextTask, refreshUnread, renameUser, signInByEmail, signOut, taskHash, useUser, googleSignInUrl, type AccountMark, type Task, type User } from '../../lib/account';
 import { InvestigationPage } from './Investigation';
 import { Pic } from './pic';
+import { ScorePanel } from './Score';
 import type { Route } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
 import './cabinet.css';
@@ -64,7 +65,7 @@ interface Mine {
   notifications: Notice[];
 }
 
-const TABS = ['squares', 'marks', 'findings', 'investigations', 'tasks', 'history', 'notifications', 'account'] as const;
+const TABS = ['squares', 'marks', 'findings', 'investigations', 'tasks', 'history', 'notifications', 'score', 'account'] as const;
 type Tab = (typeof TABS)[number];
 const TAB_NAME: Record<Tab, string> = {
   squares: 'My squares',
@@ -74,6 +75,7 @@ const TAB_NAME: Record<Tab, string> = {
   tasks: 'Tasks',
   history: 'View history',
   notifications: 'Notifications',
+  score: 'Score',
   account: 'Account',
 };
 const RESULT: Record<string, string> = { nothing: 'Nothing here', marks: 'Done, with marks', moves: 'It moves', artefact: 'Artefact', known: 'Known object' };
@@ -221,6 +223,32 @@ function TaskRow({ t }: { t: Task }) {
   );
 }
 
+/** "Hide me from the leaderboard": the points are still earned. */
+function HideFromBoard() {
+  const [hide, setHide] = useState<boolean | null>(null);
+  const [status, setStatus] = useState('');
+  useEffect(() => {
+    void api<{ hide_from_board: boolean }>('/api/me/score').then((s) => setHide(s.hide_from_board), () => setHide(false));
+  }, []);
+  const set = (v: boolean) => {
+    setHide(v);
+    api('/api/me', { method: 'PATCH', body: { hide_from_board: v } }).then(
+      () => setStatus(''),
+      (e: Error) => setStatus(e.message),
+    );
+  };
+  return (
+    <div class="cb-line">
+      <label class="chk">
+        <input type="checkbox" checked={hide === true} disabled={hide === null} onChange={(e) => set((e.target as HTMLInputElement).checked)} data-testid="hide-board" />
+        Hide me from the leaderboard
+      </label>
+      <span class="mono-s">points are still earned</span>
+      {status && <span class="cb-status bad">{status}</span>}
+    </div>
+  );
+}
+
 function Who({ user }: { user: User }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
@@ -283,6 +311,7 @@ export function Cabinet({ route }: { route: Route }) {
     tasks: (mine?.tasks.filter((t) => t.state === 'open').length ?? 0) + inflight.length,
     history: mine?.history.length ?? 0,
     notifications: unread,
+    score: 0,
     account: 0,
   };
   return (
@@ -305,7 +334,7 @@ export function Cabinet({ route }: { route: Route }) {
               {TABS.map((t) => (
                 <button key={t} role="tab" aria-selected={tab === t} class={tab === t ? 'on' : ''} onClick={() => go(t)} data-testid={`tab-${t}`}>
                   {TAB_NAME[t]}
-                  {t !== 'account' && <span>{count[t]}</span>}
+                  {t !== 'account' && t !== 'score' && <span>{count[t]}</span>}
                 </button>
               ))}
               <span class={`cb-status ${error || status ? 'bad' : ''}`} role="status" data-testid="cabinet-status">
@@ -494,6 +523,12 @@ export function Cabinet({ route }: { route: Route }) {
                     </div>
                   </>
                 )}
+                {tab === 'score' && (
+                  <>
+                    <h3>Score</h3>
+                    <ScorePanel />
+                  </>
+                )}
                 {tab === 'account' && (
                   <>
                     <h3>Account</h3>
@@ -502,6 +537,7 @@ export function Cabinet({ route }: { route: Route }) {
                         <b>{user.name}</b>
                         <span class="mono-s">{user.email}</span>
                       </div>
+                      <HideFromBoard />
                       <div class="cb-line">
                         <a class="btn sm" href="/api/me/export" download="spherex-space-my-data.json" data-testid="download-data">
                           Download my data
