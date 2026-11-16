@@ -46,12 +46,13 @@ def make_auth_router(st: Any) -> APIRouter:
     def signed_in(request: Request, user: dict[str, Any], nxt: str | None) -> Response:
         acc = accounts.get(st)
         token = acc.db.new_session(user["id"], SESSION_S)
-        resp = RedirectResponse(f"{public_base(request)}/{nxt if nxt and NEXT.match(nxt) else '#/me'}", status_code=303)
+        # a relative address: the browser stays on the site it opened the link on (also behind the web dev server's proxy)
+        resp = RedirectResponse(f"/{nxt if nxt and NEXT.match(nxt) else '#/me'}", status_code=303)
         resp.set_cookie(COOKIE, token, max_age=int(SESSION_S), httponly=True, samesite="lax", secure=not is_local(request), path="/")
         return resp
 
     def failed(request: Request, why: str) -> Response:
-        return RedirectResponse(f"{public_base(request)}/#/me?signin={why}", status_code=303)
+        return RedirectResponse(f"/#/me?signin={why}", status_code=303)
 
     @router.get("/api/me")
     def me(request: Request) -> Any:

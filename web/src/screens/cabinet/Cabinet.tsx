@@ -83,7 +83,8 @@ export function markHash(m: Pick<AccountMark, 'field_key' | 'ra' | 'dec'>): stri
   return `#/lab?${new URLSearchParams({ ra, dec, fov })}`;
 }
 
-function useMine(user: User | null): { mine: Mine | null; error: string; reload: () => void } {
+/** Everything of the user, read again whenever the cabinet or one of its tabs is opened. */
+function useMine(user: User | null, tab: string): { mine: Mine | null; error: string; reload: () => void } {
   const [mine, setMine] = useState<Mine | null>(null);
   const [error, setError] = useState('');
   const [n, setN] = useState(0);
@@ -102,7 +103,7 @@ function useMine(user: User | null): { mine: Mine | null; error: string; reload:
       (e: Error) => !stop.signal.aborted && setError(`Not loaded: ${e.message}`),
     );
     return () => stop.abort();
-  }, [user?.id, n]);
+  }, [user?.id, n, tab]);
   return { mine, error, reload: useCallback(() => setN((x) => x + 1), []) };
 }
 
@@ -328,9 +329,9 @@ function Who({ user }: { user: User }) {
 
 export function Cabinet({ route }: { route: Route }) {
   const { user, ready, auth } = useUser();
-  const { mine, error, reload } = useMine(user);
   const [status, setStatus] = useState('');
   const tab: Tab = (TABS as readonly string[]).includes(route.params['tab'] ?? '') ? (route.params['tab'] as Tab) : 'squares';
+  const { mine, error, reload } = useMine(user, tab);
   const go = (t: Tab) => (location.hash = t === 'squares' ? '#/me' : `#/me?tab=${t}`);
   const run = (job: Promise<unknown>) => job.then(reload, (e: Error) => setStatus(e.message));
   const take = (kind: 'cell' | 'finding') =>
@@ -372,10 +373,10 @@ export function Cabinet({ route }: { route: Route }) {
                   <span>{count[t]}</span>
                 </button>
               ))}
+              <span class={`cb-status ${error || status ? 'bad' : ''}`} role="status" data-testid="cabinet-status">
+                {error || status || (!mine ? 'Loading…' : '')}
+              </span>
             </div>
-            <p class={`cb-status ${error || status ? 'bad' : ''}`} role="status">
-              {error || status || (!mine ? 'Loading…' : '')}
-            </p>
             {mine && (
               <div class="card glass cb-card" data-testid={`panel-${tab}`}>
                 {tab === 'squares' && (

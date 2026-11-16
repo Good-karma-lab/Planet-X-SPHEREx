@@ -57,3 +57,5 @@ a.cb-row:hover, button.cb-row:hover { background: rgba(95, 227, 214, 0.08); }
 @media (max-width: 800px) { .cb-split { grid-template-columns: 1fr; } }
 @media (max-width: 600px) { .cb-row { grid-template-columns: 1fr; } .cb-row .cb-side { justify-content: flex-start; } }
 .cb-row.cb-wrap .cb-main b { white-space: normal; overflow: visible; }
+.cb-tabs { align-items: center; }
+.cb-tabs .cb-status { margin-left: auto !important; }
