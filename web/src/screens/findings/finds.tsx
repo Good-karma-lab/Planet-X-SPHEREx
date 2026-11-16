@@ -379,6 +379,7 @@ interface CardReply {
   promising: number;
   promising_kinds: string[];
   noted: number;
+  visibility: { by_kind: Record<string, { visible: number; not_visible: number; not_measured: number }>; in_view: { visible: number; not_visible: number; not_measured: number } };
   identification: { pending: number; unavailable_decisive?: number };
   finds: CardFind[];
 }
@@ -388,9 +389,9 @@ const PAGE = 48;
 const PROMISING = ['mover', 'browndwarf', 'peak', 'film', 'pair'];
 
 /** The cards of one filter, a page at a time: the next page is asked for when the end of the list comes on screen. */
-function useCards(kind: KindSel, stage: StageSel, mine: string[]) {
+function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolean) {
   const [state, setState] = useState<{ key: string; head: CardReply | null; finds: CardFind[]; done: boolean; loading: boolean; failed: boolean }>({ key: '', head: null, finds: [], done: false, loading: false, failed: false });
-  const key = `${kind}|${stage}|${stage === 'mine' ? mine.length : 0}`;
+  const key = `${kind}|${stage}|${stage === 'mine' ? mine.length : 0}|${unseen}`;
   const busy = useRef(false);
   const load = (reset: boolean) => {
     if (busy.current && !reset) return;
@@ -411,6 +412,8 @@ function useCards(kind: KindSel, stage: StageSel, mine: string[]) {
     const q = new URLSearchParams({ lite: '1', sort: 'promise', status: 'all', limit: String(PAGE), offset: String(offset) });
     if (kind === 'promising') q.set('kinds', PROMISING.join(','));
     else q.set('kind', kind);
+    // the list shows the finds whose object the eye can see in the ring; the rest are behind "Not visible in the picture"
+    if (stage !== 'mine') q.set('visibility', unseen ? 'unseen' : 'seen');
     if (stage === 'mine') q.set('ids', mine.join(',') || '-');
     else if (stage === 'noted') q.set('noted', '1');
     else if (stage === 'waiting') q.set('waiting', '1');
@@ -475,7 +478,8 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
       stop = true;
     };
   }, [user?.id]);
-  const cards = useCards(kind, stage, mine);
+  const [unseen, setUnseen] = useState(false);
+  const cards = useCards(kind, stage, mine, unseen);
   const sel = useFind(leadId);
   // findings submitted by people: the button is there only when the service has accounts and somebody has submitted one
   const [people, setPeople] = useState(0);
@@ -542,7 +546,18 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
               </button>
             ))}
         </div>
+        {h && kind !== 'submitted' && stage !== 'mine' && (
+          <div class="fkinds fstat" role="group" aria-label="Visible in the picture">
+            <button class={!unseen ? 'on' : ''} aria-pressed={!unseen} onClick={() => setUnseen(false)}>
+              Visible in the picture <span>{h.visibility.in_view.visible}</span>
+            </button>
+            <button class={unseen ? 'on' : ''} aria-pressed={unseen} onClick={() => setUnseen(true)}>
+              Not visible in the picture <span>{h.visibility.in_view.not_visible + h.visibility.in_view.not_measured}</span>
+            </button>
+          </div>
+        )}
         <p class="hint leadcount">
+          <a href="#/leaders">Leaderboard</a>
           {kind === 'submitted' ? `${cards.finds.length} findings submitted by people` : h ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery` : 'reading the findings…'}
           {h && h.identification.pending > 0 && ` · identifying: ${h.identification.pending} catalogue answers to come`}
         </p>

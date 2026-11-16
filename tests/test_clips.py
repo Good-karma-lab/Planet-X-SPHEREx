@@ -318,3 +318,52 @@ def test_a_planet_x_peak_blinks_between_one_pass_and_the_sum_along_the_orbit(tmp
     assert float(fr[1][c - 6 : c + 7, c - 6 : c + 7].max()) > 230.0  # the peak stands in the middle of the ring in the sum
     assert float(fr[1][20:60, 20:60].mean()) < 40.0  # and the noise round it is dark
     assert clips.summary(peak)["blink"] == ["one pass", "sum along the orbit"]
+
+
+def test_a_faint_track_is_seen_only_when_the_visits_are_added_along_its_motion(tmp_path: Path) -> None:
+    from service.clips import VISIBLE_SN, render_track, ring_sn, track_places
+
+    store = Store(tmp_path / "main")
+    n, step, nfr = 200, 6.0, 9
+    rng = np.random.default_rng(11)
+    frames_meta, motion = [], []
+    for i in range(nfr):
+        z = rng.normal(0.0, 1.0, (n, n))
+        x, y = 40 + 14 * i, 60 + 9 * i  # the body: 2.5 sigma in one visit, invisible in any single frame
+        z[y - 1 : y + 2, x - 1 : x + 2] += 2.5
+        motion.append(np.clip(np.round(1 + 254 * np.clip((z + 5.0) / 20.0, 0, 1)), 1, 255).astype(np.uint8))
+        frames_meta.append({"visit": i, "det": 1 + i % 3, "mjd": 61000.0 + 0.1 * i, "exposures": 3})
+    key, params = "m" * 24, {"ra": RA0, "dec": DEC0, "fov": 20.0, "mjd": 61000.4}
+    meta = {"kind": "film", "params": params, "grid": {"ra0": RA0, "dec0": DEC0, "step_arcsec": step, "n": n}, "frames": frames_meta}
+    store.begin("film", key, params)
+    store.write_part("film", key, "film.sxp", encode({"sky": np.ones((nfr, n, n), np.uint8), "motion": np.stack(motion)}, meta))
+    store.write_meta("film", key, meta)
+    store.complete(key)
+    pts = [{"f": i, "x": 40.0 + 14 * i, "y": 60.0 + 9 * i, "z": 2.5, "how": "found"} for i in (0, 3, 8)]
+    find = {
+        "id": "film:f",
+        "kind": "film",
+        "ra": RA0,
+        "dec": DEC0,
+        "fov": 20.0,
+        "rate": 30.0,
+        "data": {"film": 61000.4, "track": {"pts": pts, "pa": 120.0}},
+    }
+    places = track_places(find, frames_meta)
+    assert len(places) == nfr and np.allclose(
+        places[5], (40 + 14 * 5, 60 + 9 * 5)
+    )  # between the measured places: the line from one to the next
+    data, info = render_track(find, store, key, meta)
+    assert len(_frames(data)) == 2 and info["blink"] == ["added along the motion", "added without motion"] and info["visits_added"] == nfr
+    assert info["visible_sn"] > 5.0 and info["still_sn"] < 4.0 and info["visible"] is True  # 2.5 sigma x sqrt(9) visits
+    # a track over empty sky: nothing in the ring either way
+    empty = {
+        **find,
+        "id": "film:e",
+        "data": {"film": 61000.4, "track": {"pts": [{"f": i, "x": 150.0 - 10 * i, "y": 30.0 + 2 * i} for i in (0, 4, 8)]}},
+    }
+    _, none = render_track(empty, store, key, meta)
+    assert none["visible"] is False and none["visible_sn"] < 4.5
+    img = rng.normal(0.0, 1.0, (41, 41))
+    img[20, 20] = 9.0
+    assert ring_sn(img, 20, 20, 3) > 6.0 > VISIBLE_SN > ring_sn(np.zeros((41, 41)), 20, 20, 3)
