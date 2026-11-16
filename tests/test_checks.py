@@ -61,10 +61,10 @@ def test_two_passes_and_line() -> None:
     assert ck.check_two_passes([])[0] == "fail"
     assert ck.check_straight_line(moving_marks())[0] == "pass"
     assert ck.check_straight_line(moving_marks()[:2])[0] == "warn"  # two passes always make a line
-    assert ck.check_straight_line(moving_marks(wobble=7.0))[0] == "warn"
+    assert ck.check_straight_line(moving_marks(wobble=5.0))[0] == "warn"
     assert ck.check_straight_line(moving_marks(wobble=14.0))[0] == "fail"
     assert ck.check_straight_line(moving_marks(rate_arcsec_yr=0.5))[0] == "warn"  # does not move
-    state, detail = ck.check_straight_line(moving_marks())
+    _, detail = ck.check_straight_line(moving_marks())
     assert "3.00″/yr toward 0°" in detail
 
 

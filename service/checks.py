@@ -1,7 +1,7 @@
 """The checks before submit ("Check and submit"): a job that runs every check on a set of marks and keeps the answers.
 
     two_passes     the marks are in at least two passes
-    straight_line  the marks lie on one line on the sky (largest distance from the fitted line against LINE_PASS / LINE_WARN)
+    straight_line  the marks lie on the line from the first to the last mark (largest distance from it against LINE_PASS / LINE_WARN)
     gaia           no Gaia DR3 star, carried to the date of each pass by proper motion and parallax, stands at the marks
     simbad         the same for SIMBAD objects
     jpl            no Solar System body of JPL's Small-Body Identification passes the marks during the pass
@@ -40,7 +40,7 @@ CHECK_IDS = ("two_passes", "straight_line", "gaia", "jpl", "simbad", "edge_brigh
 ANSWERED = ("pass", "warn", "fail")
 MATCH_ARCSEC = 4.0  # a catalogue object this close to a mark (two thirds of a SPHEREx pixel) is the marked point
 MIN_SHIFT_ARCSEC = 2.0  # marks closer together than this do not show a motion
-LINE_PASS_ARCSEC, LINE_WARN_ARCSEC = 3.1, 6.2  # half a SPHEREx pixel, one pixel: the largest distance of a mark from the line
+LINE_PASS_ARCSEC, LINE_WARN_ARCSEC = 3.1, 6.2  # half a SPHEREx pixel, one pixel: a mark's distance from the line first-last
 HALO_ARCSEC, HALO_BRIGHT_ARCSEC, HALO_BRIGHT_MAG = 60.0, 120.0, 6.0  # beside a saturated star: ghosts and diffraction spikes
 JPL_MATCH_ARCSEC = 12.0  # two pixels: the mark is put on a pass image in which a body trails
 JPL_MARGIN_RATE = 40.0  # ″/h: a fast main-belt body; the identification field is widened by this rate over half the pass
@@ -63,12 +63,19 @@ def _sep(ra: float, dec: float, ra0: float, dec0: float) -> tuple[float, float]:
     return float(east[0]), float(north[0])
 
 
-def fit_line(east: np.ndarray, north: np.ndarray) -> tuple[float, float]:
-    """The line through points on the sky (total least squares): (length along the line, largest distance from it), arcsec."""
-    p = np.column_stack([east - east.mean(), north - north.mean()])
-    _, _, vt = np.linalg.svd(p, full_matrices=False)
-    along, across = p @ vt[0], p @ vt[1]
-    return float(along.max() - along.min()), float(np.abs(across).max())
+def off_line(marks: list[Mark]) -> float:
+    """The largest distance (arcsec) of a mark from the line through the first and the last mark in time."""
+    ms = sorted(marks, key=lambda m: float(m["mjd"]))
+    a, b = ms[0], ms[-1]
+    east, north = _sep(b["ra"], b["dec"], a["ra"], a["dec"])
+    length = math.hypot(east, north)
+    if length == 0:
+        return 0.0
+    worst = 0.0
+    for m in ms[1:-1]:
+        e, n = _sep(m["ra"], m["dec"], a["ra"], a["dec"])
+        worst = max(worst, abs(e * north - n * east) / length)
+    return worst
 
 
 def motion(marks: list[Mark]) -> tuple[float, float, float] | None:
@@ -106,8 +113,7 @@ def check_straight_line(marks: list[Mark]) -> Answer:
         return "warn", f"The marks do not move: {said} (under {MIN_SHIFT_ARCSEC:.0f}″)."
     if len(passes) < 3:
         return "warn", f"Two passes always lie on one line ({said}): a third pass would test it."
-    east, north = offsets_arcsec(np.array([m["ra"] for m in marks]), np.array([m["dec"] for m in marks]), marks[0]["ra"], marks[0]["dec"])
-    _, off = fit_line(east, north)
+    off = off_line(marks)
     if off <= LINE_PASS_ARCSEC:
         return "pass", f"The marks of {len(passes)} passes lie on one line within {off:.1f}″ ({said})."
     state = "warn" if off <= LINE_WARN_ARCSEC else "fail"
