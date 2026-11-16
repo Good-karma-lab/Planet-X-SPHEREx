@@ -566,6 +566,16 @@ def test_flow_fields_promise_first_and_the_looks_people_gave(tmp_path: Path) -> 
     assert hid["finds"][0]["promise"] <= 2 and hid["finds"][0]["visible"] is False and vis["visibility"]["in_view"]["not_visible"] == 1
     assert vis["visibility"]["by_kind"]["red"] == {"visible": 0, "not_visible": 1, "not_measured": 0}
     assert query(db, None, "all", None, 100, 0)["finds"][0]["visible"] is None  # not measured: nothing is assumed
+    # a find with a machine note (it looks like an artefact) goes below every clean find, whatever its promise
+    import service.findings as sf
+
+    top = again["finds"][0]["id"]
+    sf._NOTES = {top: "a blend that stands still"}
+    try:
+        noted_last = query(db, None, "all", None, 100, 0, flow=flow, sort="promise")
+        assert noted_last["finds"][-1]["id"] == top and noted_last["finds"][-1]["note"] and noted_last["noted"] == 1
+    finally:
+        sf._NOTES = None
     # the old call and the old fields stay as they were
     old = query(db, None, "all", None, 100, 0)
     assert old["total"] == 5 and {"status", "verdict", "idents"} <= set(old["finds"][0])
