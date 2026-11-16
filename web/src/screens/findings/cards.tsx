@@ -80,7 +80,7 @@ export function checkHref(f: CardFind): string {
 
 /** "Check this finding": the task is taken from the service (it is kept for a signed-in user), then the lab opens with it. Without the
  *  accounts of the service, or when it does not answer in two seconds, the lab opens with the find alone. */
-async function takeTask(f: CardFind): Promise<void> {
+export async function takeTask(f: CardFind): Promise<void> {
   let href = checkHref(f);
   try {
     const ctl = new AbortController();
