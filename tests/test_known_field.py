@@ -145,6 +145,7 @@ async def test_a_catalogue_that_fails_is_said_and_not_kept(tmp_path: Path, monke
     k.client = httpx.AsyncClient(transport=transport())
     for b in k.breakers.values():
         b.success()
+    k.failed.clear()
     out = await k.objects(269.449, 4.741, 6.0, [61026.5])
     assert out["answered"] == {"gaia": True, "simbad": True, "jpl": True}
     await k.client.aclose()
