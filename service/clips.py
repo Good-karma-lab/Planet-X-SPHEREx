@@ -562,6 +562,77 @@ def render_film(find: dict[str, Any], store: Store, key: str, meta: dict[str, An
     return data, info
 
 
+# ---------------------------------------------------------------- a Planet X peak: one pass, and the sum along the orbit
+
+DISTANT = "distant"
+PEAK_FRAME_MS = 1400
+PEAK_SN_FULL = 12.0  # the product keeps S/N × 255 / 12: this S/N is white
+PEAK_SN_DARK = 3.0  # below this S/N the sum is noise: black
+
+
+def render_peak(
+    find: dict[str, Any], src: Source, sum_meta: dict[str, Any], sum_bin: bytes, size: int = SIZE
+) -> tuple[bytes, dict[str, Any]]:
+    """The Blink of a Planet X peak: "one pass" (the stacked pass of the search's date: the ring is empty, the body is below what one
+    pass shows) and "sum along the orbit" (the best-S/N map of the distance search that covers the place: the visits of that pass
+    shifted along every tried orbit and added; the peak stands in the ring). The same window of the sky in both, north up, east left."""
+    from engine import distant as edist
+
+    t0 = time.time()
+    data, info = render(find, src, WINDOW_ARCMIN, size, True, False, None)
+    stack = Image.open(io.BytesIO(data))
+    peak = (find.get("data") or {}).get("peak") or {}
+    ref = float(peak.get("ref_mjd") or 0.0)
+    passes = info["frames"]
+    k = min(range(len(passes)), key=lambda i: abs(0.5 * (passes[i]["mjd0"] + passes[i]["mjd1"]) - ref)) if ref else 0
+    stack.seek(k)
+    one = stack.convert("RGB").copy()
+    d1 = ImageDraw.Draw(one)
+    _text(d1, (8, size - 26), "one pass", 14, "ls")
+    _text(d1, (8, size - 8), passes[k]["label"], 13, "ls")
+    _text(d1, (size - 8, size - 8), f"{WINDOW_ARCMIN:g} arcmin", 12, "rs")
+    # the sum: the best-S/N map, N × N, pixel (x, y) at u = (x - N/2) S to the west and v = (y - N/2) S to the north of the centre
+    sl = sum_meta["slider"]
+    n, step = int(sl["n"]), float(sl["step"])
+    nvis = len(sl["t"])
+    best = np.frombuffer(sum_bin, np.uint8, count=n * n, offset=nvis * n * n).reshape(n, n)
+    pr = sum_meta["params"]
+    tan = edist.Tangent(float(pr["ra"]), float(pr["dec"]))  # type: ignore[no-untyped-call]
+    u, v = tan.sky2uv(float(find["ra"]), float(find["dec"]))  # type: ignore[no-untyped-call]
+    cx, cy = float(u) / step + n / 2.0, float(v) / step + n / 2.0
+    w = round(WINDOW_ARCMIN * 60.0 / step)
+    x0, y0 = round(cx - w / 2.0), round(cy - w / 2.0)
+    cut = _window(best, x0, y0, w, 0)[::-1]  # row 0 to the north
+    sn_here = float(_window(best, round(cx) - 2, round(cy) - 2, 5, 0).max()) * PEAK_SN_FULL / 255.0
+    sn_map = cut.astype(np.float64) * PEAK_SN_FULL / 255.0
+    grey = np.clip((sn_map - PEAK_SN_DARK) / (PEAK_SN_FULL - PEAK_SN_DARK), 0.0, 1.0) ** 0.8  # noise (under 3 sigma) dark, 12 sigma white
+    pic = np.repeat(grey[..., None], 3, axis=-1)
+    ring = (cx - x0, (w - 1) - (cy - y0))
+    summed = draw_frame(pic, ring, RING_ARCSEC / step, "", "", size, None, False)
+    d2 = ImageDraw.Draw(summed)
+    _text(d2, (8, size - 26), "sum along the orbit", 14, "ls")
+    sn = peak.get("sn")
+    _text(d2, (8, size - 8), f"S/N {float(sn):.1f} in the search" if sn is not None else f"S/N {sn_here:.1f} here", 13, "ls")
+    _text(d2, (size - 8, size - 8), f"{WINDOW_ARCMIN:g} arcmin", 12, "rs")
+    buf = io.BytesIO()
+    one.save(buf, "WEBP", save_all=True, append_images=[summed], duration=[PEAK_FRAME_MS, PEAK_FRAME_MS], loop=0, quality=QUALITY, method=4)
+    out = buf.getvalue()
+    info.update(
+        {
+            "blink": ["one pass", "sum along the orbit"],
+            "pass": passes[k],
+            "sum_product": sum_meta.get("key"),
+            "sum_params": pr,
+            "sum_sn_at_place": round(sn_here, 1),
+            "frames": [passes[k], {"label": "sum along the orbit"}],
+            "frame_ms": PEAK_FRAME_MS,
+            "bytes": len(out),
+            "render_s": round(time.time() - t0, 3),
+        }
+    )
+    return out, info
+
+
 # ---------------------------------------------------------------- the clips of the service
 
 
@@ -668,6 +739,34 @@ class Clips:
                 return key, meta
         return None
 
+    def sum_for(self, find: dict[str, Any]) -> tuple[dict[str, Any], bytes] | None:
+        """The distance search (one pass) whose map holds a Planet X peak: its field covers the place, its pass is the peak's, its
+        distances include the peak's; the smallest field first. (meta with its key, the binary part) or None."""
+        peak = (find.get("data") or {}).get("peak") or {}
+        ref, dist = peak.get("ref_mjd"), peak.get("d")
+        best: tuple[float, str] | None = None
+        for row in self.store.listing((DISTANT,)):
+            p = row["params"]
+            if not row["complete"] or list(p.get("det") or []) != [1, 2, 3]:
+                continue
+            half = float(p.get("fov", 0.0)) / 120.0 - WINDOW_ARCMIN / 120.0
+            dra = ((float(find["ra"]) - float(p["ra"]) + 540.0) % 360.0 - 180.0) * math.cos(math.radians(float(find["dec"])))
+            if abs(dra) > half or abs(float(find["dec"]) - float(p["dec"])) > half:
+                continue
+            if ref is not None and p.get("mjd") is not None and abs(float(p["mjd"]) - float(ref)) > 40.0:
+                continue
+            if dist is not None and not (float(p.get("dmin", 0)) <= float(dist) <= float(p.get("dmax", 1e9))):
+                continue
+            if best is None or float(p["fov"]) < best[0]:
+                best = (float(p["fov"]), row["key"])
+        if best is None:
+            return None
+        meta = self.store.read_meta(DISTANT, best[1])
+        blob = self.store.read_part(DISTANT, best[1], "bin")
+        if not meta or blob is None or meta.get("status") != "ok" or not meta.get("slider"):
+            return None
+        return {**meta, "key": best[1]}, blob
+
     def rank(self, find: dict[str, Any]) -> int:
         """For the order of the page: 0 the clip is ready, 1 it can be made, 2 it cannot (nothing covers the place; a track whose visits
         are not kept)."""
@@ -750,7 +849,13 @@ class Clips:
         async with self.gate:
             if not p.is_file():
                 try:
-                    data, info = await asyncio.to_thread(render, find, src)
+                    summed = await asyncio.to_thread(self.sum_for, find) if find.get("kind") == "peak" else None
+                    if summed is not None:
+                        data, info = await asyncio.to_thread(render_peak, find, src, summed[0], summed[1])
+                    else:
+                        data, info = await asyncio.to_thread(render, find, src)
+                        if find.get("kind") == "peak":
+                            info["note"] = "the sum along the orbit is not kept here: the passes alone are shown"
                 except ClipUnavailable as e:
                     self.failed[fid] = str(e)
                     raise
@@ -835,6 +940,11 @@ class Clips:
         out: dict[str, Any] = {"url": f"/api/findings/{fid}/clip.webp?v={VERSION}", "state": st, "version": VERSION}
         if st != "ready" and self.source_for(find) is not None:
             out["still"] = f"/api/findings/{fid}/still.webp?v={VERSION}"  # a picture of the place while the clip is not there
+        if find.get("kind") == "peak" and st == "ready":
+            i0 = self.info(fid) or {}
+            out["blink"] = i0.get("blink")  # ["one pass", "sum along the orbit"], or None when the sum is not kept here
+            if i0.get("note"):
+                out["note"] = i0["note"]
         if st == "ready" and detail:
             i = self.info(fid) or {}
             out.update({"frames": len(i.get("frames") or []), "bytes": i.get("bytes"), "window_arcmin": i.get("window_arcmin")})

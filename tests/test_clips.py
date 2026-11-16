@@ -277,3 +277,44 @@ def test_a_track_inside_one_pass_is_shown_in_the_visits_of_one_detector(tmp_path
 
     alone, filled = film_picture(sky[2]), film_picture(sky[2], [sky[4]])
     assert float(alone[:20, :20].min()) > 0.05 and np.allclose(filled[:20, :20, 0], (sky[4][:20, :20].astype(float) - 1) / 254.0)
+
+
+def test_a_planet_x_peak_blinks_between_one_pass_and_the_sum_along_the_orbit(tmp_path: Path) -> None:
+    import asyncio
+
+    from engine import distant as edist
+    from service.clips import Clips
+
+    store = Store(tmp_path / "main")
+    _field(store, "f" * 24, 5.0)
+    # a distance search of the same place: 3 visits of differences, then the best-S/N map with a peak 20″ west and 10″ north of the centre
+    n, nvis = 120, 3
+    best = np.full((n, n), 30, np.uint8)
+    px, py = n // 2 + round(20.0 / edist.S), n // 2 + round(10.0 / edist.S)
+    best[py - 1 : py + 2, px - 1 : px + 2] = 255
+    blob = np.zeros((nvis, n, n), np.uint8).tobytes() + best.tobytes() + np.zeros((n, n), np.uint8).tobytes()
+    params = {"ra": RA0, "dec": DEC0, "fov": 6.0, "mjd": MJD[1], "det": [1, 2, 3], "dmin": 60.0, "dmax": 110.0}
+    meta = {"status": "ok", "params": params, "slider": {"n": n, "step": edist.S, "t": [0.0] * nvis}}
+    store.begin("distant", "d" * 24, params)
+    store.write_part("distant", "d" * 24, "bin", blob)
+    store.write_meta("distant", "d" * 24, meta)
+    store.complete("d" * 24)
+    ra = RA0 - 20.0 / 3600.0 / np.cos(np.radians(DEC0))
+    peak = {
+        "id": "peak:t",
+        "kind": "peak",
+        "ra": float(ra),
+        "dec": DEC0 + 10.0 / 3600.0,
+        "data": {"peak": {"ref_mjd": MJD[1], "d": 80.0, "sn": 10.9}},
+    }
+    clips = Clips(store, tmp_path / "clips")
+    assert clips.sum_for(peak) is not None and clips.sum_for({**peak, "data": {"peak": {"ref_mjd": MJD[1], "d": 500.0}}}) is None
+    path = asyncio.run(clips.get(peak))
+    fr = _frames(path.read_bytes())
+    info = clips.info("peak:t") or {}
+    assert len(fr) == 2 and info["blink"] == ["one pass", "sum along the orbit"] and info["sum_sn_at_place"] == 12.0
+    assert info["pass"]["pass"] == 1  # the pass of the search's date
+    c = SIZE // 2
+    assert float(fr[1][c - 6 : c + 7, c - 6 : c + 7].max()) > 230.0  # the peak stands in the middle of the ring in the sum
+    assert float(fr[1][20:60, 20:60].mean()) < 40.0  # and the noise round it is dark
+    assert clips.summary(peak)["blink"] == ["one pass", "sum along the orbit"]
