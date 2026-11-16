@@ -103,7 +103,7 @@ documentation and the method write-up, ran the validation scripts and drafted th
 
 The images and videos the tool shows are **not AI-generated**: they are computed deterministically by our code from real NASA SPHEREx
 exposures (and archive images from DSS2, 2MASS and AllWISE, credited on screen). No generative image or video model was used for
-any picture or figure of the tool. The 30-second demo video is the one exception: it contains two AI-generated clips (a space telescope in orbit and a flying star, made with Google Gemini), each marked "AI-generated" on screen, an AI voice-over and sound effects (ElevenLabs) and CC0 music ("Transmission", Dark Sci-Fi Audio Pack, OpenGameArt). Every sky image in the video and in the tool is real SPHEREx data. No NASA logo or insignia appears in any generated content.
+any picture, figure or video of the submission. No NASA logo or insignia appears in any generated content.
 
 AI-written code and text are acknowledged here and in the repository (commit messages carry a co-author line for the AI assistant).
 
