@@ -46,6 +46,11 @@ def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[FastAPI, _Sta
     return app, st, mail
 
 
+def _unread(c: TestClient) -> int:
+    """Unread notifications, the achievements apart (they have their own tests)."""
+    return sum(1 for n in c.get("/api/me/notifications").json()["notifications"] if not n["read"] and n["kind"] != "achievement")
+
+
 def _client(app: FastAPI) -> TestClient:
     return TestClient(app, base_url="http://localhost", follow_redirects=False)
 
@@ -189,7 +194,8 @@ def test_history_notifications_and_name(site: tuple[FastAPI, _State, _Mail]) -> 
     uid = c.get("/api/me").json()["user"]["id"]
     accounts.get(st).db.notify(uid, "status", "Finding x: the status is now “candidate”.", "x")
     n = c.get("/api/me/notifications").json()
-    assert n["unread"] == 1 and n["notifications"][0]["ref"] == "x"
+    assert _unread(c) == 1 and next(x for x in n["notifications"] if x["kind"] == "status")["ref"] == "x"
+    assert any(x["text"].startswith("Achievement: Named.") for x in n["notifications"])  # the name was chosen above
     c.post("/api/me/notifications/read", json={})
     assert c.get("/api/me/notifications").json()["unread"] == 0
     assert c.delete("/api/me/history").status_code == 204 and c.get("/api/me/history").json() == {"history": []}
@@ -292,11 +298,11 @@ def test_investigation_and_submit_only_when_the_checks_allow(site: tuple[FastAPI
     public = _client(app).get("/api/findings/submitted").json()["findings"]
     assert [(x["name"], x["role"]) for x in public[0]["credit"]] == [("ann", "submitted"), ("ann", "marked")]
     assert "email" not in str(public)
-    assert c.get("/api/me/notifications").json()["unread"] == 1
+    assert _unread(c) == 1
     # the verdict reaches the user
     assert accounts.get(st).db.set_status(out["finding_id"], "candidate") == 1
     assert c.get("/api/me/findings").json()["findings"][0]["status"] == "candidate"
-    assert c.get("/api/me/notifications").json()["unread"] == 2
+    assert _unread(c) == 2
     assert c.delete(f"/api/me/investigations/{iid}").status_code == 204
 
 
@@ -363,3 +369,60 @@ def test_download_and_delete_my_data(site: tuple[FastAPI, _State, _Mail]) -> Non
     assert "ann@example.org" not in dump and MARK["id"] not in dump
     again = _sign_in(app, mail)  # the address can start anew, empty
     assert again.get("/api/me/marks").json() == {"marks": []}
+
+
+def test_declared_submit_finishes_by_itself(site: tuple[FastAPI, _State, _Mail]) -> None:
+    """ "Check and submit" is said once; the server submits when the checks allow it, with no page open (st.on_checks_done)."""
+    app, st, mail = site
+    c = _sign_in(app, mail)
+    c.post("/api/me/marks", json=MARK)
+    jobs: dict[str, Any] = {}
+    st.checks_status = lambda job: jobs.get(job)  # type: ignore[attr-defined]
+
+    def job(state: str, *checks: tuple[str, str, str], ok: bool = False) -> dict[str, Any]:
+        return {"job": "x", "state": state, "checks": [{"id": i, "state": s, "detail": d} for i, s, d in checks], "can_submit": ok}
+
+    def texts() -> list[str]:
+        return [n["text"] for n in c.get("/api/me/notifications").json()["notifications"] if n["kind"] != "achievement"]
+
+    def new(title: str) -> str:
+        iid: str = c.post("/api/me/investigations", json={"title": title, "mark_ids": [MARK["id"]]}).json()["id"]
+        return iid
+
+    # 1. every check passes: declared while running, submitted by the checks' own signal
+    a = new("Clean")
+    assert c.post(f"/api/me/investigations/{a}/submit", json={"checks_job": "nope"}).status_code == 404
+    jobs["ja"] = job("running", ("gaia", "pass", ""), ("jpl", "running", "Asking JPL for the bodies of visit 2 of 5"))
+    inv = c.post(f"/api/me/investigations/{a}/submit", json={"checks_job": "ja", "note": "Seen in both passes."}).json()
+    assert inv["state"] == "checking" and inv["declared"] and len(inv["notes"]) == 1
+    assert inv["progress"] == "1 of 2 checks answered · Asking JPL for the bodies of visit 2 of 5"
+    jobs["ja"] = job("done", ("gaia", "pass", ""), ("jpl", "pass", ""), ok=True)
+    st.on_checks_done({"job": "ja"})  # type: ignore[attr-defined]  # the checks stream's signal: nobody has a page open
+    mine = c.get("/api/me/investigations").json()["investigations"]
+    done = next(i for i in mine if i["id"] == a)
+    assert done["state"] == "submitted" and done["submitted"].startswith("user:")
+    assert texts() == ["Your finding “Clean” is submitted and waits for the verdict."]
+    st.on_checks_done({"job": "ja"})  # type: ignore[attr-defined]  # a second signal changes nothing
+    assert len(texts()) == 1
+
+    # 2. a check fails: the user is told which and why, nothing is submitted
+    b = new("A star")
+    jobs["jb"] = job("done", ("gaia", "fail", "Gaia DR3 1 stands 1.1″ from every mark: a known object."), ("jpl", "pass", ""))
+    assert c.post(f"/api/me/investigations/{b}/submit", json={"checks_job": "jb"}).json()["state"] == "blocked"
+    assert texts()[0] == "“A star” was not submitted. Gaia: Gaia DR3 1 stands 1.1″ from every mark: a known object."
+    assert len(c.get("/api/me/findings").json()["findings"]) == 1
+
+    # 3. two warnings: comments are asked for once, and the submit happens by itself when they are there
+    w = new("Fast")
+    jobs["jw"] = job("running", ("straight_line", "running", ""))
+    c.post(f"/api/me/investigations/{w}/submit", json={"checks_job": "jw"})
+    jobs["jw"] = job("done", ("straight_line", "warn", "curved"), ("gaia", "warn", "near a star"), ("jpl", "pass", ""), ok=True)
+    st.on_checks_done({"job": "jw"})  # type: ignore[attr-defined]
+    assert texts()[0].startswith("“Fast”: every check has answered. 2 comments are needed for the warnings (straight line, Gaia)")
+    one = c.post(f"/api/me/investigations/{w}/notes", json={"text": "The path curves: the body is close."}).json()
+    assert one["state"] == "needs_comment" and one["submitted"] is None
+    assert texts()[0].startswith("“Fast”: every check has answered. One comment is needed")
+    two = c.post(f"/api/me/investigations/{w}/notes", json={"text": "The star is near the first visit only."}).json()
+    assert two["state"] == "submitted" and two["submitted"]
+    assert texts()[0] == "Your finding “Fast” is submitted and waits for the verdict."
+    assert len(c.get("/api/me/findings").json()["findings"]) == 2

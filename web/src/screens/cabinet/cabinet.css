@@ -83,3 +83,7 @@ a.cb-row:hover, button.cb-row:hover { background: rgba(95, 227, 214, 0.08); }
 .cb-pic .cb-pic-big { position: absolute; left: calc(100% + 10px); top: 0; z-index: 60; width: 320px; height: 320px; max-width: none; border-radius: 10px; border: 1px solid var(--edge-hi); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.7); background: #02070a; pointer-events: none; }
 .cb-list > :nth-last-child(-n + 2):not(:nth-child(-n + 2)) .cb-pic .cb-pic-big { top: auto; bottom: 0; }
 @media (max-width: 600px) { .cb-pic .cb-pic-big { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(320px, 92vw); height: auto; aspect-ratio: 1; } }
+.cb-declnote { flex: 1 1 260px; min-width: 0; }
+.badge.st-inv-checking, .badge.st-inv-needs_comment { color: var(--amber); border-color: rgba(255, 180, 84, 0.4); }
+.badge.st-inv-blocked { color: var(--bad); border-color: rgba(255, 111, 111, 0.4); }
+.badge.st-inv-submitted { color: var(--good); border-color: rgba(79, 227, 161, 0.4); }

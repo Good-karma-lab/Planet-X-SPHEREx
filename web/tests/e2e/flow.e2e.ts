@@ -126,15 +126,16 @@ test('5. Check and submit on a known star: the checks run and the submit is refu
   await page.goto(`/#/me?tab=investigations&inv=${made!.inv}`);
   await expect(page.getByTestId('investigation-page')).toBeVisible();
   await page.getByTestId('check-submit').click();
-  // the checks answer one by one (JPL and NEOWISE are slow); the reason of the refusal is on the page as soon as Gaia has answered
-  await expect(page.getByTestId('checks').getByText(/^gaia: fail$/i)).toBeVisible({ timeout: 120_000 });
+  // "Check and submit" is said once; a quick check that fails ends the job early and the page says which
+  await expect(page.getByTestId('checks-status')).toHaveText(/^Not submitted · (gaia|simbad|edge bright): fail$/, { timeout: 300_000 });
+  await expect(page.getByTestId('checks').getByText(/^gaia: fail$/i)).toBeVisible();
   await expect(page.getByTestId('investigation-page')).toContainText(/gaia: Gaia DR3 \d+ .*a known object/);
   await expect(page.getByTestId('investigation-page')).toContainText(/simbad: SIMBAD Barnard's star/);
-  // no way to submit: while the last checks run the button is off, after them it is "Check again"
-  const button = page.getByTestId('check-submit');
-  if ((await button.innerText()) === 'Submit the finding') await expect(button).toBeDisabled();
-  else await expect(button).toHaveText('Check again');
+  await expect(page.getByTestId('check-submit')).toHaveText('Check again');
   await shot('5-refused-known-star');
+  // the user is told the same in the notifications, with the reason
+  await page.getByTestId('tab-notifications').click();
+  await expect(page.getByTestId('panel-notifications')).toContainText(/“A known star \(end-to-end\)” was not submitted\. .*a known object/);
   // and the API refuses the same
   const code = await page.evaluate(async (inv) => {
     const i = ((await fetch('/api/me/investigations').then((r) => r.json())) as { investigations: { id: string; checks_job: string }[] }).investigations.find((x) => x.id === inv)!;
@@ -147,25 +148,33 @@ const LEAD = 'film:2e26f8ee6415'; // the one real unexplained lead with a path: 
 let submitted = false;
 
 test('6. a case that passes: the fast-mover lead is checked, commented and submitted; it is in My findings and in Findings', async () => {
-  test.setTimeout(600_000);
+  test.setTimeout(1_800_000);
   // The investigation of the lead is opened through the account API (in the lab it is "Save to investigation" on the finding).
   const inv = await page.evaluate(
     (lead) => fetch('/api/me/investigations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Fast mover near Barnard (end-to-end)', finding_id: lead }) }).then((r) => r.json()).then((d: { id: string }) => d.id),
     LEAD,
   );
   await page.goto(`/#/me?tab=investigations&inv=${inv}`);
+  // said once, with the first comment given up front; then the user leaves the page
+  await page.getByTestId('declare-note').fill('Not one straight line: the body is 0.4 au away and its path curves over 169 hours; the track search fits all five visits.');
   await page.getByTestId('check-submit').click();
-  // every check answers (JPL is asked for each of the five visits): two warnings, nothing fails
-  await expect(page.getByTestId('checks-status')).toHaveText('A check gave a warning: add a note that explains it', { timeout: 420_000 });
+  await expect(page.getByTestId('checks-status')).toHaveText(/^(Submit declared · .*you may leave|Every check has answered · one comment needed)/, { timeout: 60_000 });
+  await shot('6-declared');
+  await page.getByTestId('tab-tasks').click();
+  await expect(page.getByTestId('submit-row').filter({ hasText: 'Fast mover near Barnard (end-to-end)' })).toBeVisible();
+  await shot('6-tasks-progress');
+  // JPL is asked for each of the five visits (minutes): the server goes on without the page and says when a comment is needed
+  await expect(async () => {
+    await page.getByTestId('tab-history').click();
+    await page.getByTestId('tab-notifications').click();
+    await expect(page.getByTestId('panel-notifications')).toContainText('“Fast mover near Barnard (end-to-end)”: every check has answered. One comment is needed', { timeout: 5000 });
+  }).toPass({ timeout: 1_500_000, intervals: [15_000] });
+  await page.goto(`/#/me?tab=investigations&inv=${inv}`);
+  await expect(page.getByTestId('checks-status')).toHaveText(/one comment needed for the warnings/);
   await expect(page.getByTestId('checks').getByText(/^two passes: pass$/i)).toBeVisible();
-  await expect(page.getByTestId('check-submit')).toBeDisabled();
-  for (const note of ['Not one straight line: the body is 0.4 au away and its path curves over 169 hours; the track search fits all five visits.', 'The Gaia star is 2.7″ from the first visit only; the other four visits are far from it.']) {
-    await page.getByPlaceholder('Add a note').fill(note);
-    await page.getByRole('button', { name: 'Add', exact: true }).click();
-    await expect(page.getByTestId('investigation-page')).toContainText(note);
-  }
-  await expect(page.getByTestId('checks-status')).toHaveText('Every check has answered: ready to submit');
-  await page.getByTestId('check-submit').click();
+  // the second comment is all it waited for: the finding is submitted with no further click
+  await page.getByPlaceholder('Add a note').fill('The Gaia star is 2.7″ from the first visit only; the other four visits are far from it.');
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(page.getByTestId('verdict')).toContainText('Submitted. Waiting for the verdict.');
   submitted = true;
   await shot('6-submitted');
@@ -208,7 +217,7 @@ test('8. the cabinet keeps the work: the investigation, its marks with pictures,
   });
   await page.getByTestId('tab-notifications').click();
   if (finished) {
-    await expect(page.getByTestId('panel-notifications')).toContainText('The checks of “A known star (end-to-end)” have finished');
+    await expect(page.getByTestId('panel-notifications')).toContainText('“A known star (end-to-end)” was not submitted');
     await expect(page.getByTestId('nav-unread')).toBeVisible();
   } else {
     test.info().annotations.push({ type: 'note', description: 'the checks job was still running (JPL): the "checks finished" notification was not asserted' });
