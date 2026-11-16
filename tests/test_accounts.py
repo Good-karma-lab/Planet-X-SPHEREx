@@ -157,7 +157,11 @@ def test_public_server_needs_its_address_and_a_secure_cookie(site: tuple[FastAPI
 def test_marks_are_kept_per_user_and_seen_from_a_second_browser(site: tuple[FastAPI, _State, _Mail]) -> None:
     app, _, mail = site
     a = _sign_in(app, mail)
-    assert a.post("/api/me/marks", json=MARK).json() == MARK
+    assert a.post("/api/me/marks", json=MARK).json() == {**MARK, "mjd": None}
+    dated = a.post("/api/me/marks", json={**MARK, "mjd": 61118.31214}).json()  # the lab's date of the frame is kept and given back
+    assert dated["mjd"] == 61118.31214 and a.get("/api/me/marks").json()["marks"][0]["mjd"] == 61118.31214
+    assert a.post("/api/me/marks", json={**MARK, "mjd": 12.0}).status_code == 422
+    a.post("/api/me/marks", json=MARK)
     assert a.post("/api/me/marks", json={**MARK, "label": "dot 2"}).json()["label"] == "dot 2"  # the same id replaces
     made = a.post("/api/me/marks", json={"field_key": "k1", "ra": 1, "dec": 2, "level": "artefact"}).json()
     assert made["id"] and made["created"] and made["pass"] is None and made["cell_id"] is None
@@ -360,7 +364,7 @@ def test_download_and_delete_my_data(site: tuple[FastAPI, _State, _Mail]) -> Non
     r = c.get("/api/me/export")
     assert "attachment" in r.headers["content-disposition"]
     data = r.json()
-    assert data["user"]["email"] == "ann@example.org" and data["marks"] == [MARK] and len(data["history"]) == 1
+    assert data["user"]["email"] == "ann@example.org" and data["marks"] == [{**MARK, "mjd": None}] and len(data["history"]) == 1
     other = _sign_in(app, mail)
     assert _client(app).delete("/api/me").status_code == 401
     assert c.delete("/api/me").status_code == 204
@@ -418,6 +422,19 @@ def test_declared_submit_finishes_by_itself(site: tuple[FastAPI, _State, _Mail])
     assert c.post(f"/api/me/investigations/{b2}/submit", json={"checks_job": "jb2"}).json()["state"] == "blocked"
     assert texts()[0] == "“A star, JPL still asked” was not submitted. Gaia: a known object"
 
+    # a check that did not answer and is asked again by the job is not a refusal: the submit keeps waiting, nothing is said
+    n = new("JPL is away")
+    jobs["jn"] = {
+        **job("done", ("gaia", "pass", ""), ("jpl", "no_answer", "JPL did not answer")),
+        "next_try_at": "2026-11-16T20:26:58+00:00",
+    }
+    waits = c.post(f"/api/me/investigations/{n}/submit", json={"checks_job": "jn"}).json()
+    assert waits["state"] == "checking" and waits["progress"] == "1 of 2 checks answered · JPL did not answer and is asked again"
+    assert not any("JPL is away" in t for t in texts())
+    jobs["jn"] = job("done", ("gaia", "pass", ""), ("jpl", "pass", ""), ok=True)
+    st.on_checks_done({"job": "jn"})  # type: ignore[attr-defined]
+    assert texts()[0] == "Your finding “JPL is away” is submitted and waits for the verdict."
+
     # 3. two warnings: comments are asked for once, and the submit happens by itself when they are there
     w = new("Fast")
     jobs["jw"] = job("running", ("straight_line", "running", ""))
@@ -431,4 +448,4 @@ def test_declared_submit_finishes_by_itself(site: tuple[FastAPI, _State, _Mail])
     two = c.post(f"/api/me/investigations/{w}/notes", json={"text": "The star is near the first visit only."}).json()
     assert two["state"] == "submitted" and two["submitted"]
     assert texts()[0] == "Your finding “Fast” is submitted and waits for the verdict."
-    assert len(c.get("/api/me/findings").json()["findings"]) == 2
+    assert len(c.get("/api/me/findings").json()["findings"]) == 3

@@ -93,7 +93,7 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
       const first = own[0];
       if (!body && first) {
         const key = /^[A-Za-z0-9_,.+-]*$/.test(first.field_key) ? first.field_key : ''; // a store key, or the lab's "ra,dec,fov"
-        body = { field_key: key, ra: first.ra, dec: first.dec, marks: own.map((m) => ({ pass: m.pass ?? 0, ra: m.ra, dec: m.dec })) };
+        body = { field_key: key, ra: first.ra, dec: first.dec, marks: own.map((m) => ({ pass: m.pass ?? 0, ra: m.ra, dec: m.dec, ...(m.mjd != null ? { mjd: m.mjd } : {}) })) };
       }
       if (!body) throw new Error('No marks in this investigation: put a mark in the lab first');
       const r = await api<{ job: string }>('/api/checks', { method: 'POST', body });
@@ -106,6 +106,7 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
   const rows = checks?.checks ?? [];
   const waiting = rows.filter((c) => ['running', 'queued', 'waiting'].includes(c.state));
   const said = waiting.find((c) => c.state === 'running' && c.detail)?.detail ?? '';
+  // a job that ended with a check to ask again keeps the server's own line ("JPL did not answer and is asked again")
   const progress = checks && checks.state !== 'done' ? `${rows.length - waiting.length} of ${rows.length} checks answered${said ? ` · ${said}` : ''}` : inv.progress;
   const warns = rows.filter((c) => c.state === 'warn');
   const need = Math.max(0, warns.length - inv.notes.length);

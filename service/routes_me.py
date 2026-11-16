@@ -2,7 +2,7 @@
 """The signed-in user's own data. A guest gets 401 on every route here; the rest of the site works without a login.
 
 PATCH  /api/me {name}                         → {user}
-GET    /api/me/marks[?field_key=]             → {marks:[{id, field_key, cell_id, ra, dec, pass, label, level, note, created}]}
+GET    /api/me/marks[?field_key=]             → {marks:[{id, field_key, cell_id, ra, dec, pass, label, level, note, created, mjd}]}
 POST   /api/me/marks  (a mark; the id may be made by the page, the same id again replaces the mark)   → the mark
 DELETE /api/me/marks/{id}  (or ?id=)          → 204
 GET    /api/me/tasks                          → {tasks:[{id, kind, cell_id, finding_id, field_key, ra, dec, state, result, mark_ids, created, done_at}]}
@@ -57,6 +57,7 @@ class MarkIn(BaseModel):
     level: Literal["suspicious", "interesting", "artefact"]
     note: str = Field("", max_length=2000)
     created: str | None = Field(None, max_length=40)
+    mjd: float | None = Field(None, ge=48000.0, le=90000.0)  # the date of the frame the mark was put on (the lab sends it)
 
 
 class DoneIn(BaseModel):
