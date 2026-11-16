@@ -785,6 +785,9 @@ class Checks:
                 bar = json.loads(bar)
             except ValueError:
                 bar = None
+        if hasattr(grid, "bar_at"):  # the grid stream's own reader of the stored bar
+            with contextlib.suppress(Exception):
+                bar = grid.bar_at(db, ra, dec) or bar
         return {"id": cid, "bar": bar if isinstance(bar, dict) else {}, "field_key": row.get("field_key"), "finds": row.get("finds")}
 
     def _movers(self, field_key: str | None) -> dict[str, Any] | None:
