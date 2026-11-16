@@ -1021,7 +1021,10 @@ class Clips:
                     else:
                         data, info = await asyncio.to_thread(render, find, src)
                         if find.get("kind") == "peak":
+                            # a peak exists only in the sum along its orbit: light at its place in ONE pass is a source that
+                            # stands still (a star's residual), so without the sum the peak is not visible in any picture made here
                             info["note"] = "the sum along the orbit is not kept here: the passes alone are shown"
+                            info["pass_sn"], info["visible_sn"], info["visible"] = info.get("visible_sn"), None, False
                 except ClipUnavailable as e:
                     self.failed[fid] = str(e)
                     raise
