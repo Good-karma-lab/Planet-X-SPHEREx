@@ -315,21 +315,43 @@ def run(
     systemd_scope: bool = False,
     base: str | None = None,
     say: Callable[[str], None] = print,
+    recycle_every: int = 10,
+    recycle_share: float = 0.7,
 ) -> SweepResult:
     """Sweep up to `max_squares` squares, one at a time, under the memory cap. `base` reuses a running instance (tests); else a private
-    one is started on `store` and stopped at the end."""
+    one is started on `store` and stopped at the end. The private instance is started afresh (same port) after every `recycle_every`
+    squares, and before a square whenever its resident memory is above `recycle_share` of the cap: its caches grow by about 150 MB a
+    square, so a long sweep is recycled well before the cap, and the cap stays the hard stop for a single square that is too big."""
     out = SweepResult()
     inst: Instance | None = None
     dog: Watchdog | None = None
     t_start = time.monotonic()
     t_end = t_start + hours * 3600.0
+    since_start = 0
     if base is None:
         inst = Instance(store=store, cap_mb=cap_mb, workers=workers, standby=standby, systemd_scope=systemd_scope)
         base = inst.start()
         assert inst.proc is not None
         dog = Watchdog(inst.proc.pid, cap_mb)
         dog.start()
-    stop = (lambda: dog.tripped) if dog is not None else (lambda: False)
+
+    def stop() -> bool:
+        return dog is not None and dog.tripped
+
+    def recycle(why: str) -> None:
+        nonlocal dog, since_start
+        assert inst is not None and dog is not None
+        out.peak_rss_mb = max(out.peak_rss_mb, round(dog.peak_mb, 1))
+        dog.stop()
+        inst.stop()
+        db.log("recycle", reason=why)
+        say(f"recycling the sweep's instance ({why})")
+        inst.start()
+        assert inst.proc is not None
+        dog = Watchdog(inst.proc.pid, cap_mb)
+        dog.start()
+        since_start = 0
+
     db.log("start", cap_mb=cap_mb, workers=workers, max_squares=max_squares)
     try:
         with httpx.Client(base_url=base, headers={"User-Agent": "sky-sweep/1"}) as c:
@@ -337,7 +359,14 @@ def run(
                 if out.squares >= max_squares or time.monotonic() > t_end:
                     out.stopped = out.stopped or ("max squares" if out.squares >= max_squares else "time")
                     break
+                if inst is not None and dog is not None:
+                    now_mb = tree_rss_mb(inst.proc.pid) if inst.proc is not None else 0.0
+                    if since_start >= recycle_every:
+                        recycle(f"{since_start} squares")
+                    elif now_mb > recycle_share * cap_mb:
+                        recycle(f"{now_mb:.0f} MB before the square")
                 out.squares += 1
+                since_start += 1
                 if dog is not None:
                     dog.reset_square()
                 db.put(ce.id, "searching", source="sweep")
@@ -378,7 +407,7 @@ def run(
         out.seconds = round(time.monotonic() - t_start, 1)
         if dog is not None:
             dog.stop()
-            out.peak_rss_mb = round(dog.peak_mb, 1)
+            out.peak_rss_mb = max(out.peak_rss_mb, round(dog.peak_mb, 1))
         if inst is not None:
             inst.stop()
         db.log("end", **{k: v for k, v in out.__dict__.items() if k != "per_square"})
