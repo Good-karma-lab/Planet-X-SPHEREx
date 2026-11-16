@@ -2,7 +2,7 @@ import { render } from 'preact';
 import { App } from './app';
 import './style.css';
 import './responsive.css';
-import { installPinch } from './ui/touch';
+import { installLoupe, installPinch, installStrips } from './ui/touch';
 import { loadManifest, tiles } from './lib/hips';
 
 // a tab opened before a deploy asks for the old build's lazy parts: if one cannot load, the page reloads once onto the new build
@@ -38,6 +38,8 @@ void loadManifest();
 
 // two fingers zoom the globe (phones and tablets); a mouse is not touched
 installPinch();
+installStrips();
+installLoupe();
 
 const root = document.getElementById('app');
 if (root) render(<App />, root);

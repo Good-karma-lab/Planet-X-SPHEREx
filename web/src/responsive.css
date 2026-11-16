@@ -186,7 +186,7 @@
     border-radius: 18px 18px 0 0;
     border: 1px solid var(--edge);
     border-bottom: 0;
-    background: linear-gradient(160deg, rgba(22, 40, 52, 0.97), rgba(7, 15, 21, 0.97));
+    background: linear-gradient(160deg, #14262f, #070f15);
     box-shadow: 0 -14px 44px rgba(0, 0, 0, 0.5);
   }
   :root .more-head {
@@ -388,7 +388,7 @@
     padding: 6px 16px 14px;
     border-radius: 18px 18px 0 0;
     border-width: 1px 0 0;
-    background: linear-gradient(160deg, rgba(20, 38, 49, 0.97), rgba(7, 15, 21, 0.97));
+    background: linear-gradient(160deg, #14262f, #070f15);
     box-shadow: 0 -14px 44px rgba(0, 0, 0, 0.55);
     font-size: 15px;
   }
@@ -710,7 +710,7 @@
     transition: height 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
     border-radius: 18px 18px 0 0;
     border-top: 1px solid var(--edge-hi);
-    background: linear-gradient(160deg, rgba(20, 38, 49, 0.98), rgba(7, 15, 21, 0.98));
+    background: linear-gradient(160deg, #14262f, #070f15);
     box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.55);
     overflow: hidden;
   }
@@ -771,7 +771,7 @@
     gap: 10px;
     border-radius: 18px 18px 0 0;
     border-width: 1px 0 0;
-    background: linear-gradient(160deg, rgba(20, 38, 49, 0.99), rgba(7, 15, 21, 0.99));
+    background: linear-gradient(160deg, #14262f, #070f15);
     box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.6);
   }
   :root .markedit .inp {
@@ -790,4 +790,176 @@
   :root .markedit .me-hint {
     font-size: 12px;
   }
+}
+
+/* =====================================================================================================================
+   PHONE, upright: pages that scroll (Findings, Cabinet, Planet X, Index, Method, About)
+   ===================================================================================================================== */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .screen:has(.ipage) {
+    position: relative;
+    inset: auto;
+    overflow: visible;
+  }
+  :root .ipage {
+    padding: 10px 14px 28px;
+    gap: 14px;
+    font-size: 15px;
+  }
+  :root .pg-h h1 {
+    font-size: 24px;
+  }
+  :root .pg-h .hint {
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  /* a row of chips is ONE strip that slides sideways, 44 px high (filters of Findings and Index, the Cabinet's tabs) */
+  :root .ipage .chips,
+  :root .fkinds,
+  :root .cb-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    gap: 8px;
+    margin-left: -14px;
+    margin-right: -14px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  :root .ipage .chips::-webkit-scrollbar,
+  :root .fkinds::-webkit-scrollbar,
+  :root .cb-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  :root .ipage .chip,
+  :root .fkinds button,
+  :root .cb-tabs button {
+    flex: none;
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 14px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+  }
+  :root .fkinds,
+  :root .cb-tabs {
+    justify-content: flex-start;
+    align-items: center;
+  }
+  :root .ipage .btn,
+  :root .ipage .btn.sm,
+  :root .ipage a.btn {
+    min-height: 44px;
+    padding-left: 14px;
+    padding-right: 14px;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  :root .ipage .inp {
+    min-height: 48px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  :root .ipage .mono-s {
+    font-size: 12px;
+  }
+
+  /* ===== Findings: one column of cards ===== */
+  :root .fbar {
+    padding: 10px 14px 10px;
+    overflow: hidden;
+  }
+  :root .fbar .fsep {
+    display: none;
+  }
+  :root .fgrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  :root .fcard {
+    contain-intrinsic-size: auto 560px;
+  }
+  :root .fcard-body {
+    padding: 12px 14px 14px;
+    gap: 5px;
+  }
+  :root .fcard-title {
+    font-size: 16px;
+    min-height: 0;
+  }
+  :root .fcard-meta {
+    font-size: 14px;
+  }
+  :root .fcard-promise {
+    display: block;
+    font-size: 12px;
+  }
+  :root .ipage .fcard-go {
+    min-height: 48px;
+    font-size: 15px;
+    margin-top: 8px;
+  }
+
+  /* ===== Cabinet ===== */
+  :root .cb-head {
+    align-items: stretch;
+  }
+  :root .cb-who {
+    font-size: 14px;
+  }
+  :root .cb-card {
+    padding: 12px 14px;
+  }
+  :root .cb-row,
+  :root a.cb-row,
+  :root button.cb-row {
+    min-height: 56px;
+    padding: 8px 4px;
+    font-size: 15px;
+  }
+  :root .cb-signin {
+    max-width: none;
+    padding: 16px 14px;
+  }
+  :root .cb-signin form {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  :root .cb-signin .inp {
+    min-width: 0;
+    flex: none;
+  }
+  :root .cb-signin .btn {
+    min-height: 48px;
+    font-size: 15px;
+  }
+  :root .cb-signin a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  :root .cb-addnote {
+    flex-direction: column;
+  }
+}
+
+/* the magnifier for marks (ui/touch.ts): made only while a finger is on the picture, so a desktop never has it */
+.loupe {
+  position: fixed;
+  z-index: 200;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  border: 2px solid rgba(159, 243, 234, 0.85);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  display: none;
 }
