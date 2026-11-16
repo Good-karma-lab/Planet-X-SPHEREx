@@ -206,3 +206,37 @@ def test_the_routes_serve_the_clip_once_rendered_and_say_why_there_is_none(tmp_p
     assert {f["id"]: f["clip"]["state"] for f in after["finds"]} == {"mover:abc": "ready", "red:far": "none"}
     # the shared store got nothing: the clip is in the clips' own folder
     assert not list((tmp_path / "store").rglob("*.webp")) and list((tmp_path / "clips").rglob("*.webp"))
+
+
+def test_a_track_inside_one_pass_is_shown_in_the_visits_of_one_detector(tmp_path: Path) -> None:
+    from service.clips import Clips, render_film
+
+    store = Store(tmp_path / "main")
+    n, step = 200, 6.0
+    rng = np.random.default_rng(5)
+    stars = sum(_blob(n, rng.uniform(0, n), rng.uniform(0, n), rng.uniform(40, 200), 2.5) for _ in range(60))
+    frames_meta, sky = [], []
+    for i in range(8):
+        det = 1 + i % 2  # the visits alternate between two detectors
+        body = _blob(n, 40 + 15 * i, 60 + 10 * i, 180, 2.5)
+        sky.append(np.clip(1 + stars + body, 1, 255).astype(np.uint8))
+        frames_meta.append({"visit": i, "det": det, "mjd": 61000.0 + 0.1 * i, "exposures": 3})
+    sky[2][:20, :20] = 0  # this visit did not cover a corner
+    key, params = "v" * 24, {"ra": RA0, "dec": DEC0, "fov": 20.0, "mjd": 61000.4}
+    meta = {"kind": "film", "params": params, "grid": {"ra0": RA0, "dec0": DEC0, "step_arcsec": step, "n": n}, "frames": frames_meta}
+    store.begin("film", key, params)
+    store.write_part("film", key, "film.sxp", encode({"sky": np.stack(sky), "motion": np.zeros((8, n, n), np.uint8)}, meta))
+    store.write_meta("film", key, meta)
+    store.complete(key)
+    pts = [{"f": i, "x": 40.0 + 15 * i, "y": 60.0 + 10 * i, "z": 9.0, "how": "found"} for i in (0, 2, 4, 6, 7)]
+    find = {"id": "film:t", "kind": "film", "ra": RA0, "dec": DEC0, "fov": 20.0, "data": {"film": 61000.4, "track": {"pts": pts}}}
+    clips = Clips(store, tmp_path / "clips")
+    hit = clips.visits_for(find)
+    assert hit is not None and hit[0] == key
+    data, info = render_film(find, store, key, hit[1])
+    fr = _frames(data)
+    assert info["detector"] == "D1" and [f["frame"] for f in info["frames"]] == [0, 2, 4, 6] and len(fr) == 4  # one detector: no flicker
+    assert all(f["det"] == 1 for f in info["frames"]) and info["window_arcmin"] >= 4.0
+    ras = [f["ra"] for f in info["frames"]]
+    assert ras == sorted(ras, reverse=True)  # x grows to the west: the ring moves west with the body
+    assert clips.visits_for({**find, "data": {**find["data"], "film": 60000.0}}) is None  # another pass: not these visits

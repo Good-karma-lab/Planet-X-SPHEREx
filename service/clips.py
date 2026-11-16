@@ -393,6 +393,99 @@ def render(find: dict[str, Any], src: Source, window_arcmin: float = WINDOW_ARCM
     return data, info
 
 
+# ---------------------------------------------------------------- a body that moves inside one pass: frames of the visits
+
+FILM = "film"
+FILM_FRAME_MS = 550
+FILM_MAX_FRAMES = 14
+FILM_MIN_WINDOW_ARCMIN = 4.0
+FILM_MARGIN_ARCMIN = 1.5
+
+
+def film_picture(sky: NDArray[np.uint8]) -> F:
+    """A frame of the visits product as the lab's Days scale draws it: grey in the lab's display law (the product keeps 1 + 254 × the
+    law; 0 = no data). The visits carry no saturation layer, so a hole next to full-scale light is a saturated core and is white;
+    any other hole (no exposure there in this visit) is black."""
+    v = np.where(sky > 0, (sky.astype(np.float64) - 1.0) / 254.0, 0.0)
+    hole = sky == 0
+    core = hole & (maximum_filter(sky, size=7, mode="nearest") >= 235)
+    v[core] = 1.0
+    return np.repeat(v[..., None], 3, axis=-1)
+
+
+def render_film(find: dict[str, Any], store: Store, key: str, meta: dict[str, Any], size: int = SIZE) -> tuple[bytes, dict[str, Any]]:
+    """The clip of a time-lapse track: the visits of its pass in ONE detector (so the wavelength never changes between frames), the same
+    window in every frame, the ring where the track's straight line puts the body at the time of each visit."""
+    t0 = time.time()
+    g = meta["grid"]
+    grid = Grid(float(g["ra0"]), float(g["dec0"]), float(g["step_arcsec"]), int(g["n"]))
+    frames_meta = meta.get("frames") or []
+    pts = [p for p in ((find.get("data") or {}).get("track") or {}).get("pts") or [] if 0 <= int(p.get("f", -1)) < len(frames_meta)]
+    if len(pts) < 2:
+        raise ClipUnavailable("the track has no measured places in the visits")
+    raw = store.read_part(FILM, key, "film.sxp")
+    if raw is None:
+        raise ClipUnavailable("the visits of this pass are not built here")
+    _, arr = decode(raw)
+    sky = arr["sky"]
+    t = np.array([float(frames_meta[int(p["f"])]["mjd"]) for p in pts])
+    xs, ys = np.array([float(p["x"]) for p in pts]), np.array([float(p["y"]) for p in pts])
+    tm = t.mean()
+    if float(np.ptp(t)) > 0:
+        px, py = np.polyfit(t - tm, xs, 1), np.polyfit(t - tm, ys, 1)
+    else:
+        px, py = np.array([0.0, xs.mean()]), np.array([0.0, ys.mean()])
+    dets = [int(frames_meta[int(p["f"])]["det"]) for p in pts]
+    det = max(set(dets), key=dets.count)  # the detector that saw the body most often
+    f0, f1 = min(int(p["f"]) for p in pts), max(int(p["f"]) for p in pts)
+    chosen = [i for i in range(f0, f1 + 1) if int(frames_meta[i]["det"]) == det]
+    if len(chosen) > FILM_MAX_FRAMES:
+        chosen = [chosen[round(k * (len(chosen) - 1) / (FILM_MAX_FRAMES - 1))] for k in range(FILM_MAX_FRAMES)]
+    if not chosen:
+        raise ClipUnavailable("no visit of the track's detector in this pass")
+    where = [
+        (float(np.polyval(px, float(frames_meta[i]["mjd"]) - tm)), float(np.polyval(py, float(frames_meta[i]["mjd"]) - tm))) for i in chosen
+    ]
+    wx = [w[0] for w in where]
+    wy = [w[1] for w in where]
+    span = max(max(wx) - min(wx), max(wy) - min(wy)) * grid.step_arcsec / 60.0
+    window = min(max(FILM_MIN_WINDOW_ARCMIN, span + 2 * FILM_MARGIN_ARCMIN), grid.n * grid.step_arcsec / 60.0)
+    w = max(8, round(window * 60.0 / grid.step_arcsec))
+    x0 = round((max(wx) + min(wx)) / 2.0 - w / 2.0)
+    y0 = round((max(wy) + min(wy)) / 2.0 - w / 2.0)
+    x0, y0 = min(max(x0, 0), max(0, grid.n - w)), min(max(y0, 0), max(0, grid.n - w))
+    ring_px = max(RING_ARCSEC / grid.step_arcsec, 0.035 * w)  # in a wide window the ring keeps a visible size
+    frames: list[Image.Image] = []
+    shown: list[dict[str, Any]] = []
+    for i, (rx, ry) in zip(chosen, where, strict=True):
+        pic = film_picture(_window(sky[i], x0, y0, w, 0))
+        mjd = float(frames_meta[i]["mjd"])
+        label = f"{_mjd_date(mjd).day} {_mjd_date(mjd):%b %Y %H:%M} UT"
+        ring = (rx - x0, ry - y0) if -0.5 <= rx - x0 <= w - 0.5 and -0.5 <= ry - y0 <= w - 0.5 else None
+        frames.append(draw_frame(pic, ring, ring_px, label, f"{window:.0f} arcmin", size))
+        ra, dec = (float(v) for v in grid.grid_to_sky(rx, ry))
+        shown.append({"frame": i, "visit": frames_meta[i].get("visit"), "det": det, "mjd": mjd, "label": label, "ra": ra, "dec": dec})
+    buf = io.BytesIO()
+    frames[0].save(buf, "WEBP", save_all=True, append_images=frames[1:], duration=FILM_FRAME_MS, loop=0, quality=QUALITY, method=4)
+    data = buf.getvalue()
+    info = {
+        "version": VERSION,
+        "id": find["id"],
+        "kind": find.get("kind"),
+        "visits_product": key,
+        "detector": f"D{det}",
+        "step_arcsec": grid.step_arcsec,
+        "window_arcmin": round(window, 2),
+        "size": size,
+        "frame_ms": FILM_FRAME_MS,
+        "frames": shown,
+        "bytes": len(data),
+        "render_s": round(time.time() - t0, 3),
+        "made": time.time(),
+    }
+    return data, info
+
+
 # ---------------------------------------------------------------- the clips of the service
 
 
@@ -471,6 +564,27 @@ class Clips:
                 best = (rank, s)
         return best[1] if best else None
 
+    def visits_for(self, find: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+        """The visits product a time-lapse track was found in: the same pass (its date), the same field size, the track inside it."""
+        d = find.get("data") or {}
+        want = d.get("film")
+        first = (d.get("visits") or [{}])[0]
+        ra, dec = float(first.get("ra", find["ra"])), float(first.get("dec", find["dec"]))
+        for row in self.store.listing((FILM,)):
+            p = row["params"]
+            if not row["complete"] or want is None or abs(float(p.get("mjd", -1e9)) - float(want)) > 0.06:
+                continue
+            if find.get("fov") is not None and abs(float(p.get("fov", 0.0)) - float(find["fov"])) > 0.01:
+                continue
+            meta = self.store.read_meta(FILM, row["key"])
+            if not meta or not meta.get("frames"):
+                continue
+            g = meta["grid"]
+            x, y = Grid(float(g["ra0"]), float(g["dec0"]), float(g["step_arcsec"]), int(g["n"])).sky_to_grid(ra, dec)
+            if -1 <= float(x) <= g["n"] and -1 <= float(y) <= g["n"]:
+                return row["key"], meta
+        return None
+
     def wants_own(self, find: dict[str, Any], src: Source | None) -> bool:
         """A place no finished field holds, and a slow mover that only the coarse grid of a 60′ field holds, get a 5′ field of their own."""
         if src is None:
@@ -486,6 +600,8 @@ class Clips:
         p = self.path(fid)
         if p.is_file():
             return p
+        if find.get("kind") == "film":
+            return await self._get_film(find, p)
         src = self.source_for(find)
         if self.wants_own(find, src) and self.build is not None and fid not in self.failed:
             task = self.building.get(fid)
@@ -513,6 +629,25 @@ class Clips:
             if not p.is_file():
                 try:
                     data, info = await asyncio.to_thread(render, find, src)
+                except ClipUnavailable as e:
+                    self.failed[fid] = str(e)
+                    raise
+                atomic_write_bytes(p, data)
+                atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
+        return p
+
+    async def _get_film(self, find: dict[str, Any], p: Path) -> Path:
+        """A body that moves inside one pass is not in the stacked passes (a stack keeps what stands still): its clip is made of the
+        visits of that pass, when the service has them."""
+        fid = str(find["id"])
+        hit = await asyncio.to_thread(self.visits_for, find)
+        if hit is None:
+            self.failed[fid] = "the visits of its pass are not kept here; open it in the lab"
+            raise ClipUnavailable(self.failed[fid])
+        async with self.gate:
+            if not p.is_file():
+                try:
+                    data, info = await asyncio.to_thread(render_film, find, self.store, hit[0], hit[1])
                 except ClipUnavailable as e:
                     self.failed[fid] = str(e)
                     raise
