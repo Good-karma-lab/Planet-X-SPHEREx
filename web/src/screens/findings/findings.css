@@ -123,3 +123,5 @@
 @media (max-width: 760px) { .fpage-grid { grid-template-columns: minmax(0, 1fr); } .fpage-head h1 { font-size: 18px; } }
 .fcard-note { font-size: 12px; line-height: 1.35; color: var(--amber); border-left: 2px solid var(--amber); padding-left: 7px; margin: 3px 0; overflow-wrap: anywhere; }
 .fcard-mine { font: 600 10.5px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--good); }
+a.fcard-title { color: var(--ink); text-decoration: none; display: block; }
+a.fcard-title:hover { color: var(--accent); }

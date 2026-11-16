@@ -244,9 +244,9 @@ export function FindCard({ f, onOpen, current, mine = false }: { f: CardFind; on
         )}
       </button>
       <div class="fcard-body">
-        <b class="fcard-title" title={cardTitle(f)}>
+        <a class="fcard-title" href={f.kind === 'submitted' ? checkHref(f) : `#/findings/${encodeURIComponent(f.id)}`} title="Open the page of this finding">
           {cardTitle(f)}
-        </b>
+        </a>
         <span class="mono-s fcard-sub">
           {KIND_ONE[f.kind] ?? f.kind} · {f.place}
         </span>
