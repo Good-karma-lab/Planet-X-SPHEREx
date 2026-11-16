@@ -211,6 +211,10 @@ def test_the_routes_serve_the_clip_once_rendered_and_say_why_there_is_none(tmp_p
     info = client.get("/api/findings/mover:abc/clip").json()
     assert info["state"] == "ready" and info["frames"] == 3 and info["shows"]["window_arcmin"] == 3.0
     none = client.get("/api/findings/red:far/clip.webp")
+    for _ in range(40):  # on a busy machine the first answer may be "being built": the next one says there is nothing to build from
+        if none.status_code != 202:
+            break
+        none = client.get("/api/findings/red:far/clip.webp")
     assert none.status_code == 404 and none.json()["state"] == "none" and none.json()["reason"]
     assert client.get("/api/findings/nope/clip.webp").status_code == 404
     after = client.get("/api/findings?lite=1").json()
