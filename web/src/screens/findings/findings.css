@@ -106,3 +106,5 @@
   .fcard-promise { display: none; }
   .fbar { padding: 10px 10px 6px; }
 }
+.fclip .fstill { opacity: 0.85; }
+.fclip .fstill ~ .mono-s { position: absolute; left: 0; right: 0; bottom: 0; padding: 5px 10px; background: rgba(2, 7, 10, 0.72); color: var(--ink); }
