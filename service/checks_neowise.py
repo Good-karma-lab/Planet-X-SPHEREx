@@ -41,7 +41,8 @@ IBE = "https://irsa.ipac.caltech.edu/ibe/"
 TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 WISE_MID_MJD = 58300.0  # the middle of the NEOWISE years
 MIN_FRAMES, MIN_EPOCHS = 20, 4
-THREADS = 8
+THREADS = 8  # resampling of the cutouts already on disk
+FETCH_THREADS, RETRY_THREADS = 6, 2  # requests to IRSA at a time: first round, then the cutouts that failed
 RULED_OUT_SIGMA = 5.0  # a body of the candidate's flux must stand at least this high in the archive for its absence to count
 RULED_OUT_BELOW = 3.0  # and the measured flux must be this many errors below the candidate's flux
 SEEN_SIGMA = 3.0
@@ -155,6 +156,29 @@ def orbit_check(o: dict[str, Any], cache: Path, progress: Callable[[str], None] 
         edges = [0, *(np.where(np.diff(t) > 30.0)[0] + 1).tolist(), len(frames)]
         done, failed = 0, 0
 
+        def fetch(f: dict[str, Any]) -> bool:
+            try:
+                cutout(client, cache, f["path"], sra, sdec)
+            except Exception:
+                return False
+            return True
+
+        # the cutouts first, a few at a time (IRSA answers 502 when pressed); those that failed are asked once more, two at a time
+        missing = frames
+        for threads in (FETCH_THREADS, RETRY_THREADS):
+            got_n = 0
+            with ThreadPoolExecutor(threads) as pool:
+                oks = []
+                for ok in pool.map(fetch, missing):
+                    oks.append(ok)
+                    got_n += 1
+                    if got_n % 20 == 0 or got_n == len(missing):
+                        have = len(frames) - len(missing) + sum(oks)
+                        say(f"NEOWISE exposures fetched: {have} of {len(frames)}")
+            missing = [f for f, ok in zip(missing, oks, strict=True) if not ok]
+            if not missing:
+                break
+
         def one(f: dict[str, Any]) -> tuple[float, Any] | None:
             try:
                 e = load(cutout(client, cache, f["path"], sra, sdec), tw)
@@ -173,7 +197,7 @@ def orbit_check(o: dict[str, Any], cache: Path, progress: Callable[[str], None] 
                         failed += 1
                     else:
                         got.append(r_)
-                say(f"NEOWISE exposures read: {done} of {len(frames)}")
+                say(f"NEOWISE exposures added: {done} of {len(frames)}")
                 vis.extend(earc.epoch_images(got))
         res["frames_failed"] = failed
         res["epochs"] = len(vis)

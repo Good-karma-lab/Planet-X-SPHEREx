@@ -105,6 +105,11 @@ def test_track_miss_and_above_bar() -> None:
     state, detail = ck.check_above_bar(marks, {"tracks": [track]})
     assert state == "pass" and "10–12σ" in detail
     assert ck.check_above_bar(marks, {"tracks": []})[0] == "warn"
+    # a square the sweep searched: its stored bar is the one named
+    square = {"id": "470-0292", "bar": {"kind": "sweep", "mover_sigma": 5.0, "mover_shift_arcsec": 6.15, "passes": 3}}
+    state, detail = ck.check_above_bar(marks, {"tracks": []}, square)
+    assert state == "warn" and "square 470-0292: a motion of 5σ and a shift of 6.15″ over 3 passes" in detail
+    assert "8σ in each pass" in ck.check_above_bar(marks, {"tracks": []}, {"id": "1-1", "bar": {"kind": "import"}})[1]
     assert ck.check_above_bar(marks, None)[0] == "no_answer"
 
 

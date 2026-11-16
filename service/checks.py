@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import importlib
 import io
 import json
 import math
@@ -230,7 +231,16 @@ def track_miss(body: list[Any], mark: Mark, t0: float, t1: float, mid: float) ->
     return math.hypot(x + vx * t, y + vy * t)
 
 
-def check_above_bar(marks: list[Mark], result: dict[str, Any] | None) -> Answer:
+def bar_words(square: dict[str, Any] | None) -> str:
+    """The bar in words: the one the sweep stored for the square when it searched it, else the movers search's own."""
+    bar = (square or {}).get("bar") or {}
+    if bar.get("kind") == "sweep" and bar.get("mover_sigma") is not None:
+        shift = f" and a shift of {bar['mover_shift_arcsec']:g}″" if bar.get("mover_shift_arcsec") is not None else ""
+        return f"square {square['id']}: a motion of {bar['mover_sigma']:g}σ{shift} over {bar.get('passes', '?')} passes" if square else ""
+    return f"{NSIG:.0f}σ in each pass"
+
+
+def check_above_bar(marks: list[Mark], result: dict[str, Any] | None, square: dict[str, Any] | None = None) -> Answer:
     if result is None:
         return "no_answer", "The machine has not searched this field yet: there is no bar to compare with."
     best: tuple[int, dict[str, Any]] | None = None
@@ -242,9 +252,9 @@ def check_above_bar(marks: list[Mark], result: dict[str, Any] | None) -> Answer:
                     hit += 1
         if hit and (best is None or hit > best[0]):
             best = (hit, t)
-    bar = f"{NSIG:.0f}σ"
+    bar = bar_words(square)
     if best is None:
-        return "warn", f"The machine's search of this field has nothing above its bar ({bar} in each pass) at the marks: seen by eye only."
+        return "warn", f"The machine's search of this field has nothing above its bar ({bar}) at the marks: seen by eye only."
     hit, t = best
     snr = [s for s in t.get("snr", []) if s is not None]
     if not snr:
@@ -460,7 +470,11 @@ class Checks:
         async def above_bar() -> Answer:
             if not marks:
                 return "fail", "No marks."
-            return check_above_bar(marks, await asyncio.to_thread(self._movers, field))
+            square = await asyncio.to_thread(self._square, ra, dec)
+            result = await asyncio.to_thread(self._movers, field)
+            if result is None and square is not None:  # the field the sweep built for the square
+                result = await asyncio.to_thread(self._movers, square.get("field_key"))
+            return check_above_bar(marks, result, square)
 
         async def neowise() -> Answer:
             return await self._neowise(job, marks if dated else [], req.get("orbit"))
@@ -528,6 +542,28 @@ class Checks:
             ):
                 found = (float(pp["fov"]), str(r["key"]))
         return found[1] if found else ""
+
+    def _square(self, ra: float, dec: float) -> dict[str, Any] | None:
+        """The grid square that holds a place, when the sweep has searched it: {id, bar, field_key, finds} (the grid stream's
+        `service.grid` and `st.grid`); None when the grid is not there or the square is not searched."""
+        db = getattr(self.st, "grid", None)
+        if db is None:
+            return None
+        try:
+            grid: Any = importlib.import_module("service.grid")
+            cid = grid.cell_at(ra, dec).id
+            row = db.get(cid)
+        except Exception:
+            return None
+        if not row or row.get("state") != "searched":
+            return None
+        bar = row.get("bar")
+        if isinstance(bar, str):
+            try:
+                bar = json.loads(bar)
+            except ValueError:
+                bar = None
+        return {"id": cid, "bar": bar if isinstance(bar, dict) else {}, "field_key": row.get("field_key"), "finds": row.get("finds")}
 
     def _movers(self, field_key: str | None) -> dict[str, Any] | None:
         movers = getattr(self.st, "movers", None)
