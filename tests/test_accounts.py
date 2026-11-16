@@ -412,6 +412,12 @@ def test_declared_submit_finishes_by_itself(site: tuple[FastAPI, _State, _Mail])
     assert texts()[0] == "“A star” was not submitted. Gaia: Gaia DR3 1 stands 1.1″ from every mark: a known object."
     assert len(c.get("/api/me/findings").json()["findings"]) == 1
 
+    # a fail is final at once: the slow checks still running do not keep the user waiting
+    b2 = new("A star, JPL still asked")
+    jobs["jb2"] = job("running", ("gaia", "fail", "a known object"), ("jpl", "running", "visit 1 of 24"))
+    assert c.post(f"/api/me/investigations/{b2}/submit", json={"checks_job": "jb2"}).json()["state"] == "blocked"
+    assert texts()[0] == "“A star, JPL still asked” was not submitted. Gaia: a known object"
+
     # 3. two warnings: comments are asked for once, and the submit happens by itself when they are there
     w = new("Fast")
     jobs["jw"] = job("running", ("straight_line", "running", ""))

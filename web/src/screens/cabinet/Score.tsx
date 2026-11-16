@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../../lib/account';
 import type { Route } from '../../lib/route';
+import { GLYPH_OF, GLYPHS } from './glyphs';
 
 export interface Achievement {
   id: string;
@@ -79,19 +80,34 @@ function eventLine(e: ScoreEvent): string {
   }
 }
 
-/** A small glass badge: the tier inside, bright when earned, a ring of progress when it is the next one. */
-export function Badge({ a, size = 40 }: { a: Pick<Achievement, 'name' | 'tier' | 'hidden'> & Partial<Achievement>; size?: number }) {
+/** A small glass badge: the achievement's own line glyph, lit when earned and dim when not; the ring around it is cut into the
+ *  tiers of its family and shows which tier this is; a hidden one that is not earned is a "?". */
+export function Badge({ a, tiers = 1, size = 46 }: { a: Pick<Achievement, 'id' | 'name' | 'tier' | 'hidden'> & Partial<Achievement>; tiers?: number; size?: number }) {
   const earned = a.earned_at !== null && a.earned_at !== undefined;
-  const r = 17;
-  const ring = 2 * Math.PI * r;
+  const secret = a.name === '?';
+  const r = 20;
+  const n = Math.max(1, tiers);
+  const gap = n > 1 ? 9 : 0; // degrees between the segments of the ring
+  const arc = (i: number) => {
+    const a0 = ((-90 + (360 / n) * i + gap / 2) * Math.PI) / 180;
+    const a1 = ((-90 + (360 / n) * (i + 1) - gap / 2) * Math.PI) / 180;
+    if (n === 1) return `M24 ${24 - r}A${r} ${r} 0 1 1 23.99 ${24 - r}`;
+    return `M${(24 + r * Math.cos(a0)).toFixed(2)} ${(24 + r * Math.sin(a0)).toFixed(2)}A${r} ${r} 0 ${360 / n - gap > 180 ? 1 : 0} 1 ${(24 + r * Math.cos(a1)).toFixed(2)} ${(24 + r * Math.sin(a1)).toFixed(2)}`;
+  };
   return (
-    <span class={`cb-badge ${earned ? 'on' : ''}`} style={{ width: `${size}px`, height: `${size}px` }} title={a.name === '?' ? 'A hidden achievement' : a.name} aria-hidden="true">
-      <svg viewBox="0 0 40 40" width={size} height={size}>
-        <circle cx="20" cy="20" r={r} class="bg" />
-        {!earned && (a.progress ?? 0) > 0 && <circle cx="20" cy="20" r={r} class="pr" stroke-dasharray={`${ring * (a.progress ?? 0)} ${ring}`} transform="rotate(-90 20 20)" />}
-        <text x="20" y="25" text-anchor="middle">
-          {a.name === '?' ? '?' : ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII'][a.tier - 1] ?? a.tier}
-        </text>
+    <span class={`cb-badge ${earned ? 'on' : ''}`} style={{ width: `${size}px`, height: `${size}px` }} aria-hidden="true">
+      <svg viewBox="0 0 48 48" width={size} height={size}>
+        <circle cx="24" cy="24" r="16" class="bg" />
+        {Array.from({ length: n }, (_, i) => (
+          <path key={i} d={arc(i)} class={`seg ${i < a.tier ? 'tier' : ''}`} />
+        ))}
+        {secret ? (
+          <text x="24" y="29.5" text-anchor="middle">
+            ?
+          </text>
+        ) : (
+          <g class="gl" transform="translate(12 12)" dangerouslySetInnerHTML={{ __html: GLYPHS[GLYPH_OF[a.id ?? ''] ?? 'square'] ?? '' }} />
+        )}
       </svg>
     </span>
   );
@@ -162,7 +178,7 @@ export function ScorePanel() {
               <div class="cb-badges">
                 {list.map((a) => (
                   <span key={a.id} class={`cb-ach ${a.earned_at ? 'on' : a === next ? 'next' : ''}`} data-testid={`ach-${a.id}`} data-earned={a.earned_at ? '1' : '0'} title={`${a.line}${a.earned_at ? ` · earned ${when(a.earned_at)}` : ''}${a.rarity != null ? ` · ${a.rarity}% of searchers have it` : ''}`}>
-                    <Badge a={a} />
+                    <Badge a={a} tiers={list.length} />
                     <span class="cb-achname">{a.name}</span>
                   </span>
                 ))}
@@ -243,7 +259,7 @@ export function Leaders({ route }: { route: Route }) {
       <div class="ipage" data-testid="leaders">
         <div class="pg-h">
           <h1>Leaderboard</h1>
-          <p class="hint">Points are paid for being right: squares really looked through, answers that agree with the verdict, findings that pass the checks. A place needs {min} settled answers.</p>
+          <p class="hint">Points are paid for being right. A place needs {min} settled answers.</p>
         </div>
         <div class="cb-tabs" role="tablist">
           {PERIODS.map(([k, name]) => (

@@ -299,11 +299,13 @@ def test_leaderboard_ranks_only_after_ten_answers_and_hides_on_request(sc: Score
     assert len(sc.leaders("all", bob)["rows"][0]["badges"]) <= 3
 
 
-def test_rarity_is_the_share_of_searchers(sc: Score) -> None:
+def test_rarity_is_the_share_of_searchers_and_shown_from_fifty(sc: Score, monkeypatch: pytest.MonkeyPatch) -> None:
     ann, bob = _user(sc), _user(sc, "bob")
     sc.square_done(ann, _square("a"), LOOK, [])
     sc.square_done(bob, _square("b"), {**LOOK, "local_hour": 1}, [])
     sc.summary(ann)
+    assert {a["rarity"] for a in sc.summary(bob)["achievements"]} == {None}  # two searchers: a share says nothing
+    monkeypatch.setattr(score, "RARITY_MIN_SEARCHERS", 2)
     r = {a["id"]: a["rarity"] for a in sc.summary(bob)["achievements"]}
     assert r["first_light"] == 100.0 and r["night_owl"] == 50.0 and r["stargazer"] == 0.0
 

@@ -70,14 +70,22 @@ test('4. the user puts marks on two passes in the lab; they appear in My marks',
   const picture = page.getByTestId('picture');
   const box = (await picture.boundingBox())!;
   const dates: string[] = [];
+  // the passes play one after another (Blink): an arrow key stops on one pass, so that a mark belongs to the pass the user sees
+  const stay = async () => {
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.press('ArrowRight');
+    let seen = '';
+    await expect(async () => {
+      const now = (await page.getByTestId('lab-status').innerText()).trim();
+      const same = now === seen && LOADED.test(now);
+      seen = now;
+      expect(same).toBe(true);
+    }).toPass({ timeout: 30_000, intervals: [1500] });
+    return seen;
+  };
   for (const [i, at] of [[0, [0.3, 0.3]], [1, [0.7, 0.68]]] as const) {
-    if (i === 1) {
-      // the next pass, by the arrow key like a user (the keys go to the lab, not to the field just typed in)
-      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-      await page.keyboard.press('ArrowRight');
-      await expect(page.getByTestId('lab-status')).not.toHaveText(dates[0]!, { timeout: 20_000 });
-    }
-    dates.push((await page.getByTestId('lab-status').innerText()).trim());
+    dates.push(await stay()); // the first pass to stay on, then the next one
+    if (i === 1) expect(dates[1]).not.toBe(dates[0]);
     const tool = page.getByTestId('tool-mark');
     await expect(tool).toBeEnabled({ timeout: 20_000 });
     if ((await tool.getAttribute('aria-pressed')) !== 'true') await tool.click();
