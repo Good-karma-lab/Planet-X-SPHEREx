@@ -244,11 +244,15 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
       stop = true;
     };
   }, [key]);
-  // a finding to check, a find to submit: the checks of the place start as soon as the field is known
-  const wantChecks = !!task && task.kind === 'finding' && !!a.fieldKey;
+  // a finding to check: the checks need the user's marks of the object (they compare its places over the passes), so they run as
+  // soon as there is a mark, and again when the marks change; without marks the list waits (it never shows a fail nobody earned)
+  const real = a.marksHere.filter((m) => m.level !== 'artefact' && m.pass != null);
+  const marksKey = real.map((m) => `${m.id}:${m.pass}:${m.ra.toFixed(6)}:${m.dec.toFixed(6)}`).join(';');
+  const wantChecks = !!task && task.kind === 'finding' && !!a.fieldKey && real.length > 0;
   useEffect(() => {
-    if (wantChecks && a.fieldKey) checks.start(a.fieldKey, a.ra, a.dec, a.marksHere);
-  }, [wantChecks, a.fieldKey, key]);
+    if (wantChecks && a.fieldKey) checks.start(a.fieldKey, real[0]!.ra, real[0]!.dec, real);
+    else checks.reset();
+  }, [wantChecks, a.fieldKey, key, marksKey]);
   if (!task) return null;
 
   const close = async (result: string) => {
@@ -292,7 +296,10 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
       </div>
       {task.kind !== 'cell' && <ChecksList view={checks.view} />}
       <div class="tp-line" data-testid="task-line">
-        {line || (task.kind === 'cell' ? `${n} mark${n === 1 ? '' : 's'} in this square` : checksStatus(checks.view))}
+        {line ||
+          (task.kind === 'cell'
+            ? `${n} mark${n === 1 ? '' : 's'} in this square`
+            : checksStatus(checks.view) || (task.kind === 'finding' ? 'Checks wait for a mark on the object' : ''))}
       </div>
       <div class="tp-btns">
         {task.kind === 'cell' && (
