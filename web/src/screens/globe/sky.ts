@@ -99,10 +99,10 @@ export function projectIn(v: SkyView, ra: number, dec: number): [number, number,
   const zc = x * b.c[0] + y * b.c[1] + z * b.c[2];
   if (v.inside) {
     if (zc < 0.05) return [0, 0, false];
-    return [v.W / 2 - ((x * b.e[0] + y * b.e[1]) / zc) * v.R, v.H / 2 - ((x * b.n[0] + y * b.n[1] + z * b.n[2]) / zc) * v.R, true];
+    return [v.W / 2 - ((x * b.e[0] + y * b.e[1] + z * b.e[2]) / zc) * v.R, v.H / 2 - ((x * b.n[0] + y * b.n[1] + z * b.n[2]) / zc) * v.R, true];
   }
   if (zc < 0.02) return [0, 0, false];
-  return [v.W / 2 - (x * b.e[0] + y * b.e[1]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
+  return [v.W / 2 - (x * b.e[0] + y * b.e[1] + z * b.e[2]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
 }
 
 interface Pass {
@@ -237,8 +237,7 @@ class SkyPainter {
     const gainBaked = B0 ? (B0.gain * 255) / (255 - blackBaked) : gainLive;
     const r = g.paint({
       sw, sh, R: view.R, inside: !!view.inside, c: b.c,
-      // the CPU loop leaves the east axis's z out of the pixel's direction; the same here, so that the two painters give one picture
-      e: [b.e[0], b.e[1], 0],
+      e: b.e,
       n: b.n, gal, sampler: sm, blackBaked, gainBaked, blackLive, gainLive,
       place: (i, j, f) => this.place(view, b, gal, 1, sw, sh, i, j, f),
     });
@@ -306,7 +305,7 @@ class SkyPainter {
       }
       const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
       const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
-      z = zz * b.c[2] + sy * b.n[2];
+      z = zz * b.c[2] + sx * b.e[2] + sy * b.n[2]; // the east axis has a z part when the view is rolled
       ra = Math.atan2(vy, vx) / D2R;
     }
     let zc = z > 1 ? 1 : z < -1 ? -1 : z;
@@ -492,7 +491,7 @@ class SkyPainter {
           }
           const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
           const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
-          z = zz * b.c[2] + sy * b.n[2];
+          z = zz * b.c[2] + sx * b.e[2] + sy * b.n[2]; // the east axis has a z part when the view is rolled
           ra = Math.atan2(vy, vx) / D2R;
         }
         p.total++;
@@ -637,4 +636,6 @@ class SkyPainter {
 
 /** One painter for the page: the last picture survives a visit to another screen. */
 export const sky = new SkyPainter();
-(globalThis as { __skyPainter?: () => string }).__skyPainter = () => sky.painter;
+// for the picture checks and the frame-time reports
+(globalThis as { __skyPainter?: () => string; __sky?: SkyPainter }).__skyPainter = () => sky.painter;
+(globalThis as { __sky?: SkyPainter }).__sky = sky;
