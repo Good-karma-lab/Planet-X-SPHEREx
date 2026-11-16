@@ -3,6 +3,7 @@ import { formatHash } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
 import { parseSxp, halfToFloat } from '../../lib/sxp';
 import { ATLAS_LEAD, LeadPanel } from './leads';
+import { FindCard, STAGE_LABEL, type CardFind } from './cards';
 
 export interface Ident {
   catalogue: string;
@@ -44,8 +45,7 @@ interface Reply {
   finds: Find[];
 }
 
-const KIND_SHORT: Record<string, string> = { mover: 'Movers', browndwarf: 'Brown dwarfs', red: 'Red sources', anomaly: 'Spectral anomalies', pair: 'Pairs changing', film: 'Film tracks', peak: 'Planet X peaks' };
-const KIND_ORDER = ['mover', 'browndwarf', 'film', 'pair', 'red', 'anomaly', 'peak'];
+const KIND_SHORT: Record<string, string> = { mover: 'Movers', browndwarf: 'Brown dwarfs', red: 'Red sources', anomaly: 'Spectral anomalies', pair: 'Pairs changing', film: 'Time-lapse tracks', peak: 'Planet X peaks' };
 const um = (v: number) => v.toFixed(2).replace(/0$/, '');
 const mjdDate = (m: number | null) => (m == null ? '' : new Date((m - 40587) * 864e5).toISOString().slice(0, 10));
 
@@ -114,13 +114,6 @@ export function titleOf(f: Find): string {
     }
   }
 }
-
-/** The best name any catalogue gave, for the second line of a row. */
-const nameOf = (f: Find) => {
-  if (f.identity) return f.identity.catalogue === 'SIMBAD' ? cleanName(f.identity.name) : f.identity.name;
-  const i = f.idents.find((x) => x.state === 'ok' && x.name && x.catalogue !== 'gaia') ?? f.idents.find((x) => x.state === 'ok' && x.name);
-  return i?.name ? (i.catalogue === 'simbad' ? cleanName(i.name) : i.name) : '';
-};
 
 // ---- the 2′ picture as a blink of the passes ----
 const frames = new Map<string, Promise<{ n: number; g: Uint8ClampedArray } | null>>();
@@ -375,98 +368,172 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
   );
 }
 
-export function FindingsView({ wide, leadId, setLeadId }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void }) {
-  const r = useFinds();
-  const [kind, setKind] = useState<string>('all');
-  const [stat, setStat] = useState<'all' | 'unexplained' | 'unchecked' | 'known'>('all');
-  if (!r) return <div class="mono-s">reading the findings…</div>;
-  const rows = r.finds.filter((f) => (kind === 'all' || f.kind === kind) && (stat === 'all' || f.status === stat));
-  const sel = r.finds.find((f) => f.id === leadId);
+interface CardReply {
+  count: number;
+  total: number;
+  counts: Record<string, { all: number; leads?: number }>;
+  stages: Record<string, number>;
+  waiting: number;
+  waiting_promising: number;
+  promising: number;
+  promising_kinds: string[];
+  identification: { pending: number; unavailable_decisive?: number };
+  finds: CardFind[];
+}
+type KindSel = 'promising' | 'mover' | 'browndwarf' | 'peak' | 'film' | 'pair' | 'red' | 'anomaly';
+type StageSel = 'any' | 'waiting' | 'new' | 'in_review' | 'submitted' | 'candidate' | 'confirmed' | 'known';
+const PAGE = 48;
+const PROMISING = ['mover', 'browndwarf', 'peak', 'film', 'pair'];
+
+/** The cards of one filter, a page at a time: the next page is asked for when the end of the list comes on screen. */
+function useCards(kind: KindSel, stage: StageSel) {
+  const [state, setState] = useState<{ key: string; head: CardReply | null; finds: CardFind[]; done: boolean; loading: boolean; failed: boolean }>({ key: '', head: null, finds: [], done: false, loading: false, failed: false });
+  const key = `${kind}|${stage}`;
+  const busy = useRef(false);
+  const load = (reset: boolean) => {
+    if (busy.current && !reset) return;
+    busy.current = true;
+    const offset = reset ? 0 : state.finds.length;
+    const q = new URLSearchParams({ lite: '1', sort: 'promise', status: 'all', limit: String(PAGE), offset: String(offset) });
+    if (kind === 'promising') q.set('kinds', PROMISING.join(','));
+    else q.set('kind', kind);
+    if (stage === 'waiting') q.set('waiting', '1');
+    else if (stage !== 'any') q.set('stage', stage);
+    setState((s) => (reset ? { key, head: s.head, finds: [], done: false, loading: true, failed: false } : { ...s, loading: true }));
+    fetch(`/api/v1/findings?${q}`)
+      .then((r) => (r.ok ? (r.json() as Promise<CardReply>) : Promise.reject(new Error(String(r.status)))))
+      .then((d) => {
+        setState((s) => {
+          if (s.key !== key) return s; // the filter changed while this page was on its way
+          const finds = reset ? d.finds : [...s.finds, ...d.finds.filter((f) => !s.finds.some((x) => x.id === f.id))];
+          return { key, head: d, finds, done: finds.length >= d.count || d.finds.length === 0, loading: false, failed: false };
+        });
+      })
+      .catch(() => setState((s) => (s.key === key ? { ...s, loading: false, failed: true, done: true } : s)))
+      .finally(() => {
+        busy.current = false;
+      });
+  };
+  useEffect(() => {
+    busy.current = false;
+    load(true);
+  }, [key]);
+  return { ...state, more: () => !state.done && !state.loading && state.key === key && load(false) };
+}
+
+/** The full report of one find (catalogue answers, spectrum, positions): asked for when its card is opened. */
+function useFind(id: string | null): Find | null {
+  const [f, setF] = useState<Find | null>(null);
+  useEffect(() => {
+    setF(null);
+    if (!id || id === ATLAS_LEAD.id) return;
+    let stop = false;
+    void fetch(`/api/v1/findings/${encodeURIComponent(id)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: Find | null) => {
+        if (stop || !d) return;
+        if (d.kind === 'peak' && (d.data as { peak?: { ok?: boolean } })?.peak?.ok === false && d.status !== 'known') d.status = 'residual';
+        setF(d);
+      })
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, [id]);
+  return f;
+}
+
+export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void }) {
+  const [kind, setKind] = useState<KindSel>('promising');
+  const [stage, setStage] = useState<StageSel>('any');
+  const cards = useCards(kind, stage);
+  const sel = useFind(leadId);
+  const end = useRef<HTMLDivElement>(null);
+  const more = useRef(cards.more);
+  more.current = cards.more;
+  useEffect(() => {
+    const el = end.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && more.current(), { rootMargin: '300px 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [cards.finds.length, cards.done]);
+  const h = cards.head;
   const atlas = leadId === ATLAS_LEAD.id;
-  const shown = atlas ? undefined : (sel ?? (wide ? rows[0] : undefined));
-  // the Planet X leads counted from the peaks themselves, after the service's JPL, residual and halo verdicts (a peak still ok and still open:
-  // not a known body, a residual or a bright star's halo); the count the service sends is made before some of those verdicts
-  const peakLeads = r.finds.filter((f) => f.kind === 'peak' && (f.data as { peak?: { ok?: boolean } })?.peak?.ok !== false && (f.status === 'unchecked' || f.status === 'unexplained')).length;
-  const cnt = (k: string) => (k === 'all' ? r.total : k === 'peak' ? peakLeads : (r.counts[k]?.all ?? 0));
-  let n = 0;
-  const list = (
-    <section class="card glass leads">
-      <div class="fkinds" role="group" aria-label="Kind">
-        {['all', ...KIND_ORDER].filter((k) => cnt(k) > 0 || k === 'all').map((k) => (
-          <button key={k} class={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
-            {k === 'all' ? 'All' : KIND_SHORT[k]} <span>{cnt(k)}</span>
-          </button>
-        ))}
-      </div>
-      <div class="fkinds fstat" role="group" aria-label="Status">
-        {(['all', 'unexplained', 'unchecked', 'known'] as const).map((s) => (
-          <button key={s} class={stat === s ? 'on' : ''} onClick={() => setStat(s)}>
-            {s === 'all' ? 'Any' : s === 'unexplained' ? 'Unexplained' : s === 'unchecked' ? 'Not yet checked' : 'Known'}
-          </button>
-        ))}
-      </div>
-      <p class="hint leadcount">
-        {rows.length} of {r.total} finds in the searched fields · a find is a lead, not a discovery
-        {r.identification.pending > 0 && ` · identifying: ${r.identification.pending} catalogue answers to come`}
-        {(r.identification.unavailable_decisive ?? 0) > 0 && ` · ${r.identification.unavailable_decisive} deciding answers being retried`}
-        {(r.identification.unavailable_extras ?? r.identification.unavailable) > 0 && ` · extra catalogues that did not answer: ${r.identification.unavailable_extras ?? r.identification.unavailable} (they add detail, they do not decide)`}
-      </p>
-      {(kind === 'all' ? KIND_ORDER : [kind]).map((k) => {
-        const g = rows.filter((f) => f.kind === k);
-        if (!g.length) return null;
-        return (
-          <div key={k}>
-            <div class="leadgroup">
-              {KIND_SHORT[k]} <span>{g.length}</span>
-            </div>
-            <ol class="leadlist">
-              {g.map((f) => (
-                <li key={f.id}>
-                  <button class="leadrow" aria-current={shown?.id === f.id ? 'true' : undefined} title={`${titleOf(f)} · ${f.place}`} onClick={() => setLeadId(f.id)}>
-                    <span class="rank">{++n}</span>
-                    <span class="lt">
-                      <b>{titleOf(f)}</b>
-                      <span class="mono-s">
-                        {f.place}
-                        {nameOf(f) ? ` · ${nameOf(f)}` : ''}
-                      </span>
-                    </span>
-                    <span class={`badge ${f.status === 'known' ? 'green' : f.status === 'unchecked' || f.status === 'residual' ? '' : 'orange'}`}>{f.status === 'known' ? 'Known' : f.status === 'unchecked' ? 'Not yet checked' : f.status === 'residual' ? 'Residual' : 'Unexplained'}</span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </div>
-        );
-      })}
-      <div class="leadgroup">
-        Comet <span>1</span>
-      </div>
-      <ol class="leadlist">
-        <li>
-          <button class="leadrow" aria-current={atlas ? 'true' : undefined} onClick={() => setLeadId(ATLAS_LEAD.id)}>
-            <span class="rank">{++n}</span>
-            <span class="lt">
-              <b>{ATLAS_LEAD.title}</b>
-              <span class="mono-s">{ATLAS_LEAD.sub}</span>
-            </span>
-            <span class="badge green">Comet</span>
-          </button>
-        </li>
-      </ol>
-      <p class="hint leadnote">A lead is not a discovery. Known objects are listed so a recovery is not mistaken for a find.</p>
-    </section>
-  );
-  const panel = atlas ? <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={wide} /> : shown ? <Detail f={shown} onClose={() => setLeadId(null)} inline={wide} /> : null;
-  return wide ? (
-    <div class="fsplit wide2">
-      {list}
-      {panel ?? <div class="leadpanel glass inline mono-s">no finds match these filters</div>}
-    </div>
-  ) : (
+  const cnt = (k: KindSel) => (!h ? null : k === 'promising' ? h.promising : (h.counts[k]?.all ?? 0));
+  const kinds: [KindSel, string][] = [
+    ['promising', 'Promising'],
+    ['mover', KIND_SHORT.mover!],
+    ['browndwarf', KIND_SHORT.browndwarf!],
+    ['peak', KIND_SHORT.peak!],
+    ['film', KIND_SHORT.film!],
+    ['pair', KIND_SHORT.pair!],
+  ];
+  const more2: [KindSel, string][] = [
+    ['red', KIND_SHORT.red!],
+    ['anomaly', KIND_SHORT.anomaly!],
+  ];
+  const stages: StageSel[] = ['any', 'waiting', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
+  // the numbers on the status buttons are of the whole list, so they are shown only where they are what the button gives
+  const stageTotal = (s: StageSel) => (!h || s === 'any' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0));
+  const stageCount = (s: StageSel) => (h && s === 'waiting' && kind === 'promising' ? h.waiting_promising : null);
+  const chip = (k: KindSel, label: string) =>
+    (cnt(k) ?? 1) > 0 || k === 'promising' || k === kind ? (
+      <button key={k} class={kind === k ? 'on' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}>
+        {label} <span>{cnt(k) ?? ''}</span>
+      </button>
+    ) : null;
+  return (
     <>
-      {list}
-      {panel}
+      <section class="card glass fbar">
+        <div class="fkinds" role="group" aria-label="Kind">
+          {kinds.map(([k, l]) => chip(k, l))}
+          <span class="fsep" aria-hidden="true" />
+          {more2.map(([k, l]) => chip(k, l))}
+        </div>
+        <div class="fkinds fstat" role="group" aria-label="Status">
+          {stages
+            .filter((s) => s === 'any' || s === 'waiting' || s === 'new' || s === 'known' || s === stage || stageTotal(s) > 0)
+            .map((s) => (
+              <button key={s} class={stage === s ? 'on' : ''} aria-pressed={stage === s} onClick={() => setStage(s)}>
+                {s === 'any' ? 'Any status' : s === 'waiting' ? 'Waiting for a look' : STAGE_LABEL[s]} {stageCount(s) != null && <span>{stageCount(s)}</span>}
+              </button>
+            ))}
+        </div>
+        <p class="hint leadcount">
+          {h ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery` : 'reading the findings…'}
+          {h && h.identification.pending > 0 && ` · identifying: ${h.identification.pending} catalogue answers to come`}
+        </p>
+      </section>
+      <div class="fgrid-wrap">
+        <ol class="fgrid" aria-busy={cards.loading}>
+          {cards.finds.map((f) => (
+            <FindCard key={f.id} f={f} current={leadId === f.id} onOpen={setLeadId} />
+          ))}
+          {kind === 'promising' && (stage === 'any' || stage === 'known') && cards.done && (
+            <li class={`fcard glass${atlas ? ' on' : ''}`}>
+              <button class="fcard-pic" onClick={() => setLeadId(ATLAS_LEAD.id)} aria-label={`Open the report: ${ATLAS_LEAD.title}`}>
+                <div class="fclip">
+                  <img src="/neossat/3i-2025-12-14.png" alt="Comet 3I/ATLAS in a NEOSSat frame, ringed at the place JPL predicts" loading="lazy" />
+                </div>
+                <span class="badge green fcard-stage">Known</span>
+              </button>
+              <div class="fcard-body">
+                <b class="fcard-title">{ATLAS_LEAD.title}</b>
+                <span class="mono-s fcard-sub">Comet · {ATLAS_LEAD.sub}</span>
+                <button class="btn sm fcard-go" onClick={() => setLeadId(ATLAS_LEAD.id)}>
+                  Open the report
+                </button>
+              </div>
+            </li>
+          )}
+        </ol>
+        <div ref={end} class="fend" />
+      </div>
+      {cards.failed && <p class="mono-s">the findings did not load; the page asks again when the filter is changed</p>}
+      {!cards.loading && cards.done && cards.finds.length === 0 && !cards.failed && <p class="mono-s">no finds match these filters</p>}
+      {cards.loading && <p class="mono-s">reading the findings…</p>}
+      {atlas ? <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={false} /> : leadId && sel ? <Detail f={sel} onClose={() => setLeadId(null)} inline={false} /> : null}
     </>
   );
 }
