@@ -8,5 +8,7 @@ export const SIZES = {
   t820: { width: 820, height: 1180, dsf: 2, mobile: true },
   t1024: { width: 1024, height: 768, dsf: 2, mobile: true },
   t1180: { width: 1180, height: 820, dsf: 2, mobile: true },
+  d1280: { width: 1280, height: 800, dsf: 1, mobile: false },
   d1512: { width: 1512, height: 860, dsf: 2, mobile: false },
+  d1920: { width: 1920, height: 1080, dsf: 1, mobile: false },
 };
