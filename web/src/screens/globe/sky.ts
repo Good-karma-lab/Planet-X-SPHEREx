@@ -209,8 +209,185 @@ class SkyPainter {
     return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0, total: 0, fade, equi };
   }
 
-  /** Paints rows until the deadline; true when the pass is done. */
+  // the grid of exact sky places a band of rows is painted from (see rows): two grid rows and the centres of the blocks between them
+  private gN = 0;
+  private gFace = new Int8Array(0);
+  private gX = new Float64Array(0);
+  private gY = new Float64Array(0);
+  private zone = 0;
+
+  /** The exact sky place of a picture pixel as a face point (in the frame of the layer's tiles); false when the pixel is off the globe or the map. */
+  private place(v: SkyView, b: ReturnType<typeof basis>, gal: boolean, s: number, sw: number, sh: number, i: number, j: number, f: FacePt): boolean {
+    let ra: number;
+    let z: number;
+    if (v.proj === 'moll') {
+      const M = mw(v);
+      const X = (i * s - mcx(v)) / (M / 2);
+      const Y = -(j * s - mcy(v)) / (M / 4);
+      if (X * X + Y * Y > 1) return false;
+      const th = Math.asin(Y);
+      z = (2 * th + Math.sin(2 * th)) / Math.PI;
+      ra = 180 - ((Math.PI * X) / Math.cos(th)) / D2R;
+    } else {
+      const Rs = v.R / s;
+      let sx = (sw / 2 - i) / Rs;
+      let sy = (sh / 2 - j) / Rs;
+      let zz: number;
+      if (v.inside) {
+        const n = Math.sqrt(1 + sx * sx + sy * sy);
+        zz = 1 / n;
+        sx /= n;
+        sy /= n;
+      } else {
+        const rr = sx * sx + sy * sy;
+        if (rr > 1) return false;
+        zz = Math.sqrt(1 - rr);
+      }
+      const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
+      const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
+      z = zz * b.c[2] + sy * b.n[2];
+      ra = Math.atan2(vy, vx) / D2R;
+    }
+    let zc = z > 1 ? 1 : z < -1 ? -1 : z;
+    if (gal) {
+      const g = toGalactic(ra, zc);
+      ra = g[0];
+      zc = g[1] > 1 ? 1 : g[1] < -1 ? -1 : g[1];
+    }
+    facePt(ra, zc, f);
+    // the two zones of a HEALPix face (equatorial belt, polar cap) are two different maps that meet with a kink
+    this.zone = Math.abs(zc) > 2 / 3 ? 1 : 0;
+    return true;
+  }
+
+  /** One pixel of a picture made of three surveys (one per colour), at the face point f. */
+  private three(p: Pass, f: FacePt, q: number): boolean {
+    const o = p.img.data;
+    const rgb = this.rgb;
+    for (let c = 0; c < 3; c++) {
+      const l = p.layer[c]!;
+      const sm = p.samplers[c]!;
+      if (sm.at(f, rgb, 0) === FROM_NOTHING) return false;
+      if (sm.lastBaked) o[q + c] = Math.max(0, rgb[0]! - (bakedOf(l.id)?.black ?? 0)) * (bakedOf(l.id)?.gain ?? 1);
+      else o[q + c] = Math.max(0, rgb[0]! - l.black) * ((l.gain * 255) / (255 - l.black));
+    }
+    o[q + 3] = 255;
+    return true;
+  }
+
+  /**
+   * Paints rows until the deadline; true when the pass is done.
+   *
+   * The sky place of a pixel (a square root, an arctangent, the HEALPix face) is worked out exactly only at the corners and the centre of blocks of 8×8 pixels.
+   * Where a block lies inside one face and one zone, and the centre agrees with the mean of the corners to 1/20 of a screen pixel, the places inside it are
+   * interpolated (the map is smooth there) and each row is painted as one run of the tile sampler. Every other block (the limb of the globe, a face edge, a pole)
+   * is worked out pixel by pixel. The picture is the same; a frame costs a fraction of the arithmetic, so the globe turns smoothly in every browser.
+   */
   private rows(p: Pass, deadline: number): boolean {
+    const { view: v, s, sw, sh, samplers, layer } = p;
+    const l0 = layer[0]!;
+    if (p.equi || (l0.id === 'dust' && !bakedOf('dust'))) return this.rowsPlain(p, deadline);
+    const o = p.img.data;
+    const b = basis(v);
+    const one = layer.length === 1;
+    const gal = layer.every((l) => HIPS[l.id]?.frame === 'galactic');
+    // the tone of a single survey: a baked tile has its own (and may want a black point on top), a live one the layer's
+    const B0 = bakedOf(l0.id);
+    const blackLive = l0.black;
+    const gainLive = (l0.gain * 255) / (255 - l0.black);
+    const blackBaked = B0 ? Math.max(B0.black, EXTRA_BLACK[l0.id] ?? 0) : blackLive;
+    const gainBaked = B0 ? (B0.gain * 255) / (255 - blackBaked) : gainLive;
+    const sm = samplers[0]!;
+    // a face is 2^order tiles of w pixels across: 1/20 of a tile pixel (no more than a screen pixel) in face units
+    let across = 512;
+    for (const x of samplers) across = Math.max(across, (x.order >= 0 ? 2 ** x.order : 1) * (HIPS[x.id]?.w ?? 512));
+    const tol = 0.05 / across;
+    const BL = 8;
+    const nG = Math.ceil(sw / BL) + 1;
+    if (this.gN !== nG) {
+      this.gN = nG;
+      this.gFace = new Int8Array(nG * 3);
+      this.gX = new Float64Array(nG * 3);
+      this.gY = new Float64Array(nG * 3);
+    }
+    const gF = this.gFace;
+    const gX = this.gX;
+    const gY = this.gY;
+    const f = this.f;
+    while (p.row < sh) {
+      const j0 = p.row;
+      p.row += BL;
+      const jn = Math.min(BL, sh - j0);
+      // the exact places: grid row 0 at j0, row 1 at j0 + 8, row 2 the centres of the blocks; face −1 where there is no sky, the zone in bit 4
+      for (let g = 0; g < nG; g++) {
+        for (let r = 0; r < 3; r++) {
+          const ok = r < 2 ? this.place(v, b, gal, s, sw, sh, g * BL, j0 + r * BL, f) : this.place(v, b, gal, s, sw, sh, g * BL + BL / 2, j0 + BL / 2, f);
+          const k = r * nG + g;
+          gF[k] = ok ? f.face + this.zone * 16 : -1;
+          gX[k] = f.x;
+          gY[k] = f.y;
+        }
+      }
+      for (let g = 0; g + 1 < nG; g++) {
+        const i0 = g * BL;
+        const cnt = Math.min(BL, sw - i0);
+        if (cnt <= 0) break;
+        const fa = gF[g]!;
+        const x00 = gX[g]!;
+        const y00 = gY[g]!;
+        const x10 = gX[g + 1]!;
+        const y10 = gY[g + 1]!;
+        const x01 = gX[nG + g]!;
+        const y01 = gY[nG + g]!;
+        const x11 = gX[nG + g + 1]!;
+        const y11 = gY[nG + g + 1]!;
+        const smooth =
+          fa >= 0 &&
+          gF[g + 1] === fa &&
+          gF[nG + g] === fa &&
+          gF[nG + g + 1] === fa &&
+          gF[2 * nG + g] === fa &&
+          Math.abs((x00 + x10 + x01 + x11) / 4 - gX[2 * nG + g]!) < tol &&
+          Math.abs((y00 + y10 + y01 + y11) / 4 - gY[2 * nG + g]!) < tol;
+        if (smooth) {
+          const face = fa & 15;
+          for (let jj = 0; jj < jn; jj++) {
+            const a = jj / BL;
+            const xl = x00 + (x01 - x00) * a;
+            const yl = y00 + (y01 - y00) * a;
+            const dx = (x10 + (x11 - x10) * a - xl) / BL;
+            const dy = (y10 + (y11 - y10) * a - yl) / BL;
+            const q = ((j0 + jj) * sw + i0) * 4;
+            p.total += cnt;
+            if (one) p.painted += sm.run(face, xl, yl, dx, dy, cnt, o, q, blackBaked, gainBaked, blackLive, gainLive);
+            else {
+              for (let i = 0; i < cnt; i++) {
+                f.face = face;
+                f.x = xl + dx * i;
+                f.y = yl + dy * i;
+                if (this.three(p, f, q + i * 4)) p.painted++;
+              }
+            }
+          }
+        } else if (fa >= 0 || gF[g + 1]! >= 0 || gF[nG + g]! >= 0 || gF[nG + g + 1]! >= 0 || gF[2 * nG + g]! >= 0) {
+          for (let jj = 0; jj < jn; jj++) {
+            for (let i = 0; i < cnt; i++) {
+              if (!this.place(v, b, gal, s, sw, sh, i0 + i, j0 + jj, f)) continue;
+              p.total++;
+              const q = ((j0 + jj) * sw + i0 + i) * 4;
+              if (one) p.painted += sm.run(f.face, f.x, f.y, 0, 0, 1, o, q, blackBaked, gainBaked, blackLive, gainLive);
+              else if (this.three(p, f, q)) p.painted++;
+            }
+          }
+        }
+      }
+      if (performance.now() > deadline) return false;
+    }
+    return true;
+  }
+
+  /** The same, pixel by pixel: the layers that are one picture of the whole sky (the dust picture, an equirectangular map). */
+  private rowsPlain(p: Pass, deadline: number): boolean {
     const { view: v, s, sw, sh, samplers, layer } = p;
     const o = p.img.data;
     const b = basis(v);
