@@ -32,3 +32,6 @@ docs/submission/demo/out/
 sweep-store/
 product.sqlite*
 sweep-trial.*
+.store/
+clips/
+product.sqlite*
