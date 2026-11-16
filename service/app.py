@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
 from service import __version__, cpu
+from service.accounts import register_accounts
 from service.anomalies import Anomalies
 from service.bodies import KnownBodies
 from service.browndwarfs import BrownDwarfs
@@ -48,12 +49,15 @@ from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
 from service.routes_brightness import make_brightness_router
+from service.routes_checks import make_checks_router
+from service.routes_clips import make_clips_router
 from service.routes_dwarfs import make_dwarfs_router
 from service.routes_export import make_export_router
 from service.routes_extras import register as register_extras
 from service.routes_findings import make_findings_router
 from service.routes_grid import make_grid_router
 from service.routes_known import make_known_router
+from service.routes_known_field import make_known_field_router
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
 from service.routes_search import make_router
@@ -70,14 +74,6 @@ API_PREFIX = "/api/v1"
 # a second instance that takes over while the main one restarts (deploy/push.sh): it builds nothing new
 STANDBY = os.environ.get("SKY_STANDBY", "0") == "1"
 LIGHTCURVES_WAIT_S = 3.0  # IRSA may take a minute for NEOWISE: the light curves route answers within this, the rest `pending`
-
-
-def _register_flow_known_checks(app: FastAPI, st: Any) -> None:  # FLOW-B2: remove at integration
-    from service.routes_checks import make_checks_router
-    from service.routes_known_field import make_known_field_router
-
-    app.include_router(make_known_field_router(st))
-    app.include_router(make_checks_router(st))
 
 
 class State:
@@ -497,23 +493,18 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     # the searches' own routes: what else is known at a place, comets and asteroids, the movers route with pairs, Find Planet X
     app.include_router(make_router(st))
     app.include_router(make_known_router(st))
-    _register_flow_known_checks(app, st)  # FLOW-B2 (flow-known-checks): /api/known and /api/checks; the integrator resolves this line
+    app.include_router(make_known_field_router(st))  # the known objects of a frame at each epoch (stream B2)
+    app.include_router(make_checks_router(st))  # the checks before submit (stream B2)
     app.include_router(make_pairs_router(st))
     app.include_router(make_dwarfs_router(st))
     app.include_router(make_searched_router(st))
     app.include_router(make_findings_router(st))
-    from service.routes_clips import make_clips_router  # FLOW-FINDINGS (stream F3): one line for the integrator to move
-
-    app.include_router(make_clips_router(st))  # FLOW-FINDINGS (stream F3)
+    app.include_router(make_clips_router(st))  # the time-lapse clips of findings (stream F3)
     app.include_router(make_brightness_router(st))
     app.include_router(make_export_router(st))
     app.include_router(make_planetx_router(st))
-    # >>> flow-accounts (stream B3): registered here to test the branch alone; the integrator resolves these three lines
-    from service.accounts import register_accounts
-
-    register_accounts(app, st)
-    # <<< flow-accounts
     app.include_router(make_grid_router(st))  # the sky grid and its coverage (product flow)
+    register_accounts(app, st)  # accounts, sign-in, marks, tasks, investigations, submit (stream B3)
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
     register_extras(app)
 

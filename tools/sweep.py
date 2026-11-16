@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Iterable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -34,6 +35,7 @@ def main() -> int:
     ap.add_argument("--hours", type=float, default=2.0)
     ap.add_argument("--cap-mb", type=float, default=6000.0, help="hard cap on the resident memory of the sweep's processes")
     ap.add_argument("--workers", type=int, default=2)
+    ap.add_argument("--recycle-every", type=int, default=10, help="start the instance afresh after this many squares")
     ap.add_argument("--per-search-minutes", type=float, default=20.0)
     ap.add_argument("--tiers", default="0,1,2", help="0 Planet Nine band, 1 the rest of the ecliptic, 2 everything else")
     ap.add_argument("--cells", default="", help="search these square ids instead of the sweep order (comma separated)")
@@ -60,7 +62,7 @@ def main() -> int:
 
     sweep.prepare_store(a.store.resolve(), a.shared_store.resolve() if a.shared_store else None)
     if a.cells:
-        cells = [grid.by_id(c.strip()) for c in a.cells.split(",") if c.strip()]
+        cells: Iterable[grid.Cell] = [grid.by_id(c.strip()) for c in a.cells.split(",") if c.strip()]
     else:
         cells = sweep.pending(db, grid.sweep_order(tuple(int(t) for t in a.tiers.split(","))), a.retry_failed)
     r = sweep.run(
@@ -75,6 +77,7 @@ def main() -> int:
         standby=a.standby,
         systemd_scope=a.systemd_scope,
         base=a.base,
+        recycle_every=a.recycle_every,
     )
     s = sweep.summary_json(r)
     print(s)

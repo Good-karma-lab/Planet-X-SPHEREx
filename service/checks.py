@@ -1,5 +1,10 @@
 """The checks before submit ("Check and submit"): a job that runs every check on a set of marks and keeps the answers.
 
+    two kinds of movers, told apart by the marks: `fast` when every mark carries its own date and all are in one pass (a body that
+    moves inside a pass, seen visit by visit), `slow` otherwise (it moves between passes). Below, the slow rules; for a fast mover
+    two_passes wants three dated visits, straight_line fits a constant rate through them, above_bar reads the time-lapse track
+    search, neowise does not apply and jpl (one ask per dated mark) decides.
+
     two_passes     the marks are in at least two passes
     straight_line  the marks lie on the line from the first to the last mark (largest distance from it against LINE_PASS / LINE_WARN)
     gaia           no Gaia DR3 star, carried to the date of each pass by proper motion and parallax, stands at the marks
@@ -19,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import csv
+import importlib
 import io
 import json
 import math
@@ -29,13 +35,16 @@ from typing import Any
 import httpx
 import numpy as np
 
+from engine.grid import Grid
 from engine.movers import EDGE_ARCSEC as FIELD_EDGE_ARCSEC
 from engine.movers import NSIG
+from engine.onoff import TRACK_NSIG
 from service import checks_neowise
 from service.context import BRIGHT_MAG, BRIGHT_RADIUS, display_name
 from service.known_field import GAIA_EPOCH, SIMBAD_EPOCH, KnownField, cache_dir, epoch_year, offsets_arcsec, propagate
 from service.storage import digest
 
+VERSION = "c2"  # the rules' version: part of the job id, so answers made under older rules are not served
 CHECK_IDS = ("two_passes", "straight_line", "gaia", "jpl", "simbad", "edge_bright", "above_bar", "neowise")
 ANSWERED = ("pass", "warn", "fail")
 MATCH_ARCSEC = 4.0  # a catalogue object this close to a mark (two thirds of a SPHEREx pixel) is the marked point
@@ -55,6 +64,10 @@ NEOWISE_MIN_EPOCHS = 3
 NEOWISE_FROM, NEOWISE_TO = 2014.0, 2024.6
 IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 MAX_MARKS = 40
+FAST_MIN_VISITS = 3  # a fast mover (inside one pass) needs this many dated visits
+FAST_CURVE_MIN_VISITS = 5  # a curved path is taken (with a warning) only with this many visits
+ORBIT_RMS_MAX = 2.0  # the track search's own limit for a track fitted by an orbit (engine.filmsearch.RMS_MAX)
+VISIT_SAME_DAYS = 0.02  # dates closer than half an hour are one visit
 
 Answer = tuple[str, str]
 Mark = dict[str, Any]
@@ -93,6 +106,116 @@ def motion(marks: list[Mark]) -> tuple[float, float, float] | None:
     east, north = _sep(b["ra"], b["dec"], a["ra"], a["dec"])
     shift = math.hypot(east, north)
     return shift, shift / years, math.degrees(math.atan2(east, north)) % 360.0
+
+
+def kind_of(marks: list[dict[str, Any]]) -> str:
+    """`fast`: two or more marks, every one with its own date, all in one pass (a body that moves inside a pass, seen visit by visit);
+    `slow` otherwise (a body that moves between passes)."""
+    if len(marks) >= 2 and all(m.get("mjd") is not None for m in marks) and len({int(m["pass"]) for m in marks}) == 1:
+        return "fast"
+    return "slow"
+
+
+def visits_of(marks: list[Mark]) -> int:
+    """Distinct dated visits among the marks (dates closer than VISIT_SAME_DAYS are one visit)."""
+    days = sorted(float(m["mjd"]) for m in marks)
+    return sum(1 for k, t in enumerate(days) if k == 0 or t - days[k - 1] > VISIT_SAME_DAYS)
+
+
+def check_fast_visits(marks: list[Mark]) -> Answer:
+    n = visits_of(marks)
+    if n >= FAST_MIN_VISITS:
+        hours = (max(float(m["mjd"]) for m in marks) - min(float(m["mjd"]) for m in marks)) * 24.0
+        return "pass", f"A fast mover: marked in {n} dated visits of one pass, over {hours:.1f} hours."
+    return "fail", f"A fast mover (all marks in one pass) needs at least {FAST_MIN_VISITS} dated visits; these marks have {n}."
+
+
+def fit_motion(marks: list[Mark], degree: int) -> tuple[float, float, float]:
+    """Places against time fitted by a polynomial of `degree` on each axis: (largest residual in arcsec, rate in arcsec/h at the
+    middle, direction in degrees east of north)."""
+    ms = sorted(marks, key=lambda m: float(m["mjd"]))
+    t = np.array([float(m["mjd"]) for m in ms])
+    t = (t - t.mean()) * 24.0
+    east, north = offsets_arcsec(np.array([m["ra"] for m in ms]), np.array([m["dec"] for m in ms]), ms[0]["ra"], ms[0]["dec"])
+    ce, cn = np.polyfit(t, east, degree), np.polyfit(t, north, degree)
+    resid = float(np.hypot(east - np.polyval(ce, t), north - np.polyval(cn, t)).max())
+    ve, vn = float(ce[-2]), float(cn[-2])
+    return resid, math.hypot(ve, vn), math.degrees(math.atan2(ve, vn)) % 360.0
+
+
+def check_fast_line(marks: list[Mark], searches: list[dict[str, Any]] | None = None) -> Answer:
+    n = visits_of(marks)
+    if n < FAST_MIN_VISITS:
+        return "fail", f"A line at a constant rate needs at least {FAST_MIN_VISITS} dated visits; these marks have {n}."
+    resid, rate, pa = fit_motion(marks, 1)
+    said = f"{rate:.1f}″/h toward {pa:.0f}°"
+    if resid <= LINE_PASS_ARCSEC:
+        return "pass", f"The {n} visits lie on one line at a constant rate within {resid:.1f}″ ({said})."
+    if n >= FAST_CURVE_MIN_VISITS:
+        curved, rate2, pa2 = fit_motion(marks, 2)
+        if curved <= LINE_PASS_ARCSEC:
+            return (
+                "warn",
+                f"Not a straight line at a constant rate ({resid:.0f}″ off), but the {n} visits lie on a smooth curve within {curved:.1f}″ "
+                f"({rate2:.1f}″/h toward {pa2:.0f}° at the middle): the path of a near body bends over days.",
+            )
+    found = best_track(marks, searches)
+    if (
+        found is not None
+        and found[0] == len(marks)
+        and found[1].get("method") == "orbit"
+        and float(found[1].get("rms") or 99.0) <= ORBIT_RMS_MAX
+    ):
+        t = found[1]
+        return (
+            "warn",
+            f"Not a straight line at a constant rate ({resid:.0f}″ off over {float(t.get('hours') or 0.0):.0f} hours), but the time-lapse "
+            f"track search fits all {n} visits with one orbit within {float(t['rms']):.2f}″ ({float(t.get('rate') or 0.0):.1f}″/h): "
+            "the path of a near body bends.",
+        )
+    state = "warn" if resid <= LINE_WARN_ARCSEC else "fail"
+    return state, f"A visit is {resid:.1f}″ off the line at a constant rate through the others ({said})."
+
+
+def best_track(marks: list[Mark], searches: list[dict[str, Any]] | None) -> tuple[int, dict[str, Any]] | None:
+    """The track of the time-lapse track searches that has the most marks (same visit, within TRACK_MATCH_ARCSEC): (marks, track)."""
+    best: tuple[int, dict[str, Any]] | None = None
+    for meta in searches or []:
+        g = meta["grid"]
+        grid = Grid(g["ra0"], g["dec0"], g["step_arcsec"], g["n"])
+        frames = meta.get("frames") or []
+        for t in meta.get("tracks") or []:
+            hit = 0
+            for m in marks:
+                for p in t.get("pts") or []:
+                    f = int(p["f"])
+                    if f >= len(frames) or abs(float(frames[f]["mjd"]) - float(m["mjd"])) > VISIT_SAME_DAYS:
+                        continue
+                    ra, dec = grid.grid_to_sky([p["x"]], [p["y"]])
+                    if math.hypot(*_sep(float(ra[0]), float(dec[0]), m["ra"], m["dec"])) <= TRACK_MATCH_ARCSEC:
+                        hit += 1
+                        break
+            if hit and (best is None or hit > best[0]):
+                best = (hit, t)
+    return best
+
+
+def check_fast_bar(marks: list[Mark], searches: list[dict[str, Any]] | None) -> Answer:
+    """The time-lapse track search (filmsearch) of the place: a track that has the marks, with its own significance."""
+    if not searches:
+        return "no_answer", "The time-lapse track search has not run on this place and pass: there is no bar to compare with."
+    best = best_track(marks, searches)
+    bar = f"{TRACK_NSIG:.0f}σ for the visits together"
+    if best is None:
+        return "warn", f"The time-lapse track search has no track above its bar ({bar}) at the marks: seen by eye only."
+    hit, t = best
+    z = float(t.get("z_together") or 0.0)
+    state = "pass" if z >= TRACK_NSIG else "warn"
+    checked = "verified in the exposures" if t.get("verified") else "not verified in the exposures"
+    return (
+        state,
+        f"The time-lapse track search has this track at {hit} of {len(marks)} marks: {z:.1f}σ together ({checked}); the bar: {bar}.",
+    )
 
 
 def check_two_passes(marks: list[Mark]) -> Answer:
@@ -230,7 +353,16 @@ def track_miss(body: list[Any], mark: Mark, t0: float, t1: float, mid: float) ->
     return math.hypot(x + vx * t, y + vy * t)
 
 
-def check_above_bar(marks: list[Mark], result: dict[str, Any] | None) -> Answer:
+def bar_words(square: dict[str, Any] | None) -> str:
+    """The bar in words: the one the sweep stored for the square when it searched it, else the movers search's own."""
+    bar = (square or {}).get("bar") or {}
+    if bar.get("kind") == "sweep" and bar.get("mover_sigma") is not None:
+        shift = f" and a shift of {bar['mover_shift_arcsec']:g}″" if bar.get("mover_shift_arcsec") is not None else ""
+        return f"square {square['id']}: a motion of {bar['mover_sigma']:g}σ{shift} over {bar.get('passes', '?')} passes" if square else ""
+    return f"{NSIG:.0f}σ in each pass"
+
+
+def check_above_bar(marks: list[Mark], result: dict[str, Any] | None, square: dict[str, Any] | None = None) -> Answer:
     if result is None:
         return "no_answer", "The machine has not searched this field yet: there is no bar to compare with."
     best: tuple[int, dict[str, Any]] | None = None
@@ -242,9 +374,9 @@ def check_above_bar(marks: list[Mark], result: dict[str, Any] | None) -> Answer:
                     hit += 1
         if hit and (best is None or hit > best[0]):
             best = (hit, t)
-    bar = f"{NSIG:.0f}σ"
+    bar = bar_words(square)
     if best is None:
-        return "warn", f"The machine's search of this field has nothing above its bar ({bar} in each pass) at the marks: seen by eye only."
+        return "warn", f"The machine's search of this field has nothing above its bar ({bar}) at the marks: seen by eye only."
     hit, t = best
     snr = [s for s in t.get("snr", []) if s is not None]
     if not snr:
@@ -291,7 +423,9 @@ def neowise_path(marks: list[Mark], rows: list[dict[str, float]]) -> Answer:
 
 def neowise_orbit_answer(res: dict[str, Any], orbit: dict[str, Any]) -> Answer:
     years = res.get("years") or [2014, 2024]
-    head = f"NEOWISE {years[0]:.0f}–{years[-1]:.0f}, {res.get('frames', 0)} exposures"
+    lost = int(res.get("frames_failed") or 0)
+    read = f"{res.get('frames', 0) - lost} of {res.get('frames', 0)} exposures read" if lost else f"{res.get('frames', 0)} exposures"
+    head = f"NEOWISE {years[0]:.0f}–{years[-1]:.0f}, {read}"
     if res.get("status") != "ok":
         why = {
             "no-frames": "too few exposures cover the orbit's strip",
@@ -304,6 +438,12 @@ def neowise_orbit_answer(res: dict[str, Any], orbit: dict[str, Any]) -> Answer:
         f"{head} in {res['epochs_used']} epochs added along the orbit ({res['epochs_unmasked']} not masked): "
         f"{res['flux_mjy']:+.4f} ± {res['err_mjy']:.4f} mJy"
     )
+    sc = res.get("scan")
+    if sc and "orbits" in sc:
+        said += (
+            f"; {sc['orbits']} orbits around it reach {sc['sn_at_place']:.1f}σ at the place, shifted places {sc['noise_median']:.1f}σ "
+            f"(median) to {sc['noise_max']:.1f}σ, {sc['places_not_below']} of {sc['places']} not below it"
+        )
     flux = float(orbit.get("flux_mjy") or 0.0)
     if res.get("ruled_out"):
         return "fail", f"{said}, where a body of {flux:.3f} mJy would stand at {res['would_be_sigma']:.1f}σ: ruled out."
@@ -325,6 +465,7 @@ class Job:
         self.state = "running"
         self.started = time.time()
         self.seconds: float | None = None
+        self.field = ""  # the store key the request's field resolved to
         self.task: asyncio.Task[None] | None = None
 
     def view(self) -> dict[str, Any]:
@@ -333,6 +474,8 @@ class Job:
         return {
             "job": self.id,
             "field_key": self.request.get("field_key", ""),
+            "field": self.field,
+            "kind": kind_of(self.request.get("marks") or []),
             "ra": self.request.get("ra"),
             "dec": self.request.get("dec"),
             "state": self.state,
@@ -362,14 +505,18 @@ class Checks:
             return None
         job = Job(job_id, kept["request"])
         job.checks = {c: kept["checks"].get(c) or job.checks[c] for c in CHECK_IDS}
-        job.state, job.seconds = "done", kept.get("seconds")
+        job.state, job.seconds, job.field = "done", kept.get("seconds"), kept.get("field", "")
         return job
 
     def _keep(self, job: Job) -> None:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{job.id}.part"
-            tmp.write_text(json.dumps({"request": job.request, "checks": job.checks, "seconds": job.seconds}, separators=(",", ":")))
+            tmp.write_text(
+                json.dumps(
+                    {"request": job.request, "checks": job.checks, "seconds": job.seconds, "field": job.field}, separators=(",", ":")
+                )
+            )
             tmp.replace(self.dir / f"{job.id}.json")
         except OSError:
             pass
@@ -382,7 +529,7 @@ class Checks:
 
     def start(self, request: dict[str, Any]) -> Job:
         """The job of a request (the same request is the same job); checks that have not answered are run (again)."""
-        job_id = digest(json.dumps(request, sort_keys=True))[:20]
+        job_id = digest(VERSION, json.dumps(request, sort_keys=True))[:20]
         job = self.get(job_id) or Job(job_id, request)
         self.jobs[job_id] = job
         while len(self.jobs) > 500:
@@ -399,8 +546,10 @@ class Checks:
         req = job.request
         meta: dict[str, Any] | None = None
         store = getattr(self.st, "store", None)
-        if store is not None and req.get("field_key"):
-            meta = await asyncio.to_thread(store.read_meta, "field", req["field_key"])
+        field = await asyncio.to_thread(self._resolve, req)
+        job.field = field
+        if store is not None and field:
+            meta = await asyncio.to_thread(store.read_meta, "field", field)
         passes = {int(p["index"]): p for p in (meta or {}).get("passes", [])}
         marks: list[Mark] = []
         for m in req["marks"]:
@@ -429,11 +578,15 @@ class Checks:
         elif not dated:
             blocked = ("no_answer", "The dates of the passes are not known (the field is not in the store and the marks carry no date).")
 
+        fast = kind_of(req["marks"]) == "fast"
+
         async def two_passes() -> Answer:
-            return check_two_passes(marks)
+            return check_fast_visits(marks) if fast else check_two_passes(marks)
 
         async def straight_line() -> Answer:
-            return blocked or check_straight_line(marks)
+            if blocked or not fast:
+                return blocked or check_straight_line(marks)
+            return check_fast_line(marks, await asyncio.to_thread(self._track_searches, marks))
 
         async def gaia() -> Answer:
             return blocked or check_catalogue(await catalogue("gaia"), marks, GAIA_EPOCH, gaia_label)
@@ -450,9 +603,17 @@ class Checks:
         async def above_bar() -> Answer:
             if not marks:
                 return "fail", "No marks."
-            return check_above_bar(marks, await asyncio.to_thread(self._movers, req.get("field_key")))
+            if fast:
+                return check_fast_bar(marks, await asyncio.to_thread(self._track_searches, marks))
+            square = await asyncio.to_thread(self._square, ra, dec)
+            result = await asyncio.to_thread(self._movers, field)
+            if result is None and square is not None:  # the field the sweep built for the square
+                result = await asyncio.to_thread(self._movers, square.get("field_key"))
+            return check_above_bar(marks, result, square)
 
         async def neowise() -> Answer:
+            if fast and not req.get("orbit"):
+                return "pass", "Not applicable to a body that moves this fast: a path of hours cannot be added in a ten-year archive."
             return await self._neowise(job, marks if dated else [], req.get("orbit"))
 
         runners: dict[str, Callable[[], Awaitable[Answer]]] = {
@@ -478,6 +639,91 @@ class Checks:
         job.seconds = round(time.time() - job.started, 1)
         job.state = "done"
         await asyncio.to_thread(self._keep, job)
+
+    def _resolve(self, req: dict[str, Any]) -> str:
+        """The store key of the request's field. `field_key` is a store key, or the lab's "ra,dec,fov": the stored field of that size
+        whose centre is nearest (within a twentieth of the size, the service's own snap); without a size, or with no key at all, the
+        smallest stored field that holds every mark FIELD_EDGE_ARCSEC inside its edge. "" when the store has no such field."""
+        raw = str(req.get("field_key") or "")
+        if raw and "," not in raw and ":" not in raw:
+            return raw  # a store key (a finding id such as "film:2e26…" names no field: the marks' place decides)
+        store = getattr(self.st, "store", None)
+        if store is None:
+            return ""
+        nums: list[float] = []
+        for x in raw.split(","):
+            try:
+                nums.append(float(x))
+            except ValueError:
+                break
+        fields = [r for r in store.listing(("field",)) if r["complete"] and {"ra", "dec", "fov"} <= r["params"].keys()]
+        fields.reverse()  # the newest first: a field built again with more passes wins
+        if len(nums) >= 3:
+            ra, dec, fov = nums[:3]
+            best: tuple[float, str] | None = None
+            for r in fields:
+                pp = r["params"]
+                if abs(float(pp["fov"]) - fov) > 0.01:
+                    continue
+                dist = math.hypot(*_sep(float(pp["ra"]), float(pp["dec"]), ra, dec))
+                if dist <= fov * 60.0 / 20.0 and (best is None or dist < best[0] - 1e-6):
+                    best = (dist, str(r["key"]))
+            return best[1] if best else ""
+        places = [(m["ra"], m["dec"]) for m in req["marks"]] or [(float(req["ra"]), float(req["dec"]))]
+        found: tuple[float, str] | None = None
+        for r in fields:
+            pp = r["params"]
+            half = float(pp["fov"]) * 30.0 - FIELD_EDGE_ARCSEC
+            if all(max(abs(v) for v in _sep(a, d, float(pp["ra"]), float(pp["dec"]))) <= half for a, d in places) and (
+                found is None or float(pp["fov"]) < found[0]
+            ):
+                found = (float(pp["fov"]), str(r["key"]))
+        return found[1] if found else ""
+
+    def _track_searches(self, marks: list[Mark]) -> list[dict[str, Any]]:
+        """The finished time-lapse track searches (filmsearch products) whose grid holds the first mark and whose frames cover its
+        date."""
+        store = getattr(self.st, "store", None)
+        if store is None or not marks:
+            return []
+        m = marks[0]
+        out = []
+        for row in store.listing(("filmsearch",)):
+            if not row["complete"]:
+                continue
+            meta = store.read_meta("filmsearch", row["key"])
+            if not meta or not meta.get("grid") or not meta.get("frames"):
+                continue
+            g = meta["grid"]
+            half = g["n"] * g["step_arcsec"] / 2.0
+            if max(abs(v) for v in _sep(m["ra"], m["dec"], g["ra0"], g["dec0"])) > half:
+                continue
+            days = [float(f["mjd"]) for f in meta["frames"]]
+            if min(days) - 1.0 <= float(m["mjd"]) <= max(days) + 1.0:
+                out.append(meta)
+        return out
+
+    def _square(self, ra: float, dec: float) -> dict[str, Any] | None:
+        """The grid square that holds a place, when the sweep has searched it: {id, bar, field_key, finds} (the grid stream's
+        `service.grid` and `st.grid`); None when the grid is not there or the square is not searched."""
+        db = getattr(self.st, "grid", None)
+        if db is None:
+            return None
+        try:
+            grid: Any = importlib.import_module("service.grid")
+            cid = grid.cell_at(ra, dec).id
+            row = db.get(cid)
+        except Exception:
+            return None
+        if not row or row.get("state") != "searched":
+            return None
+        bar = row.get("bar")
+        if isinstance(bar, str):
+            try:
+                bar = json.loads(bar)
+            except ValueError:
+                bar = None
+        return {"id": cid, "bar": bar if isinstance(bar, dict) else {}, "field_key": row.get("field_key"), "finds": row.get("finds")}
 
     def _movers(self, field_key: str | None) -> dict[str, Any] | None:
         movers = getattr(self.st, "movers", None)
