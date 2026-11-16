@@ -7,6 +7,7 @@ import { InfoPage } from './screens/pages';
 import { Landing } from './screens/landing';
 import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
+import { Cabinet } from './screens/cabinet/Cabinet'; // flow-accounts (stream B3): for the integrator to resolve
 
 const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
   { screen: 'globe', name: 'Globe', icon: 'globe', tip: 'The sky: globe and catalogue' },
@@ -16,6 +17,7 @@ const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
   { screen: 'index', name: 'Index', icon: 'database', tip: 'Exposure index: what the sky service can search' },
   { screen: 'method', name: 'Method', icon: 'sigma', tip: 'Method: how everything is computed' },
   { screen: 'about', name: 'About', icon: 'info', tip: 'About, data and credits' },
+  { screen: 'me', name: 'Cabinet', icon: 'user', tip: 'Cabinet: your squares, marks, findings and history' }, // flow-accounts (stream B3)
 ];
 
 function useRoute(): Route {
@@ -71,7 +73,7 @@ export function App() {
         </div>
       </nav>
       <main data-screen={route.screen}>
-        {route.screen === 'lab' ? <Lab route={route} /> : route.screen === 'globe' ? <Globe /> : route.screen === 'planetx' ? <PlanetXPage /> : <InfoPage screen={route.screen} health={health} />}
+        {route.screen === 'lab' ? <Lab route={route} /> : route.screen === 'globe' ? <Globe /> : route.screen === 'planetx' ? <PlanetXPage /> : route.screen === 'me' ? <Cabinet route={route} /> /* flow-accounts (stream B3) */ : <InfoPage screen={route.screen} health={health} />}
       </main>
     </div>
   );

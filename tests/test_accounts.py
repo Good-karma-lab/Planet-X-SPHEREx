@@ -173,6 +173,11 @@ def test_history_notifications_and_name(site: tuple[FastAPI, _State, _Mail]) -> 
     h = c.get("/api/me/history").json()["history"]
     assert [x["ref"] for x in h] == ["#/lab?ra=1&dec=2", "#/explore"]  # the same place moves to the top
     assert c.post("/api/me/history", json={"kind": "lab", "ref": "https://evil.example"}).status_code == 422
+    # the lab's address changes while the user works in one field: the place is one entry, with the latest link
+    for band in ("1", "2"):
+        c.post("/api/me/history", json={"kind": "lab", "ref": f"#/lab?ra=9&dec=9&band={band}", "key": "lab:9,9,20"})
+    h = c.get("/api/me/history").json()["history"]
+    assert len(h) == 3 and h[0]["ref"] == "#/lab?ra=9&dec=9&band=2"
     uid = c.get("/api/me").json()["user"]["id"]
     accounts.get(st).db.notify(uid, "status", "Finding x: the status is now “candidate”.", "x")
     n = c.get("/api/me/notifications").json()

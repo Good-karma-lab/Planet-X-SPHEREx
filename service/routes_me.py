@@ -7,7 +7,7 @@ POST   /api/me/marks  (a mark; the id may be made by the page, the same id again
 DELETE /api/me/marks/{id}  (or ?id=)          → 204
 GET    /api/me/tasks                          → {tasks:[{id, kind, cell_id, finding_id, field_key, ra, dec, state, result, mark_ids, created, done_at}]}
 POST   /api/me/tasks/{id}/done {result, mark_ids} → {task}
-GET    /api/me/history                        → {history:[{id, kind, ref, title, at}]};  POST {kind, ref, title?};  DELETE clears it
+GET    /api/me/history                        → {history:[{id, kind, ref, title, at}]};  POST {kind, ref, title?, key?};  DELETE clears it
 GET    /api/me/notifications                  → {notifications:[{id, kind, text, ref, created, read}], unread};  POST …/read {ids?}
 GET    /api/me/investigations                 → {investigations:[{id, title, finding_id, mark_ids, notes, frames, checks_job, submitted, checks}]}
 POST   /api/me/investigations {title, …}      → the investigation;  PATCH|DELETE /api/me/investigations/{id}
@@ -64,6 +64,7 @@ class HistoryIn(BaseModel):
     kind: str = Field(pattern=r"^[a-z_]{1,20}$")
     ref: str = Field(max_length=600)
     title: str = Field("", max_length=120)
+    key: str | None = Field(None, max_length=120)
 
 
 class ReadIn(BaseModel):
@@ -213,7 +214,7 @@ def make_me_router(st: Any) -> APIRouter:
         acc, u = me(request)
         if not REF.match(body.ref):
             raise HTTPException(422, "ref is a place inside this app (it starts with #/)")
-        acc.db.add_history(u["id"], body.kind, body.ref, body.title)
+        acc.db.add_history(u["id"], body.kind, body.ref, body.title, body.key)
         return {"ok": True}
 
     @router.delete("/api/me/history", status_code=204)
