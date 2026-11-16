@@ -81,11 +81,24 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
     void run(api(`/api/me/investigations/${inv.id}/notes`, { method: 'POST', body: { text: note.trim() } }).then(() => setNote('')));
   };
   const startChecks = () => {
-    const first = own[0];
-    if (!first) return setStatus('No marks in this investigation: put a mark in the lab first');
-    const key = /^[A-Za-z0-9_,.+-]*$/.test(first.field_key) ? first.field_key : ''; // a store key, or the lab's "ra,dec,fov"
-    const body = { field_key: key, ra: first.ra, dec: first.dec, marks: own.map((m) => ({ pass: m.pass ?? 0, ra: m.ra, dec: m.dec })) };
-    void run(api<{ job: string }>('/api/checks', { method: 'POST', body }).then((r) => api(`/api/me/investigations/${inv.id}`, { method: 'PATCH', body: { checks_job: r.job } })));
+    const start = async () => {
+      let body: { field_key: string; ra: number; dec: number; marks: { pass: number; ra: number; dec: number; mjd?: number }[] } | null = null;
+      if (inv.finding_id) {
+        // a machine finding brought to submit: the dated visits the machine measured it in (a body that moves inside one pass)
+        const f = await api<{ ra: number; dec: number; data?: { visits?: { ra: number; dec: number; mjd: number }[] } }>(`/api/v1/findings/${encodeURIComponent(inv.finding_id)}`).catch(() => null);
+        const visits = (f?.data?.visits ?? []).filter((v) => Number.isFinite(v.ra) && Number.isFinite(v.dec) && Number.isFinite(v.mjd));
+        if (f && visits.length >= 2) body = { field_key: '', ra: f.ra, dec: f.dec, marks: visits.map((v) => ({ pass: 0, ra: v.ra, dec: v.dec, mjd: v.mjd })) };
+      }
+      const first = own[0];
+      if (!body && first) {
+        const key = /^[A-Za-z0-9_,.+-]*$/.test(first.field_key) ? first.field_key : ''; // a store key, or the lab's "ra,dec,fov"
+        body = { field_key: key, ra: first.ra, dec: first.dec, marks: own.map((m) => ({ pass: m.pass ?? 0, ra: m.ra, dec: m.dec })) };
+      }
+      if (!body) throw new Error('No marks in this investigation: put a mark in the lab first');
+      const r = await api<{ job: string }>('/api/checks', { method: 'POST', body });
+      await api(`/api/me/investigations/${inv.id}`, { method: 'PATCH', body: { checks_job: r.job } });
+    };
+    void run(start());
   };
   const submit = () => void run(api('/api/findings/submit', { method: 'POST', body: { investigation_id: inv.id, checks_job: inv.checks_job } }));
   const running = !!inv.checks_job && (!checks || checks.state !== 'done');
