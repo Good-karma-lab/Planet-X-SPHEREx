@@ -8,6 +8,7 @@ import { Landing } from './screens/landing';
 import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
 import { Cabinet } from './screens/cabinet/Cabinet';
+import { FindingPage } from './screens/findings/page';
 import { useUnread } from './lib/account';
 
 const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
@@ -96,6 +97,12 @@ export function App() {
           <PlanetXPage />
         ) : route.screen === 'me' ? (
           <Cabinet route={route} />
+        ) : route.screen === 'findings' && route.params['id'] ? (
+          <div class="screen">
+            <div class="ipage">
+              <FindingPage id={route.params['id']} />
+            </div>
+          </div>
         ) : (
           <InfoPage screen={route.screen} health={health} />
         )}
