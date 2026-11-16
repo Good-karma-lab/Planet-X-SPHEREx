@@ -75,3 +75,5 @@ a.cb-row:hover, button.cb-row:hover { background: rgba(95, 227, 214, 0.08); }
 .tab { position: relative; }
 .navbadge { position: absolute; top: 3px; right: 5px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--amber); color: #1a1205; font: 700 10px/15px var(--mono); text-align: center; }
 @media (max-width: 600px) { .cb-row.haspic { grid-template-columns: auto minmax(0, 1fr); } .cb-row.haspic .cb-side { grid-column: 1 / -1; } .cb-head { align-items: flex-start; } .cb-tabs .cb-status { margin-left: 0 !important; flex-basis: 100%; } .cb-frames a { width: calc(50% - 5px); } .cb-frames img, .cb-frames .cb-noimg { width: 100%; height: auto; aspect-ratio: 1; } }
+.cb-pic[data-state='none'] { background: none; border-style: dashed; }
+@media (max-width: 600px) { .cb-tabs .cb-status:empty { display: none; } }
