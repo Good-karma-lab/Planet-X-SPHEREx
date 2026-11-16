@@ -162,6 +162,9 @@ class AccountsDB:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._conn().executescript(SCHEMA)
+        cols = {r[1] for r in self._conn().execute("PRAGMA table_info(acc_investigations)")}
+        if "declared" not in cols:  # added on 16 Nov 2026: when the user said "Check and submit" (the submit then finishes by itself)
+            self._conn().execute("ALTER TABLE acc_investigations ADD COLUMN declared REAL")
 
     def _conn(self) -> sqlite3.Connection:
         c: sqlite3.Connection | None = getattr(self._local, "c", None)
@@ -351,8 +354,24 @@ class AccountsDB:
         return {
             "id": r["id"], "title": r["title"], "finding_id": r["finding_id"], "mark_ids": json.loads(r["mark_ids"]),
             "notes": json.loads(r["notes"]), "frames": json.loads(r["frames"]), "checks_job": r["checks_job"],
-            "submitted": r["submitted"], "created": iso(r["created"]), "updated": iso(r["updated"]),
+            "submitted": r["submitted"], "declared": iso(r["declared"]), "created": iso(r["created"]), "updated": iso(r["updated"]),
         }  # fmt: skip
+
+    def declare(self, user_id: str, inv_id: str, checks_job: str) -> None:
+        """The user said "Check and submit": from now the submit finishes by itself (service.accounts.submit)."""
+        now = time.time()
+        self._conn().execute(
+            "UPDATE acc_investigations SET checks_job=?, declared=?, updated=? WHERE id=? AND user_id=? AND submitted IS NULL",
+            (checks_job, now, now, inv_id, user_id),
+        )
+
+    def declared_for_job(self, checks_job: str) -> list[tuple[str, dict[str, Any]]]:
+        rows = (
+            self._conn()
+            .execute("SELECT * FROM acc_investigations WHERE checks_job=? AND declared IS NOT NULL AND submitted IS NULL", (checks_job,))
+            .fetchall()
+        )
+        return [(r["user_id"], self._inv(r)) for r in rows]
 
     def investigations(self, user_id: str) -> list[dict[str, Any]]:
         rows = self._conn().execute("SELECT * FROM acc_investigations WHERE user_id=? ORDER BY updated DESC", (user_id,))

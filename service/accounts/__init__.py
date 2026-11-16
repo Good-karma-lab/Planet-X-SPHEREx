@@ -5,6 +5,7 @@ One call wires everything into the app: `register_accounts(app, st)` (service/ap
 
 Hooks that other streams fill (each may be absent; the routes that need them then answer 503):
   st.checks_status(job) -> the body of GET /api/checks/{job} ({state, checks, can_submit, ...}) or None for an unknown job
+and one hook this module sets for the checks stream: st.on_checks_done(body), called when a job reaches its final state
 """
 
 from __future__ import annotations
@@ -124,6 +125,10 @@ def register_accounts(app: FastAPI, st: Any) -> None:
     from service.routes_tasks import make_tasks_router
 
     st.current_user = lambda request: get(st).current_user(request)
+    # the checks stream calls this when a job reaches its final state: declared submits finish without any page open
+    from service.accounts import submit
+
+    st.on_checks_done = lambda body: submit.settle_job(st, get(st).db, str(body.get("job") or ""))
     app.include_router(make_auth_router(st))
     app.include_router(make_me_router(st))
     app.include_router(make_tasks_router(st))

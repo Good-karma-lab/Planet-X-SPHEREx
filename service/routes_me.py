@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from service import accounts
+from service.accounts import submit as auto
 from service.accounts.db import LimitReachedError, iso
 
 ID = r"^[A-Za-z0-9_\-:.]{6,64}$"
@@ -103,6 +104,11 @@ class InvestigationPatch(BaseModel):
     checks_job: str | None = Field(None, max_length=80)
 
 
+class DeclareIn(BaseModel):
+    checks_job: str = Field(min_length=1, max_length=80)
+    note: str | None = Field(None, max_length=4000)
+
+
 class SubmitIn(BaseModel):
     investigation_id: str = Field(max_length=80)
     checks_job: str = Field(min_length=1, max_length=80)
@@ -139,14 +145,17 @@ def make_me_router(st: Any) -> APIRouter:
 
     def with_checks(inv: dict[str, Any]) -> dict[str, Any]:
         body = checks_of(inv["checks_job"])
-        inv["checks"] = None if body is None else {k: body.get(k) for k in ("state", "checks", "can_submit")}
+        inv["checks"] = None if body is None else {k: body.get(k) for k in ("state", "checks", "can_submit", "needs_comment", "kind")}
+        inv["state"] = auto.state_of(inv, body)
+        inv["progress"] = auto.progress_of(body) if inv["state"] == "checking" else ""
         return inv
 
     def fresh(acc: accounts.Accounts, u: dict[str, Any]) -> None:
         """What happened since the user last looked, said once each: a checks job of theirs finished; a square they looked through
         got a machine find. (A finding's new status is said when the verdict is set: AccountsDB.set_status.)"""
+        auto.settle_user(st, acc.db, u["id"])  # a declared submit finishes here too, should the checks' own signal be missed
         for inv in acc.db.investigations(u["id"]):
-            body = None if inv["submitted"] else checks_of(inv["checks_job"])
+            body = None if inv["submitted"] or inv["declared"] else checks_of(inv["checks_job"])
             if body is not None and body.get("state") == "done":
                 ok = body.get("can_submit") is True
                 text = f"The checks of “{inv['title']}” have finished: " + ("ready to submit." if ok else "something blocks the submit.")
@@ -273,6 +282,7 @@ def make_me_router(st: Any) -> APIRouter:
     @router.get("/api/me/investigations")
     def investigations(request: Request) -> Any:
         acc, u = me(request)
+        auto.settle_user(st, acc.db, u["id"])
         return {"investigations": [with_checks(i) for i in acc.db.investigations(u["id"])]}
 
     @router.post("/api/me/investigations")
@@ -314,7 +324,28 @@ def make_me_router(st: Any) -> APIRouter:
         inv = mine(acc, u, inv_id)
         if len(inv["notes"]) >= MAX_NOTES:
             raise HTTPException(409, "too many notes in this investigation")
-        return patched(acc, u, inv_id, {"notes": [*inv["notes"], *_stamp([body.model_dump()])]})
+        acc.db.patch_investigation(u["id"], inv_id, {"notes": [*inv["notes"], *_stamp([body.model_dump()])]})
+        auto.settle(st, acc.db, u["id"], mine(acc, u, inv_id))  # a comment may be all a declared submit was waiting for
+        return with_checks(mine(acc, u, inv_id))
+
+    @router.post("/api/me/investigations/{inv_id}/submit")
+    def declare(inv_id: str, body: DeclareIn, request: Request) -> Any:
+        """ "Check and submit", said once: the checks job is tied to the investigation and the submit finishes by itself."""
+        acc, u = me(request)
+        inv = mine(acc, u, inv_id)
+        if inv["submitted"]:
+            return with_checks(inv)
+        if not callable(getattr(st, "checks_status", None)):
+            raise HTTPException(503, "the checks are not loaded on this server")
+        if checks_of(body.checks_job) is None:
+            raise HTTPException(404, "no such checks job")
+        if body.note and body.note.strip():
+            if len(inv["notes"]) >= MAX_NOTES:
+                raise HTTPException(409, "too many notes in this investigation")
+            acc.db.patch_investigation(u["id"], inv_id, {"notes": [*inv["notes"], *_stamp([{"text": body.note.strip(), "at": None}])]})
+        acc.db.declare(u["id"], inv_id, body.checks_job)
+        auto.settle(st, acc.db, u["id"], mine(acc, u, inv_id))
+        return with_checks(mine(acc, u, inv_id))
 
     @router.post("/api/me/investigations/{inv_id}/frames")
     def add_frame(inv_id: str, body: Frame, request: Request) -> Any:
