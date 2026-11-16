@@ -201,10 +201,10 @@ class Instance:
             if self.proc.poll() is not None:
                 raise RuntimeError(f"the sweep's service instance exited at start (code {self.proc.returncode}); see {self.log_path}")
             with contextlib.suppress(httpx.HTTPError):
-                if httpx.get(f"{base}/health", timeout=2).status_code == 200:
+                if httpx.get(f"{base}/api/v1/health", timeout=2).status_code == 200:
                     return base
             time.sleep(1.0)
-        raise RuntimeError("the sweep's service instance did not answer /health")
+        raise RuntimeError("the sweep's service instance did not answer /api/v1/health")
 
     def stop(self) -> None:
         if self.proc is not None and self.proc.poll() is None:
