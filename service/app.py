@@ -73,6 +73,9 @@ SERVICE_NAME = "spherex-sky"
 API_PREFIX = "/api/v1"
 # a second instance that takes over while the main one restarts (deploy/push.sh): it builds nothing new
 STANDBY = os.environ.get("SKY_STANDBY", "0") == "1"
+# a local run on a snapshot of the production finds (tools/findings_snapshot.py): Findings only reads its database and the Find Planet X
+# identifier does not ask JPL, while every field and search is built as usual (a standby would build nothing new)
+FINDINGS_READONLY = os.environ.get("SKY_FINDINGS_READONLY", "0") == "1"
 LIGHTCURVES_WAIT_S = 3.0  # IRSA may take a minute for NEOWISE: the light curves route answers within this, the rest `pending`
 
 
@@ -200,12 +203,12 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                         store.reopen(row["key"])
 
             asyncio.get_running_loop().run_in_executor(None, reopen_unread)
-        st.findings = Findings(
-            st.store, cfg.store_dir, st.catalogue, st.movers, st.pairs, st.dwarfs, st.anomalies or _NoAnomalies(), writer=not STANDBY
-        )
+        anomalies = st.anomalies or _NoAnomalies()
+        writer = not (STANDBY or FINDINGS_READONLY)
+        st.findings = Findings(st.store, cfg.store_dir, st.catalogue, st.movers, st.pairs, st.dwarfs, anomalies, writer=writer)
         st.findings.start()
         st.fpx_known = FpxIdentifier(st.store, cfg.store_dir / "fpx_known")
-        if not STANDBY:  # one process asks JPL (the standby only reads the kept answers): two would double the rate JPL sees
+        if not (STANDBY or FINDINGS_READONLY):  # one process asks JPL (the standby only reads the kept answers): two would double the rate
             st.fpx_known.start()
         checks_of(st).resume()  # check jobs a restart interrupted run again at once, not on the first request
         hips = st.hips
