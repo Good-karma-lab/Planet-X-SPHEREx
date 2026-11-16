@@ -31,6 +31,7 @@ from service.context import CatalogueContext
 from service.coverage import coverage_payload, index_key
 from service.findings import Findings
 from service.fpx_known import FpxIdentifier
+from service.grid import GridDB, import_searched
 from service.jobs.scheduler import Priority, Scheduler
 from service.known import Known
 from service.lightcurves import neowise as lc_neowise
@@ -51,6 +52,7 @@ from service.routes_dwarfs import make_dwarfs_router
 from service.routes_export import make_export_router
 from service.routes_extras import register as register_extras
 from service.routes_findings import make_findings_router
+from service.routes_grid import make_grid_router
 from service.routes_known import make_known_router
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
@@ -58,6 +60,7 @@ from service.routes_search import make_router
 from service.routes_searched import make_searched_router
 from service.searched import Searched
 from service.spectrum import Spectra, place_at, spectrum_params
+from service.storage import product_db_path
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
 from service.workers import fieldjob, filmjob, filmsearchjob
@@ -106,6 +109,8 @@ class State:
         self.findings: Findings | None = None
         self.fpx_known: FpxIdentifier | None = None
         self.loopwatch: LoopWatch | None = None
+        self.grid: GridDB | None = None
+        self.grid_import: asyncio.Task[None] | None = None
 
 
 class _NoAnomalies:
@@ -119,9 +124,27 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     cfg = config or load()
     st = State(cfg)
 
+    async def grid_import_loop() -> None:
+        """Marks the grid squares of the searched places: the list kept in data/searched_seed.json (the places searched before the
+        grid existed) once, then the service's own list of searched places every ten minutes."""
+        seed = Path(__file__).resolve().parent.parent / "data" / "searched_seed.json"
+        with contextlib.suppress(Exception):
+            if st.grid is not None and seed.is_file():
+                await asyncio.to_thread(import_searched, st.grid, json.loads(seed.read_text()).get("fields", []))
+        while True:
+            await asyncio.sleep(30)
+            with contextlib.suppress(Exception):
+                if st.searched is not None and st.grid is not None:
+                    body = await st.searched.get()
+                    await asyncio.to_thread(import_searched, st.grid, body.get("fields", []))
+            await asyncio.sleep(570)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         st.store = Store(cfg.store_dir)
+        st.grid = GridDB(product_db_path(cfg.store_dir))
+        if not STANDBY:  # the places searched before the grid existed, once (and the service's own searches, every ten minutes)
+            st.grid_import = asyncio.get_running_loop().create_task(grid_import_loop())
         st.hips = HipsTiles(cfg.store_dir / "hips")
         st.store.purge_stale()
         index_path = cfg.store_dir / "index" / "exposures.sqlite"
@@ -206,6 +229,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         yield
         if warm_task is not None:
             warm_task.cancel()
+        if st.grid_import is not None:
+            st.grid_import.cancel()
         if st.findings is not None:
             await st.findings.stop()
         if st.fpx_known is not None:
@@ -471,6 +496,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_brightness_router(st))
     app.include_router(make_export_router(st))
     app.include_router(make_planetx_router(st))
+    app.include_router(make_grid_router(st))  # the sky grid and its coverage (product flow)
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
     register_extras(app)
 
