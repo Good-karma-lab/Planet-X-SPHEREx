@@ -335,7 +335,9 @@ class KnownField:
                         break
                 r.raise_for_status()
                 body = r.json()
-                if "fields_second" not in body and "n_second_pass" not in body:
+                # a frame without bodies is an answer too: JPL says "no matching records" and gives no table
+                empty = "signature" in body and "no matching records" in str(body.get("warning", ""))
+                if "fields_second" not in body and "n_second_pass" not in body and not empty:
                     raise ValueError(str(body)[:160])
             except Exception:
                 br.failure()
