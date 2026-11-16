@@ -9,6 +9,7 @@ import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
 import { Cabinet } from './screens/cabinet/Cabinet';
 import { useUnread } from './lib/account';
+import { MoreTab } from './ui/BottomNav';
 
 const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
   { screen: 'globe', name: 'Globe', icon: 'globe', tip: 'The sky: globe and catalogue' },
@@ -85,6 +86,7 @@ export function App() {
               )}
             </a>
           ))}
+          <MoreTab screen={route.screen} />
         </div>
       </nav>
       <main data-screen={route.screen}>
