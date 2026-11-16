@@ -66,6 +66,9 @@ def test_db_and_routes(tmp_path: Path) -> None:
     assert meta["scheme"] == grid.SCHEME and meta["counts"]["searched"] == 1 and meta["counts"]["with_finds"] == 1
     cov = c.get("/api/grid/coverage").json()["cells"]
     assert cov == [{"id": cid, "state": "searched", "finds": 2, "viewers": 0}]
+    withc = c.get("/api/grid/coverage", params={"corners": 1}).json()["cells"]
+    assert withc[0]["corners"] == grid.by_id(cid).corners()
+    assert meta["scheme_params"]["n_bands"] == 540
     cells = c.get("/api/grid/cells", params={"ra": 50, "dec": 8, "radius": 0.5}).json()["cells"]
     assert cells[0]["id"] == cid and cells[0]["state"] == "searched" and len(cells[0]["corners"]) == 4
     one = c.get(f"/api/grid/cell/{cid}").json()
