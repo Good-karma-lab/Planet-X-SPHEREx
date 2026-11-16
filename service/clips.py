@@ -787,6 +787,9 @@ class Clips:
         """The `clip` field of a finding in the API: where the clip is and whether it is ready."""
         fid = str(find["id"])
         st = self.state(fid)
+        if st == "waiting" and find.get("kind") == "film" and self.visits_for(find) is None:
+            st = "none"  # known without asking: the page shows the reason and does not request the clip
+            self.failed.setdefault(fid, "the visits of its pass are not kept here; open it in the lab")
         out: dict[str, Any] = {"url": f"/api/findings/{fid}/clip.webp?v={VERSION}", "state": st, "version": VERSION}
         if st == "ready" and detail:
             i = self.info(fid) or {}
