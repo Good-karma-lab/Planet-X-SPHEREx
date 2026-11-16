@@ -1,0 +1,11 @@
+{
+  "about": "Machine notes on findings: what the review of the rendered time-lapse clips saw (16 Nov 2026, clip version c2). A note sets no status; it only groups the finds a person should judge as possible artefacts.",
+  "notes": {
+    "browndwarf:b5e2f0136331": "The ring holds a blend of two sources that stands still while the ring moves 8.84″/yr.",
+    "browndwarf:fdc9b8040289": "A blue source is in the ring, but its motion is not visible between the passes.",
+    "film:fb441f0f3e75": "The ring is empty in the frames of the visits.",
+    "film:407a82b8568a": "Crowded field: a star is in the ring in every frame, the body cannot be told from it.",
+    "film:fbe0e3924d52": "Crowded field: a star is in the ring in every frame, the body cannot be told from it.",
+    "film:2e26f8ee6415": "Crowded field: a star is in the ring in every frame, the body cannot be told from it."
+  }
+}

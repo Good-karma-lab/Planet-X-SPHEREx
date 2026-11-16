@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { nextTask, taskHash } from '../../lib/account';
 import { formatHash } from '../../lib/route';
 import { cleanName } from './finds';
 
@@ -21,6 +22,8 @@ export interface CardFind {
   credit: { found_by: string; machine: boolean; first_marked_by: string | null; checked_by: string[]; looks: Record<string, number> };
   clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string; still?: string } | null;
   name: string | null;
+  /** what the review of the clips saw, when it looks like an artefact (a note, not a status) */
+  note?: string | null;
   field: { ra: number; dec: number; fov: number } | null;
   group: string | null;
   passes: number | null;
@@ -83,14 +86,8 @@ export function checkHref(f: CardFind): string {
 export async function takeTask(f: CardFind): Promise<void> {
   let href = checkHref(f);
   try {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 2000);
-    const r = await fetch(`/api/tasks/next?kind=finding&finding_id=${encodeURIComponent(f.id)}`, { signal: ctl.signal, credentials: 'same-origin' });
-    clearTimeout(t);
-    if (r.ok) {
-      const b = (await r.json()) as { task?: { id?: string } | null };
-      if (b.task?.id) href += `&task_id=${encodeURIComponent(b.task.id)}`;
-    }
+    const t = await Promise.race([nextTask('finding', f.id), new Promise<null>((res) => setTimeout(() => res(null), 2500))]);
+    if (t) href = taskHash(t); // the lab's own address of the task (a guest gets one too; it is kept for a signed-in user)
   } catch {
     // no accounts here: the find alone
   }
@@ -231,7 +228,7 @@ export function Clip({ f }: { f: CardFind }) {
   );
 }
 
-export function FindCard({ f, onOpen, current }: { f: CardFind; onOpen: (id: string) => void; current: boolean }) {
+export function FindCard({ f, onOpen, current, mine = false }: { f: CardFind; onOpen: (id: string) => void; current: boolean; mine?: boolean }) {
   const looks = f.viewers;
   const by = f.credit.first_marked_by ? `Marked first by ${f.credit.first_marked_by}` : `Found by ${f.credit.found_by.replace(/^SPHEREx Space, /, '')}`;
   const checked = f.credit.checked_by.length ? ` · checked by ${f.credit.checked_by.slice(0, 2).join(', ')}${f.credit.checked_by.length > 2 ? ` +${f.credit.checked_by.length - 2}` : ''}` : '';
@@ -261,7 +258,13 @@ export function FindCard({ f, onOpen, current }: { f: CardFind; onOpen: (id: str
             </svg>
             {looks ? `${looks} ${looks === 1 ? 'look' : 'looks'}` : f.stage === 'new' ? 'waiting for a look' : 'no looks yet'}
           </span>
+          {mine && <span class="fcard-mine">viewed by me</span>}
         </span>
+        {f.note && (
+          <span class="fcard-note" title="A machine note from the review of the clips. It sets no status: judge it in the lab.">
+            Machine note: {f.note}
+          </span>
+        )}
         <span class="mono-s fcard-credit" title={`${f.credit.found_by}${checked}`}>
           {by}
           {checked}
