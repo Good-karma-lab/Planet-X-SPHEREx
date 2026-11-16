@@ -3,12 +3,13 @@
 
 import { useEffect, useRef, useState } from 'preact/hooks';
 
-/** The clip of a place (ra, dec), once the findings stream serves one; null until then (the frame stays empty). */
-export const PLACE_CLIP: string | null = null;
+/** The clip of a place (ra, dec) from the findings stream: 3′ around the place, one frame per pass, made only from a finished field
+ *  (404 when none holds the place: the frame then stays empty). */
+export const PLACE_CLIP: string | null = '/api/clips/place.webp';
 
 export function clipUrl(p: { findingId?: string | null; ra?: number | null; dec?: number | null }): string | null {
   if (p.findingId && !p.findingId.startsWith('user:')) return `/api/findings/${encodeURIComponent(p.findingId)}/clip.webp`;
-  if (PLACE_CLIP && p.ra != null && p.dec != null) return `${PLACE_CLIP}?ra=${p.ra.toFixed(4)}&dec=${p.dec.toFixed(4)}`;
+  if (PLACE_CLIP && p.ra != null && p.dec != null) return `${PLACE_CLIP}?ra=${p.ra.toFixed(4)}&dec=${p.dec.toFixed(4)}&size=96`;
   return null;
 }
 
