@@ -320,12 +320,20 @@ class GridDB:
         out = []
         for cid in sorted(set(rows) | set(views)):
             r = rows.get(cid, {"state": "new", "finds": 0})
-            item: dict[str, Any] = {"id": cid, "state": r["state"], "finds": int(r["finds"]), "viewers": views.get(cid, 0)}
+            try:
+                ce = by_id(cid)
+            except ValueError:
+                continue
+            item: dict[str, Any] = {
+                "id": cid,
+                "ra": round(ce.ra, 6),
+                "dec": round(ce.dec, 6),
+                "state": r["state"],
+                "finds": int(r["finds"]),
+                "viewers": views.get(cid, 0),
+            }
             if corners:
-                try:
-                    item["corners"] = by_id(cid).corners()
-                except ValueError:
-                    continue
+                item["corners"] = ce.corners()
             out.append(item)
         return out
 

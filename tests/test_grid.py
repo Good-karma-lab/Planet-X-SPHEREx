@@ -65,7 +65,10 @@ def test_db_and_routes(tmp_path: Path) -> None:
     meta = c.get("/api/grid/meta").json()
     assert meta["scheme"] == grid.SCHEME and meta["counts"]["searched"] == 1 and meta["counts"]["with_finds"] == 1
     cov = c.get("/api/grid/coverage").json()["cells"]
-    assert cov == [{"id": cid, "state": "searched", "finds": 2, "viewers": 0}]
+    assert [{k: v for k, v in x.items() if k not in ("ra", "dec")} for x in cov] == [
+        {"id": cid, "state": "searched", "finds": 2, "viewers": 0}
+    ]
+    assert abs(cov[0]["dec"] - grid.by_id(cid).dec) < 1e-6
     withc = c.get("/api/grid/coverage", params={"corners": 1}).json()["cells"]
     assert withc[0]["corners"] == grid.by_id(cid).corners()
     assert meta["scheme_params"]["n_bands"] == 540
