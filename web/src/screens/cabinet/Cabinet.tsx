@@ -2,7 +2,9 @@
 // panel for a guest. Everything shown is read from the account API (lib/account.ts).
 
 import { useCallback, useEffect, useState } from 'preact/hooks';
-import { api, nextTask, renameUser, signInByEmail, signOut, taskHash, useUser, googleSignInUrl, type AccountMark, type Task, type User } from '../../lib/account';
+import { api, loadUser, nextTask, refreshUnread, renameUser, signInByEmail, signOut, taskHash, useUser, googleSignInUrl, type AccountMark, type Task, type User } from '../../lib/account';
+import { InvestigationPage } from './Investigation';
+import { Pic } from './pic';
 import type { Route } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
 import './cabinet.css';
@@ -12,7 +14,7 @@ interface Check {
   state: string;
   detail?: string;
 }
-interface Investigation {
+export interface Investigation {
   id: string;
   title: string;
   finding_id: string | null;
@@ -24,7 +26,7 @@ interface Investigation {
   checks: { state: string; checks: Check[] | null; can_submit: boolean } | null;
   updated: string;
 }
-interface MyFinding {
+export interface MyFinding {
   finding_id: string;
   role: string;
   result: string | null;
@@ -58,7 +60,7 @@ interface Mine {
   notifications: Notice[];
 }
 
-const TABS = ['squares', 'marks', 'findings', 'investigations', 'tasks', 'history', 'notifications'] as const;
+const TABS = ['squares', 'marks', 'findings', 'investigations', 'tasks', 'history', 'notifications', 'account'] as const;
 type Tab = (typeof TABS)[number];
 const TAB_NAME: Record<Tab, string> = {
   squares: 'My squares',
@@ -68,6 +70,7 @@ const TAB_NAME: Record<Tab, string> = {
   tasks: 'Tasks',
   history: 'View history',
   notifications: 'Notifications',
+  account: 'Account',
 };
 const RESULT: Record<string, string> = { nothing: 'Nothing here', marks: 'Done, with marks', moves: 'It moves', artefact: 'Artefact', known: 'Known object' };
 const ROLE: Record<string, string> = { submitted: 'Submitted by me', checked: 'Checked by me', marked: 'Marked by me' };
@@ -84,7 +87,17 @@ export function markHash(m: Pick<AccountMark, 'field_key' | 'ra' | 'dec'>): stri
 }
 
 /** Everything of the user, read again whenever the cabinet or one of its tabs is opened. */
-function useMine(user: User | null, tab: string): { mine: Mine | null; error: string; reload: () => void } {
+/** What a history row shows a picture of: the lab's place or the finding. */
+function placeOf(ref: string): { findingId?: string; ra?: number; dec?: number } {
+  const [name = '', query = ''] = ref.replace(/^#\/?/, '').split('?');
+  const p = new URLSearchParams(query);
+  if (name === 'findings' && p.get('lead')) return { findingId: p.get('lead')! };
+  const ra = Number(p.get('ra') ?? NaN);
+  const dec = Number(p.get('dec') ?? NaN);
+  return Number.isFinite(ra) && Number.isFinite(dec) ? { ra, dec } : {};
+}
+
+function useMine(user: User | null, tab: string, inv: string): { mine: Mine | null; error: string; reload: () => void } {
   const [mine, setMine] = useState<Mine | null>(null);
   const [error, setError] = useState('');
   const [n, setN] = useState(0);
@@ -99,11 +112,12 @@ function useMine(user: User | null, tab: string): { mine: Mine | null; error: st
       ([marks, tasks, findings, investigations, history, notifications]) => {
         setMine({ marks, tasks, findings, investigations, history, notifications });
         setError('');
+        refreshUnread(notifications.filter((x) => !x.read).length);
       },
       (e: Error) => !stop.signal.aborted && setError(`Not loaded: ${e.message}`),
     );
     return () => stop.abort();
-  }, [user?.id, n, tab]);
+  }, [user?.id, n, tab, inv]);
   return { mine, error, reload: useCallback(() => setN((x) => x + 1), []) };
 }
 
@@ -185,7 +199,8 @@ function SquaresMap({ tasks }: { tasks: Task[] }) {
 
 function TaskRow({ t }: { t: Task }) {
   return (
-    <a class="cb-row" href={taskHash(t)} data-testid="task-row">
+    <a class="cb-row haspic" href={taskHash(t)} data-testid="task-row">
+      <Pic findingId={t.finding_id} ra={t.ra} dec={t.dec} label={t.kind === 'cell' ? `square ${t.cell_id}` : `finding ${t.finding_id}`} />
       <span class="cb-main">
         <b>{t.kind === 'cell' ? `Square ${t.cell_id}` : `Finding ${t.finding_id}`}</b>
         <span class="mono-s">
@@ -198,95 +213,6 @@ function TaskRow({ t }: { t: Task }) {
         {t.mark_ids.length > 0 && <span class="mono-s">{t.mark_ids.length} marks</span>}
       </span>
     </a>
-  );
-}
-
-function InvestigationItem({ inv, reload }: { inv: Investigation; reload: () => void }) {
-  const [note, setNote] = useState('');
-  const [status, setStatus] = useState('');
-  const run = (job: Promise<unknown>) => job.then(reload, (e: Error) => setStatus(e.message));
-  const add = (e: Event) => {
-    e.preventDefault();
-    if (!note.trim()) return;
-    void run(api(`/api/me/investigations/${inv.id}/notes`, { method: 'POST', body: { text: note.trim() } }).then(() => setNote('')));
-  };
-  const checks = inv.checks;
-  return (
-    <details class="cb-inv" data-testid="investigation">
-      <summary>
-        <span class="cb-row">
-          <span class="cb-main">
-            <b>{inv.title}</b>
-            <span class="mono-s">
-              {inv.notes.length} notes · {inv.frames.length} saved frames · {inv.mark_ids.length} marks · changed {when(inv.updated)}
-            </span>
-          </span>
-          <span class="cb-side">
-            {inv.submitted ? (
-              <span class="badge st-submitted">submitted</span>
-            ) : checks ? (
-              <span class={`badge ${checks.can_submit ? 'st-pass' : checks.state === 'done' ? 'st-fail' : 'st-open'}`}>{checks.can_submit ? 'ready to submit' : checks.state === 'done' ? 'checks block submit' : 'checks running'}</span>
-            ) : (
-              <span class="badge">{inv.checks_job ? 'checks not answering' : 'not checked'}</span>
-            )}
-          </span>
-        </span>
-      </summary>
-      <div class="cb-inv-body">
-        {checks?.checks && checks.checks.length > 0 && (
-          <>
-            <h4>Checks</h4>
-            <div class="cb-checks">
-              {checks.checks.map((c) => (
-                <span key={c.id} class={`badge st-${c.state}`} title={c.detail ?? ''}>
-                  {words(c.id)}: {words(c.state)}
-                </span>
-              ))}
-            </div>
-          </>
-        )}
-        <h4>Notes</h4>
-        {inv.notes.length === 0 && <span class="mono-s">No notes yet</span>}
-        {inv.notes.map((n, i) => (
-          <div key={i} class="cb-note">
-            {n.text} <span class="mono-s">{when(n.at)}</span>
-          </div>
-        ))}
-        <form class="cb-addnote" onSubmit={add}>
-          <input class="inp" placeholder="Add a note" aria-label="Add a note" maxLength={4000} value={note} onInput={(e) => setNote((e.target as HTMLInputElement).value)} />
-          <button class="btn sm" type="submit">
-            Add
-          </button>
-        </form>
-        {inv.frames.length > 0 && (
-          <>
-            <h4>Saved frames</h4>
-            <div class="cb-frames">
-              {inv.frames.map((f, i) => (
-                <a key={i} href={f.ref} title="Open this place">
-                  {f.thumb ? <img src={f.thumb} alt={f.title || 'Saved frame'} /> : <span class="cb-noimg" />}
-                  <span>{f.title || 'Frame'}</span>
-                  {f.note && <span class="mono-s">{f.note}</span>}
-                </a>
-              ))}
-            </div>
-          </>
-        )}
-        <div class="cb-side" style={{ justifyContent: 'flex-start' }}>
-          {inv.finding_id && (
-            <a class="btn sm" href={`#/findings?lead=${encodeURIComponent(inv.finding_id)}`}>
-              Open the finding
-            </a>
-          )}
-          {!inv.submitted && (
-            <button class="btn sm" onClick={() => confirm(`Delete the investigation “${inv.title}”?`) && void run(api(`/api/me/investigations/${inv.id}`, { method: 'DELETE' }))}>
-              Delete
-            </button>
-          )}
-          <span class="cb-status bad">{status}</span>
-        </div>
-      </div>
-    </details>
   );
 }
 
@@ -331,7 +257,9 @@ export function Cabinet({ route }: { route: Route }) {
   const { user, ready, auth } = useUser();
   const [status, setStatus] = useState('');
   const tab: Tab = (TABS as readonly string[]).includes(route.params['tab'] ?? '') ? (route.params['tab'] as Tab) : 'squares';
-  const { mine, error, reload } = useMine(user, tab);
+  const invId = route.params['inv'] ?? '';
+  const { mine, error, reload } = useMine(user, tab, invId);
+  const opened = tab === 'investigations' && invId ? (mine?.investigations.find((i) => i.id === invId) ?? null) : null;
   const go = (t: Tab) => (location.hash = t === 'squares' ? '#/me' : `#/me?tab=${t}`);
   const run = (job: Promise<unknown>) => job.then(reload, (e: Error) => setStatus(e.message));
   const take = (kind: 'cell' | 'finding') =>
@@ -349,6 +277,7 @@ export function Cabinet({ route }: { route: Route }) {
     tasks: mine?.tasks.filter((t) => t.state === 'open').length ?? 0,
     history: mine?.history.length ?? 0,
     notifications: unread,
+    account: 0,
   };
   return (
     <div class="screen">
@@ -370,7 +299,7 @@ export function Cabinet({ route }: { route: Route }) {
               {TABS.map((t) => (
                 <button key={t} role="tab" aria-selected={tab === t} class={tab === t ? 'on' : ''} onClick={() => go(t)} data-testid={`tab-${t}`}>
                   {TAB_NAME[t]}
-                  <span>{count[t]}</span>
+                  {t !== 'account' && <span>{count[t]}</span>}
                 </button>
               ))}
               <span class={`cb-status ${error || status ? 'bad' : ''}`} role="status" data-testid="cabinet-status">
@@ -409,7 +338,8 @@ export function Cabinet({ route }: { route: Route }) {
                     {mine.marks.length === 0 && <Empty text="No marks yet" />}
                     <div class="cb-list">
                       {mine.marks.map((m) => (
-                        <div key={m.id} class="cb-row" data-testid="mark-row">
+                        <div key={m.id} class="cb-row haspic" data-testid="mark-row">
+                          <Pic ra={m.ra} dec={m.dec} label={m.label || 'mark'} />
                           <span class="cb-main">
                             <b>{m.label || 'Mark'}</b>
                             <span class="mono-s">
@@ -446,7 +376,8 @@ export function Cabinet({ route }: { route: Route }) {
                     {mine.findings.length === 0 && <Empty text="No findings yet" />}
                     <div class="cb-list">
                       {mine.findings.map((f) => (
-                        <a key={`${f.finding_id}${f.role}`} class="cb-row" href={`#/findings?lead=${encodeURIComponent(f.finding_id)}`} data-testid="finding-row">
+                        <a key={`${f.finding_id}${f.role}`} class="cb-row haspic" href={`#/findings?lead=${encodeURIComponent(f.finding_id)}`} data-testid="finding-row">
+                          <Pic findingId={f.finding_id} ra={f.ra} dec={f.dec} label={f.title || `finding ${f.finding_id}`} />
                           <span class="cb-main">
                             <b>{f.title || `Finding ${f.finding_id}`}</b>
                             <span class="mono-s">
@@ -462,15 +393,42 @@ export function Cabinet({ route }: { route: Route }) {
                     </div>
                   </>
                 )}
-                {tab === 'investigations' && (
-                  <>
-                    <h3>Investigations</h3>
-                    {mine.investigations.length === 0 && <Empty text="No investigations yet" />}
-                    {mine.investigations.map((inv) => (
-                      <InvestigationItem key={inv.id} inv={inv} reload={reload} />
-                    ))}
-                  </>
-                )}
+                {tab === 'investigations' &&
+                  (opened ? (
+                    <InvestigationPage inv={opened} marks={mine.marks} finding={mine.findings.find((f) => f.finding_id === opened.submitted) ?? null} reload={reload} />
+                  ) : (
+                    <>
+                      <h3>Investigations</h3>
+                      {invId && <Empty text="No such investigation" />}
+                      {mine.investigations.length === 0 && <Empty text="No investigations yet" />}
+                      <div class="cb-list">
+                        {mine.investigations.map((inv) => {
+                          const first = mine.marks.find((m) => inv.mark_ids.includes(m.id));
+                          const c = inv.checks;
+                          return (
+                            <a key={inv.id} class="cb-row haspic" href={`#/me?tab=investigations&inv=${inv.id}`} data-testid="investigation">
+                              <Pic findingId={inv.finding_id} ra={first?.ra} dec={first?.dec} label={inv.title} />
+                              <span class="cb-main">
+                                <b>{inv.title}</b>
+                                <span class="mono-s">
+                                  {inv.notes.length} notes · {inv.frames.length} saved frames · {inv.mark_ids.length} marks · changed {when(inv.updated)}
+                                </span>
+                              </span>
+                              <span class="cb-side">
+                                {inv.submitted ? (
+                                  <span class="badge st-submitted">submitted</span>
+                                ) : c ? (
+                                  <span class={`badge ${c.can_submit ? 'st-pass' : c.state === 'done' ? 'st-fail' : 'st-open'}`}>{c.can_submit ? 'ready to submit' : c.state === 'done' ? 'checks block submit' : 'checks running'}</span>
+                                ) : (
+                                  <span class="badge">{inv.checks_job ? 'checks not answering' : 'not checked'}</span>
+                                )}
+                              </span>
+                            </a>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ))}
                 {tab === 'tasks' && (
                   <>
                     <h3>
@@ -507,7 +465,8 @@ export function Cabinet({ route }: { route: Route }) {
                     {mine.history.length === 0 && <Empty text="Nothing opened yet" />}
                     <div class="cb-list">
                       {mine.history.map((h) => (
-                        <a key={h.id} class="cb-row" href={h.ref} data-testid="history-row">
+                        <a key={h.id} class="cb-row haspic" href={h.ref} data-testid="history-row">
+                          <Pic {...placeOf(h.ref)} label={h.title || 'this place'} />
                           <span class="cb-main">
                             <b>{h.title || h.ref}</b>
                             <span class="mono-s">{when(h.at)}</span>
@@ -517,6 +476,35 @@ export function Cabinet({ route }: { route: Route }) {
                           </span>
                         </a>
                       ))}
+                    </div>
+                  </>
+                )}
+                {tab === 'account' && (
+                  <>
+                    <h3>Account</h3>
+                    <div class="cb-account">
+                      <div class="cb-line">
+                        <b>{user.name}</b>
+                        <span class="mono-s">{user.email}</span>
+                      </div>
+                      <div class="cb-line">
+                        <a class="btn sm" href="/api/me/export" download="spherex-space-my-data.json" data-testid="download-data">
+                          Download my data
+                        </a>
+                        <span class="mono-s">JSON: marks, squares, tasks, investigations, findings, history, notifications</span>
+                      </div>
+                      <div class="cb-line">
+                        <button
+                          class="btn sm danger"
+                          data-testid="delete-account"
+                          onClick={() =>
+                            confirm('Delete your account and all your data? Marks, squares, investigations, history and notifications are removed and cannot be restored. Findings you submitted stay, without your name.') &&
+                            void api('/api/me', { method: 'DELETE' }).then(() => loadUser(), (e: Error) => setStatus(e.message))
+                          }
+                        >
+                          Delete my account and my data
+                        </button>
+                      </div>
                     </div>
                   </>
                 )}
@@ -535,7 +523,7 @@ export function Cabinet({ route }: { route: Route }) {
                     {mine.notifications.length === 0 && <Empty text="No notifications" />}
                     <div class="cb-list">
                       {mine.notifications.map((n) => (
-                        <a key={n.id} class={`cb-row cb-wrap ${n.read ? '' : 'unread'}`} href={n.ref ? `#/findings?lead=${encodeURIComponent(n.ref)}` : '#/me?tab=notifications'} data-testid="notice-row">
+                        <a key={n.id} class={`cb-row cb-wrap ${n.read ? '' : 'unread'}`} href={!n.ref ? '#/me?tab=notifications' : n.ref.startsWith('#/') ? n.ref : `#/findings?lead=${encodeURIComponent(n.ref)}`} data-testid="notice-row">
                           <span class="cb-main">
                             <b>{n.text}</b>
                             <span class="mono-s">{when(n.created)}</span>
