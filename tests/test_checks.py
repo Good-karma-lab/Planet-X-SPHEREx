@@ -155,7 +155,8 @@ def make(tmp_path: Path, known: Any, irsa: str = "ra,dec,mjd\n", result: dict[st
         {"key": "e" * 24, "complete": True, "params": {"ra": 269.4485, "dec": 4.74, "fov": 60.0}},
     ]
     store = SimpleNamespace(
-        read_meta=lambda kind, key: {"passes": PASSES, "grid": GRID} if key in ("f1", "f" * 24) else None, listing=lambda kinds: listing
+        read_meta=lambda kind, key: {"passes": PASSES, "grid": GRID} if key in ("f1", "f" * 24) else None,
+        listing=lambda kinds: listing if kinds == ("field",) else [],
     )
     # every pass has one visit of a day, in the exposure index
     index = SimpleNamespace(containing=lambda ra, dec, t0, t1: [SimpleNamespace(mjd0=t0 + 0.5, mjd1=t0 + 1.5)])
@@ -262,6 +263,56 @@ async def test_the_labs_field_key_is_resolved_to_the_stored_field(tmp_path: Path
         assert view["field"] == "f" * 24 and states(view)["gaia"] == "fail"  # dated by the stored field's passes
     view = await finished(c.start({"field_key": "10.0,5.0,20", "ra": 10.0, "dec": 5.0, "marks": marks}))
     assert view["field"] == "" and states(view)["gaia"] == "no_answer"
+
+
+def fast_marks(n: int = 4, bend: float = 0.0) -> list[dict[str, Any]]:
+    """Marks of a body moving 30″/h north in one pass, one visit every 1.5 h (optionally bending east with time squared)."""
+    out = []
+    for k in range(n):
+        h = 1.5 * k
+        out.append({"pass": 1, "ra": 269.40 + bend * h * h / 3600.0, "dec": 4.70 + 30.0 * h / 3600.0, "mjd": 61119.0 + h / 24.0})
+    return out
+
+
+def test_fast_mover_rules() -> None:
+    assert ck.kind_of(fast_marks()) == "fast" and ck.kind_of(moving_marks()) == "slow"
+    assert ck.kind_of([{k: v for k, v in m.items() if k != "mjd"} for m in fast_marks()]) == "slow"  # undated marks of one pass
+    assert ck.check_fast_visits(fast_marks())[0] == "pass" and ck.check_fast_visits(fast_marks(2))[0] == "fail"
+    state, detail = ck.check_fast_line(fast_marks())
+    assert state == "pass" and "30.0″/h toward 0°" in detail
+    assert ck.check_fast_line(fast_marks(4, bend=3.0))[0] == "fail"  # four visits off a line: not enough to call it a curve
+    assert ck.check_fast_line(fast_marks(6, bend=3.0))[0] == "warn"  # six visits on a smooth curve
+    wild = fast_marks(6)
+    wild[2] = {**wild[2], "ra": wild[2]["ra"] + 40.0 / 3600.0}
+    assert ck.check_fast_line(wild)[0] == "fail"
+    # the time-lapse track search: a track at the marks, with its significance
+    marks = fast_marks()
+    grid = {"ra0": 269.40, "dec0": 4.72, "step_arcsec": 3.075, "n": 200}
+    g = ck.Grid(grid["ra0"], grid["dec0"], grid["step_arcsec"], grid["n"])
+    pts = []
+    for k, m in enumerate(marks):
+        x, y = g.sky_to_grid([m["ra"]], [m["dec"]])
+        pts.append({"f": k, "x": float(x[0]), "y": float(y[0]), "z": 6.0})
+    search = {"grid": grid, "frames": [{"mjd": m["mjd"]} for m in marks], "tracks": [{"pts": pts, "z_together": 9.3, "verified": True}]}
+    state, detail = ck.check_fast_bar(marks, [search])
+    assert state == "pass" and "4 of 4 marks: 9.3σ together (verified" in detail
+    assert ck.check_fast_bar(marks, [{**search, "tracks": []}])[0] == "warn"
+    assert ck.check_fast_bar(marks, [])[0] == "no_answer"
+
+
+@sync
+async def test_fast_mover_job(tmp_path: Path) -> None:
+    marks = fast_marks()
+    known = FakeKnown({"state": "ok", "rows": [FAINT]}, {"state": "ok", "rows": []}, [])
+    view = await finished(make(tmp_path, known).start({"field_key": "", "ra": 269.4, "dec": 4.7, "marks": marks}))
+    got = states(view)
+    assert view["kind"] == "fast" and got["two_passes"] == "pass" and got["straight_line"] == "pass" and got["jpl"] == "pass"
+    assert got["neowise"] == "pass" and "Not applicable" in next(x["detail"] for x in view["checks"] if x["id"] == "neowise")
+    # the same marks on a known body: JPL decides
+    body = ["9952 (1991 AK)", marks[0]["ra"], marks[0]["dec"], 18.1, 0.0, 30.0]
+    known = FakeKnown({"state": "ok", "rows": [FAINT]}, {"state": "ok", "rows": []}, [body])
+    view = await finished(make(tmp_path / "b", known).start({"field_key": "", "ra": 269.4, "dec": 4.7, "marks": marks}))
+    assert states(view)["jpl"] == "fail" and view["can_submit"] is False
 
 
 def test_routes(tmp_path: Path) -> None:
