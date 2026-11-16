@@ -596,10 +596,11 @@ def render_track(find: dict[str, Any], store: Store, key: str, meta: dict[str, A
     motion_txt = motion_of(find)
     frames = []
     for pic, title, sn_here in zip(pics, ("added along the motion", "added without motion"), sns, strict=True):
-        im = draw_frame(pic, (c, c), ring_px, "", "", size, motion_txt if title.endswith("the motion") else None, False)
+        arrow = (motion_txt[0], motion_txt[1]) if motion_txt is not None and title.endswith("the motion") else None
+        im = draw_frame(pic, (c, c), ring_px, "", "", size, arrow, False)
         d = ImageDraw.Draw(im)
-        _text(d, (8, 20), title, 14, "ls")
-        _text(d, (size - 8, 20), f"S/N {sn_here:.1f} in the ring", 13, "rs")
+        _text(d, (8, size - 42), title, 14, "ls")  # the top corners of a card carry its badges: the text stays at the bottom
+        _text(d, (8, size - 25), f"S/N {sn_here:.1f} in the ring", 13, "ls")
         _text(d, (8, size - 8), dates, 12, "ls")
         _text(d, (size - 8, size - 8), f"{TRACK_WINDOW_ARCMIN:g} arcmin", 12, "rs")
         frames.append(im)
