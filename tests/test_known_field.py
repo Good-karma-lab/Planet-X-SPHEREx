@@ -178,6 +178,18 @@ async def test_kept_on_disk_and_slow_jpl_is_pending(tmp_path: Path) -> None:
     await k2.client.aclose()
 
 
+@sync
+async def test_a_frame_without_bodies_is_an_answer(tmp_path: Path) -> None:
+    empty = {"signature": {"source": "NASA/JPL Small-Body Identification API"}, "warning": "no matching records"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=empty if "sb_ident" in str(request.url) else {"error": "something else"})
+
+    k = kf.KnownField(tmp_path, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    assert await k.jpl_at(10.0, 5.0, 4.0, 61026.5, None) == {"state": "ok", "via": "JPL Small-Body Identification, geocentric", "rows": []}
+    await k.client.aclose()
+
+
 def test_route(tmp_path: Path) -> None:
     st = SimpleNamespace(cfg=SimpleNamespace(store_dir=tmp_path), known_field=make(tmp_path))
     app = FastAPI()
