@@ -46,6 +46,9 @@ FETCH_THREADS, RETRY_THREADS = 6, 2  # requests to IRSA at a time: first round, 
 RULED_OUT_SIGMA = 5.0  # a body of the candidate's flux must stand at least this high in the archive for its absence to count
 RULED_OUT_BELOW = 3.0  # and the measured flux must be this many errors below the candidate's flux
 SEEN_SIGMA = 3.0
+# the scan of the orbit's uncertainty (`orbit.scan`): 7 distances x 5 radial speeds x 57 x 57 own motions = 113 715 orbits
+SCAN_D_HALF_AU, SCAN_N_D, SCAN_MU_HALF, SCAN_WORKERS = 14.0, 7, 0.02, 6
+SCAN_VR = np.linspace(-2.0, 2.0, 5)  # km/s
 
 
 def strip_centre(o: dict[str, Any]) -> tuple[float, float, Any, Any]:
@@ -244,4 +247,33 @@ def orbit_check(o: dict[str, Any], cache: Path, progress: Callable[[str], None] 
         res["would_be_sigma"] = round(flux / err, 1)
         res["ruled_out"] = bool(flux / err > RULED_OUT_SIGMA and meas < flux - RULED_OUT_BELOW * err)
     res["seen"] = bool(meas > SEEN_SIGMA * err)
+    if o.get("scan"):
+        # the orbit's uncertainty: distance, radial speed and own motion around the nominal orbit, each orbit also shifted on the
+        # sky (a box of 61 x 121 grid points): what the shifted places reach is what noise alone gives
+        say("scanning the orbits around the nominal one")
+        r = earc.run_scan(
+            dv,
+            g,
+            tw,
+            (0.0, 0.0),
+            float(o["d_au"]),
+            tuple(o["mu"]),
+            d_half=SCAN_D_HALF_AU,
+            n_d=SCAN_N_D,
+            mu_half=SCAN_MU_HALF,
+            vr=SCAN_VR,
+            workers=SCAN_WORKERS,
+            progress=lambda i, n: say(f"scanning the orbits around the nominal one: {i} of {n} parts"),
+        )
+        blocks = r["blocks"]
+        res["scan"] = {
+            "orbits": int(r["n_orbits"]),
+            "sn_at_place": round(float(r["centre"][0]), 2),
+            "hypothesis": [round(float(x), 4) for x in r["centre"][1]],  # distance (au), radial speed (km/s), own motion u, v (″/day)
+            "noise_median": round(float(np.median(blocks)), 2) if len(blocks) else None,
+            "noise_p97": round(float(np.percentile(blocks, 97.5)), 2) if len(blocks) else None,
+            "noise_max": round(float(blocks.max()), 2) if len(blocks) else None,
+            "places": len(blocks),
+            "places_not_below": int((blocks >= r["centre"][0]).sum()),
+        }
     return res

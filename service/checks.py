@@ -316,6 +316,12 @@ def neowise_orbit_answer(res: dict[str, Any], orbit: dict[str, Any]) -> Answer:
         f"{head} in {res['epochs_used']} epochs added along the orbit ({res['epochs_unmasked']} not masked): "
         f"{res['flux_mjy']:+.4f} ± {res['err_mjy']:.4f} mJy"
     )
+    sc = res.get("scan")
+    if sc:
+        said += (
+            f"; {sc['orbits']} orbits around it reach {sc['sn_at_place']:.1f}σ at the place, shifted places {sc['noise_median']:.1f}σ "
+            f"(median) to {sc['noise_max']:.1f}σ, {sc['places_not_below']} of {sc['places']} not below it"
+        )
     flux = float(orbit.get("flux_mjy") or 0.0)
     if res.get("ruled_out"):
         return "fail", f"{said}, where a body of {flux:.3f} mJy would stand at {res['would_be_sigma']:.1f}σ: ruled out."

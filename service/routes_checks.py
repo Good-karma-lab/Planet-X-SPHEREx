@@ -33,6 +33,7 @@ class OrbitIn(BaseModel):
     d_au: float = Field(ge=20.0, le=5000.0)
     mu: tuple[float, float]
     flux_mjy: float = Field(default=0.0, ge=0.0, le=1000.0)
+    scan: bool = False  # also scan the orbit's uncertainty (distance, radial speed, own motion) against shifted places: minutes more
 
 
 class ChecksIn(BaseModel):
