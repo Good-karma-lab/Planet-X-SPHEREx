@@ -43,6 +43,7 @@ import { useDistantPlan } from './search/distant';
 import { FPX_AUTO } from '../lib/flags';
 import { useAsteroidSearch } from './asteroids';
 import { useLabFlow, type LabFlow } from './lab/flow';
+import { SheetGrip } from '../ui/Sheet';
 
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
@@ -2993,6 +2994,7 @@ export function Lab({ route }: { route: Route }) {
           <div class="vstage" ref={stageRef}>
             <div
               class={`vsq ${side < 760 ? 'compact' : ''}${view !== 'picture' && film === null ? ' wallv' : ''}`}
+              data-tool={flow.tool ?? undefined}
               style={{
                 // a picture is one square in every month and band (the frame never moves or grows); a wall of tiles takes the whole stage, which it fills with the largest squares
                 width: `${wallView && stage.w >= 561 ? stage.w : side}px`,
@@ -3156,6 +3158,17 @@ export function Lab({ route }: { route: Route }) {
                   </select>
                 </label>
               </div>
+              {/* touch windows: the Mark tool on the picture itself, so that it is not looked for in the panel (not displayed on a desktop) */}
+              <button
+                type="button"
+                class={`float fmark touch-only${flow.tool === 'mark' ? ' on' : ''}`}
+                aria-pressed={flow.tool === 'mark'}
+                disabled={!flow.markable}
+                onClick={() => flow.setTool(flow.tool === 'mark' ? null : 'mark')}
+                data-testid="touch-mark"
+              >
+                Mark
+              </button>
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
                 {note ||
                   (bandsWait
@@ -3446,6 +3459,8 @@ export function Lab({ route }: { route: Route }) {
           </div>
         </div>
         <aside class="panel">
+          {/* phones and upright tablets: the panel is a bottom sheet pulled up by this grabber (not displayed on a desktop) */}
+          <SheetGrip peek=".taskpanel, .panel-head" under=".lab .tbar" label="Lab panel" />
           {flow.taskPanel}
           <div class="panel-head">
             <div class="seg sm" role="group" aria-label="Panel">

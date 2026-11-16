@@ -1,0 +1,793 @@
+/* SPHEREx Space: the responsive layer (phones and tablets).
+
+   Three window classes (docs/mobile: rules 1.1–1.4):
+     phone             narrower than 600 px                         bottom bar, one pane, the second pane is a bottom sheet
+     phone on its side lower than 480 px                            narrow rail on the left, picture left, controls right
+     tablet            600–1279 px wide and at least 480 px high    rail on the left; one pane to 839 px, two panes from 840 px
+   A window 1280 px wide or wider is a desktop: NOTHING in this file may change it. Every rule below sits inside a media query
+   with `max-width: 1279.98px`, except the few marked "everywhere", which only hide elements that exist for touch windows.
+
+   Selectors start with `:root` so that this layer wins over the screens' own files whatever order they are loaded in. */
+
+/* ===== everywhere: the parts that exist only for touch windows are not displayed ===== */
+.tab-more,
+.sheet-grip,
+.touch-only {
+  display: none;
+}
+
+@media (max-width: 1279.98px) {
+  :root {
+    --sa-t: env(safe-area-inset-top, 0px);
+    --sa-r: env(safe-area-inset-right, 0px);
+    --sa-b: env(safe-area-inset-bottom, 0px);
+    --sa-l: env(safe-area-inset-left, 0px);
+    --nav: 0px; /* the height the bottom bar takes from the window */
+    --hit: 44px; /* the smallest side of anything a finger presses (rule 3.1) */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+  /* a tap answers at once and never zooms the page by a double tap; the highlight of a tap is ours (rule 3.6) */
+  :root a,
+  :root button,
+  :root select,
+  :root input,
+  :root label,
+  :root summary,
+  :root [role='tab'],
+  :root [role='button'] {
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  :root button:active:not(:disabled),
+  :root a.btn:active,
+  :root .tab:active,
+  :root .chip:active,
+  :root .bchip:active {
+    filter: brightness(1.25);
+  }
+  /* a field in which one types is 16 px: smaller text makes iOS zoom the page on focus (rule 6.2) */
+  :root input:not([type='range']):not([type='checkbox']):not([type='radio']),
+  :root select,
+  :root textarea {
+    font-size: 16px;
+  }
+  /* canvases that turn and zoom take their own touches: the page never moves under them (rule 5.7) */
+  :root .globe-wrap canvas,
+  :root .vsq,
+  :root .px-canvas {
+    touch-action: none;
+  }
+  :root .screen,
+  :root .pbody,
+  :root .catalog,
+  :root .more-sheet {
+    overscroll-behavior: contain;
+  }
+}
+
+/* =====================================================================================================================
+   PHONE, upright: the bottom bar
+   ===================================================================================================================== */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root {
+    --nav: calc(56px + var(--sa-b));
+  }
+  :root body {
+    overflow: auto;
+    overscroll-behavior-y: none;
+  }
+  :root #app {
+    height: auto;
+    min-height: 100dvh;
+  }
+  :root .app {
+    display: block;
+    height: auto;
+    min-height: 100dvh;
+    padding: var(--sa-t) 0 var(--nav);
+    gap: 0;
+  }
+  :root main {
+    min-height: calc(100dvh - var(--nav) - var(--sa-t));
+  }
+
+  /* --- the bar --- */
+  :root .rail {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 60;
+    width: auto;
+    height: var(--nav);
+    padding: 0 max(4px, var(--sa-r)) var(--sa-b) max(4px, var(--sa-l));
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0;
+    border-radius: 0;
+    border-width: 1px 0 0;
+    overflow: visible;
+    background: rgba(6, 14, 19, 0.92);
+    box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
+  }
+  :root .rail .brand {
+    display: none;
+  }
+  :root .rail .tabs {
+    flex: 1;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: stretch;
+    gap: 2px;
+    margin: 0;
+    width: 100%;
+    height: 56px;
+  }
+  :root .rail .tab {
+    position: relative;
+    flex: 1 1 0;
+    min-width: 0;
+    height: 56px;
+    padding: 7px 0 5px;
+    gap: 3px;
+    justify-content: center;
+    font: 600 11px var(--font);
+    letter-spacing: 0.03em;
+    white-space: nowrap;
+    border-radius: 12px;
+  }
+  :root .rail .tab svg {
+    width: 24px;
+    height: 24px;
+    flex: none;
+  }
+  :root .rail .tab span {
+    overflow: visible;
+    max-width: none;
+  }
+  /* five destinations: Globe, Lab, Findings, More, Cabinet at the far right (rules 2.1, 2.4) */
+  :root .rail .tab[data-testid='nav-planetx'],
+  :root .rail .tab[data-testid='nav-index'],
+  :root .rail .tab[data-testid='nav-method'],
+  :root .rail .tab[data-testid='nav-about'] {
+    display: none;
+  }
+  :root .rail .tab-more {
+    display: flex;
+    order: 1;
+    background: none;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  :root .rail .tab-more.on {
+    color: var(--accent-l);
+    background: rgba(95, 227, 214, 0.12);
+    border-color: rgba(95, 227, 214, 0.4);
+  }
+  :root .rail .tab[data-testid='nav-me'] {
+    order: 2;
+  }
+
+  /* --- the More sheet: above the bar, over a dimmed screen --- */
+  :root .more-layer {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 100%;
+    height: 100dvh;
+    display: flex;
+    align-items: flex-end;
+    background: rgba(2, 6, 9, 0.55);
+  }
+  :root .more-sheet {
+    width: 100%;
+    padding: 6px 12px 12px;
+    border-radius: 18px 18px 0 0;
+    border: 1px solid var(--edge);
+    border-bottom: 0;
+    background: linear-gradient(160deg, rgba(22, 40, 52, 0.97), rgba(7, 15, 21, 0.97));
+    box-shadow: 0 -14px 44px rgba(0, 0, 0, 0.5);
+  }
+  :root .more-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 48px;
+    padding-left: 6px;
+    font-size: 16px;
+  }
+  :root .more-x {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--muted);
+  }
+  :root .more-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 52px;
+    padding: 0 10px;
+    border-radius: 12px;
+    color: var(--ink);
+    font-size: 16px;
+  }
+  :root .more-row svg {
+    color: var(--muted);
+    flex: none;
+  }
+  :root .more-row.on {
+    color: var(--accent-l);
+    background: rgba(95, 227, 214, 0.1);
+  }
+  :root .more-row.on svg {
+    color: var(--accent-l);
+  }
+
+  /* --- screens that are one canvas (globe, lab) fill the window above the bar; the page under them never scrolls --- */
+  :root main[data-screen='globe'],
+  :root main[data-screen='lab'] {
+    height: calc(100dvh - var(--nav) - var(--sa-t));
+    min-height: 0;
+    overflow: hidden;
+  }
+  :root main[data-screen='globe'] > .screen,
+  :root main[data-screen='lab'] > .screen {
+    position: absolute;
+    inset: 0;
+    gap: 0;
+  }
+
+  /* ===== globe ===== */
+  :root .screen .globe-wrap {
+    position: absolute;
+    inset: 0;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  :root .globe-wrap::after {
+    display: none;
+  }
+  /* the controls: ONE row of chips that slides sideways; Coverage first, then the sky layers, the aim fields last */
+  :root .map-ui.map-bar {
+    left: 0;
+    right: 0;
+    top: 0;
+    max-width: none;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  :root .map-ui.map-bar::-webkit-scrollbar {
+    display: none;
+  }
+  :root .map-ui.map-bar > * {
+    flex: none;
+  }
+  :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] {
+    order: -3;
+  }
+  :root .map-ui.map-bar > .seg[aria-label='Sky background'] {
+    order: -2;
+  }
+  :root .map-ui.map-bar > .aimrow {
+    order: 9;
+    gap: 10px;
+    padding: 0 10px;
+    min-height: 46px;
+  }
+  :root .map-ui.map-bar .seg,
+  :root .map-ui.map-bar .seg.sm {
+    flex-wrap: nowrap;
+    overflow: visible;
+    padding: 0;
+    border-radius: 12px;
+  }
+  :root .map-ui.map-bar .seg button,
+  :root .map-ui.map-bar .seg.sm button {
+    min-height: var(--hit);
+    min-width: var(--hit);
+    padding: 0 13px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+  :root .map-ui.map-bar .fld > span {
+    font-size: 11px;
+  }
+  :root .map-ui.map-bar .fld .inp.coord {
+    width: 150px;
+    height: 36px;
+    font-size: 16px;
+  }
+  :root .map-ui.map-bar .fld .fovsel {
+    width: 84px;
+    height: 36px;
+    font-size: 16px;
+  }
+  /* zoom: two 48 px buttons on the right, in reach of the thumb; two fingers on the globe do the same (rule 5.9) */
+  :root .zoomctl {
+    left: auto;
+    right: 10px;
+    top: auto;
+    bottom: 84px;
+    transform: none;
+    padding: 0;
+    gap: 8px;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  :root .zoomctl .zs {
+    display: none;
+  }
+  :root .zoomctl button {
+    width: 48px;
+    height: 48px;
+    border-radius: 14px;
+    font-size: 22px;
+    background: rgba(8, 18, 24, 0.78);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+  :root .map-open {
+    right: 10px;
+    bottom: 12px;
+    min-height: 52px;
+    padding: 0 18px;
+    font-size: 16px;
+  }
+  :root .map-bl {
+    left: 10px;
+    right: auto;
+    bottom: 12px;
+    max-width: calc(100% - 178px);
+    gap: 6px;
+  }
+  :root .map-bl .map-read {
+    font-size: 12px;
+    padding: 6px 9px;
+    border-radius: 10px;
+  }
+  :root .map-bl .map-credit,
+  :root .map-bl .map-help {
+    display: none;
+  }
+  /* the catalogue: a full-width panel from its handle on the right edge */
+  :root .cat-drawer {
+    top: 62px;
+    width: 100%;
+  }
+  :root .cat-drawer .cat-handle {
+    min-width: 44px;
+    min-height: 120px;
+  }
+  /* a square's card: a sheet at the bottom, above the bar; the two actions are full-width buttons (rules 5.1, 5.4, 5.6) */
+  :root .cov-card {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    width: auto;
+    max-width: none;
+    z-index: 25;
+    padding: 6px 16px 14px;
+    border-radius: 18px 18px 0 0;
+    border-width: 1px 0 0;
+    background: linear-gradient(160deg, rgba(20, 38, 49, 0.97), rgba(7, 15, 21, 0.97));
+    box-shadow: 0 -14px 44px rgba(0, 0, 0, 0.55);
+    font-size: 15px;
+  }
+  :root .cov-card .cov-head {
+    min-height: 48px;
+    font-size: 16px;
+  }
+  :root .cov-card .cov-x {
+    width: 44px;
+    height: 44px;
+    margin-right: -10px;
+    font-size: 20px;
+  }
+  :root .cov-card .cov-facts {
+    gap: 6px 14px;
+    margin-bottom: 14px;
+  }
+  :root .cov-card .cov-facts dt {
+    font-size: 11px;
+    align-self: center;
+  }
+  :root .cov-card .cov-btns {
+    flex-wrap: nowrap;
+    gap: 10px;
+  }
+  :root .cov-card .cov-btns .btn {
+    flex: 1 1 0;
+    min-height: 48px;
+    font-size: 15px;
+    padding: 0 8px;
+  }
+}
+
+/* the newcomer tour's card (its own element on the page): on a phone it lies above the bar, across the window */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .tour {
+    left: 12px;
+    right: 12px;
+    bottom: calc(56px + var(--sa-b) + 12px);
+    width: auto;
+  }
+  :root .tour p {
+    font-size: 15px;
+  }
+  :root .tour .btn,
+  :root .tour .lnk {
+    min-height: 44px;
+    min-width: 64px;
+  }
+}
+
+/* =====================================================================================================================
+   The bottom sheet (ui/Sheet.tsx). An element is a sheet where a rule below gives it `--sheet: 1`; the grabber sets
+   `--sheet-h` (its height at rest) and `--sheet-drag` (its shift while a finger moves it).
+   ===================================================================================================================== */
+@media (max-width: 1279.98px) {
+  :root .sheet-grip {
+    position: relative;
+    flex: none;
+    width: 100%;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    background: none;
+    align-items: center;
+    justify-content: center;
+    touch-action: none;
+    cursor: grab;
+  }
+  /* the grabber is 26 px of glass; the finger has 44 px (rule 3.1) */
+  :root .sheet-grip::after {
+    content: '';
+    position: absolute;
+    inset: -16px 0 -2px;
+  }
+  :root .sheet-grip i {
+    width: 44px;
+    height: 5px;
+    border-radius: 3px;
+    background: rgba(190, 236, 246, 0.42);
+  }
+}
+
+/* =====================================================================================================================
+   PHONE, upright: the lab. The picture first, bands and playback under it, the panel as a sheet.
+   ===================================================================================================================== */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .lab {
+    position: absolute;
+    inset: 0;
+    flex-direction: column;
+    border: 0;
+    border-radius: 0;
+  }
+  :root .lab .vwrap {
+    flex: 0 1 auto;
+    min-height: 0;
+    gap: 0;
+    padding: 0 0 var(--sheet-peek, 70px);
+    border: 0;
+  }
+  /* the picture: a square of the window's width (smaller only in a window too low for the rest); the band row hangs under it */
+  :root .lab .vstage {
+    flex: 0 1 100vw;
+    min-height: 160px;
+    margin-bottom: 52px;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  :root .vsq {
+    margin-bottom: 0;
+  }
+  :root .vsq::after {
+    border-radius: 0;
+    border-width: 0 0 1px;
+  }
+  :root .vsq .ftitle {
+    left: 8px;
+    top: 8px;
+    max-width: calc(100% - 150px);
+    min-height: 36px;
+    padding: 0 10px;
+  }
+  :root .vsq .ftitle b {
+    font-size: 15px;
+  }
+  :root .vsq .factions {
+    right: 8px;
+    top: 8px;
+    min-height: 36px;
+  }
+  :root .vsq .factions .fovsel {
+    font-size: 11px;
+  }
+  :root .vsq .factions select {
+    height: 36px;
+    padding: 0 6px;
+  }
+  /* 36 px of glass, 44 px for the finger */
+  :root .vsq .factions .fovsel::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+  }
+  :root .vsq .fstatus,
+  :root .vsq.compact .fstatus {
+    left: 8px;
+    bottom: 8px;
+    max-width: calc(100% - 100px);
+    font-size: 12px;
+    line-height: 1.35;
+    white-space: normal;
+  }
+  :root .vsq .refbox {
+    top: 52px;
+    left: 8px;
+  }
+  /* the Mark tool on the picture (touch windows only) */
+  :root .vsq .fmark {
+    display: inline-flex;
+    right: 8px;
+    bottom: 8px;
+    min-width: 72px;
+    height: 44px;
+    padding: 0 14px;
+    justify-content: center;
+    border-radius: 12px;
+    font: 600 14px var(--font);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  :root .vsq .fmark.on {
+    color: #06211f;
+    background: var(--accent);
+    border-color: var(--accent-l);
+  }
+  :root .vsq .fmark:disabled {
+    opacity: 0.45;
+  }
+  /* band chips: one row under the picture, 44 px high, slides sideways */
+  :root .vsq .fbands,
+  :root .vsq.compact .fbands {
+    left: 50%;
+    top: 100%;
+    bottom: auto;
+    transform: translateX(-50%);
+    width: 100vw;
+    max-width: none;
+    height: 52px;
+    padding: 4px 8px;
+    gap: 6px;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    border: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  :root .vsq .fbands::-webkit-scrollbar {
+    display: none;
+  }
+  :root .vsq .fbands .bchip,
+  :root .vsq.compact .fbands .bchip {
+    flex: none;
+    min-height: 44px;
+    min-width: 48px;
+    padding: 0 12px;
+    font-size: 14px;
+    justify-content: center;
+  }
+  :root .vsq .fbands .bchip b {
+    max-width: none;
+  }
+  :root .vsq .fbands .bchip em,
+  :root .vsq .fbands .bchip .dot {
+    display: none;
+  }
+  :root .vsq .fbands .mini,
+  :root .vsq.compact .fbands .mini {
+    flex: none;
+    height: 44px;
+    min-width: 48px;
+    padding: 0 12px;
+    font-size: 13px;
+  }
+
+  /* playback: play and the passes on the first row; scale, mode, speed and the actions on a second row that slides sideways */
+  :root .tbar {
+    display: grid;
+    grid-template-rows: 48px 44px;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    align-items: center;
+    gap: 6px 8px;
+    height: auto;
+    padding: 6px 8px;
+    border-radius: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  :root .tbar::-webkit-scrollbar {
+    display: none;
+  }
+  :root .tbar > * {
+    grid-row: 2;
+    order: 0;
+  }
+  :root .tbar .play {
+    grid-row: 1;
+    grid-column: 1;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    width: 48px;
+    height: 48px;
+  }
+  /* the passes take no room in the sliding row: the box is empty and its content hangs out of it, as wide as the window allows */
+  :root .tbar .tl-mid {
+    grid-row: 1;
+    grid-column: 1;
+    position: sticky;
+    left: 68px;
+    width: 0;
+    min-width: 0;
+    margin-left: 60px;
+    flex: none;
+    overflow: visible;
+  }
+  :root .tbar .tl-mid > * {
+    width: calc(100vw - 84px);
+  }
+  :root .tbar .tl-labels {
+    font-size: 12px;
+  }
+  :root .tbar .tl-labels span {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+  :root .tbar .seg.scale button,
+  :root .tbar .seg button {
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 14px;
+  }
+  :root .tbar .spd {
+    height: 44px;
+    padding: 0 8px;
+  }
+  :root .tbar .acts {
+    gap: 8px;
+  }
+  :root .tbar .mini {
+    height: 44px;
+    min-width: 44px;
+    justify-content: center;
+  }
+
+  /* --- the panel is the sheet --- */
+  :root .lab .panel {
+    --sheet: 1;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: auto;
+    height: var(--sheet-h, 70px);
+    max-height: calc(100dvh - var(--nav) - var(--sa-t) - 56px);
+    transform: translateY(var(--sheet-drag, 0px));
+    transition: height 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+    border-radius: 18px 18px 0 0;
+    border-top: 1px solid var(--edge-hi);
+    background: linear-gradient(160deg, rgba(20, 38, 49, 0.98), rgba(7, 15, 21, 0.98));
+    box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+  }
+  :root .lab .panel > * {
+    flex-shrink: 0;
+  }
+  :root .lab .panel > .pbody {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  :root .lab .panel[data-dragging] {
+    transition: none;
+  }
+  :root .lab .panel[data-settling] {
+    transition: transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  :root .lab .panel .sheet-grip {
+    display: flex;
+  }
+  :root .lab .panel-head {
+    padding: 0 8px 8px;
+  }
+  :root .lab .panel-head .seg button {
+    min-height: 44px;
+    font-size: 14px;
+    padding: 0 6px;
+  }
+  :root .lab .pbody {
+    padding: 10px 14px calc(28px + var(--sa-b));
+    gap: 10px;
+    font-size: 14px;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  :root .lab .pbody.pobj {
+    min-height: 0;
+  }
+
+  /* the task: the sheet's header, always on screen */
+  :root .taskpanel {
+    padding: 0 14px 8px;
+  }
+  :root .taskpanel .btn {
+    min-height: 48px;
+    font-size: 15px;
+  }
+
+  /* the editor of a mark: under the picture, in the sheet's place, never over the point */
+  :root .vsq .float.markedit {
+    position: fixed;
+    left: 0 !important;
+    right: 0;
+    top: auto !important;
+    bottom: 0;
+    width: auto !important;
+    z-index: 40;
+    padding: 12px 14px calc(14px + var(--sa-b));
+    gap: 10px;
+    border-radius: 18px 18px 0 0;
+    border-width: 1px 0 0;
+    background: linear-gradient(160deg, rgba(20, 38, 49, 0.99), rgba(7, 15, 21, 0.99));
+    box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.6);
+  }
+  :root .markedit .inp {
+    height: 44px;
+    padding: 0 10px;
+  }
+  :root .markedit .me-row button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  :root .markedit .me-levels button {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  :root .markedit .me-meta,
+  :root .markedit .me-hint {
+    font-size: 12px;
+  }
+}
