@@ -23,10 +23,11 @@ PYENV_VERSION=3.11.9 uv sync
 **2. The API on 8790**
 
 ```bash
-cd /Users/aostapenko/Work/Planet-X-SPHEREx-flow && SKY_STANDBY=1 SKY_AUTH_DEV=1 SKY_STORE=$PWD/.store SKY_CLIPS=$PWD/clips SKY_PRODUCT_DB=$PWD/product.sqlite SKY_WARM=0 SKY_WORKERS=4 .venv/bin/uvicorn service.app:app --host 127.0.0.1 --port 8790
+cd /Users/aostapenko/Work/Planet-X-SPHEREx-flow && SKY_FINDINGS_READONLY=1 SKY_AUTH_DEV=1 SKY_STORE=$PWD/.store SKY_CLIPS=$PWD/clips SKY_PRODUCT_DB=$PWD/product.sqlite SKY_WARM=0 SKY_WORKERS=4 .venv/bin/uvicorn service.app:app --host 127.0.0.1 --port 8790
 ```
 
-- `SKY_STANDBY=1` keeps Findings from replacing the snapshot with the few finds of the local result files.
+- `SKY_FINDINGS_READONLY=1` keeps Findings from replacing the snapshot with the few finds of the local result files, and keeps the
+  Find Planet X identifier from asking JPL. Never `SKY_STANDBY=1` here: a standby builds no new field ("the sky service is restarting").
 - `SKY_AUTH_DEV=1`: the sign-in link is printed in this log and shown on the page.
 - Clips and the product database (users, marks, tasks, squares) live in this worktree, never in the shared store.
 
