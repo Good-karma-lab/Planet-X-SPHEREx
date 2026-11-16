@@ -1363,6 +1363,7 @@ export function Globe() {
                 </span>
               ))}
               <span class="faint" data-testid="cov-count">{covLine(covTick)}</span>
+              <span class="cov-do" data-testid="cov-do">click a square to take it</span>
             </div>
           )}
           <div class="map-credit" data-testid="map-credit">

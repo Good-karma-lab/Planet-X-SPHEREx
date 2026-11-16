@@ -179,3 +179,5 @@
   .cov-card { left: 10px; right: 44px; top: auto; bottom: 148px; width: auto; max-width: none; padding: 10px 12px 12px; }
   .cov-legend { font-size: 11px; gap: 2px 9px; }
 }
+
+.cov-legend .cov-do { color: var(--accent-l); white-space: nowrap; }
