@@ -1,7 +1,7 @@
 """The coverage API of the sky grid (service.grid): what the machine and people have done with each square.
 
     GET  /api/grid/meta                  {scheme, total, cell_arcmin, counts:{searched, viewed, with_finds}, rate_per_hour}
-    GET  /api/grid/coverage              {cells:[{id, state, finds, viewers}]}    every square that is not "new"
+    GET  /api/grid/coverage[?corners=1]  {cells:[{id, state, finds, viewers[, corners]}]}    every square that is not "new"
     GET  /api/grid/cells?ra=&dec=&radius= {cells:[{id, ra, dec, corners, state, finds, viewers, bar, searched_at}]}
     GET  /api/grid/cell/{id}             the same + finds:[finding ids] + field_key + open:{ra, dec, fov}
     POST /api/grid/cell/{id}/viewed      {result:"nothing"|"marks"} → {viewers}
@@ -44,6 +44,7 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
     async def meta() -> Any:
         return {
             "scheme": grid.SCHEME,
+            "scheme_params": grid.scheme_params(),
             "total": grid.TOTAL,
             "cell_arcmin": grid.FIELD_FOV_ARCMIN,
             "counts": D().counts(),
@@ -51,9 +52,9 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         }
 
     @router.get("/api/grid/coverage")
-    async def coverage(response: Response) -> Any:
+    async def coverage(response: Response, corners: bool = Query(False, description="also the four corners of each square")) -> Any:
         response.headers["Cache-Control"] = "no-store"
-        return {"cells": D().coverage()}
+        return {"cells": D().coverage(corners)}
 
     @router.get("/api/grid/cells")
     async def cells(ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90), radius: float = Query(1.0, gt=0)) -> Any:

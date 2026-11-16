@@ -312,7 +312,7 @@ class GridDB:
         )
         return self.viewers([cid]).get(cid, 0)
 
-    def coverage(self) -> list[dict[str, Any]]:
+    def coverage(self, corners: bool = False) -> list[dict[str, Any]]:
         """Every square that is not `new`: a row in grid_cells or at least one viewer."""
         c = self._conn()
         rows = {r["id"]: dict(r) for r in c.execute("SELECT id, state, finds FROM grid_cells")}
@@ -320,7 +320,13 @@ class GridDB:
         out = []
         for cid in sorted(set(rows) | set(views)):
             r = rows.get(cid, {"state": "new", "finds": 0})
-            out.append({"id": cid, "state": r["state"], "finds": int(r["finds"]), "viewers": views.get(cid, 0)})
+            item: dict[str, Any] = {"id": cid, "state": r["state"], "finds": int(r["finds"]), "viewers": views.get(cid, 0)}
+            if corners:
+                try:
+                    item["corners"] = by_id(cid).corners()
+                except ValueError:
+                    continue
+            out.append(item)
         return out
 
     def counts(self) -> dict[str, int]:
@@ -350,6 +356,18 @@ class GridDB:
             return round(3600.0 / (sum(secs) / len(secs)), 2) if secs else None
         span = rows[-1][0] - rows[0][0]
         return round((len(rows) - 1) * 3600.0 / span, 2) if span > 0 else None
+
+
+def scheme_params() -> dict[str, Any]:
+    """The scheme in numbers, so a client can draw any square without its own copy of the rules."""
+    return {
+        "name": SCHEME,
+        "cell_deg": CELL_DEG,
+        "n_bands": N_BANDS,
+        "dec0": -90.0,
+        "cols": "max(1, round(360 * cos(dec_mid) / cell_deg)) equal RA steps from RA 0; dec_mid = -90 + (band + 0.5) * cell_deg",
+        "id": "f'{band:03d}-{col:04d}'",
+    }
 
 
 def view_of(ce: Cell, row: dict[str, Any] | None, viewers: int) -> dict[str, Any]:
@@ -393,3 +411,14 @@ def import_searched(db: GridDB, fields: list[dict[str, Any]]) -> int:
         )
         n += 1
     return n
+
+
+def bar_at(db: GridDB, ra: float, dec: float) -> dict[str, Any] | None:
+    """The bar the search of the square at (ra, dec) used (None while the square is not searched): for the `above_bar` check.
+    Keys of a sweep bar: kind="sweep", mover_sigma, mover_shift_arcsec, passes, passes_used, sources_per_pass, chance_any,
+    known_movers; of an imported place: kind="import", searches, fov_arcmin, partial."""
+    row = db.get(cell_at(ra, dec).id)
+    if not row or row.get("state") != "searched" or not row.get("bar"):
+        return None
+    bar: dict[str, Any] = json.loads(row["bar"])
+    return bar

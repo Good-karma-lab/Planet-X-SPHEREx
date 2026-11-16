@@ -66,6 +66,9 @@ def test_db_and_routes(tmp_path: Path) -> None:
     assert meta["scheme"] == grid.SCHEME and meta["counts"]["searched"] == 1 and meta["counts"]["with_finds"] == 1
     cov = c.get("/api/grid/coverage").json()["cells"]
     assert cov == [{"id": cid, "state": "searched", "finds": 2, "viewers": 0}]
+    withc = c.get("/api/grid/coverage", params={"corners": 1}).json()["cells"]
+    assert withc[0]["corners"] == grid.by_id(cid).corners()
+    assert meta["scheme_params"]["n_bands"] == 540
     cells = c.get("/api/grid/cells", params={"ra": 50, "dec": 8, "radius": 0.5}).json()["cells"]
     assert cells[0]["id"] == cid and cells[0]["state"] == "searched" and len(cells[0]["corners"]) == 4
     one = c.get(f"/api/grid/cell/{cid}").json()
@@ -96,3 +99,10 @@ def test_watchdog_kills_a_tree_over_the_cap(tmp_path: Path) -> None:
     while p.poll() is None and time.monotonic() - t0 < 20:
         time.sleep(0.1)
     assert dog.tripped and p.poll() is not None
+
+
+def test_bar_at(tmp_path: Path) -> None:
+    db = GridDB(tmp_path / "p.sqlite")
+    assert grid.bar_at(db, 50, 8) is None
+    db.put(grid.cell_at(50, 8).id, "searched", bar={"kind": "sweep", "mover_sigma": 5.0}, source="sweep")
+    assert grid.bar_at(db, 50.01, 8.01) == {"kind": "sweep", "mover_sigma": 5.0}
