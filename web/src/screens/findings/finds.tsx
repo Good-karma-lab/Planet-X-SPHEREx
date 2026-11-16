@@ -454,7 +454,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   useEffect(() => {
     const el = end.current;
     if (!el || typeof IntersectionObserver === 'undefined') return;
-    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && more.current(), { rootMargin: '600px 0px' });
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && more.current(), { rootMargin: '300px 0px' });
     io.observe(el);
     return () => io.disconnect();
   }, [cards.finds.length, cards.done]);
@@ -474,7 +474,9 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
     ['anomaly', KIND_SHORT.anomaly!],
   ];
   const stages: StageSel[] = ['any', 'waiting', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
-  const stageCount = (s: StageSel) => (!h || s === 'any' ? null : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0));
+  // the numbers on the status buttons are of the whole list, so they are shown only where they are what the button gives
+  const stageTotal = (s: StageSel) => (!h || s === 'any' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0));
+  const stageCount = (s: StageSel) => (h && s === 'waiting' && kind === 'promising' ? h.waiting_promising : null);
   const chip = (k: KindSel, label: string) =>
     (cnt(k) ?? 1) > 0 || k === 'promising' || k === kind ? (
       <button key={k} class={kind === k ? 'on' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}>
@@ -491,7 +493,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
         </div>
         <div class="fkinds fstat" role="group" aria-label="Status">
           {stages
-            .filter((s) => s === 'any' || s === 'waiting' || s === 'new' || s === 'known' || s === stage || (stageCount(s) ?? 0) > 0)
+            .filter((s) => s === 'any' || s === 'waiting' || s === 'new' || s === 'known' || s === stage || stageTotal(s) > 0)
             .map((s) => (
               <button key={s} class={stage === s ? 'on' : ''} aria-pressed={stage === s} onClick={() => setStage(s)}>
                 {s === 'any' ? 'Any status' : s === 'waiting' ? 'Waiting for a look' : STAGE_LABEL[s]} {stageCount(s) != null && <span>{stageCount(s)}</span>}
@@ -503,32 +505,34 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
           {h && h.identification.pending > 0 && ` · identifying: ${h.identification.pending} catalogue answers to come`}
         </p>
       </section>
-      <ol class="fgrid" aria-busy={cards.loading}>
-        {cards.finds.map((f) => (
-          <FindCard key={f.id} f={f} current={leadId === f.id} onOpen={setLeadId} />
-        ))}
-        {kind === 'promising' && (stage === 'any' || stage === 'known') && cards.done && (
-          <li class={`fcard glass${atlas ? ' on' : ''}`}>
-            <button class="fcard-pic" onClick={() => setLeadId(ATLAS_LEAD.id)} aria-label={`Open the report: ${ATLAS_LEAD.title}`}>
-              <div class="fclip">
-                <img src="/neossat/3i-2025-12-14.png" alt="Comet 3I/ATLAS in a NEOSSat frame, ringed at the place JPL predicts" loading="lazy" />
-              </div>
-              <span class="badge green fcard-stage">Known</span>
-            </button>
-            <div class="fcard-body">
-              <b class="fcard-title">{ATLAS_LEAD.title}</b>
-              <span class="mono-s fcard-sub">Comet · {ATLAS_LEAD.sub}</span>
-              <button class="btn sm fcard-go" onClick={() => setLeadId(ATLAS_LEAD.id)}>
-                Open the report
+      <div class="fgrid-wrap">
+        <ol class="fgrid" aria-busy={cards.loading}>
+          {cards.finds.map((f) => (
+            <FindCard key={f.id} f={f} current={leadId === f.id} onOpen={setLeadId} />
+          ))}
+          {kind === 'promising' && (stage === 'any' || stage === 'known') && cards.done && (
+            <li class={`fcard glass${atlas ? ' on' : ''}`}>
+              <button class="fcard-pic" onClick={() => setLeadId(ATLAS_LEAD.id)} aria-label={`Open the report: ${ATLAS_LEAD.title}`}>
+                <div class="fclip">
+                  <img src="/neossat/3i-2025-12-14.png" alt="Comet 3I/ATLAS in a NEOSSat frame, ringed at the place JPL predicts" loading="lazy" />
+                </div>
+                <span class="badge green fcard-stage">Known</span>
               </button>
-            </div>
-          </li>
-        )}
-      </ol>
+              <div class="fcard-body">
+                <b class="fcard-title">{ATLAS_LEAD.title}</b>
+                <span class="mono-s fcard-sub">Comet · {ATLAS_LEAD.sub}</span>
+                <button class="btn sm fcard-go" onClick={() => setLeadId(ATLAS_LEAD.id)}>
+                  Open the report
+                </button>
+              </div>
+            </li>
+          )}
+        </ol>
+        <div ref={end} class="fend" />
+      </div>
       {cards.failed && <p class="mono-s">the findings did not load; the page asks again when the filter is changed</p>}
       {!cards.loading && cards.done && cards.finds.length === 0 && !cards.failed && <p class="mono-s">no finds match these filters</p>}
       {cards.loading && <p class="mono-s">reading the findings…</p>}
-      <div ref={end} class="fend" />
       {atlas ? <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={false} /> : leadId && sel ? <Detail f={sel} onClose={() => setLeadId(null)} inline={false} /> : null}
     </>
   );

@@ -131,7 +131,11 @@ export function Clip({ f }: { f: CardFind }) {
         setState((s) => (s === 'building' ? s : 'asking'));
         const r = await fetch(url);
         code = r.status;
-        if (code === 404) reason = ((await r.json().catch(() => ({}))) as { reason?: string }).reason ?? '';
+        if (code === 404) {
+          const b = (await r.json().catch(() => ({}))) as { state?: string; reason?: string };
+          if (b.state === 'none') reason = b.reason ?? '';
+          else code = 0; // not the clip's own answer (the service is restarting): asked again
+        }
         else await r.arrayBuffer(); // the clip is now in the browser's cache: the picture below reads it from there
       } catch {
         code = 0;

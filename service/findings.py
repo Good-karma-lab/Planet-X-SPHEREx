@@ -20,6 +20,7 @@ import hashlib
 import json
 import math
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -1432,9 +1433,10 @@ class FlowDB:
         self.db.commit()
 
     def add_view(self, find_id: str, result: str | None, user_id: str | None = None, user_name: str | None = None) -> int:
-        self.db.execute("INSERT INTO finding_views VALUES (?,?,?,?,?)", (find_id, time.time(), result, user_id, user_name))
-        self.db.commit()
-        return int(self.db.execute("SELECT COUNT(*) FROM finding_views WHERE find_id = ?", (find_id,)).fetchone()[0])
+        with _READ:
+            self.db.execute("INSERT INTO finding_views VALUES (?,?,?,?,?)", (find_id, time.time(), result, user_id, user_name))
+            self.db.commit()
+            return int(self.db.execute("SELECT COUNT(*) FROM finding_views WHERE find_id = ?", (find_id,)).fetchone()[0])
 
     def views(self) -> dict[str, dict[str, Any]]:
         """{find id: {viewers, results{result: n}, checked_by[names, the first first]}}."""
@@ -1475,9 +1477,14 @@ LITE_KEYS = (
 )  # fmt: skip
 
 
+# the page asks for many clips and the list at once, each in its own thread: one connection is read by one thread at a time
+_READ = threading.Lock()
+
+
 def find_row(db: FindingsDB, find_id: str) -> dict[str, Any] | None:
     """One find as the table keeps it (no catalogue answers): what a clip needs to know about it."""
-    r = db.db.execute("SELECT id, kind, place, fov, ra, dec, rate, data FROM finds WHERE id = ?", (find_id,)).fetchone()
+    with _READ:
+        r = db.db.execute("SELECT id, kind, place, fov, ra, dec, rate, data FROM finds WHERE id = ?", (find_id,)).fetchone()
     if r is None:
         return None
     return {**{k: r[k] for k in ("id", "kind", "place", "fov", "ra", "dec", "rate")}, "data": json.loads(r["data"] or "{}")}
@@ -1500,11 +1507,12 @@ def query(
     """The finds with what the catalogues said. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
     stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
     the old one). Every find also carries the flow fields (flow_fields)."""
-    views = flow.views() if flow is not None else {}
-    rows = db.db.execute("SELECT * FROM finds").fetchall()
-    ids = [r["id"] for r in rows]
-    idents = db.idents_of(ids)
-    rel = db.related(ids)
+    with _READ:
+        views = flow.views() if flow is not None else {}
+        rows = db.db.execute("SELECT * FROM finds").fetchall()
+        ids = [r["id"] for r in rows]
+        idents = db.idents_of(ids)
+        rel = db.related(ids)
     items: list[dict[str, Any]] = []
     for r in rows:
         f = {
