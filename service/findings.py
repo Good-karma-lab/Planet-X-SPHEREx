@@ -22,6 +22,7 @@ import math
 import sqlite3
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -1503,6 +1504,7 @@ def query(
     stage: str | None = None,
     waiting: bool = False,
     kinds: tuple[str, ...] | None = None,
+    clip_rank: Callable[[dict[str, Any]], int] | None = None,
 ) -> dict[str, Any]:
     """The finds with what the catalogues said. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
     stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
@@ -1578,7 +1580,10 @@ def query(
     rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     if sort == "promise":
-        sel.sort(key=lambda f: (-f["promise"], -(f["score"] or f["snr"] or 0.0), f["id"]))
+        # a find that can have no clip (a track whose visits are not kept, a place no field covers) goes below every find that can;
+        # within equal promise the finds whose clip is ready come first: the first screen shows pictures, not empty cards
+        cr = {f["id"]: clip_rank(f) for f in sel} if clip_rank is not None else {}
+        sel.sort(key=lambda f: (cr.get(f["id"], 0) == 2, -f["promise"], cr.get(f["id"], 0), -(f["score"] or f["snr"] or 0.0), f["id"]))
     shown = [f for f in items if f["status"] not in HIDDEN]
     stages = {s: sum(1 for f in items if f["stage"] == s) for s in STAGES}
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")

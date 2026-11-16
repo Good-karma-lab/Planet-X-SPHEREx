@@ -552,6 +552,9 @@ def test_flow_fields_promise_first_and_the_looks_people_gave(tmp_path: Path) -> 
     assert query(db, None, "all", None, 100, 0, flow=flow, waiting=True)["count"] == 3
     assert query(db, None, "all", None, 100, 0, flow=flow, stage="in_review")["count"] == 1
     assert {f["kind"] for f in query(db, None, "all", None, 100, 0, flow=flow, kinds=("red", "anomaly"))["finds"]} == {"red", "anomaly"}
+    # finds that can have no clip go to the end; within equal promise a ready clip comes first
+    order = query(db, None, "all", None, 100, 0, flow=flow, sort="promise", clip_rank=lambda f: 2 if f["kind"] == "mover" else 0)
+    assert order["finds"][-1]["kind"] == "mover" and order["count"] == again["count"]
     # the old call and the old fields stay as they were
     old = query(db, None, "all", None, 100, 0)
     assert old["total"] == 5 and {"status", "verdict", "idents"} <= set(old["finds"][0])

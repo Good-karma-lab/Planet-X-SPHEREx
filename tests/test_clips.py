@@ -97,7 +97,18 @@ def test_the_mover_moves_and_the_background_stands_still(tmp_path: Path) -> None
         v = f[c - 50 : c + 50, c - 3 : c + 4].mean(axis=(1, 2))
         return float((v * np.arange(v.size)).sum() / v.sum())
 
-    assert abs(row(fr[0]) - row(fr[2]) - 2 * MOTION_ARCSEC * scale) <= 3.0
+    bare = _frames(render(_mover(), Source(store, "k" * 24, meta, False), with_ring=False)[0])  # no ring, no arrow: the light alone
+    assert abs(row(bare[0]) - row(bare[2]) - 2 * MOTION_ARCSEC * scale) <= 3.0
+    # the motion is written on the picture and the arrow points the way it goes (north)
+    from service.clips import motion_of
+
+    text, pa = motion_of(_mover()) or ("", None)
+    assert (
+        text.endswith('"/yr')
+        and abs(float(text.split('"')[0]) - MOTION_ARCSEC / (180.0 / 365.25)) < 0.05
+        and pa is not None
+        and min(pa, 360 - pa) < 1.0
+    )
     # the background stands still: away from the mover, the ring and the labels the frames differ only by noise and compression
     quiet = np.ones((SIZE, SIZE), bool)
     quiet[c - 60 : c + 60, c - 60 : c + 60] = False
@@ -207,6 +218,14 @@ def test_the_routes_serve_the_clip_once_rendered_and_say_why_there_is_none(tmp_p
     # a place (a row of the cabinet): the same picture without a ring, only from a finished field, never a field job
     pl = client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=96")
     assert pl.status_code == 200 and pl.headers["content-type"] == "image/webp" and _frames(pl.content)[0].shape == (96, 96, 3)
+    # labels=0 and a small picture carry no text: the date is on the 320 px frame and not on the bare one
+    big, bare = (client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=320{q}").content for q in ("", "&labels=0"))
+
+    def strip(b: bytes) -> np.ndarray:
+        return _frames(b)[0][-22:-4, 4:150]
+
+    assert float(np.abs(strip(big) - strip(bare)).max()) > 100.0
+    assert st.clips.path(f"place_{RA0:.4f}_{DEC0:+.4f}_s96_t0").is_file()  # 96 px: made without text whatever was asked
     off = client.get(f"/api/clips/place.webp?ra={RA0 + 5}&dec={DEC0}")
     assert off.status_code == 404 and off.json()["state"] == "none" and not st.clips.building
     assert client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=97").status_code == 422

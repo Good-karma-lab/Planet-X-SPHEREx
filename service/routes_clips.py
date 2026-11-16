@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse, JSONResponse
 
-from service.clips import ClipPending, Clips, ClipUnavailable, clips_dir
+from service.clips import VERSION, ClipPending, Clips, ClipUnavailable, clips_dir
 from service.findings import find_row
 from service.jobs.scheduler import Priority
 from service.products.store import Store, product_key
@@ -91,6 +91,7 @@ def make_clips_router(st: Any) -> APIRouter:
         dec: float = Query(..., ge=-90.0, le=90.0),
         size: int = Query(170),
         ring: bool = Query(False),
+        labels: bool = Query(True, description="0: no dates on the frames; a clip smaller than 200 px never carries them"),
         field_key: str | None = Query(None, description="a hint only: the finest finished field that holds the place is used"),
     ) -> Any:
         """The time-lapse of a place (for the rows of the cabinet): 200 image/webp, or 404 {state, reason} when no finished field holds
@@ -98,12 +99,18 @@ def make_clips_router(st: Any) -> APIRouter:
         if size not in PLACE_SIZES:
             raise HTTPException(422, f"size is one of {', '.join(str(v) for v in PLACE_SIZES)}")
         try:
-            path = await clips_of(st).place(ra, dec, size, ring)
+            path = await clips_of(st).place(ra, dec, size, ring, labels)
         except ClipUnavailable as e:
             return JSONResponse({"state": "none", "reason": str(e)}, 404, headers={"Cache-Control": "no-store"})
         return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
+    async def status() -> Any:
+        """The background queue that makes the clips: {running, made, left, now, rounds, building, failed}."""
+        c = clips_of(st)
+        return {**c.pre, "building": list(c.building), "failed": len(c.failed), "version": VERSION}
+
     for prefix in ("/api", "/api/v1"):
+        router.add_api_route(f"{prefix}/clips/status", status, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/clips/place.webp", place_clip, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/findings/{{find_id}}/clip.webp", clip, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/findings/{{find_id}}/clip", clip_info, methods=["GET"], include_in_schema=prefix == "/api")
