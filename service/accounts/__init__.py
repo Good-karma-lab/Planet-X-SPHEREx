@@ -24,6 +24,7 @@ OAUTH_COOKIE = "sx_oauth"
 SESSION_S = 30 * 86400.0
 LINK_MINUTES = 15
 LOCAL_HOSTS = ("localhost", "127.0.0.1", "::1", "[::1]")
+#: for Google sign-in through the web dev server set SKY_PUBLIC_URL=http://localhost:<web port> (the redirect address must be whole)
 
 
 class Accounts:
@@ -85,6 +86,10 @@ def public_base(request: Request) -> str:
     if env:
         return env
     if is_local(request):
+        # the web dev server proxies /api and puts the API's own address into Host: the page's address is in Origin
+        origin = request.headers.get("origin")
+        if origin and (urlparse(origin).hostname or "") in LOCAL_HOSTS:
+            return origin.rstrip("/")
         return f"{request.url.scheme}://{request.headers.get('host') or request.url.netloc}"
     raise HTTPException(503, "sign-in is not set up on this server (SKY_PUBLIC_URL)")
 
@@ -95,6 +100,8 @@ def check_origin(request: Request) -> None:
     if not origin:
         return
     allowed = {request.headers.get("host"), urlparse(os.environ.get("SKY_PUBLIC_URL", "")).netloc or None}
+    if is_local(request) and (urlparse(origin).hostname or "") in LOCAL_HOSTS:
+        return  # local work: the web dev server on another port
     if urlparse(origin).netloc not in allowed:
         raise HTTPException(403, "this request comes from another site")
 

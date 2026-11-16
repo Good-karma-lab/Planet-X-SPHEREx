@@ -56,7 +56,7 @@ def _sign_in(app: FastAPI, mail: _Mail, email: str = "ann@example.org") -> TestC
     assert r.status_code == 200 and r.json() == {"sent": True, "minutes": 15}
     link = mail.sent[-1][1]
     r = c.get(link.replace("http://localhost", ""))
-    assert r.status_code == 303 and r.headers["location"] == "http://localhost/#/me"
+    assert r.status_code == 303 and r.headers["location"] == "/#/me"
     return c
 
 
@@ -111,10 +111,18 @@ def test_dev_link_only_in_dev_mode_and_next_is_kept(site: tuple[FastAPI, _State,
     assert "dev_link" not in c.post("/api/auth/email", json={"email": "a@example.org"}).json()
     monkeypatch.setenv("SKY_AUTH_DEV", "1")
     link = c.post("/api/auth/email", json={"email": "a@example.org", "next": "#/lab?ra=10&dec=2"}).json()["dev_link"]
-    assert c.get(link.replace("http://localhost", "")).headers["location"] == "http://localhost/#/lab?ra=10&dec=2"
+    assert c.get(link.replace("http://localhost", "")).headers["location"] == "/#/lab?ra=10&dec=2"
     # a place outside the app is not followed
     link = c.post("/api/auth/email", json={"email": "a@example.org", "next": "//evil.example"}).json()["dev_link"]
-    assert c.get(link.replace("http://localhost", "")).headers["location"] == "http://localhost/#/me"
+    assert c.get(link.replace("http://localhost", "")).headers["location"] == "/#/me"
+
+
+def test_behind_the_web_dev_server_the_link_goes_to_the_page(site: tuple[FastAPI, _State, _Mail]) -> None:
+    app, _, mail = site
+    c = TestClient(app, base_url="http://127.0.0.1:8783", follow_redirects=False)  # the proxy puts the API's address into Host
+    assert c.post("/api/auth/email", json={"email": "ann@example.org"}, headers={"origin": "http://localhost:5183"}).status_code == 200
+    assert mail.sent[-1][1].startswith("http://localhost:5183/api/auth/callback?token=")
+    assert c.post("/api/auth/email", json={"email": "ann@example.org"}, headers={"origin": "https://evil.example"}).status_code == 403
 
 
 def test_sign_in_is_rate_limited_and_bad_addresses_refused(site: tuple[FastAPI, _State, _Mail]) -> None:
@@ -173,6 +181,11 @@ def test_history_notifications_and_name(site: tuple[FastAPI, _State, _Mail]) -> 
     h = c.get("/api/me/history").json()["history"]
     assert [x["ref"] for x in h] == ["#/lab?ra=1&dec=2", "#/explore"]  # the same place moves to the top
     assert c.post("/api/me/history", json={"kind": "lab", "ref": "https://evil.example"}).status_code == 422
+    # the lab's address changes while the user works in one field: the place is one entry, with the latest link
+    for band in ("1", "2"):
+        c.post("/api/me/history", json={"kind": "lab", "ref": f"#/lab?ra=9&dec=9&band={band}", "key": "lab:9,9,20"})
+    h = c.get("/api/me/history").json()["history"]
+    assert len(h) == 3 and h[0]["ref"] == "#/lab?ra=9&dec=9&band=2"
     uid = c.get("/api/me").json()["user"]["id"]
     accounts.get(st).db.notify(uid, "status", "Finding x: the status is now “candidate”.", "x")
     n = c.get("/api/me/notifications").json()
@@ -308,5 +321,5 @@ def test_google_sign_in_with_a_fake_google(site: tuple[FastAPI, _State, _Mail], 
     state = re.search(r"state=([^&]+)", r.headers["location"]).group(1)  # type: ignore[union-attr]
     assert c.get("/api/auth/google/callback", params={"code": "the-code", "state": "forged"}).headers["location"].endswith("signin=google")
     r = c.get("/api/auth/google/callback", params={"code": "the-code", "state": state})
-    assert r.headers["location"] == "http://localhost/#/me"
+    assert r.headers["location"] == "/#/me"
     assert c.get("/api/me").json()["user"] == {"id": c.get("/api/me").json()["user"]["id"], "name": "Ann K.", "email": "ann@example.org"}

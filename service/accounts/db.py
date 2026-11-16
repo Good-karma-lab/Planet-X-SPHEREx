@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS acc_history (
   kind TEXT NOT NULL,
   ref TEXT NOT NULL,
   title TEXT NOT NULL DEFAULT '',
+  key TEXT NOT NULL,
   at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS acc_history_user ON acc_history(user_id, at);
@@ -395,13 +396,17 @@ class AccountsDB:
         rows = self._conn().execute("SELECT * FROM acc_history WHERE user_id=? ORDER BY at DESC, id DESC LIMIT ?", (user_id, limit))
         return [{"id": r["id"], "kind": r["kind"], "ref": r["ref"], "title": r["title"], "at": iso(r["at"])} for r in rows]
 
-    def add_history(self, user_id: str, kind: str, ref: str, title: str) -> None:
-        """The same place opened again moves to the top instead of filling the list."""
+    def add_history(self, user_id: str, kind: str, ref: str, title: str, key: str | None = None) -> None:
+        """The same place opened again moves to the top instead of filling the list. `key` names the place when the link to it
+        changes while the user works there (the lab's address carries the display state); without it the link is the place."""
         c = self._conn()
         now = time.time()
-        cur = c.execute("UPDATE acc_history SET at=?, title=?, kind=? WHERE user_id=? AND ref=?", (now, title, kind, user_id, ref))
+        key = key or ref
+        cur = c.execute(
+            "UPDATE acc_history SET at=?, title=?, kind=?, ref=? WHERE user_id=? AND key=?", (now, title, kind, ref, user_id, key)
+        )
         if cur.rowcount == 0:
-            c.execute("INSERT INTO acc_history(user_id,kind,ref,title,at) VALUES(?,?,?,?,?)", (user_id, kind, ref, title, now))
+            c.execute("INSERT INTO acc_history(user_id,kind,ref,title,key,at) VALUES(?,?,?,?,?,?)", (user_id, kind, ref, title, key, now))
             c.execute(
                 "DELETE FROM acc_history WHERE user_id=? AND id NOT IN (SELECT id FROM acc_history WHERE user_id=? ORDER BY at DESC LIMIT ?)",
                 (user_id, user_id, MAX_HISTORY),
