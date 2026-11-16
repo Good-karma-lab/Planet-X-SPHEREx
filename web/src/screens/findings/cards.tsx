@@ -44,6 +44,7 @@ export const KIND_ONE: Record<string, string> = {
   pair: 'Pair changing',
   film: 'Time-lapse track',
   peak: 'Planet X peak',
+  submitted: 'Found by a person',
 };
 
 const clean = (n: string) => cleanName(n);
@@ -75,6 +76,63 @@ export function checkHref(f: CardFind): string {
     ? { ra: fp.ra.toFixed(5), dec: fp.dec.toFixed(5), fov: String(fp.fov), find: f.id, find_ra: f.ra.toFixed(5), find_dec: f.dec.toFixed(5) }
     : { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id, find_ra: f.ra.toFixed(5), find_dec: f.dec.toFixed(5) };
   return formatHash({ screen: 'lab', params: { ...base, task: 'finding', finding: f.id } });
+}
+
+/** "Check this finding": the task is taken from the service (it is kept for a signed-in user), then the lab opens with it. Without the
+ *  accounts of the service, or when it does not answer in two seconds, the lab opens with the find alone. */
+async function takeTask(f: CardFind): Promise<void> {
+  let href = checkHref(f);
+  try {
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), 2000);
+    const r = await fetch(`/api/tasks/next?kind=finding&finding_id=${encodeURIComponent(f.id)}`, { signal: ctl.signal, credentials: 'same-origin' });
+    clearTimeout(t);
+    if (r.ok) {
+      const b = (await r.json()) as { task?: { id?: string } | null };
+      if (b.task?.id) href += `&task_id=${encodeURIComponent(b.task.id)}`;
+    }
+  } catch {
+    // no accounts here: the find alone
+  }
+  location.hash = href;
+}
+
+/** A finding a person submitted (`GET /api/findings/submitted`, the accounts of the service) as a card: its picture is the time-lapse of its place. */
+export interface Submitted {
+  finding_id: string;
+  status?: string;
+  title?: string;
+  ra?: number;
+  dec?: number;
+  created?: string;
+  credit?: { name: string; role: string }[];
+}
+export function submittedCard(s: Submitted): CardFind {
+  const names = (s.credit ?? []).map((c) => c.name);
+  const stage = (s.status && s.status in STAGE_LABEL ? s.status : 'submitted') as CardFind['stage'];
+  const has = s.ra != null && s.dec != null;
+  return {
+    id: s.finding_id,
+    kind: 'submitted',
+    place: s.created ? s.created.slice(0, 10) : '',
+    fov: 20,
+    ra: s.ra ?? 0,
+    dec: s.dec ?? 0,
+    rate: null,
+    snr: null,
+    score: null,
+    status: s.status ?? 'submitted',
+    verdict: '',
+    stage,
+    promise: 0,
+    viewers: (s.credit ?? []).filter((c) => c.role === 'checked').length,
+    credit: { found_by: names[0] ?? 'a person', machine: false, first_marked_by: names[0] ?? null, checked_by: (s.credit ?? []).filter((c) => c.role === 'checked').map((c) => c.name), looks: {} },
+    clip: has ? { url: `/api/clips/place.webp?ra=${s.ra!.toFixed(4)}&dec=${s.dec!.toFixed(4)}&size=320&ring=1`, state: 'waiting' } : null,
+    name: s.title ?? 'Submitted finding',
+    field: null,
+    group: null,
+    passes: null,
+  };
 }
 
 // ---- clips: only what is on screen is loaded and plays; a few are asked for at a time (a clip not made yet is rendered by the request)
@@ -181,9 +239,11 @@ export function FindCard({ f, onOpen, current }: { f: CardFind; onOpen: (id: str
       <button class="fcard-pic" onClick={() => onOpen(f.id)} title="Open the report of this finding" aria-label={`Open the report: ${cardTitle(f)}`}>
         <Clip f={f} />
         <span class={`badge ${STAGE_BADGE[f.stage] ?? ''} fcard-stage`}>{STAGE_LABEL[f.stage] ?? f.stage}</span>
-        <span class="fcard-promise" title="Promise, 0 to 100: what to look at first (Method, findings)">
-          {f.promise}
-        </span>
+        {f.kind !== 'submitted' && (
+          <span class="fcard-promise" title="Promise, 0 to 100: what to look at first (Method, findings)">
+            {f.promise}
+          </span>
+        )}
       </button>
       <div class="fcard-body">
         <b class="fcard-title" title={cardTitle(f)}>
@@ -205,7 +265,14 @@ export function FindCard({ f, onOpen, current }: { f: CardFind; onOpen: (id: str
           {by}
           {checked}
         </span>
-        <a class="btn sm primary fcard-go" href={checkHref(f)}>
+        <a
+          class="btn sm primary fcard-go"
+          href={checkHref(f)}
+          onClick={(e) => {
+            e.preventDefault();
+            void takeTask(f);
+          }}
+        >
           Check this finding
         </a>
       </div>

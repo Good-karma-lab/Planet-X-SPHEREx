@@ -3,7 +3,7 @@ import { formatHash } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
 import { parseSxp, halfToFloat } from '../../lib/sxp';
 import { ATLAS_LEAD, LeadPanel } from './leads';
-import { FindCard, STAGE_LABEL, type CardFind } from './cards';
+import { FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
 
 export interface Ident {
   catalogue: string;
@@ -380,7 +380,7 @@ interface CardReply {
   identification: { pending: number; unavailable_decisive?: number };
   finds: CardFind[];
 }
-type KindSel = 'promising' | 'mover' | 'browndwarf' | 'peak' | 'film' | 'pair' | 'red' | 'anomaly';
+type KindSel = 'submitted' | 'promising' | 'mover' | 'browndwarf' | 'peak' | 'film' | 'pair' | 'red' | 'anomaly';
 type StageSel = 'any' | 'waiting' | 'new' | 'in_review' | 'submitted' | 'candidate' | 'confirmed' | 'known';
 const PAGE = 48;
 const PROMISING = ['mover', 'browndwarf', 'peak', 'film', 'pair'];
@@ -393,6 +393,18 @@ function useCards(kind: KindSel, stage: StageSel) {
   const load = (reset: boolean) => {
     if (busy.current && !reset) return;
     busy.current = true;
+    if (kind === 'submitted') {
+      // what people submitted (the accounts of the service): a short list, all at once
+      setState({ key, head: state.head, finds: [], done: false, loading: true, failed: false });
+      fetch('/api/findings/submitted')
+        .then((r) => (r.ok ? (r.json() as Promise<{ findings: Submitted[] }>) : Promise.reject(new Error(String(r.status)))))
+        .then((d) => setState((s) => (s.key !== key ? s : { ...s, finds: d.findings.map(submittedCard), done: true, loading: false })))
+        .catch(() => setState((s) => (s.key === key ? { ...s, loading: false, failed: true, done: true } : s)))
+        .finally(() => {
+          busy.current = false;
+        });
+      return;
+    }
     const offset = reset ? 0 : state.finds.length;
     const q = new URLSearchParams({ lite: '1', sort: 'promise', status: 'all', limit: String(PAGE), offset: String(offset) });
     if (kind === 'promising') q.set('kinds', PROMISING.join(','));
@@ -448,6 +460,14 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   const [stage, setStage] = useState<StageSel>('any');
   const cards = useCards(kind, stage);
   const sel = useFind(leadId);
+  // findings submitted by people: the button is there only when the service has accounts and somebody has submitted one
+  const [people, setPeople] = useState(0);
+  useEffect(() => {
+    void fetch('/api/findings/submitted')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { findings?: unknown[] } | null) => setPeople(d?.findings?.length ?? 0))
+      .catch(() => {});
+  }, []);
   const end = useRef<HTMLDivElement>(null);
   const more = useRef(cards.more);
   more.current = cards.more;
@@ -460,7 +480,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   }, [cards.finds.length, cards.done]);
   const h = cards.head;
   const atlas = leadId === ATLAS_LEAD.id;
-  const cnt = (k: KindSel) => (!h ? null : k === 'promising' ? h.promising : (h.counts[k]?.all ?? 0));
+  const cnt = (k: KindSel) => (!h || k === 'submitted' ? null : k === 'promising' ? h.promising : (h.counts[k]?.all ?? 0));
   const kinds: [KindSel, string][] = [
     ['promising', 'Promising'],
     ['mover', KIND_SHORT.mover!],
@@ -487,6 +507,11 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
     <>
       <section class="card glass fbar">
         <div class="fkinds" role="group" aria-label="Kind">
+          {people > 0 && (
+            <button class={kind === 'submitted' ? 'on' : ''} aria-pressed={kind === 'submitted'} onClick={() => setKind('submitted')}>
+              Found by people <span>{people}</span>
+            </button>
+          )}
           {kinds.map(([k, l]) => chip(k, l))}
           <span class="fsep" aria-hidden="true" />
           {more2.map(([k, l]) => chip(k, l))}
@@ -501,7 +526,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
             ))}
         </div>
         <p class="hint leadcount">
-          {h ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery` : 'reading the findings…'}
+          {kind === 'submitted' ? `${cards.finds.length} findings submitted by people` : h ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery` : 'reading the findings…'}
           {h && h.identification.pending > 0 && ` · identifying: ${h.identification.pending} catalogue answers to come`}
         </p>
       </section>
