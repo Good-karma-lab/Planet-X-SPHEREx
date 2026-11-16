@@ -1,10 +1,12 @@
 // The Coverage layer of the globe: the fixed grid of 20′ squares the machine searches, drawn over any background and coloured by
 // what has happened to each square (searched by the machine, viewed by people, has finds, being searched).
 //
-// The grid is the service's scheme `dec20` (service/grid.py): 540 declination bands 20′ high from the south pole; band b is split
-// into max(1, round(360·cos(dec_mid)·3)) equal steps of right ascension from RA 0; a square's id is "{band:03d}-{col:04d}".
-// `GET /api/grid/coverage` lists every square that is not new by id only, so the places of the squares are worked out here from the
-// same scheme (the unit test checks it against corners the API gave). The card of a square is `GET /api/grid/cell/{id}`.
+// One source for the grid: the service. The squares that are not new come from `GET /api/grid/coverage?corners=1` with their centres and
+// corners, and are drawn from those. The lattice itself (the thin frames of the new squares when zoomed in, the square under a click) is
+// built from the numbers `GET /api/grid/meta` gives in `scheme_params` (band height, number of bands, the first declination); the one
+// rule kept here is the scheme's column count, max(1, round(360·cos(dec_mid) / cell_deg)) equal steps of right ascension from RA 0,
+// with ids "{band:03d}-{col:04d}". A scheme of another name switches the grid list off (the list of searched fields stands in). The
+// unit test checks the lattice against corners the API gave. The card of a square is `GET /api/grid/cell/{id}`.
 //
 // Readable at every zoom: where a square is 22 px or more on screen its real outline is drawn (every square, new ones as a thin
 // frame); below that the squares that are not new are gathered into blocks of 2×2, 4×4, … squares, each block at least 12 px on
@@ -13,9 +15,11 @@
 
 import { D2R } from '../../lib/sky';
 
-export const CELL_DEG = 1 / 3;
-export const N_BANDS = 540;
 export const SCHEME = 'dec20';
+/** The numbers of the scheme; the values of `scheme_params` replace them when /api/grid/meta has answered. */
+export let CELL_DEG = 1 / 3;
+export let N_BANDS = 540;
+let DEC0 = -90;
 
 export type CellState = 'new' | 'queued' | 'searching' | 'searched' | 'failed';
 export interface CovCell {
@@ -23,6 +27,10 @@ export interface CovCell {
   state: CellState;
   finds: number;
   viewers: number;
+  /** from the API (`corners=1`): the centre and the four corners, SW, SE, NE, NW */
+  ra?: number;
+  dec?: number;
+  corners?: [number, number][];
 }
 /** The card of one square (`GET /api/grid/cell/{id}`); `finds` are finding ids. */
 export interface CellCard {
@@ -44,9 +52,26 @@ const roundEven = (x: number): number => {
   const r = Math.round(x);
   return Math.abs(x - Math.trunc(x)) === 0.5 && r % 2 !== 0 ? r - 1 : r;
 };
-const COLS: number[] = Array.from({ length: N_BANDS }, (_, b) => Math.max(1, roundEven((360 * Math.cos((-90 + (b + 0.5) * CELL_DEG) * D2R)) / CELL_DEG)));
+const colsOf = (): number[] => Array.from({ length: N_BANDS }, (_, b) => Math.max(1, roundEven((360 * Math.cos((DEC0 + (b + 0.5) * CELL_DEG) * D2R)) / CELL_DEG)));
+let COLS: number[] = colsOf();
 export const nCols = (band: number): number => COLS[band]!;
-export const TOTAL = COLS.reduce((s, n) => s + n, 0);
+export let TOTAL = COLS.reduce((s, n) => s + n, 0);
+/** Takes the scheme's numbers from /api/grid/meta (`scheme_params`); false when it is a scheme this layer cannot draw. */
+export function setScheme(p: { name?: unknown; cell_deg?: unknown; n_bands?: unknown; dec0?: unknown } | null | undefined): boolean {
+  if (!p) return true; // a service that gives no numbers: the scheme named dec20 as it is known here
+  const cell = Number(p.cell_deg);
+  const bands = Number(p.n_bands);
+  const dec0 = Number(p.dec0);
+  if (p.name !== SCHEME || !(cell > 0) || !Number.isInteger(bands) || bands < 1 || bands > 100000 || !Number.isFinite(dec0)) return false;
+  if (cell !== CELL_DEG || bands !== N_BANDS || dec0 !== DEC0) {
+    CELL_DEG = cell;
+    N_BANDS = bands;
+    DEC0 = dec0;
+    COLS = colsOf();
+    TOTAL = COLS.reduce((s, n) => s + n, 0);
+  }
+  return true;
+}
 
 export const cellId = (band: number, col: number): string => `${String(band).padStart(3, '0')}-${String(col).padStart(4, '0')}`;
 export function parseId(id: string): { band: number; col: number } | null {
@@ -56,7 +81,7 @@ export function parseId(id: string): { band: number; col: number } | null {
   const col = Number(m[2]);
   return band < N_BANDS && col < COLS[band]! ? { band, col } : null;
 }
-export const bandOf = (dec: number): number => Math.min(N_BANDS - 1, Math.max(0, Math.floor((dec + 90) / CELL_DEG)));
+export const bandOf = (dec: number): number => Math.min(N_BANDS - 1, Math.max(0, Math.floor((dec - DEC0) / CELL_DEG)));
 /** The square a sky place lies in. */
 export function cellAt(ra: number, dec: number): { band: number; col: number } {
   const band = bandOf(dec);
@@ -66,7 +91,7 @@ export function cellAt(ra: number, dec: number): { band: number; col: number } {
 /** The edges of a square, degrees (ra1 may be 360). */
 export function cellBox(band: number, col: number): { ra0: number; ra1: number; dec0: number; dec1: number } {
   const w = 360 / COLS[band]!;
-  return { ra0: col * w, ra1: (col + 1) * w, dec0: -90 + band * CELL_DEG, dec1: -90 + (band + 1) * CELL_DEG };
+  return { ra0: col * w, ra1: (col + 1) * w, dec0: DEC0 + band * CELL_DEG, dec1: DEC0 + (band + 1) * CELL_DEG };
 }
 export function cellCentre(band: number, col: number): { ra: number; dec: number } {
   const b = cellBox(band, col);
@@ -115,8 +140,8 @@ export function fromSearched(fields: { ra: number; dec: number; state: string; f
 export function loadCoverage(fresh = false): Promise<Coverage | null> {
   if (req && !fresh) return req;
   const mine: Promise<Coverage | null> = (async () => {
-    const [cov, meta] = await Promise.all([getJson('/api/grid/coverage'), getJson('/api/grid/meta')]);
-    if (cov && Array.isArray(cov['cells']) && (!meta || meta['scheme'] === SCHEME)) {
+    const [cov, meta] = await Promise.all([getJson('/api/grid/coverage?corners=1'), getJson('/api/grid/meta')]);
+    if (cov && Array.isArray(cov['cells']) && (!meta || (meta['scheme'] === SCHEME && setScheme(meta['scheme_params'] as Parameters<typeof setScheme>[0])))) {
       const cells = new Map<string, CovCell>();
       for (const c of cov['cells'] as CovCell[]) if (parseId(c.id)) cells.set(c.id, c);
       const counts = (meta?.['counts'] as Coverage['counts']) ?? null;
@@ -231,7 +256,7 @@ function blockAt(k: number, ra: number, dec: number): { key: string; ra0: number
   const n = Math.max(1, Math.round(COLS[mid]! / k));
   const w = 360 / n;
   const c = Math.floor((((ra % 360) + 360) % 360) / w) % n;
-  return { key: `${g}-${c}`, ra0: c * w, ra1: (c + 1) * w, dec0: -90 + b0 * CELL_DEG, dec1: -90 + b1 * CELL_DEG };
+  return { key: `${g}-${c}`, ra0: c * w, ra1: (c + 1) * w, dec0: DEC0 + b0 * CELL_DEG, dec1: DEC0 + b1 * CELL_DEG };
 }
 let blocksOf: { k: number; version: number; blocks: Map<string, Block> } | null = null;
 function blocks(cov: Coverage, k: number): Map<string, Block> {
@@ -241,7 +266,7 @@ function blocks(cov: Coverage, k: number): Map<string, Block> {
     const kind = kindOf(c);
     const p = parseId(c.id);
     if (!kind || !p) continue;
-    const ce = cellCentre(p.band, p.col);
+    const ce = c.ra != null && c.dec != null ? { ra: c.ra, dec: c.dec } : cellCentre(p.band, p.col);
     const b = blockAt(k, ce.ra, ce.dec);
     const old = out.get(b.key);
     if (!old) out.set(b.key, { ra0: b.ra0, ra1: b.ra1, dec0: b.dec0, dec1: b.dec1, n: 1, kind, best: c.id, bestFinds: c.finds });
@@ -360,7 +385,7 @@ export function drawCoverage(ctx: CanvasRenderingContext2D, cov: Coverage | null
     for (let band = b0; band <= b1; band++) {
       const n = COLS[band]!;
       const w = 360 / n;
-      const d0 = -90 + band * CELL_DEG;
+      const d0 = DEC0 + band * CELL_DEG;
       const cosd = Math.max(0.01, Math.cos(Math.min(89.9, Math.abs(d0 + CELL_DEG / 2)) * D2R));
       const span = v.radius / cosd + w;
       const all = span >= 180 || Math.abs(v.dec) + v.radius >= 89.5;
@@ -404,11 +429,14 @@ export function drawCoverage(ctx: CanvasRenderingContext2D, cov: Coverage | null
         const c = cov?.cells.get(id);
         const kind = c ? kindOf(c) : null;
         if (kind) {
+          // a square that is not new is drawn at the corners the API gave
+          const q = c?.corners?.length === 4 ? c.corners.map(([ra, de]) => v.project(ra, de)) : null;
+          const [a0, a1, a2, a3] = q && q.every((t) => t[2]) ? q : [p00, p10, p11, p01];
           ctx.beginPath();
-          ctx.moveTo(p00[0], p00[1]);
-          ctx.lineTo(p10[0], p10[1]);
-          ctx.lineTo(p11[0], p11[1]);
-          ctx.lineTo(p01[0], p01[1]);
+          ctx.moveTo(a0![0], a0![1]);
+          ctx.lineTo(a1![0], a1![1]);
+          ctx.lineTo(a2![0], a2![1]);
+          ctx.lineTo(a3![0], a3![1]);
           ctx.closePath();
           // the larger a square is on screen, the lighter its fill: zoomed in, the sky under it must stay readable
           ctx.globalAlpha = (kind === 'searching' ? 0.14 : 0.3) * Math.max(0.2, Math.min(1, 48 / v.cellPx));
