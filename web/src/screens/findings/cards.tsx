@@ -22,6 +22,9 @@ export interface CardFind {
   credit: { found_by: string; machine: boolean; first_marked_by: string | null; checked_by: string[]; looks: Record<string, number> };
   clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string; still?: string; blink?: string[] | null; note?: string } | null;
   name: string | null;
+  /** is the object visible in its own picture (S/N in the ring of 3 or more)? null: the picture is not made yet */
+  visible?: boolean | null;
+  visible_sn?: number | null;
   /** what the review of the clips saw, when it looks like an artefact (a note, not a status) */
   note?: string | null;
   field: { ra: number; dec: number; fov: number } | null;
@@ -259,6 +262,11 @@ export function FindCard({ f, onOpen, current, mine = false }: { f: CardFind; on
             {looks ? `${looks} ${looks === 1 ? 'look' : 'looks'}` : f.stage === 'new' ? 'waiting for a look' : 'no looks yet'}
           </span>
           {mine && <span class="fcard-mine">viewed by me</span>}
+          {f.visible_sn != null && (
+            <span class={f.visible ? '' : 'wait'} title="How far the brightest point inside the ring stands above the noise of this picture">
+              S/N {f.visible_sn.toFixed(1)} in the ring
+            </span>
+          )}
         </span>
         {f.kind === 'peak' && f.clip?.state === 'ready' && !f.clip.blink && <span class="mono-s fcard-sub">the sum along the orbit is not kept here: the passes alone are shown</span>}
         {f.note && (
