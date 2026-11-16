@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import secrets
 import sqlite3
 import threading
@@ -131,12 +130,6 @@ MAX_HISTORY = 500
 MAX_INVESTIGATIONS = 500
 #: the statuses of a finding (docs: product spec §3)
 STATUSES = ("new", "in_review", "submitted", "known", "artefact", "candidate", "confirmed")
-
-
-def product_db_path(store_dir: Path) -> Path:
-    """`SKY_PRODUCT_DB`, else `<store>/product.sqlite` (the same rule as service.storage.product_db_path of the grid stream)."""
-    env = os.environ.get("SKY_PRODUCT_DB")
-    return Path(env).resolve() if env else Path(store_dir) / "product.sqlite"
 
 
 def iso(t: float | None) -> str | None:

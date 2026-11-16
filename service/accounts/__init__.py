@@ -15,9 +15,10 @@ from urllib.parse import urlparse
 
 from fastapi import FastAPI, HTTPException, Request
 
-from service.accounts.db import AccountsDB, product_db_path
+from service.accounts.db import AccountsDB
 from service.accounts.mail import LogSender, MailSender
 from service.ratelimit import Buckets, client_id
+from service.storage import product_db_path
 
 COOKIE = "sx_session"
 OAUTH_COOKIE = "sx_oauth"
