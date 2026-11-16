@@ -16,13 +16,17 @@
                    without one, the single-exposure source table along the straight path of the marks carried back
 
 Each check answers `pass` | `warn` | `fail` | `no_answer` with one plain sentence; a catalogue or archive that did not answer is
-`no_answer`, never `pass`. `can_submit` is true only when every check has answered and none failed. Finished jobs are kept on disk; a
-job asked again runs its `no_answer` checks again.
+`no_answer`, never `pass`. `can_submit` is true only when every check has answered and none failed. The quick checks answer first; when
+one of them fails the NEOWISE archive is not asked. A check has a time limit (no answer in time is `no_answer`); checks without an
+answer are run again by the job itself every RETRY_S (`next_try_at` in the body), and by anyone posting the same request. Jobs are
+kept on disk from their start: `resume()` at the service's start runs the interrupted ones again. When a job reaches its final
+state `st.on_checks_done(body)` is called if set.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import csv
 import importlib
 import io
@@ -30,6 +34,7 @@ import json
 import math
 import time
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -64,6 +69,10 @@ NEOWISE_MIN_EPOCHS = 3
 NEOWISE_FROM, NEOWISE_TO = 2014.0, 2024.6
 IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 MAX_MARKS = 40
+QUICK = ("two_passes", "straight_line", "gaia", "simbad", "edge_bright", "above_bar")  # answered first, within seconds
+LIMIT_S = {"jpl": 1800.0, "neowise": 5400.0}  # a check that takes longer ends in no_answer
+QUICK_LIMIT_S = 180.0
+RETRY_S, MAX_TRIES = 600.0, 12  # checks without an answer are run again by the job itself this often, this many times
 FAST_MIN_VISITS = 3  # a fast mover (inside one pass) needs this many dated visits
 FAST_CURVE_MIN_VISITS = 5  # a curved path is taken (with a warning) only with this many visits
 ORBIT_RMS_MAX = 2.0  # the track search's own limit for a track fitted by an orbit (engine.filmsearch.RMS_MAX)
@@ -466,7 +475,12 @@ class Job:
         self.started = time.time()
         self.seconds: float | None = None
         self.field = ""  # the store key the request's field resolved to
+        self.tries = 0
+        self.next_try_at: float | None = None  # when the checks without an answer are run again (epoch seconds)
         self.task: asyncio.Task[None] | None = None
+
+    def kept(self) -> dict[str, Any]:
+        return {"seconds": self.seconds, "field": self.field, "state": self.state, "tries": self.tries}
 
     def view(self) -> dict[str, Any]:
         checks = [dict(self.checks[c]) for c in CHECK_IDS]
@@ -482,6 +496,9 @@ class Job:
             "checks": checks,
             "can_submit": bool(self.state == "done" and answered and not any(c["state"] == "fail" for c in checks)),
             "needs_comment": [c["id"] for c in checks if c["state"] == "warn"],
+            "next_try_at": None
+            if self.next_try_at is None
+            else datetime.fromtimestamp(self.next_try_at, UTC).isoformat(timespec="seconds"),
             "seconds": round(time.time() - self.started, 1) if self.state == "running" else self.seconds,
         }
 
@@ -496,6 +513,8 @@ class Checks:
         self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(120, connect=10), headers={"User-Agent": "spherex-sky/0.1"})
         self.jobs: dict[str, Job] = {}
         self.orbit_check: Callable[..., dict[str, Any]] = checks_neowise.orbit_check
+        self.auto_retry = True
+        self.retries: set[asyncio.Task[None]] = set()
 
     # ---- jobs -------------------------------------------------------------------------------------------------------------------------
     def _load(self, job_id: str) -> Job | None:
@@ -505,21 +524,31 @@ class Checks:
             return None
         job = Job(job_id, kept["request"])
         job.checks = {c: kept["checks"].get(c) or job.checks[c] for c in CHECK_IDS}
-        job.state, job.seconds, job.field = "done", kept.get("seconds"), kept.get("field", "")
+        job.state, job.seconds, job.field, job.tries = "done", kept.get("seconds"), kept.get("field", ""), int(kept.get("tries") or 0)
+        if kept.get("state") == "running":  # the service stopped while it ran: the checks that were running have no answer yet
+            for c in CHECK_IDS:
+                if job.checks[c]["state"] not in ANSWERED:
+                    job.checks[c] = {"id": c, "state": "no_answer", "detail": "The service restarted while this check ran: run again."}
         return job
 
     def _keep(self, job: Job) -> None:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{job.id}.part"
-            tmp.write_text(
-                json.dumps(
-                    {"request": job.request, "checks": job.checks, "seconds": job.seconds, "field": job.field}, separators=(",", ":")
-                )
-            )
+            tmp.write_text(json.dumps({**job.kept(), "request": job.request, "checks": job.checks}, separators=(",", ":")))
             tmp.replace(self.dir / f"{job.id}.json")
         except OSError:
             pass
+
+    def resume(self) -> int:
+        """Called when the service starts (inside its loop): jobs on disk with checks that have no answer are run again."""
+        n = 0
+        for path in sorted(self.dir.glob("*.json")) if self.dir.is_dir() else []:
+            job = self.get(path.stem)
+            if job is not None and job.tries < MAX_TRIES and any(job.checks[c]["state"] not in ANSWERED for c in CHECK_IDS):
+                self.start(job.request)
+                n += 1
+        return n
 
     def get(self, job_id: str) -> Job | None:
         job = self.jobs.get(job_id) or self._load(job_id)
@@ -538,7 +567,9 @@ class Checks:
         if todo and (job.task is None or job.task.done()):
             for c in todo:
                 job.checks[c] = {"id": c, "state": "running", "detail": ""}
-            job.state, job.started = "running", time.time()
+            job.state, job.started, job.next_try_at = "running", time.time(), None
+            job.tries += 1
+            self._keep(job)  # a job that the service's restart interrupts is found again
             job.task = asyncio.get_running_loop().create_task(self._run(job, todo))
         return job
 
@@ -628,17 +659,47 @@ class Checks:
         }
 
         async def one(cid: str) -> None:
+            limit = LIMIT_S.get(cid, QUICK_LIMIT_S)
             try:
-                state, detail = await runners[cid]()
+                state, detail = await asyncio.wait_for(runners[cid](), limit)
+            except TimeoutError:
+                state, detail = "no_answer", f"No answer within {limit / 60.0:.0f} minutes: the check was stopped and is run again later."
             except Exception as e:  # a check that broke has not answered: said, and run again when asked again
                 why = (str(e).splitlines() or [""])[0][:100]
                 state, detail = "no_answer", f"The check could not be made ({type(e).__name__}: {why}): run again."
             job.checks[cid] = {**{k: v for k, v in job.checks[cid].items() if k == "result"}, "id": cid, "state": state, "detail": detail}
 
-        await asyncio.gather(*(one(c) for c in todo))
+        # the quick checks first: they are in the body within seconds; JPL is asked meanwhile
+        slow = asyncio.gather(*(one(c) for c in todo if c == "jpl"))
+        await asyncio.gather(*(one(c) for c in todo if c in QUICK))
+        failed = [c for c in QUICK if job.checks[c]["state"] == "fail"]
+        if "neowise" in todo:
+            if failed and not req.get("orbit"):  # an early fail blocks the submit anyway: the archive is not asked
+                why = f"Not run: {', '.join(failed)} failed, which blocks the submit; the archive is asked once that is cleared."
+                job.checks["neowise"] = {"id": "neowise", "state": "no_answer", "detail": why, "skipped": True}
+            else:
+                await one("neowise")
+        await slow
         job.seconds = round(time.time() - job.started, 1)
         job.state = "done"
+        waiting = [c for c in CHECK_IDS if job.checks[c]["state"] == "no_answer" and not job.checks[c].get("skipped")]
+        if waiting and self.auto_retry and job.tries < MAX_TRIES:
+            job.next_try_at = time.time() + RETRY_S
+            for c in waiting:
+                job.checks[c]["next_try_at"] = datetime.fromtimestamp(job.next_try_at, UTC).isoformat(timespec="seconds")
+
+            async def again() -> None:
+                await asyncio.sleep(RETRY_S)
+                self.start(job.request)
+
+            t = asyncio.get_running_loop().create_task(again())
+            self.retries.add(t)
+            t.add_done_callback(self.retries.discard)
         await asyncio.to_thread(self._keep, job)
+        hook = getattr(self.st, "on_checks_done", None)
+        if hook is not None and job.next_try_at is None:  # the final state: nothing more is tried by the job itself
+            with contextlib.suppress(Exception):  # the hook is the accounts stream's: its failure is not the job's
+                hook(job.view())
 
     def _resolve(self, req: dict[str, Any]) -> str:
         """The store key of the request's field. `field_key` is a store key, or the lab's "ra,dec,fov": the stored field of that size
