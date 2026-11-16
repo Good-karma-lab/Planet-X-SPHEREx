@@ -73,6 +73,14 @@ STANDBY = os.environ.get("SKY_STANDBY", "0") == "1"
 LIGHTCURVES_WAIT_S = 3.0  # IRSA may take a minute for NEOWISE: the light curves route answers within this, the rest `pending`
 
 
+def _register_flow_known_checks(app: FastAPI, st: Any) -> None:  # FLOW-B2: remove at integration
+    from service.routes_checks import make_checks_router
+    from service.routes_known_field import make_known_field_router
+
+    app.include_router(make_known_field_router(st))
+    app.include_router(make_checks_router(st))
+
+
 class State:
     def __init__(self, cfg: Config) -> None:
         self.cfg = cfg
@@ -490,6 +498,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     # the searches' own routes: what else is known at a place, comets and asteroids, the movers route with pairs, Find Planet X
     app.include_router(make_router(st))
     app.include_router(make_known_router(st))
+    _register_flow_known_checks(app, st)  # FLOW-B2 (flow-known-checks): /api/known and /api/checks; the integrator resolves this line
     app.include_router(make_pairs_router(st))
     app.include_router(make_dwarfs_router(st))
     app.include_router(make_searched_router(st))
