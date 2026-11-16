@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 from typing import Any
 
@@ -49,6 +50,8 @@ def checks_of(st: Any) -> Checks:
     if ch is None:
         ch = Checks(st, known_field_of(st))
         st.checks = ch
+        with contextlib.suppress(RuntimeError):  # no running loop (a test building the state): nothing to resume
+            ch.resume()  # jobs a restart interrupted; the integrator may also call this from the app's start-up
     return ch
 
 

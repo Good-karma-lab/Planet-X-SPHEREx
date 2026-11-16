@@ -163,10 +163,12 @@ def make(tmp_path: Path, known: Any, irsa: str = "ra,dec,mjd\n", result: dict[st
     movers = SimpleNamespace(key_of=lambda k: "m" + k)
     st = SimpleNamespace(cfg=SimpleNamespace(store_dir=tmp_path), store=store, movers=movers, index=index)
     if result is not None:
-        (tmp_path / "movers").mkdir(exist_ok=True)
+        (tmp_path / "movers").mkdir(parents=True, exist_ok=True)
         (tmp_path / "movers" / "mf1.json").write_text(json.dumps(result))
     client = httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200, text=irsa)))
-    return ck.Checks(st, known, client)
+    c = ck.Checks(st, known, client)
+    c.auto_retry = False  # a test ends with its loop: no retry left sleeping
+    return c
 
 
 async def finished(job: ck.Job) -> dict[str, Any]:
@@ -191,6 +193,10 @@ async def test_job_on_a_known_star_cannot_be_submitted(tmp_path: Path, monkeypat
     got = states(view)
     assert got["gaia"] == "fail" and got["two_passes"] == "pass" and got["straight_line"] == "pass" and got["jpl"] == "pass"
     assert got["edge_bright"] == "fail" and got["simbad"] == "pass" and got["above_bar"] == "warn"
+    # an early fail: the archive is not asked at all
+    assert got["neowise"] == "no_answer" and "Not run: gaia, edge_bright failed" in next(
+        x["detail"] for x in view["checks"] if x["id"] == "neowise"
+    )
     assert view["state"] == "done" and view["can_submit"] is False
     # kept on disk: another instance has the same answers under the same job id
     again = make(tmp_path, known).get(job.id)
@@ -313,6 +319,42 @@ async def test_fast_mover_job(tmp_path: Path) -> None:
     known = FakeKnown({"state": "ok", "rows": [FAINT]}, {"state": "ok", "rows": []}, [body])
     view = await finished(make(tmp_path / "b", known).start({"field_key": "", "ra": 269.4, "dec": 4.7, "marks": marks}))
     assert states(view)["jpl"] == "fail" and view["can_submit"] is False
+
+
+@sync
+async def test_hook_restart_and_time_limit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    marks = moving_marks()
+    known = FakeKnown({"state": "ok", "rows": [FAINT]}, {"state": "ok", "rows": []}, [])
+    c = make(tmp_path, known, result={"tracks": []})
+    done: list[dict[str, Any]] = []
+    c.st.on_checks_done = done.append
+    request = {"field_key": "f1", "ra": 269.4, "dec": 4.7, "marks": marks}
+    job = c.start(request)
+    # on disk from the start: a service that stops now finds the job again, its running checks without an answer, and resumes it
+    other = make(tmp_path, known, result={"tracks": []})
+    found = other.get(job.id)
+    assert found is not None and found.view()["state"] == "done" and "restarted" in found.checks["neowise"]["detail"]
+    view = await finished(job)
+    assert [d["job"] for d in done] == [job.id] and done[0]["state"] == "done" and view["can_submit"] is True
+    third = make(tmp_path, known, result={"tracks": []})
+    assert third.resume() == 0  # everything answered: nothing to run again
+    # a check that does not answer in time ends in no_answer, and the job says when it tries again
+    monkeypatch.setattr(ck, "QUICK_LIMIT_S", 0.05)
+
+    class Slow(FakeKnown):
+        async def gaia(self, *a: Any) -> dict[str, Any]:
+            await asyncio.sleep(5.0)
+            return self._gaia
+
+    slow = make(tmp_path / "s", Slow({"state": "ok", "rows": []}, {"state": "ok", "rows": []}, []), result={"tracks": []})
+    slow.auto_retry = True
+    monkeypatch.setattr(ck, "RETRY_S", 3600.0)
+    view = await finished(slow.start(request))
+    assert states(view)["gaia"] == "no_answer" and "No answer within" in next(x["detail"] for x in view["checks"] if x["id"] == "gaia")
+    assert view["next_try_at"] and view["can_submit"] is False
+    for t in list(slow.retries):
+        t.cancel()
+    await asyncio.gather(*slow.retries, return_exceptions=True)
 
 
 def test_routes(tmp_path: Path) -> None:
