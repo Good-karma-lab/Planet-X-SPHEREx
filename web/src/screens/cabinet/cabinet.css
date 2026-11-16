@@ -101,19 +101,20 @@ a.cb-row:hover, button.cb-row:hover { background: rgba(95, 227, 214, 0.08); }
 .cb-family { border: 1px solid var(--edge-soft); border-radius: 12px; background: rgba(3, 9, 13, 0.38); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
 .cb-famname { font: 600 12.5px var(--font); color: var(--ink); }
 .cb-badges { display: flex; flex-wrap: wrap; gap: 8px 10px; }
-.cb-ach { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 74px; text-align: center; opacity: 0.5; }
-.cb-ach.on, .cb-ach.next { opacity: 1; }
+.cb-ach { display: flex; flex-direction: column; align-items: center; gap: 3px; width: 78px; text-align: center; }
+.cb-ach:not(.on):not(.next) .cb-achname { opacity: 0.6; }
 .cb-achname { font-size: 10.5px; line-height: 1.2; color: var(--muted); }
 .cb-ach.on .cb-achname { color: var(--ink); }
 .cb-badge { display: block; flex: none; }
-.cb-badge .bg { fill: rgba(24, 42, 53, 0.5); stroke: none; }
-.cb-badge .seg { fill: none; stroke: rgba(140, 225, 240, 0.16); stroke-width: 2; stroke-linecap: round; }
-.cb-badge .seg.tier { stroke: rgba(140, 225, 240, 0.42); }
-.cb-badge .gl { fill: none; stroke: var(--faint); stroke-width: 1.15; stroke-linecap: round; stroke-linejoin: round; color: var(--faint); }
-.cb-badge text { font: 600 15px var(--mono); fill: var(--faint); }
-.cb-badge.on .bg { fill: rgba(95, 227, 214, 0.14); filter: drop-shadow(0 0 5px rgba(95, 227, 214, 0.3)); }
+.cb-badge { position: relative; }
+.cb-badge img { position: absolute; inset: 4px; width: calc(100% - 8px); height: calc(100% - 8px); border-radius: 50%; filter: grayscale(1) brightness(0.8); opacity: 0.5; }
+.cb-badge.on img { filter: none; opacity: 1; }
+.cb-badge svg { position: absolute; inset: 0; }
+.cb-badge .seg { fill: none; stroke: rgba(140, 225, 240, 0.16); stroke-width: 1.6; stroke-linecap: round; }
+.cb-badge .seg.tier { stroke: rgba(140, 225, 240, 0.4); }
 .cb-badge.on .seg.tier { stroke: var(--accent); }
-.cb-badge.on .gl { stroke: var(--accent-l); color: var(--accent-l); }
+.cb-levelbadge { width: 56px; height: 56px; flex: none; border-radius: 50%; }
+.cb-minibadge { width: 20px; height: 20px; border-radius: 50%; flex: none; }
 .cb-next { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); border-top: 1px solid var(--edge-soft); padding-top: 8px; }
 .cb-next b { color: var(--ink); font-weight: 600; }
 .cb-pts { font: 700 13px var(--mono); color: var(--accent-l); min-width: 52px; text-align: right; }
