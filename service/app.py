@@ -498,6 +498,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_dwarfs_router(st))
     app.include_router(make_searched_router(st))
     app.include_router(make_findings_router(st))
+    from service.routes_clips import make_clips_router  # FLOW-FINDINGS (stream F3): one line for the integrator to move
+
+    app.include_router(make_clips_router(st))  # FLOW-FINDINGS (stream F3)
     app.include_router(make_brightness_router(st))
     app.include_router(make_export_router(st))
     app.include_router(make_planetx_router(st))

@@ -154,6 +154,38 @@ export function useUser(): { user: User | null; ready: boolean; auth: AuthInfo }
   return { user, ready: loaded, auth };
 }
 
+// ----------------------------------------------------------------------------------------------------------- notifications
+
+let unread = 0;
+const unreadListeners = new Set<() => void>();
+let unreadTimer: ReturnType<typeof setInterval> | undefined;
+
+/** Set the number of unread notifications (the cabinet knows it after reading them), or ask the server for it. */
+export function refreshUnread(known?: number): void {
+  const set = (n: number) => {
+    if (n === unread) return;
+    unread = n;
+    for (const f of unreadListeners) f();
+  };
+  if (known !== undefined) return set(known);
+  if (!user) return set(0);
+  void api<{ unread: number }>('/api/me/notifications').then(
+    (r) => set(r.unread),
+    () => undefined,
+  );
+}
+
+/** The number of unread notifications, for the badge on the Cabinet tab of the nav (0 for a guest). Asked once a minute. */
+export function useUnread(): number {
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const f = () => tick((n) => n + 1);
+    unreadListeners.add(f);
+    return () => void unreadListeners.delete(f);
+  }, []);
+  return unread;
+}
+
 // ------------------------------------------------------------------------------------------------------------------- marks
 
 /** The account's marks behind the sync hook of lib/marks.ts. */
@@ -261,5 +293,10 @@ function trackPlace(): void {
 if (typeof window !== 'undefined' && typeof location !== 'undefined') {
   window.addEventListener('hashchange', trackPlace);
   onUser((u) => u && trackPlace());
+  onUser(() => {
+    refreshUnread();
+    clearInterval(unreadTimer);
+    if (user) unreadTimer = setInterval(() => refreshUnread(), 60000);
+  });
   void loadUser();
 }
