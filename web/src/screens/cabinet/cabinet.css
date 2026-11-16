@@ -59,3 +59,4 @@ a.cb-row:hover, button.cb-row:hover { background: rgba(95, 227, 214, 0.08); }
 .cb-row.cb-wrap .cb-main b { white-space: normal; overflow: visible; }
 .cb-tabs { align-items: center; }
 .cb-tabs .cb-status { margin-left: auto !important; }
+.cb-card h3 .btn { font: 600 12px var(--font); letter-spacing: 0; }
