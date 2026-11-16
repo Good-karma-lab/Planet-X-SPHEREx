@@ -6,6 +6,7 @@
   every check answered, none failed, a comment for every warning   → the finding is submitted here, the user is told
                                                                        "submitted, waiting for the verdict"
   a check failed (or gave no answer in the end)                     → the user is told which check and why; nothing is submitted
+                                                                       (a fail is acted on at once, without waiting for the rest)
   warnings without comments                                         → the user is told how many comments are needed; the submit
                                                                        happens by itself when the notes are there
 
@@ -55,6 +56,8 @@ def state_of(inv: dict[str, Any], body: dict[str, Any] | None) -> str:
         return "submitted"
     if not inv.get("declared"):
         return "open"
+    if body is not None and any(c.get("state") == "fail" for c in rows_of(body)):
+        return "blocked"  # a failed check is final whatever the slower checks will say: the user is told now, not after JPL
     if body is None or body.get("state") != "done":
         return "checking"
     if body.get("can_submit") is not True:

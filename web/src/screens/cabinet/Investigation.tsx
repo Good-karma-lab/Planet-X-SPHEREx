@@ -112,9 +112,10 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
   const failed = rows.find((c) => c.state === 'fail') ?? rows.find((c) => !['pass', 'warn'].includes(c.state));
   // the server settles a declared submit when the job ends; the page then reads the investigation again
   const jobDone = checks?.state === 'done';
+  const anyFail = rows.some((c) => c.state === 'fail'); // a fail is final at once, whatever the slower checks will say
   useEffect(() => {
-    if (jobDone && inv.state === 'checking') reload();
-  }, [jobDone, inv.state]);
+    if ((jobDone || anyFail) && inv.state === 'checking') reload();
+  }, [jobDone, anyFail, inv.state]);
   const stage = inv.submitted ? (finding?.status ?? 'submitted') : null;
   return (
     <div class="cb-page" data-testid="investigation-page">
