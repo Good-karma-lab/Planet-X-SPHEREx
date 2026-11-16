@@ -109,9 +109,9 @@ def motion(marks: list[Mark]) -> tuple[float, float, float] | None:
 
 
 def kind_of(marks: list[dict[str, Any]]) -> str:
-    """`fast`: every mark carries its own date and all are in one pass (a body that moves inside a pass, seen visit by visit);
+    """`fast`: two or more marks, every one with its own date, all in one pass (a body that moves inside a pass, seen visit by visit);
     `slow` otherwise (a body that moves between passes)."""
-    if marks and all(m.get("mjd") is not None for m in marks) and len({int(m["pass"]) for m in marks}) == 1:
+    if len(marks) >= 2 and all(m.get("mjd") is not None for m in marks) and len({int(m["pass"]) for m in marks}) == 1:
         return "fast"
     return "slow"
 
