@@ -7,8 +7,8 @@ import { InfoPage } from './screens/pages';
 import { Landing } from './screens/landing';
 import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
-import { Cabinet } from './screens/cabinet/Cabinet'; // flow-accounts (stream B3): for the integrator to resolve
-import { useUnread } from './lib/account'; // flow-accounts (stream B3): unread notifications on the Cabinet tab
+import { Cabinet } from './screens/cabinet/Cabinet';
+import { useUnread } from './lib/account';
 
 const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
   { screen: 'globe', name: 'Globe', icon: 'globe', tip: 'The sky: globe and catalogue' },
