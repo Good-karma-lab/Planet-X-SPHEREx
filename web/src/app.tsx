@@ -70,7 +70,7 @@ export function App() {
           {NAV.map((n) => (
             <a
               key={n.screen}
-              class={`tab ${route.screen === n.screen ? 'on' : ''}`}
+              class={`tab ${route.screen === n.screen ? 'on' : ''} ${n.screen === 'me' ? 'tab-end' : ''}`}
               href={n.screen === 'lab' ? lastLab : n.screen === 'globe' ? '#/explore' : `#/${n.screen}`}
               title={n.tip}
               aria-current={route.screen === n.screen ? 'page' : undefined}
