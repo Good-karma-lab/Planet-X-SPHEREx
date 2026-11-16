@@ -204,6 +204,12 @@ def test_the_routes_serve_the_clip_once_rendered_and_say_why_there_is_none(tmp_p
     assert client.get("/api/findings/nope/clip.webp").status_code == 404
     after = client.get("/api/findings?lite=1").json()
     assert {f["id"]: f["clip"]["state"] for f in after["finds"]} == {"mover:abc": "ready", "red:far": "none"}
+    # a place (a row of the cabinet): the same picture without a ring, only from a finished field, never a field job
+    pl = client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=96")
+    assert pl.status_code == 200 and pl.headers["content-type"] == "image/webp" and _frames(pl.content)[0].shape == (96, 96, 3)
+    off = client.get(f"/api/clips/place.webp?ra={RA0 + 5}&dec={DEC0}")
+    assert off.status_code == 404 and off.json()["state"] == "none" and not st.clips.building
+    assert client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=97").status_code == 422
     # the shared store got nothing: the clip is in the clips' own folder
     assert not list((tmp_path / "store").rglob("*.webp")) and list((tmp_path / "clips").rglob("*.webp"))
 
