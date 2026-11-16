@@ -105,6 +105,11 @@ def test_track_miss_and_above_bar() -> None:
     state, detail = ck.check_above_bar(marks, {"tracks": [track]})
     assert state == "pass" and "10–12σ" in detail
     assert ck.check_above_bar(marks, {"tracks": []})[0] == "warn"
+    # a square the sweep searched: its stored bar is the one named
+    square = {"id": "470-0292", "bar": {"kind": "sweep", "mover_sigma": 5.0, "mover_shift_arcsec": 6.15, "passes": 3}}
+    state, detail = ck.check_above_bar(marks, {"tracks": []}, square)
+    assert state == "warn" and "square 470-0292: a motion of 5σ and a shift of 6.15″ over 3 passes" in detail
+    assert "8σ in each pass" in ck.check_above_bar(marks, {"tracks": []}, {"id": "1-1", "bar": {"kind": "import"}})[1]
     assert ck.check_above_bar(marks, None)[0] == "no_answer"
 
 
@@ -145,7 +150,13 @@ class FakeKnown:
 
 
 def make(tmp_path: Path, known: Any, irsa: str = "ra,dec,mjd\n", result: dict[str, Any] | None = None) -> ck.Checks:
-    store = SimpleNamespace(read_meta=lambda kind, key: {"passes": PASSES, "grid": GRID} if key == "f1" else None)
+    listing = [
+        {"key": "f" * 24, "complete": True, "params": {"ra": 269.4485, "dec": 4.74, "fov": 20.0}},
+        {"key": "e" * 24, "complete": True, "params": {"ra": 269.4485, "dec": 4.74, "fov": 60.0}},
+    ]
+    store = SimpleNamespace(
+        read_meta=lambda kind, key: {"passes": PASSES, "grid": GRID} if key in ("f1", "f" * 24) else None, listing=lambda kinds: listing
+    )
     # every pass has one visit of a day, in the exposure index
     index = SimpleNamespace(containing=lambda ra, dec, t0, t1: [SimpleNamespace(mjd0=t0 + 0.5, mjd1=t0 + 1.5)])
     movers = SimpleNamespace(key_of=lambda k: "m" + k)
@@ -239,6 +250,18 @@ async def test_orbit_runs_the_archive_check(tmp_path: Path) -> None:
     view = await finished(c.start({"field_key": "", "ra": 60.94, "dec": 8.39, "marks": [mark], "orbit": orbit}))
     got = states(view)
     assert seen == [orbit] and got["neowise"] == "fail" and got["two_passes"] == "fail" and view["can_submit"] is False
+
+
+@sync
+async def test_the_labs_field_key_is_resolved_to_the_stored_field(tmp_path: Path) -> None:
+    known = FakeKnown({"state": "ok", "rows": [BARNARD]}, {"state": "ok", "rows": []}, [])
+    marks = [{k: v for k, v in m.items() if k != "mjd"} for m in star_marks(BARNARD)]
+    c = make(tmp_path, known)
+    for key in ("269.4486,4.7401,20", ""):  # the lab's key a little off the centre; no key: the smallest field that holds the marks
+        view = await finished(c.start({"field_key": key, "ra": 269.4485, "dec": 4.74, "marks": marks}))
+        assert view["field"] == "f" * 24 and states(view)["gaia"] == "fail"  # dated by the stored field's passes
+    view = await finished(c.start({"field_key": "10.0,5.0,20", "ra": 10.0, "dec": 5.0, "marks": marks}))
+    assert view["field"] == "" and states(view)["gaia"] == "no_answer"
 
 
 def test_routes(tmp_path: Path) -> None:

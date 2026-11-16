@@ -33,6 +33,7 @@ class OrbitIn(BaseModel):
     d_au: float = Field(ge=20.0, le=5000.0)
     mu: tuple[float, float]
     flux_mjy: float = Field(default=0.0, ge=0.0, le=1000.0)
+    scan: bool = False  # also scan the orbit's uncertainty (distance, radial speed, own motion) against shifted places: minutes more
 
 
 class ChecksIn(BaseModel):
@@ -66,7 +67,7 @@ def make_checks_router(st: Any, prefix: str = "/api") -> APIRouter:
     async def start(body: ChecksIn) -> Any:
         """Start (or find) the checks of a set of marks: `{job}`. The same request is the same job; a job with checks that did not
         answer runs them again."""
-        if not re.fullmatch(r"[A-Za-z0-9_-]*", body.field_key):
+        if not re.fullmatch(r"[A-Za-z0-9_,.+-]*", body.field_key):  # a store key, or the lab's "ra,dec,fov"
             raise HTTPException(400, "bad field_key")
         request: dict[str, Any] = {
             "field_key": body.field_key,
