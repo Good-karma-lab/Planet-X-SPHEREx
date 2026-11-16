@@ -164,7 +164,7 @@
 .cov-key { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
 .cov-sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; border: 1.5px solid transparent; flex: none; }
 .cov-sw.dash { border-style: dashed; }
-.cov-card { position: absolute; z-index: 7; right: 56px; top: 112px; width: 292px; max-width: calc(100% - 72px); padding: 12px 14px 14px; border-radius: 14px; color: var(--ink); font-size: 12.5px; line-height: 1.45; }
+.cov-card { background: rgba(8, 18, 24, 0.9); position: absolute; z-index: 7; right: 56px; top: 112px; width: 292px; max-width: calc(100% - 72px); padding: 12px 14px 14px; border-radius: 14px; color: var(--ink); font-size: 12.5px; line-height: 1.45; }
 .cov-card .cov-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13.5px; }
 .cov-card .cov-head b { font-family: var(--mono); font-weight: 600; letter-spacing: 0.01em; }
 .cov-card .cov-x { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); font: 400 20px/1 var(--font); cursor: pointer; }

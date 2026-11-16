@@ -6,10 +6,10 @@
 // `GET /api/grid/coverage` lists every square that is not new by id only, so the places of the squares are worked out here from the
 // same scheme (the unit test checks it against corners the API gave). The card of a square is `GET /api/grid/cell/{id}`.
 //
-// Readable at every zoom: where a square is 16 px or more on screen its real outline is drawn (every square, new ones as a thin
-// frame); below that the squares that are not new are gathered into blocks of 2×2, 4×4, … squares, each block at least 10 px on
-// screen and filled by what it holds. Drawing is a few thousand projected points per frame at most, so turning the globe costs the same
-// with the layer on.
+// Readable at every zoom: where a square is 22 px or more on screen its real outline is drawn (every square, new ones as a thin
+// frame); below that the squares that are not new are gathered into blocks of 2×2, 4×4, … squares, each block at least 12 px on
+// screen and filled by what it holds. Drawing is a few thousand projected points per frame at most (under 2 ms), so turning the globe
+// costs the same with the layer on.
 
 import { D2R } from '../../lib/sky';
 
@@ -213,11 +213,13 @@ interface Block {
   best: string;
   bestFinds: number;
 }
-/** The side of a block in squares at a zoom: 1 when a square is 16 px or more, else the power of two that makes a block 10 px or more. */
+/** a square this large on screen (CSS pixels) is drawn as itself: at most about 2 500 squares are in sight then */
+export const REAL_PX = 22;
+/** The side of a block in squares at a zoom: 1 when a square is REAL_PX or more, else the power of two that makes a block 12 px or more. */
 export function blockSide(cellPx: number): number {
-  if (cellPx >= 16) return 1;
+  if (cellPx >= REAL_PX) return 1;
   let k = 2;
-  while (k * cellPx < 10 && k < 256) k *= 2;
+  while (k * cellPx < 12 && k < 256) k *= 2;
   return k;
 }
 /** The block (of side k squares) a place lies in: its key and its edges. */
@@ -312,6 +314,8 @@ function boxPath(ctx: CanvasRenderingContext2D, v: CovView, ra0: number, ra1: nu
   return true;
 }
 
+let vx = new Float64Array(1024);
+
 /** Draws the layer; returns how many squares or blocks it drew (for tests). */
 export function drawCoverage(ctx: CanvasRenderingContext2D, cov: Coverage | null, v: CovView): number {
   const k = blockSide(v.cellPx);
@@ -362,19 +366,38 @@ export function drawCoverage(ctx: CanvasRenderingContext2D, cov: Coverage | null
       const all = span >= 180 || Math.abs(v.dec) + v.radius >= 89.5;
       const c0 = all ? 0 : Math.floor((v.ra - span) / w);
       const c1 = all ? n - 1 : Math.floor((v.ra + span) / w);
-      for (let cc = c0; cc <= c1; cc++) {
-        const col = ((cc % n) + n) % n;
-        const ra0 = col * w;
-        // the four corners; a square is drawn when all of them are in sight and inside the picture's reach
-        const p00 = v.project(ra0, d0);
-        const p10 = v.project(ra0 + w, d0);
-        const p11 = v.project(ra0 + w, d0 + CELL_DEG);
-        const p01 = v.project(ra0, d0 + CELL_DEG);
-        if (!p00[2] || !p10[2] || !p11[2] || !p01[2]) continue;
-        const x0 = Math.min(p00[0], p10[0], p11[0], p01[0]);
-        const x1 = Math.max(p00[0], p10[0], p11[0], p01[0]);
-        const y0 = Math.min(p00[1], p10[1], p11[1], p01[1]);
-        const y1 = Math.max(p00[1], p10[1], p11[1], p01[1]);
+      // the corners along the lower and the upper edge of the band, each projected once (two squares share a corner)
+      const m = c1 - c0 + 1;
+      if (vx.length < (m + 1) * 4) vx = new Float64Array((m + 1) * 8);
+      for (let q = 0; q <= m; q++) {
+        const ra = (c0 + q) * w;
+        const lo = v.project(ra, d0);
+        const hi = v.project(ra, d0 + CELL_DEG);
+        vx[q * 4] = lo[2] ? lo[0] : NaN;
+        vx[q * 4 + 1] = lo[1];
+        vx[q * 4 + 2] = hi[2] ? hi[0] : NaN;
+        vx[q * 4 + 3] = hi[1];
+      }
+      for (let q = 0; q < m; q++) {
+        const col = (((c0 + q) % n) + n) % n;
+        // a square is drawn when its four corners are in sight and it touches the picture
+        const ax = vx[q * 4]!;
+        const ay = vx[q * 4 + 1]!;
+        const bx = vx[q * 4 + 4]!;
+        const by = vx[q * 4 + 5]!;
+        const cx = vx[q * 4 + 6]!;
+        const cy = vx[q * 4 + 7]!;
+        const dx = vx[q * 4 + 2]!;
+        const dy = vx[q * 4 + 3]!;
+        if (ax !== ax || bx !== bx || cx !== cx || dx !== dx) continue;
+        const p00: [number, number] = [ax, ay];
+        const p10: [number, number] = [bx, by];
+        const p11: [number, number] = [cx, cy];
+        const p01: [number, number] = [dx, dy];
+        const x0 = Math.min(ax, bx, cx, dx);
+        const x1 = Math.max(ax, bx, cx, dx);
+        const y0 = Math.min(ay, by, cy, dy);
+        const y1 = Math.max(ay, by, cy, dy);
         if (x1 < 0 || x0 > v.W || y1 < 0 || y0 > v.H || (v.flat && x1 - x0 > v.W / 3)) continue;
         drawn++;
         const id = cellId(band, col);

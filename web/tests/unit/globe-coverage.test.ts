@@ -118,8 +118,8 @@ describe('drawing at every zoom', () => {
     project: (ra, dec) => [500 - (((ra - ra0 + 540) % 360) - 180) * scale, 400 - (dec - dec0) * scale, true],
     ra: ra0, dec: dec0, radius, cellPx: scale / 3, W: 1000, H: 800, flat: false, selected: '284-0805', font: 'sans-serif',
   });
-  it('picks real squares when they are 16 px or more, blocks below that', () => {
-    expect(blockSide(16)).toBe(1);
+  it('picks real squares when they are 22 px or more, blocks below that', () => {
+    expect(blockSide(22)).toBe(1);
     expect(blockSide(8)).toBe(2);
     expect(blockSide(3)).toBe(4);
     expect(blockSide(0.6)).toBe(32);
@@ -127,15 +127,15 @@ describe('drawing at every zoom', () => {
   it('draws every square in sight when zoomed in, only what is not new when zoomed out', async () => {
     fakeApi({ '/api/grid/coverage': { cells: [{ id: '284-0805', state: 'searched', finds: 14, viewers: 0 }, { id: '284-0806', state: 'searched', finds: 0, viewers: 0 }, { id: '100-0100', state: 'searched', finds: 0, viewers: 0 }] } });
     const c = (await loadCoverage(true))!;
-    // 60 px per degree: a square is 20 px, the picture about 17° × 13°
-    const near = drawCoverage(ctx, c, view(60, 269.5, 4.8, 11));
-    expect(near).toBeGreaterThan(1500);
-    expect(near).toBeLessThan(2400);
+    // 75 px per degree: a square is 25 px, the picture about 13° × 11°
+    const near = drawCoverage(ctx, c, view(75, 269.5, 4.8, 9));
+    expect(near).toBeGreaterThan(1000);
+    expect(near).toBeLessThan(1700);
     // 6 px per degree: a square is 2 px; the two neighbours are one block, the far square is out of sight
     expect(drawCoverage(ctx, c, view(6, 269.5, 4.8, 90))).toBe(1);
     // a click on the block opens its square with finds; zoomed in, the square under the click
     expect(pickCell(c, 269.9, 4.7, 2)).toBe('284-0805');
-    expect(pickCell(c, 269.9, 4.7, 20)).toBe('284-0806');
+    expect(pickCell(c, 269.9, 4.7, 25)).toBe('284-0806');
     expect(pickCell(null, 269.9, 4.7, 2)).toBe('284-0806');
   });
 });
