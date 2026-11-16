@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { knownStatus, knownUrl, KNOWN_OFF, motionOf, parseKnown, placeAt, speedWord, yearOfMjd } from '../../src/screens/lab/known';
+import { knownStatus, knownUrl, KNOWN_OFF, matchKnown, motionOf, parseKnown, placeAt, speedWord, yearOfMjd } from '../../src/screens/lab/known';
 
 // A fake of the `GET /api/known` contract (product spec §8), as stream B2's service answers it: dates echoed as asked (MJD).
 const FAKE = {
@@ -46,7 +46,7 @@ describe('known objects of a lab field', () => {
     expect(k.objects.map((o) => o.id)).toEqual(['gaia:4472832130942575872', 'gaia:1', 'jpl:433 Eros']);
     expect(k.objects[0]!.positions[0]!.epoch).toBeCloseTo(yearOfMjd(60926.0), 9);
     expect(k.answered).toEqual({ gaia: true, simbad: true, jpl: false });
-    expect(parseKnown(null)).toEqual({ objects: [], answered: { gaia: false, simbad: false, jpl: false } });
+    expect(parseKnown(null)).toEqual({ objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [] });
   });
 
   it('puts a star between its two places by the date, and beyond them on the same line', () => {
@@ -80,5 +80,28 @@ describe('known objects of a lab field', () => {
     expect(knownStatus({ state: 'ok', ...k, answered: { gaia: false, simbad: true, jpl: false } })).toBe('Gaia and JPL did not answer');
     expect(knownStatus({ ...KNOWN_OFF, state: 'failed' })).toBe('Gaia, SIMBAD and JPL did not answer');
     expect(knownStatus(KNOWN_OFF)).toBe('');
+  });
+
+  it('counts what the picture shows, and waits for a catalogue the service is still asking', () => {
+    const k = parseKnown({ ...FAKE, status: { jpl: { state: 'pending' } } });
+    expect(k.pending).toEqual(['jpl']);
+    expect(knownStatus({ state: 'ok', ...k }, { known: 212, noMatch: 7 })).toBe('known 212 · no match 7 · JPL: waiting');
+  });
+
+  it('rings only catalogue objects with a detected source, and points at sources with no match', () => {
+    const k = parseKnown(FAKE);
+    // a 100 px picture of 3″ pixels centred on (269.4465, 4.7685); u grows to the west, v to the south
+    const cosd = Math.cos((4.7685 * Math.PI) / 180);
+    const uvOf = (ra: number, dec: number): [number, number] => [0.5 - ((ra - 269.4465) * cosd * 3600) / 300, 0.5 - ((dec - 4.7685) * 3600) / 300];
+    const year = yearOfMjd(60926.0);
+    const [bu, bv] = uvOf(269.446448, 4.767352);
+    const peaks = [
+      { x: bu * 100 + 0.6, y: bv * 100 - 0.4, snr: 400 }, // Barnard's Star
+      { x: 80, y: 20, snr: 12 }, // a source no catalogue has
+      { x: 20, y: 80, snr: 6 }, // too faint to point at
+    ];
+    const m = matchKnown(k.objects, peaks, 100, 3, uvOf, year);
+    expect([...m.shown]).toEqual(['gaia:4472832130942575872']);
+    expect(m.noMatch).toEqual([{ u: 0.8, v: 0.2, snr: 12 }]);
   });
 });

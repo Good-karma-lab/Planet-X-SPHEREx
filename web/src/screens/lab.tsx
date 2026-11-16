@@ -1534,7 +1534,7 @@ export function Lab({ route }: { route: Route }) {
         }
       };
       // the status line floats over the bottom of the picture: a name is kept above it (not cut by it)
-      const statusRoom = !days && st.view !== 'picture' ? 0 : 50;
+      const statusRoom = !days && st.view !== 'picture' ? 0 : 76;
       const label = (x: number, y: number, rr: number, mk: Mark, box: { x: number; y: number; w: number; h: number }) => {
         // only the name or number at the ring; the rate, the checks and the rest are on the selected mark and in the Candidates list (the test target keeps its line)
         let lines = [mk.name, ...(mk.kind === 'target' || mk.selected ? mk.lines : [])].filter(Boolean);
@@ -1763,7 +1763,19 @@ export function Lab({ route }: { route: Route }) {
       }
       ctx.restore();
       // the product flow's layer (Known objects, marks, the ruler): on top of the lab's own rings, at the date shown
-      flowRef.current?.draw({ ctx, rects, wall, uvOf, year, fovArc, placed, hidden: underInset });
+      const fpic = !days && st.view === 'picture' ? pictures.current.get(shownPass) : undefined;
+      const fnoise = noiseRef.current.get(shownPass);
+      flowRef.current?.draw({
+        ctx,
+        rects,
+        wall,
+        uvOf,
+        year,
+        fovArc,
+        placed,
+        hidden: underInset,
+        picture: fpic && fnoise && fpic.n === grid.n ? { pass: shownPass, n: fpic.n, rgb: fpic.rgb, bg: fnoise.bg, sigma: fnoise.sigma, step: grid.step_arcsec } : null,
+      });
       if (!st.opts.rings) return;
       // speed rings, centred on the field: how far a body of that speed moves between the first and the last season
       // (in the Days scale: between the first and the last visit, in ″ per hour)
@@ -3155,6 +3167,7 @@ export function Lab({ route }: { route: Route }) {
                         : film !== null
                           ? daysShort
                           : dateLabel)}
+                {!note && flow.status && <span data-testid="flow-status"> · {flow.status}</span>}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
                     <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter

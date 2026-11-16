@@ -14,8 +14,10 @@
 .ft-mark:hover, .ft-mark.on { border-color: rgba(95, 227, 214, 0.5); }
 .ft-mark b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 .ft-mark span { color: var(--muted); font-size: 10.5px; }
-.vsq .fflow { left: 12px; bottom: 46px; max-width: min(72%, 560px); padding: 3px 9px; font: 600 12px var(--mono); color: #ffd9a0; pointer-events: none; white-space: normal; }
-.vsq.compact .fflow { left: 10px; bottom: 70px; font-size: 10.5px; }
+/* the status line of the picture sits above the band chips, so neither covers the other (the chips are centred and reach the corner) */
+@media (min-width: 561px) {
+  .lab .vsq:not(.compact) .fstatus { bottom: 46px; max-width: calc(100% - 24px); }
+}
 .markedit .me-hint { min-height: 14px; font: 500 10.5px var(--font); color: var(--amber); line-height: 1.3; }
 .flowtools .ft-row + .ft-row { margin-top: 6px; }
 .flowtools .ft-row .inp { height: 26px; font-size: 11.5px; padding: 0 6px; min-width: 0; }

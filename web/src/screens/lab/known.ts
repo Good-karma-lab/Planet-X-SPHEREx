@@ -1,3 +1,5 @@
+import { Buckets, NOMATCH_SIGMA, type Peak } from './detect';
+
 // Known objects of a lab field: every Gaia DR3 star, SIMBAD object and JPL body in the frame, ringed at its place on the date of the
 // pass on show (product spec §5 Lab, contract `GET /api/known` in §8). What moves and has no ring is unknown.
 
@@ -24,6 +26,8 @@ export interface KnownObject {
 export interface KnownReply {
   objects: KnownObject[];
   answered: Record<KnownSource, boolean>;
+  /** catalogues the service is still asking (it answers them later: the lab asks again) */
+  pending: KnownSource[];
 }
 
 export interface KnownState {
@@ -31,9 +35,10 @@ export interface KnownState {
   state: 'off' | 'loading' | 'ok' | 'failed';
   objects: KnownObject[];
   answered: Record<KnownSource, boolean>;
+  pending: KnownSource[];
 }
 
-export const KNOWN_OFF: KnownState = { state: 'off', objects: [], answered: { gaia: false, simbad: false, jpl: false } };
+export const KNOWN_OFF: KnownState = { state: 'off', objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [] };
 
 /** the service takes at most this many dates in one question */
 export const MAX_EPOCHS = 40;
@@ -53,7 +58,11 @@ export function knownUrl(ra: number, dec: number, sizeArcmin: number, mjds: numb
 
 /** The reply of the service made safe: wrong rows dropped, a catalogue with no word about it counted as not answered. */
 export function parseKnown(raw: unknown): KnownReply {
-  const r = (raw ?? {}) as { objects?: unknown; answered?: Partial<Record<KnownSource, unknown>> };
+  const r = (raw ?? {}) as {
+    objects?: unknown;
+    answered?: Partial<Record<KnownSource, unknown>>;
+    status?: Partial<Record<KnownSource, { state?: string }>>;
+  };
   const objects: KnownObject[] = [];
   for (const o of Array.isArray(r.objects) ? (r.objects as Partial<KnownObject>[]) : []) {
     if (!o || !KNOWN_SOURCES.includes(o.source as KnownSource) || !Array.isArray(o.positions)) continue;
@@ -78,6 +87,7 @@ export function parseKnown(raw: unknown): KnownReply {
   return {
     objects,
     answered: { gaia: r.answered?.gaia === true, simbad: r.answered?.simbad === true, jpl: r.answered?.jpl === true },
+    pending: KNOWN_SOURCES.filter((c) => r.answered?.[c] !== true && r.status?.[c]?.state === 'pending'),
   };
 }
 
@@ -112,13 +122,17 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
   };
 }
 
-/** The status line of the overlay: which catalogue did not answer ('' when all did, or the overlay is off). */
-export function knownStatus(k: KnownState): string {
+/** The status line of the overlay: the counts on the picture, and which catalogue is waited for or did not answer. */
+export function knownStatus(k: KnownState, counts?: { known: number; noMatch: number } | null): string {
   if (k.state === 'off') return '';
   if (k.state === 'loading') return 'asking Gaia, SIMBAD and JPL…';
-  const silent = KNOWN_SOURCES.filter((s) => k.state === 'failed' || !k.answered[s]).map((s) => SOURCE_WORD[s]);
-  if (!silent.length) return '';
-  return `${silent.length === 3 ? 'Gaia, SIMBAD and JPL' : silent.join(' and ')} did not answer`;
+  const parts: string[] = [];
+  if (counts && k.state === 'ok') parts.push(`known ${counts.known}`, `no match ${counts.noMatch}`);
+  const waiting = k.state === 'ok' ? k.pending : [];
+  for (const c of waiting) parts.push(`${SOURCE_WORD[c]}: waiting`);
+  const silent = KNOWN_SOURCES.filter((c) => (k.state === 'failed' || !k.answered[c]) && !waiting.includes(c)).map((c) => SOURCE_WORD[c]);
+  if (silent.length) parts.push(`${silent.length === 3 ? 'Gaia, SIMBAD and JPL' : silent.join(' and ')} did not answer`);
+  return parts.join(' · ');
 }
 
 /** a JPL place is used for a frame within this of its date (half a day, in years) */
@@ -174,12 +188,62 @@ const COLOUR: Record<KnownSource, { ring: string; text: string }> = {
   simbad: { ring: 'rgba(150,230,170,0.85)', text: '#d3f5dc' },
   jpl: { ring: 'rgba(245,225,150,0.9)', text: '#fbf0c4' },
 };
+/** the ring of a detected source with no catalogue match (CSS px) */
+const NOMATCH_R = 10;
 /** a star faster than this gets its one-year arrow (″/yr) */
 export const ARROW_MIN_RATE = 0.3;
 /** at most this many rings are drawn on one picture (the brightest first) */
 const MAX_RINGS = 4000;
 
+/** What of the catalogues the picture of a pass shows, and what it shows that no catalogue has. */
+export interface KnownMatch {
+  /** ids of the catalogue objects with a detected source at their place */
+  shown: Set<string>;
+  /** detected sources with no catalogue object at their place, as fractions of the picture (u right, v down) */
+  noMatch: { u: number; v: number; snr: number }[];
+}
+
+/** a catalogue object within this of a detected peak is that source: 7″ (a SPHEREx pixel is 6.2″), at least 2 grid pixels */
+export const MATCH_ARCSEC = 7;
+/** when there is no picture to compare with (Days, a field still loading): objects at least this bright are ringed */
+export const SHOWN_MAG = 15;
+
+/** Match the catalogue objects at the date shown to the peaks of the picture (grid pixels, n × n, `step` arcseconds each). */
+export function matchKnown(
+  objects: KnownObject[],
+  peaks: Peak[],
+  n: number,
+  step: number,
+  uvOf: (ra: number, dec: number) => [number, number],
+  year: number,
+): KnownMatch {
+  const r = Math.max(2, MATCH_ARCSEC / step);
+  const pts: { x: number; y: number; o: KnownObject }[] = [];
+  for (const o of objects) {
+    const at = placeAt(o, year);
+    if (!at) continue;
+    const [u, v] = uvOf(at[0], at[1]);
+    if (u < -0.05 || v < -0.05 || u > 1.05 || v > 1.05) continue;
+    pts.push({ x: u * n, y: v * n, o });
+  }
+  const cat = new Buckets(pts, Math.max(4, r));
+  // beside a bright star the picture shows its halo, spikes and ghosts: bumps there are not sources without a match
+  const bright = pts
+    .filter((q) => q.o.mag != null && q.o.mag <= 10)
+    .map((q) => ({ x: q.x, y: q.y, r: (q.o.mag! <= 6 ? 120 : q.o.mag! <= 8 ? 60 : 25) / step }));
+  const shown = new Set<string>();
+  const noMatch: KnownMatch['noMatch'] = [];
+  for (const p of peaks) {
+    const hit = cat.near(p.x, p.y, r);
+    if (hit) shown.add(hit.o.id);
+    else if (p.snr >= NOMATCH_SIGMA && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r)) noMatch.push({ u: p.x / n, v: p.y / n, snr: p.snr });
+  }
+  return { shown, noMatch };
+}
+
 export interface KnownDrawEnv {
+  /** what the picture of the pass shows (null when there is no picture to compare with) */
+  match: KnownMatch | null;
   ctx: CanvasRenderingContext2D;
   /** the picture, or the tiles of a wall (CSS px) */
   rects: { x: number; y: number; w: number; h: number }[];
@@ -208,7 +272,7 @@ function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, fi
 /** Draw the rings of the known objects at their places on the date shown. Returns the object under the pointer, if any. */
 export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null {
   if (k.state !== 'ok' || !k.objects.length) return null;
-  const { ctx, rects, wall, uvOf, year, fovArc, placed, pointer, hidden } = env;
+  const { ctx, rects, wall, uvOf, year, fovArc, placed, pointer, hidden, match } = env;
   const objs = k.objects.length > MAX_RINGS ? k.objects.slice().sort((a, b) => (a.mag ?? 99) - (b.mag ?? 99)).slice(0, MAX_RINGS) : k.objects;
   let hover: { o: KnownObject; x: number; y: number; r: number; box: (typeof rects)[number]; d: number } | null = null;
   const named: { o: KnownObject; x: number; y: number; r: number; box: (typeof rects)[number] }[] = [];
@@ -226,6 +290,8 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
       const arrows = new Path2D();
       for (const o of objs) {
         if (o.source !== src) continue;
+        // only what the picture can show: a detected source at its place, a named one, a Solar System body; without a picture, the bright ones
+        if (!o.label && src !== 'jpl' && !(match ? match.shown.has(o.id) : (o.mag ?? 99) <= SHOWN_MAG)) continue;
         const at = placeAt(o, year);
         if (!at) continue;
         const [u, v] = uvOf(at[0], at[1]);
@@ -233,7 +299,7 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
         const x = box.x + u * box.w;
         const y = box.y + v * box.h;
         if (!wall && hidden(x, y)) continue;
-        const r = wall ? Math.max(3, Math.min(6, box.w / 40)) : o.label ? 9 : 6;
+        const r = wall ? 3 : o.label ? 6 : 3.5; // a known object: one small quiet ring
         const path = o.label ? bold : thin;
         path.moveTo(x + r, y);
         path.arc(x, y, r, 0, 2 * Math.PI);
@@ -267,8 +333,8 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
       ctx.stroke(bold);
       ctx.stroke(arrows);
       ctx.strokeStyle = c.ring;
-      ctx.globalAlpha = 0.6;
-      ctx.lineWidth = 0.75;
+      ctx.globalAlpha = 0.55;
+      ctx.lineWidth = 0.9;
       ctx.stroke(thin);
       ctx.globalAlpha = 1;
       ctx.lineWidth = 1.1;
@@ -276,6 +342,31 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
       ctx.stroke(arrows);
     }
     ctx.restore();
+  }
+  // what the eye must land on: detected sources with no catalogue object at their place
+  let lone: { x: number; y: number } | null = null;
+  if (match && !wall) {
+    const ring = new Path2D();
+    for (const box of rects)
+      for (const q of match.noMatch) {
+        const x = box.x + q.u * box.w;
+        const y = box.y + q.v * box.h;
+        if (hidden(x, y)) continue;
+        ring.moveTo(x + NOMATCH_R, y);
+        ring.arc(x, y, NOMATCH_R, 0, 2 * Math.PI);
+        placed.push({ x0: x - NOMATCH_R - 2, y0: y - NOMATCH_R - 2, x1: x + NOMATCH_R + 2, y1: y + NOMATCH_R + 2 });
+        if (pointer && Math.hypot(pointer.x - x, pointer.y - y) <= NOMATCH_R + 3) lone = { x, y };
+      }
+    ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+    ctx.lineWidth = 3.4;
+    ctx.stroke(ring);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.6;
+    ctx.stroke(ring);
+  }
+  if (lone && !hover) {
+    ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    text(ctx, 'no catalogue match', lone.x + NOMATCH_R + 5, lone.y + 4, '#ffffff');
   }
   if (!wall) {
     ctx.font = '500 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';

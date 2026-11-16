@@ -2,8 +2,9 @@
 // calls; it returns what the lab draws on its overlay, what it puts over the picture and in the Controls panel, and its status line.
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { addMark, allMarks, MARK_LEVELS, marksSyncNote, onMarks, removeMark, updateMark, type Mark, type MarkLevel } from '../../lib/marks';
-import { drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, type KnownDrawEnv, type KnownState } from './known';
+import { addMark, allMarks, fieldKey, MARK_LEVELS, marksSyncNote, onMarks, removeMark, updateMark, type Mark, type MarkLevel } from '../../lib/marks';
+import { drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, matchKnown, type KnownDrawEnv, type KnownMatch, type KnownState } from './known';
+import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { ChecksList, checksStatus, useChecks, useLabTask } from './task';
 import { placeAt } from './known';
@@ -46,9 +47,11 @@ export interface FlowArgs {
 
 export type FlowTool = 'mark' | 'ruler' | null;
 
-export interface FlowDrawEnv extends Omit<KnownDrawEnv, 'pointer'> {
+export interface FlowDrawEnv extends Omit<KnownDrawEnv, 'pointer' | 'match'> {
   /** a wall of tiles: rings and marks without names */
   wall: boolean;
+  /** the picture of the pass on show and its noise (null in Days, on a wall, or before it has arrived) */
+  picture: { pass: number; n: number; rgb: Uint16Array; bg: number; sigma: number; step: number } | null;
 }
 
 const LEVEL_COLOUR: Record<MarkLevel, string> = { suspicious: '#ff9d5c', interesting: '#7fd8ff', artefact: '#aab4b9' };
@@ -127,9 +130,34 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   };
   const marksHere = useMemo(() => marks.filter(inFrame), [marks.length, marks, g?.ra0, g?.dec0, g?.n, g?.step_arcsec]);
 
+  // the sources of each pass picture (found once), and what the catalogues have of them at the date shown
+  const peaksRef = useRef(new Map<string, Peak[]>());
+  const matchRef = useRef<{ key: string; m: KnownMatch } | null>(null);
+  const [counts, setCounts] = useState<{ known: number; noMatch: number } | null>(null);
+  const countsRef = useRef('');
+  useEffect(() => {
+    peaksRef.current.clear();
+    matchRef.current = null;
+  }, [a.ra, a.dec, a.fov]);
   const draw = (env: FlowDrawEnv) => {
     const { ctx, rects, wall, uvOf: uv, placed } = env;
-    drawKnown({ ...env, pointer: ptr.current }, knownRef.current);
+    const kn = knownRef.current;
+    let match: KnownMatch | null = null;
+    const pic = env.picture;
+    if (kn.state === 'ok' && pic) {
+      const pk = `${pic.pass}:${pic.n}:${pic.rgb.length}:${pic.bg}`;
+      let peaks = peaksRef.current.get(pk);
+      if (!peaks) peaksRef.current.set(pk, (peaks = findPeaks(pic.rgb, pic.n, pic.bg, pic.sigma)));
+      const mk = `${pk}:${kn.objects.length}:${env.year.toFixed(4)}`;
+      if (matchRef.current?.key !== mk) matchRef.current = { key: mk, m: matchKnown(kn.objects, peaks, pic.n, pic.step, uv, env.year) };
+      match = matchRef.current.m;
+    }
+    const ck = match ? `${match.shown.size}:${match.noMatch.length}` : '';
+    if (ck !== countsRef.current) {
+      countsRef.current = ck;
+      setCounts(match ? { known: match.shown.size, noMatch: match.noMatch.length } : null);
+    }
+    drawKnown({ ...env, pointer: ptr.current, match }, kn);
     const ms = marksRef.current;
     const rl = rulerRef.current;
     if (!ms.length && !rl.length) return;
@@ -248,7 +276,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       const [ra, dec] = skyOf(x / a.side, y / a.side);
       const n = marksRef.current.length + 1;
       const m = addMark({
-        field_key: a.fieldKey ?? '',
+        field_key: fieldKey(a.ra, a.dec, a.fov),
+        mjd: a.epochNow != null ? 51544.5 + (a.epochNow - 2000) * 365.25 : null,
         cell_id: a.params['cell'] ?? null,
         ra,
         dec,
@@ -337,11 +366,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     } else setInvLine(r.status === 401 ? 'Sign in to save' : 'Not saved: the service did not answer');
   };
   const runChecks = () => {
-    if (!a.fieldKey) return;
     setShowChecks(true);
     const real = marksHere.filter((m) => m.level !== 'artefact');
     const at = (open ? real.find((m) => m.id === open) : null) ?? real[0];
-    checks.start(a.fieldKey, at?.ra ?? a.ra, at?.dec ?? a.dec, real);
+    checks.start(fieldKey(a.ra, a.dec, a.fov), at?.ra ?? a.ra, at?.dec ?? a.dec, real);
   };
   const submit = async () => {
     if (!checks.view.job) return;
@@ -350,7 +378,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     const fid = r.json?.['finding_id'];
     setInvLine(typeof fid === 'string' ? `Submitted: ${fid}` : r.status === 401 ? 'Sign in to submit' : 'Submit did not answer');
   };
-  const taskPanel = useLabTask({ params: a.params, open: a.open, ra: a.ra, dec: a.dec, fieldKey: a.fieldKey, marksHere });
+  const taskPanel = useLabTask({ params: a.params, open: a.open, ra: a.ra, dec: a.dec, fieldKey: a.grid ? fieldKey(a.ra, a.dec, a.fov) : null, marksHere });
 
   const cur = open ? (marks.find((m) => m.id === open) ?? null) : null;
   let floats: ComponentChildren = null;
@@ -500,7 +528,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       <div class="ft-row">
         <button
           class="mini"
-          disabled={!a.fieldKey || checks.view.state === 'running'}
+          disabled={checks.view.state === 'running'}
           onClick={runChecks}
           title="Check and submit: every check runs first; the submit opens when all have answered and none failed"
           data-testid="tool-check"
@@ -539,16 +567,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       : ruler.length === 2
         ? `Ruler: ${rulerWord(rulerOf(ruler[0]!, ruler[1]!))}`
         : '';
-  const status = [knownStatus(known), tool === 'mark' ? 'Mark: click a place' : '', rulerStatus, marksSyncNote()].filter(Boolean).join(' · ');
+  const status = [knownStatus(known, counts), tool === 'mark' ? 'Mark: click a place' : '', rulerStatus, marksSyncNote()].filter(Boolean).join(' · ');
 
   // the flow's own status line, over the picture above the date (nothing else on the page moves when it appears)
   const all = (
     <>
-      {status && (
-        <div class="float fflow" data-testid="flow-status">
-          {status}
-        </div>
-      )}
       {floats}
     </>
   );
