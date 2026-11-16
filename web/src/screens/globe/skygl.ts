@@ -281,7 +281,7 @@ export class GlSky {
           const q = ((face * WIN + (ty - oy)) * WIN + (tx - ox)) * 4;
           idx[q] = s + 1;
           idx[q + 1] = n - sm.resolvedOrder;
-          idx[q + 2] = t.baked ? 1 : 0;
+          idx[q + 2] = t.baked ? 255 : 0;
           idx[q + 3] = 255;
           painted += count;
         }
