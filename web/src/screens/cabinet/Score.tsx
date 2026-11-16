@@ -4,7 +4,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import { api } from '../../lib/account';
 import type { Route } from '../../lib/route';
-import { GLYPH_OF, GLYPHS } from './glyphs';
 
 export interface Achievement {
   id: string;
@@ -80,34 +79,30 @@ function eventLine(e: ScoreEvent): string {
   }
 }
 
-/** A small glass badge: the achievement's own line glyph, lit when earned and dim when not; the ring around it is cut into the
- *  tiers of its family and shows which tier this is; a hidden one that is not earned is a "?". */
-export function Badge({ a, tiers = 1, size = 46 }: { a: Pick<Achievement, 'id' | 'name' | 'tier' | 'hidden'> & Partial<Achievement>; tiers?: number; size?: number }) {
+/** The picture of an achievement (web/public/badges/<id>.webp: one style, generated with Google Gemini). */
+export const badgeSrc = (id: string) => `/badges/${id}.webp`;
+
+/** A badge: the achievement's picture, lit when earned and greyed when not (the same file); the ring around it is cut into the
+ *  tiers of its family and shows which tier this is; a hidden one that is not earned shows the "?" picture. */
+export function Badge({ a, tiers = 1, size = 56 }: { a: Pick<Achievement, 'id' | 'name' | 'tier' | 'hidden'> & Partial<Achievement>; tiers?: number; size?: number }) {
   const earned = a.earned_at !== null && a.earned_at !== undefined;
   const secret = a.name === '?';
-  const r = 20;
+  const r = 26.5;
   const n = Math.max(1, tiers);
-  const gap = n > 1 ? 9 : 0; // degrees between the segments of the ring
+  const gap = n > 1 ? 8 : 0; // degrees between the segments of the ring
   const arc = (i: number) => {
     const a0 = ((-90 + (360 / n) * i + gap / 2) * Math.PI) / 180;
     const a1 = ((-90 + (360 / n) * (i + 1) - gap / 2) * Math.PI) / 180;
-    if (n === 1) return `M24 ${24 - r}A${r} ${r} 0 1 1 23.99 ${24 - r}`;
-    return `M${(24 + r * Math.cos(a0)).toFixed(2)} ${(24 + r * Math.sin(a0)).toFixed(2)}A${r} ${r} 0 ${360 / n - gap > 180 ? 1 : 0} 1 ${(24 + r * Math.cos(a1)).toFixed(2)} ${(24 + r * Math.sin(a1)).toFixed(2)}`;
+    if (n === 1) return `M28 ${28 - r}A${r} ${r} 0 1 1 27.99 ${28 - r}`;
+    return `M${(28 + r * Math.cos(a0)).toFixed(2)} ${(28 + r * Math.sin(a0)).toFixed(2)}A${r} ${r} 0 ${360 / n - gap > 180 ? 1 : 0} 1 ${(28 + r * Math.cos(a1)).toFixed(2)} ${(28 + r * Math.sin(a1)).toFixed(2)}`;
   };
   return (
-    <span class={`cb-badge ${earned ? 'on' : ''}`} style={{ width: `${size}px`, height: `${size}px` }} aria-hidden="true">
-      <svg viewBox="0 0 48 48" width={size} height={size}>
-        <circle cx="24" cy="24" r="16" class="bg" />
+    <span class={`cb-badge ${earned ? 'on' : ''}`} style={{ width: `${size}px`, height: `${size}px` }}>
+      <img src={badgeSrc(secret ? 'hidden' : a.id)} alt="" width={size} height={size} loading="lazy" decoding="async" />
+      <svg viewBox="0 0 56 56" width={size} height={size} aria-hidden="true">
         {Array.from({ length: n }, (_, i) => (
           <path key={i} d={arc(i)} class={`seg ${i < a.tier ? 'tier' : ''}`} />
         ))}
-        {secret ? (
-          <text x="24" y="29.5" text-anchor="middle">
-            ?
-          </text>
-        ) : (
-          <g class="gl" transform="translate(12 12)" dangerouslySetInnerHTML={{ __html: GLYPHS[GLYPH_OF[a.id ?? ''] ?? 'square'] ?? '' }} />
-        )}
       </svg>
     </span>
   );
@@ -140,6 +135,7 @@ export function ScorePanel() {
           <b>{num(s.points)}</b>
           <span>points</span>
         </div>
+        <img class="cb-levelbadge" src={badgeSrc(`level_${s.level.toLowerCase()}`)} alt="" width={56} height={56} data-testid="level-badge" />
         <div class="cb-stat wide" data-testid="score-level">
           <b>{s.level}</b>
           <span class="cb-bar" role="progressbar" aria-valuenow={Math.round(toNext * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Progress to the next level">
@@ -294,9 +290,7 @@ export function Leaders({ route }: { route: Route }) {
                         <b>{r.name}</b>
                         {r.me && <span class="badge">you</span>}
                         {r.badges.map((b) => (
-                          <span key={b.id} class="badge st-interesting" title="One of this searcher’s three rarest achievements">
-                            {b.name}
-                          </span>
+                          <img key={b.id} class="cb-minibadge" src={badgeSrc(b.id)} alt={b.name} title={`${b.name}: one of this searcher’s three rarest achievements`} width={20} height={20} loading="lazy" />
                         ))}
                         {r.answers_to_rank != null && r.answers_to_rank > 0 && <span class="mono-s">{r.answers_to_rank} more settled answers for a place</span>}
                       </span>

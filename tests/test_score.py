@@ -349,3 +349,14 @@ def test_score_through_the_api(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert [(r["place"], r["name"], r["points"], r["me"]) for r in mine] == [(None, "Ann K.", 5, True)]
     assert c.get("/api/leaders", params={"period": "year"}).status_code == 422
     assert time.time() > 0
+
+
+def test_every_achievement_and_level_has_its_badge_picture() -> None:
+    """web/public/badges/<id>.webp: one picture per achievement, one per level, and the "?" of a hidden one."""
+    badges = Path(__file__).resolve().parent.parent / "web" / "public" / "badges"
+    need = [a.id for a in ACHIEVEMENTS] + [f"level_{name.lower()}" for _, name in score.LEVELS] + ["hidden"]
+    missing = [n for n in need if not (badges / f"{n}.webp").is_file()]
+    assert missing == []
+    for n in need:
+        head = (badges / f"{n}.webp").read_bytes()[:12]
+        assert head[:4] == b"RIFF" and head[8:12] == b"WEBP", n
