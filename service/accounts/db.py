@@ -115,6 +115,12 @@ CREATE TABLE IF NOT EXISTS acc_submissions (
   created REAL NOT NULL,
   updated REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS acc_notified (
+  user_id TEXT NOT NULL,
+  key TEXT NOT NULL,
+  at REAL NOT NULL,
+  PRIMARY KEY (user_id, key)
+);
 CREATE TABLE IF NOT EXISTS acc_credits (
   finding_id TEXT NOT NULL,
   user_id TEXT NOT NULL,
@@ -530,3 +536,53 @@ class AccountsDB:
         for u in users:
             self.notify(u, "status", f"Finding {finding_id}: the status is now “{status.replace('_', ' ')}”.", finding_id)
         return len(users)
+
+    def notify_once(self, user_id: str, key: str, kind: str, text: str, ref: str | None = None) -> bool:
+        """A notification about something that happened once (a checks job finished, a square got a find): never sent twice."""
+        cur = self._conn().execute("INSERT OR IGNORE INTO acc_notified(user_id,key,at) VALUES(?,?,?)", (user_id, key, time.time()))
+        if cur.rowcount == 1:
+            self.notify(user_id, kind, text, ref)
+        return cur.rowcount == 1
+
+    def viewed_squares_with_finds(self, user_id: str) -> list[tuple[str, int]]:
+        """(square, finds) for the squares this user closed a task on where the machine now has finds (the grid stream's table;
+        nothing while it does not exist)."""
+        try:
+            rows = self._conn().execute(
+                "SELECT DISTINCT t.cell_id, g.finds FROM acc_tasks t JOIN grid_cells g ON g.id=t.cell_id"
+                " WHERE t.user_id=? AND t.kind='cell' AND t.state='done' AND g.finds>0 AND g.updated>t.done_at",
+                (user_id,),
+            )
+            return [(r[0], int(r[1])) for r in rows]
+        except sqlite3.OperationalError:
+            return []
+
+    def export(self, user_id: str) -> dict[str, Any]:
+        """Everything kept about this user."""
+        return {
+            "user": self.user(user_id),
+            "marks": self.marks(user_id),
+            "tasks": self.tasks(user_id),
+            "investigations": self.investigations(user_id),
+            "findings": self.my_findings(user_id),
+            "history": self.history(user_id, MAX_HISTORY),
+            "notifications": self.notifications(user_id, 100000),
+        }
+
+    def delete_user(self, user_id: str) -> None:
+        """The account and everything in it. A finding the user submitted stays a finding, without a name."""
+        c = self._conn()
+        c.execute("BEGIN")
+        try:
+            for table in ("acc_sessions", "acc_marks", "acc_tasks", "acc_investigations", "acc_history", "acc_notifications",
+                          "acc_notified", "acc_credits"):  # fmt: skip
+                c.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+            c.execute("UPDATE acc_submissions SET user_id='' WHERE user_id=?", (user_id,))
+            email = c.execute("SELECT email FROM acc_users WHERE id=?", (user_id,)).fetchone()
+            if email is not None:
+                c.execute("DELETE FROM acc_login_tokens WHERE email=?", (email[0],))
+            c.execute("DELETE FROM acc_users WHERE id=?", (user_id,))
+            c.execute("COMMIT")
+        except BaseException:
+            c.execute("ROLLBACK")
+            raise

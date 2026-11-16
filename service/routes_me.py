@@ -19,6 +19,7 @@ GET    /api/findings/submitted                → {findings:[…, credit:[{name,
 
 from __future__ import annotations
 
+import json
 import re
 import time
 import uuid
@@ -141,6 +142,35 @@ def make_me_router(st: Any) -> APIRouter:
         inv["checks"] = None if body is None else {k: body.get(k) for k in ("state", "checks", "can_submit")}
         return inv
 
+    def fresh(acc: accounts.Accounts, u: dict[str, Any]) -> None:
+        """What happened since the user last looked, said once each: a checks job of theirs finished; a square they looked through
+        got a machine find. (A finding's new status is said when the verdict is set: AccountsDB.set_status.)"""
+        for inv in acc.db.investigations(u["id"]):
+            body = None if inv["submitted"] else checks_of(inv["checks_job"])
+            if body is not None and body.get("state") == "done":
+                ok = body.get("can_submit") is True
+                text = f"The checks of “{inv['title']}” have finished: " + ("ready to submit." if ok else "something blocks the submit.")
+                acc.db.notify_once(u["id"], f"checks:{inv['checks_job']}", "checks", text, f"#/me?tab=investigations&inv={inv['id']}")
+        for cell_id, finds in acc.db.viewed_squares_with_finds(u["id"]):
+            text = f"Square {cell_id}, which you looked through, now has {finds} machine {'find' if finds == 1 else 'finds'}."
+            acc.db.notify_once(u["id"], f"cellfind:{cell_id}", "square", text, f"#/explore?cell={cell_id}")
+
+    @router.get("/api/me/export")
+    def export(request: Request) -> Response:
+        acc, u = me(request)
+        body = json.dumps({"exported": _now(), **acc.db.export(u["id"])}, ensure_ascii=False, indent=1)
+        return Response(
+            body, media_type="application/json", headers={"Content-Disposition": 'attachment; filename="spherex-space-my-data.json"'}
+        )
+
+    @router.delete("/api/me", status_code=204)
+    def delete_me(request: Request) -> Response:
+        acc, u = me(request)
+        acc.db.delete_user(u["id"])
+        resp = Response(status_code=204)
+        resp.delete_cookie(accounts.COOKIE, path="/")
+        return resp
+
     @router.patch("/api/me")
     def rename(body: NameIn, request: Request) -> Any:
         acc, u = me(request)
@@ -228,6 +258,7 @@ def make_me_router(st: Any) -> APIRouter:
     @router.get("/api/me/notifications")
     def notifications(request: Request) -> Any:
         acc, u = me(request)
+        fresh(acc, u)
         items = acc.db.notifications(u["id"])
         return {"notifications": items, "unread": sum(1 for n in items if not n["read"])}
 

@@ -323,3 +323,43 @@ def test_google_sign_in_with_a_fake_google(site: tuple[FastAPI, _State, _Mail], 
     r = c.get("/api/auth/google/callback", params={"code": "the-code", "state": state})
     assert r.headers["location"] == "/#/me"
     assert c.get("/api/me").json()["user"] == {"id": c.get("/api/me").json()["user"]["id"], "name": "Ann K.", "email": "ann@example.org"}
+
+
+def test_notifications_say_what_happened_once(site: tuple[FastAPI, _State, _Mail]) -> None:
+    app, st, mail = site
+    _fake_grid(st)
+    accounts.get(st).db._conn().execute("ALTER TABLE grid_cells ADD COLUMN updated REAL DEFAULT 0")
+    c = _sign_in(app, mail)
+    t = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    c.post(f"/api/me/tasks/{t['id']}/done", json={"result": "nothing", "mark_ids": []})
+    jobs: dict[str, Any] = {"j1": {"state": "running", "checks": [], "can_submit": False}}
+    st.checks_status = lambda job: jobs.get(job)  # type: ignore[attr-defined]
+    c.post("/api/me/investigations", json={"title": "Dot", "checks_job": "j1"})
+    assert c.get("/api/me/notifications").json()["notifications"] == []
+    jobs["j1"] = {"state": "done", "checks": [], "can_submit": True}
+    accounts.get(st).db._conn().execute("UPDATE grid_cells SET finds=2, updated=strftime('%s','now')+10 WHERE id=?", (t["cell_id"],))
+    texts = sorted(n["text"] for n in c.get("/api/me/notifications").json()["notifications"])
+    assert texts == [
+        f"Square {t['cell_id']}, which you looked through, now has 2 machine finds.",
+        "The checks of “Dot” have finished: ready to submit.",
+    ]
+    assert len(c.get("/api/me/notifications").json()["notifications"]) == 2  # said once
+
+
+def test_download_and_delete_my_data(site: tuple[FastAPI, _State, _Mail]) -> None:
+    app, st, mail = site
+    c = _sign_in(app, mail)
+    c.post("/api/me/marks", json=MARK)
+    c.post("/api/me/history", json={"kind": "lab", "ref": "#/lab?ra=1&dec=2"})
+    r = c.get("/api/me/export")
+    assert "attachment" in r.headers["content-disposition"]
+    data = r.json()
+    assert data["user"]["email"] == "ann@example.org" and data["marks"] == [MARK] and len(data["history"]) == 1
+    other = _sign_in(app, mail)
+    assert _client(app).delete("/api/me").status_code == 401
+    assert c.delete("/api/me").status_code == 204
+    assert c.get("/api/me").json()["user"] is None and other.get("/api/me").json()["user"] is None  # every session ended
+    dump = "\n".join(sqlite3.connect(accounts.get(st).db.path).iterdump())
+    assert "ann@example.org" not in dump and MARK["id"] not in dump
+    again = _sign_in(app, mail)  # the address can start anew, empty
+    assert again.get("/api/me/marks").json() == {"marks": []}
