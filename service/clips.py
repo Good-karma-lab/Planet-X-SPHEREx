@@ -20,6 +20,7 @@ A clip is rendered once; a new VERSION (a change of the picture) starts a new fo
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import math
 import os
@@ -47,6 +48,7 @@ SIZE = 320  # the side of the clip in pixels
 FRAME_MS = 800  # one pass on screen
 QUALITY = 82
 CLIP_FOV = 5.0  # the field built for a clip when no finished field will do
+MAX_BUILDS = 2  # fields being built for clips at once (running or queued); further clips wait their turn and are asked for again
 RING_ARCSEC = 15.0  # radius of the ring round the object
 MOVING = ("mover", "browndwarf", "peak")  # kinds whose motion between passes is a few arcseconds: they want the fine grid
 FIELD = "field"
@@ -85,7 +87,8 @@ def _sn_law(x: F) -> F:
 
 
 def plane_levels(rgb: F) -> tuple[list[float], list[float]]:
-    """Background (median) and noise (1.4826 × MAD) of each channel on its own, on every third pixel like the lab; noise 0 = not measured."""
+    """Background (median) and noise (1.4826 × MAD) of each channel on its own, on every third pixel like the lab.
+    Noise 0 = not measured."""
     bg: list[float] = []
     sg: list[float] = []
     for c in range(rgb.shape[0]):
@@ -211,7 +214,8 @@ def _mjd_date(mjd: float) -> datetime:
 
 
 def date_label(mjd0: float, mjd1: float) -> str:
-    """The dates of a pass (it is a stack of many days): "12 Aug - 27 Sep 2025" (plain ASCII: the label is drawn with the small font Pillow carries)."""
+    """The dates of a pass (it is a stack of many days): "12 Aug - 27 Sep 2025". Plain ASCII: the label is drawn with the small
+    font Pillow carries."""
     a, b = _mjd_date(mjd0), _mjd_date(mjd1)
     if a.date() == b.date():
         return f"{a.day} {a:%b %Y}"
@@ -288,7 +292,8 @@ def _text(draw: ImageDraw.ImageDraw, xy: tuple[float, float], text: str, px: int
 
 
 def draw_frame(pic: F, ring: tuple[float, float] | None, ring_px: float, label: str, corner: str, size: int = SIZE) -> Image.Image:
-    """One frame: the window enlarged to `size`, the ring (if the object is in this pass), the dates of the pass and the width of the window."""
+    """One frame: the window enlarged to `size`, the ring (if the object is in this pass), the dates of the pass and the width of
+    the window."""
     h = pic.shape[0]
     img = Image.fromarray(np.clip(np.round(pic * 255.0), 0, 255).astype(np.uint8), "RGB").resize((size, size), Image.Resampling.BICUBIC)
     k = 3  # the overlay is drawn three times larger and reduced: smooth ring, crisp text
@@ -321,7 +326,8 @@ _LOOKS: OrderedDict[tuple[str, int], PassLook] = OrderedDict()
 
 
 def render(find: dict[str, Any], src: Source, window_arcmin: float = WINDOW_ARCMIN, size: int = SIZE) -> tuple[bytes, dict[str, Any]]:
-    """The clip of `find` cut from the field `src`: (animated WebP, what it shows). Raises ClipUnavailable when the field has no pass there."""
+    """The clip of `find` cut from the field `src`: (animated WebP, what it shows). Raises ClipUnavailable when the field has no pass
+    there."""
     t0 = time.time()
     grid = src.grid
     passes = sorted(src.meta.get("passes") or [], key=lambda p: p["index"])
@@ -364,8 +370,6 @@ def render(find: dict[str, Any], src: Source, window_arcmin: float = WINDOW_ARCM
         shown.append({"pass": int(p["index"]), "mjd0": p["mjd0"], "mjd1": p["mjd1"], "label": label, "ra": ra, "dec": dec})
     if not frames:
         raise ClipUnavailable("no pass of the field covers this place")
-    import io
-
     buf = io.BytesIO()
     frames[0].save(buf, "WEBP", save_all=True, append_images=frames[1:], duration=FRAME_MS, loop=0, quality=QUALITY, method=4)
     data = buf.getvalue()
@@ -486,7 +490,11 @@ class Clips:
         if self.wants_own(find, src) and self.build is not None and fid not in self.failed:
             task = self.building.get(fid)
             if task is None:
+                if len(self.building) >= MAX_BUILDS:
+                    raise ClipPending("other clips are being built first")
                 task = self.building[fid] = asyncio.create_task(self._build(find))
+            if not wait and not task.done():
+                await asyncio.wait({task}, timeout=0.05)  # a build that answers at once is not asked for twice
             if not wait and not task.done():
                 raise ClipPending("the field of this clip is being built")
             try:
@@ -522,12 +530,12 @@ class Clips:
             self.failed[str(find["id"])] = f"the field could not be built: {e}"[:200]
             return None
 
-    def summary(self, find: dict[str, Any]) -> dict[str, Any]:
+    def summary(self, find: dict[str, Any], detail: bool = True) -> dict[str, Any]:
         """The `clip` field of a finding in the API: where the clip is and whether it is ready."""
         fid = str(find["id"])
         st = self.state(fid)
-        out: dict[str, Any] = {"url": f"/api/findings/{fid}/clip.webp", "state": st, "version": VERSION}
-        if st == "ready":
+        out: dict[str, Any] = {"url": f"/api/findings/{fid}/clip.webp?v={VERSION}", "state": st, "version": VERSION}
+        if st == "ready" and detail:
             i = self.info(fid) or {}
             out.update({"frames": len(i.get("frames") or []), "bytes": i.get("bytes"), "window_arcmin": i.get("window_arcmin")})
         elif st == "none":

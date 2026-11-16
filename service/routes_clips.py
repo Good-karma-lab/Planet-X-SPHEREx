@@ -16,7 +16,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 
-from service.clips import Clips, ClipPending, ClipUnavailable, clips_dir
+from service.clips import ClipPending, Clips, ClipUnavailable, clips_dir
 from service.findings import find_row
 from service.jobs.scheduler import Priority
 from service.products.store import Store, product_key

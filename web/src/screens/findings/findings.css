@@ -74,3 +74,33 @@
 @media (max-width: 600px) { .ftab.cat td:first-child { white-space: normal; } .fblink .fthumb { width: 100% !important; height: auto !important; aspect-ratio: 1; } }
 .st-wait { color: var(--muted); }
 @media (max-width: 1099px) { .leads { max-width: none; } }
+
+/* ---- the cards of the product flow: a looping time-lapse clip on every finding */
+.fbar { padding: 12px 14px 8px; margin-bottom: 12px; }
+.fbar .fkinds { align-items: center; }
+.fsep { width: 1px; align-self: stretch; background: var(--edge); margin: 0 4px; }
+.fgrid { list-style: none; margin: 0 !important; padding: 0 !important; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.fcard { display: flex; flex-direction: column; border: 1px solid var(--edge); border-radius: 14px; overflow: hidden; min-width: 0; content-visibility: auto; contain-intrinsic-size: auto 380px; }
+.fcard.on { border-color: rgba(95, 227, 214, 0.6); box-shadow: 0 0 0 1px rgba(95, 227, 214, 0.35); }
+.fcard-pic { position: relative; display: block; padding: 0; border: 0; background: #02070a; cursor: pointer; width: 100%; color: inherit; font: inherit; }
+.fclip { position: relative; width: 100%; aspect-ratio: 1; display: grid; place-items: center; background: #02070a; text-align: center; overflow: hidden; }
+.fclip img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+.fclip .mono-s { padding: 0 14px; color: var(--muted); }
+.fcard-stage { position: absolute; top: 8px; left: 8px; background-color: rgba(4, 12, 16, 0.78); backdrop-filter: blur(4px); }
+.fcard-promise { position: absolute; top: 8px; right: 8px; min-width: 26px; padding: 1px 6px; border-radius: 6px; border: 1px solid var(--edge); background: rgba(4, 12, 16, 0.78); color: var(--accent); font: 700 11px var(--mono); text-align: center; }
+.fcard-body { display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 12px; min-width: 0; flex: 1; }
+.fcard-title { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcard-sub, .fcard-credit { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcard-meta { display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--ink); margin-top: 2px; }
+.fcard-meta > span { display: inline-flex; gap: 5px; align-items: center; }
+.fcard-meta .wait { color: var(--amber); }
+.fcard-go { margin-top: auto; align-self: stretch; text-align: center; justify-content: center; }
+.fcard-body .fcard-credit { margin-bottom: 8px; }
+.fend { height: 1px; }
+@media (max-width: 600px) {
+  .fgrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .fcard-body { padding: 8px 9px 10px; }
+  .fcard-title { font-size: 12.5px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .fcard-promise { display: none; }
+  .fbar { padding: 10px 10px 6px; }
+}
