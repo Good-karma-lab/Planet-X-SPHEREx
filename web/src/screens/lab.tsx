@@ -1,3 +1,4 @@
+import { taskOfParams } from './lab/task';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
@@ -402,6 +403,7 @@ function useIdentNames(tracks: Track[]): (string | undefined)[] {
 
 export function Lab({ route }: { route: Route }) {
   const p = route.params;
+  const squareTaskRef = useRef(false);
   const ra = Number(p['ra']);
   const dec = Number(p['dec']);
   const valid = Number.isFinite(ra) && Number.isFinite(dec);
@@ -423,12 +425,15 @@ export function Lab({ route }: { route: Route }) {
             .map(Number)
             .filter((d) => d >= 1 && d <= 6)
         : [1, 2, 3, 4, 5, 6];
+  // a task ("Mark everything that moves and has no ring"): Known objects on, red sources and anomalies off, unless the address says
+  const inTask = !!p['task'];
+  const squareTask = inTask && taskOfParams(p)?.kind === 'cell';
   const opts: Opts = {
     reference: p['ref'] === '1',
     archive: p['arch'] === '1',
-    anomalies: p['ano'] !== '0',
+    anomalies: inTask ? p['ano'] === '1' : p['ano'] !== '0',
     movers: p['movers'] !== '0',
-    red: p['red'] !== '0',
+    red: inTask ? p['red'] === '1' : p['red'] !== '0',
     marker: p['marker'] !== '0',
     sharp: p['sharp'] !== '0',
     trim: p['trim'] === 'p999' || p['trim'] === 'p995' || p['trim'] === 'adaptive' ? p['trim'] : 'fixed',
@@ -440,8 +445,9 @@ export function Lab({ route }: { route: Route }) {
     mono: p['blend'] === 'mono',
     artifacts: p['art'] === '1',
     motion: p['mot'] === '1',
-    known: p['known'] === '1',
+    known: inTask ? p['known'] !== '0' : p['known'] === '1',
   };
+  squareTaskRef.current = squareTask;
 
   const set = (params: Record<string, string | null>) => {
     // from the address as it is now (two quick clicks before a render must both count)
@@ -486,7 +492,8 @@ export function Lab({ route }: { route: Route }) {
           if (cur.screen === 'lab' && Number.isFinite(cra) && Number.isFinite(cdec) && cfov <= 10) {
             for (const o of targets.current) {
               if (!(o.pmra || o.pmdec)) continue;
-              const near = (a: number, b: number, c: number, e: number) => Math.hypot((a - c) * Math.cos((b * Math.PI) / 180), b - e) * 3600;
+              const near = (a: number, b: number, c: number, e: number) =>
+                Math.hypot((a - c) * Math.cos((b * Math.PI) / 180), b - e) * 3600;
               if (near(o.ra, o.dec, cra, cdec) > 6) continue;
               const [era, edec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2025.9);
               if (near(era, edec, o.ra, o.dec) < 20) break;
@@ -786,6 +793,7 @@ export function Lab({ route }: { route: Route }) {
     const zoomTarget = (): [number, number] | null => {
       const sl = selRef.current;
       if (sl) return sl.pmra || sl.pmdec ? atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, 2025.9) : [sl.ra, sl.dec];
+      if (squareTaskRef.current) return null; // a square has no target: the 2′ inset waits for a clicked source
       const m = state.current.meta;
       if (!m) return null;
       const half = (m.grid.n * m.grid.step_arcsec) / 2 / 3600;
@@ -1305,7 +1313,7 @@ export function Lab({ route }: { route: Route }) {
           const [c0, c1] = pr.components;
           const [u0, v0] = uvOf(c0.ra, c0.dec);
           const [u1, v1] = uvOf(c1.ra, c1.dec);
-          const half = (Math.hypot(u0 - u1, v0 - v1) * 0.5 * wcss) || 0;
+          const half = Math.hypot(u0 - u1, v0 - v1) * 0.5 * wcss || 0;
           marks.push({
             ra: (c0.ra + c1.ra) / 2,
             dec: (c0.dec + c1.dec) / 2,
@@ -1499,7 +1507,8 @@ export function Lab({ route }: { route: Route }) {
         const shape = () => {
           ctx.beginPath();
           if (ticks) {
-            const gap = Math.max(3, rr * 0.45), arm = rr + 5;
+            const gap = Math.max(3, rr * 0.45),
+              arm = rr + 5;
             for (const [ax, ay] of [
               [1, 0],
               [-1, 0],
@@ -1701,7 +1710,9 @@ export function Lab({ route }: { route: Route }) {
       };
       const wall = !days && st.view !== 'picture';
       const underInset = (x: number, y: number) =>
-        (!!inset && x > inset.x - 4 && y > inset.y - 4 && x < inset.x + inset.w + 4 && y < inset.y + inset.h + 4) || (!wall && y < 46) || (!wall && y > hcss - 46); // nor under the title row floating over the top of the picture, nor in the band of the chips and the date at its bottom
+        (!!inset && x > inset.x - 4 && y > inset.y - 4 && x < inset.x + inset.w + 4 && y < inset.y + inset.h + 4) ||
+        (!wall && y < 46) ||
+        (!wall && y > hcss - 46); // nor under the title row floating over the top of the picture, nor in the band of the chips and the date at its bottom
       ctx.save();
       for (const box of rects) {
         if (wall) {
@@ -1775,7 +1786,10 @@ export function Lab({ route }: { route: Route }) {
         fovArc,
         placed,
         hidden: underInset,
-        picture: fpic && fnoise && fpic.n === grid.n ? { pass: shownPass, n: fpic.n, rgb: fpic.rgb, bg: fnoise.bg, sigma: fnoise.sigma, step: grid.step_arcsec } : null,
+        picture:
+          fpic && fnoise && fpic.n === grid.n
+            ? { pass: shownPass, n: fpic.n, rgb: fpic.rgb, bg: fnoise.bg, sigma: fnoise.sigma, step: grid.step_arcsec }
+            : null,
       });
       if (!st.opts.rings) return;
       // speed rings, centred on the field: how far a body of that speed moves between the first and the last season
@@ -2671,12 +2685,16 @@ export function Lab({ route }: { route: Route }) {
       else none.push(lab);
     }
     if (!any) return null;
-    const join = (a: string[]) => (a.length === 2 ? a.join(' and ') : a.length > 2 ? `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}` : a[0]!);
+    const join = (a: string[]) =>
+      a.length === 2 ? a.join(' and ') : a.length > 2 ? `${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}` : a[0]!;
     const parts: string[] = [];
     let first = true;
     for (const [key, labs] of strong) {
       const set = key.split('/').map(Number);
-      const range = set.length === 6 ? 'all six detectors (0.75–5 µm)' : `${LO[set[0]! - 1]}–${HI[set[set.length - 1]! - 1]} µm (${set.map((x) => `D${x}`).join('/')})`;
+      const range =
+        set.length === 6
+          ? 'all six detectors (0.75–5 µm)'
+          : `${LO[set[0]! - 1]}–${HI[set[set.length - 1]! - 1]} µm (${set.map((x) => `D${x}`).join('/')})`;
       parts.push(`${first ? 'Seen at ' : 'at '}${range} in ${join(labs)}`);
       first = false;
     }
@@ -3933,15 +3951,7 @@ export function Lab({ route }: { route: Route }) {
                 {!pairs.length && (
                   <div class="ssum">{mv?.state === 'done' ? 'none in this field' : 'waiting for the search between passes'}</div>
                 )}
-                {pairs.length > 0 &&
-                  pairs.map((pr, i) => (
-                    <PairButton
-                      key={i}
-                      pair={pr}
-                      on={pairSel === i}
-                      onClick={() => openPair(i)}
-                    />
-                  ))}
+                {pairs.length > 0 && pairs.map((pr, i) => <PairButton key={i} pair={pr} on={pairSel === i} onClick={() => openPair(i)} />)}
               </section>
               <section class="psec fsec">
                 <div class="fsh">Red sources</div>
