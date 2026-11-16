@@ -74,3 +74,35 @@ Open http://localhost:5190. "Start searching" goes to the globe with the Coverag
 - A cheaper per-square search is for the user to decide (options below).
 - flow-mobile: merged when it reports.
 - The local product.sqlite grid rows are trial data: 38 imported squares plus the sweep trial.
+
+## A cheaper per-square search: options, for the user to decide
+
+**Measured stages** (local Mac, 4 workers, 3 new Planet Nine squares, 3 passes each):
+
+| Square | Field built | Movers search | Brown-dwarf search | Quick parts of 2 passes ready | Peak RSS |
+|---|---|---|---|---|---|
+| 296-0149 | 512 s | 11 s | 0 s | 67 s | 2.3 GB |
+| 291-0147 | 582 s | 7 s | 0 s | 67 s | 2.7 GB |
+| 293-0151 | 143 s | 7 s | 0 s | 17 s | 4.2 GB |
+
+**What this shows:**
+- The field build (downloading and stacking every exposure of every pass) is about 95% of a square's time.
+- The movers search reads only the field's "quick" parts (one white image per pass).
+- The brown-dwarf pass costs nothing: it reuses the movers result.
+
+**Options:**
+1. **As now:** about 16 squares/h per 4-worker instance. The Planet Nine band (31,680 squares) takes about 80 days; the ecliptic
+   another 120.
+2. **No brown-dwarf pass:** saves about 0 s. Not worth losing those finds.
+3. **Movers on quick parts only:** a sweep field job that stops once every pass has its quick part, skipping the detector stacks and
+   the differences.
+   - Quick parts of 2 of 3 passes were ready at 17–67 s, against 143–582 s for the full build. That suggests 3–5× faster: about
+     50–80 squares/h. This is an estimate; it is not built.
+   - The cost: a square the machine searched opens cold in the lab, with the full build of 1–2 min when a person takes it.
+   - It needs a "quick only" mode in service/workers/fieldjob.py (not B1's file).
+4. **More cores:** the rate grows about linearly with workers. The production VM has 12; separate sweep instances need their own
+   memory caps.
+5. **A smaller area first:** only the densest part of the Planet Nine band (for example, 5° around RA 50°, Dec +8°: about 700
+   squares, 1–2 days as now).
+
+Options 3 and 4 combined would take the Planet Nine band in about a week.
