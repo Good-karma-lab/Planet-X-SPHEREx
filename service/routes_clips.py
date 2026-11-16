@@ -81,6 +81,15 @@ def make_clips_router(st: Any) -> APIRouter:
             return JSONResponse({"state": "none", "reason": str(e)}, 404, headers={"Cache-Control": "no-store"})
         return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
+    async def still(find_id: str) -> Any:
+        """One still frame of the finding's place, for a card whose clip is not made yet: 200 image/webp or 404 {state, reason}."""
+        find = await asyncio.to_thread(the_find, find_id)
+        try:
+            path = await clips_of(st).still(find)
+        except ClipUnavailable as e:
+            return JSONResponse({"state": "none", "reason": str(e)}, 404, headers={"Cache-Control": "no-store"})
+        return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=86400"})
+
     async def clip_info(find_id: str) -> Any:
         clips = clips_of(st)
         find = await asyncio.to_thread(the_find, find_id)
@@ -113,5 +122,6 @@ def make_clips_router(st: Any) -> APIRouter:
         router.add_api_route(f"{prefix}/clips/status", status, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/clips/place.webp", place_clip, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/findings/{{find_id}}/clip.webp", clip, methods=["GET"], include_in_schema=prefix == "/api")
+        router.add_api_route(f"{prefix}/findings/{{find_id}}/still.webp", still, methods=["GET"], include_in_schema=prefix == "/api")
         router.add_api_route(f"{prefix}/findings/{{find_id}}/clip", clip_info, methods=["GET"], include_in_schema=prefix == "/api")
     return router

@@ -382,6 +382,7 @@ def render(
     size: int = SIZE,
     with_ring: bool = True,
     labels: bool = True,
+    max_frames: int | None = None,
 ) -> tuple[bytes, dict[str, Any]]:
     """The clip of `find` cut from the field `src`: (animated WebP, what it shows). Raises ClipUnavailable when the field has no pass
     there."""
@@ -400,6 +401,8 @@ def render(
     shown: list[dict[str, Any]] = []
     motion = motion_of(find) if with_ring else None
     for p in passes:
+        if max_frames is not None and len(frames) >= max_frames:
+            break
         raw = src.store.read_part(FIELD, src.key, f"picture_p{p['index']}.sxp")
         if raw is None:
             continue
@@ -462,13 +465,23 @@ FILM_MIN_WINDOW_ARCMIN = 4.0
 FILM_MARGIN_ARCMIN = 1.5
 
 
-def film_picture(sky: NDArray[np.uint8]) -> F:
+NO_VISIT_GREY = 0.11
+
+
+def film_picture(sky: NDArray[np.uint8], fill: list[NDArray[np.uint8]] | None = None) -> F:
     """A frame of the visits product as the lab's Days scale draws it: grey in the lab's display law (the product keeps 1 + 254 × the
     law; 0 = no data). The visits carry no saturation layer, so a hole next to full-scale light is a saturated core and is white;
-    any other hole (no exposure there in this visit) is black."""
-    v = np.where(sky > 0, (sky.astype(np.float64) - 1.0) / 254.0, 0.0)
+    any other hole (no exposure there in this visit) is filled from `fill` (the same place in the nearest visits of the same
+    detector) and, where no visit has it, drawn dark grey: never a black hole in the sky."""
     hole = sky == 0
     core = hole & (maximum_filter(sky, size=7, mode="nearest") >= 235)
+    use = sky.copy()
+    for other in fill or ():
+        gap = (use == 0) & ~core
+        if not gap.any():
+            break
+        use[gap] = other[gap]
+    v = np.where(use > 0, (use.astype(np.float64) - 1.0) / 254.0, NO_VISIT_GREY)
     v[core] = 1.0
     return np.repeat(v[..., None], 3, axis=-1)
 
@@ -517,8 +530,10 @@ def render_film(find: dict[str, Any], store: Store, key: str, meta: dict[str, An
     ring_px = max(RING_ARCSEC / grid.step_arcsec, 0.035 * w)  # in a wide window the ring keeps a visible size
     frames: list[Image.Image] = []
     shown: list[dict[str, Any]] = []
+    same_det = [j for j in range(len(frames_meta)) if int(frames_meta[j]["det"]) == det]
     for i, (rx, ry) in zip(chosen, where, strict=True):
-        pic = film_picture(_window(sky[i], x0, y0, w, 0))
+        near = sorted((j for j in same_det if j != i), key=lambda j: abs(j - i))[:6]  # the nearest visits fill what this one lacks
+        pic = film_picture(_window(sky[i], x0, y0, w, 0), [_window(sky[j], x0, y0, w, 0) for j in near])
         mjd = float(frames_meta[i]["mjd"])
         label = f"{_mjd_date(mjd).day} {_mjd_date(mjd):%b %Y %H:%M} UT"
         ring = (rx - x0, ry - y0) if -0.5 <= rx - x0 <= w - 0.5 and -0.5 <= ry - y0 <= w - 0.5 else None
@@ -763,6 +778,24 @@ class Clips:
                 atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
         return p
 
+    def still_path(self, find_id: str) -> Path:
+        return self.path(find_id).with_name(self.path(find_id).stem + "_still.webp")
+
+    async def still(self, find: dict[str, Any]) -> Path:
+        """One still frame of the place (the first pass, the object ringed) from ANY finished field that holds it, for a card whose
+        clip is not made yet. It never builds anything. Raises ClipUnavailable when no finished field holds the place."""
+        p = self.still_path(str(find["id"]))
+        if p.is_file():
+            return p
+        src = self.source_for(find)
+        if src is None:
+            raise ClipUnavailable("no SPHEREx field covers this place yet")
+        async with self.gate:
+            if not p.is_file():
+                data, _ = await asyncio.to_thread(render, find, src, WINDOW_ARCMIN, SIZE, True, True, 1)
+                atomic_write_bytes(p, data)
+        return p
+
     async def _get_film(self, find: dict[str, Any], p: Path) -> Path:
         """A body that moves inside one pass is not in the stacked passes (a stack keeps what stands still): its clip is made of the
         visits of that pass, when the service has them."""
@@ -800,6 +833,8 @@ class Clips:
             st = "none"  # known without asking: the page shows the reason and does not request the clip
             self.failed.setdefault(fid, "the visits of its pass are not kept here; open it in the lab")
         out: dict[str, Any] = {"url": f"/api/findings/{fid}/clip.webp?v={VERSION}", "state": st, "version": VERSION}
+        if st != "ready" and self.source_for(find) is not None:
+            out["still"] = f"/api/findings/{fid}/still.webp?v={VERSION}"  # a picture of the place while the clip is not there
         if st == "ready" and detail:
             i = self.info(fid) or {}
             out.update({"frames": len(i.get("frames") or []), "bytes": i.get("bytes"), "window_arcmin": i.get("window_arcmin")})

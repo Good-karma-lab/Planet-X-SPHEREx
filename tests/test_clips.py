@@ -229,6 +229,9 @@ def test_the_routes_serve_the_clip_once_rendered_and_say_why_there_is_none(tmp_p
     off = client.get(f"/api/clips/place.webp?ra={RA0 + 5}&dec={DEC0}")
     assert off.status_code == 404 and off.json()["state"] == "none" and not st.clips.building
     assert client.get(f"/api/clips/place.webp?ra={RA0}&dec={DEC0}&size=97").status_code == 422
+    # a still of the place for a card whose clip is not made: one frame, from a finished field only
+    stl = client.get("/api/findings/mover:abc/still.webp")
+    assert stl.status_code == 200 and len(_frames(stl.content)) == 1 and client.get("/api/findings/red:far/still.webp").status_code == 404
     # the shared store got nothing: the clip is in the clips' own folder
     assert not list((tmp_path / "store").rglob("*.webp")) and list((tmp_path / "clips").rglob("*.webp"))
 
@@ -265,3 +268,8 @@ def test_a_track_inside_one_pass_is_shown_in_the_visits_of_one_detector(tmp_path
     ras = [f["ra"] for f in info["frames"]]
     assert ras == sorted(ras, reverse=True)  # x grows to the west: the ring moves west with the body
     assert clips.visits_for({**find, "data": {**find["data"], "film": 60000.0}}) is None  # another pass: not these visits
+    # the corner one visit did not cover is filled from the next visit of the same detector: no black hole
+    from service.clips import film_picture
+
+    alone, filled = film_picture(sky[2]), film_picture(sky[2], [sky[4]])
+    assert float(alone[:20, :20].min()) > 0.05 and np.allclose(filled[:20, :20, 0], (sky[4][:20, :20].astype(float) - 1) / 254.0)

@@ -19,7 +19,7 @@ export interface CardFind {
   promise: number;
   viewers: number;
   credit: { found_by: string; machine: boolean; first_marked_by: string | null; checked_by: string[]; looks: Record<string, number> };
-  clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string } | null;
+  clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string; still?: string } | null;
   name: string | null;
   field: { ra: number; dec: number; fov: number } | null;
   group: string | null;
@@ -223,6 +223,7 @@ export function Clip({ f }: { f: CardFind }) {
   return (
     <div class="fclip" ref={box}>
       {state === 'ready' && near && url && <img src={url} alt={`Time-lapse of ${cardTitle(f)}: one frame per SPHEREx pass, the object ringed`} width={320} height={320} decoding="async" />}
+      {state !== 'ready' && near && f.clip?.still && <img class="fstill" src={f.clip.still} alt="" loading="lazy" onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />}
       {state === 'asking' && <span class="mono-s">rendering the time-lapse…</span>}
       {state === 'building' && <span class="mono-s">building the field of this time-lapse…</span>}
       {state === 'none' && <span class="mono-s">no time-lapse: {why}</span>}
