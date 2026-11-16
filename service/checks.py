@@ -645,8 +645,8 @@ class Checks:
         whose centre is nearest (within a twentieth of the size, the service's own snap); without a size, or with no key at all, the
         smallest stored field that holds every mark FIELD_EDGE_ARCSEC inside its edge. "" when the store has no such field."""
         raw = str(req.get("field_key") or "")
-        if raw and "," not in raw:
-            return raw  # a store key
+        if raw and "," not in raw and ":" not in raw:
+            return raw  # a store key (a finding id such as "film:2e26…" names no field: the marks' place decides)
         store = getattr(self.st, "store", None)
         if store is None:
             return ""
