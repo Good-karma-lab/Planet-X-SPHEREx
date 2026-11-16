@@ -1472,9 +1472,25 @@ def flow_fields(f: dict[str, Any], view: dict[str, Any] | None) -> dict[str, Any
     }
 
 
+_NOTES: dict[str, str] | None = None
+
+
+def machine_notes() -> dict[str, str]:
+    """{find id: note}: what the review of the rendered clips saw (data/finding_notes.json). A note sets no status: it only lets the page
+    show together the finds that look like an artefact, for a person to judge."""
+    global _NOTES
+    if _NOTES is None:
+        try:
+            raw = json.loads((Path(__file__).resolve().parent.parent / "data" / "finding_notes.json").read_text(encoding="utf-8"))
+            _NOTES = {str(k): str(v) for k, v in (raw.get("notes") or {}).items()}
+        except (OSError, ValueError):
+            _NOTES = {}
+    return _NOTES
+
+
 LITE_KEYS = (
     "id", "kind", "place", "fov", "ra", "dec", "rate", "snr", "score", "chance", "status", "verdict", "identity", "updated",
-    "stage", "promise", "viewers", "credit", "clip",
+    "stage", "promise", "viewers", "credit", "clip", "note",
 )  # fmt: skip
 
 
@@ -1505,6 +1521,8 @@ def query(
     waiting: bool = False,
     kinds: tuple[str, ...] | None = None,
     clip_rank: Callable[[dict[str, Any]], int] | None = None,
+    only: frozenset[str] | None = None,
+    noted: bool = False,
 ) -> dict[str, Any]:
     """The finds with what the catalogues said. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
     stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
@@ -1548,6 +1566,7 @@ def query(
         f["idents"] = ids_
         f["verdict"] = verdict_of(f, ids_, st)
         f.update(flow_fields(f, views.get(f["id"])))
+        f["note"] = machine_notes().get(f["id"])
         items.append(f)
     counts: dict[str, dict[str, int]] = {
         k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "halo": 0, "leads": 0}
@@ -1576,6 +1595,8 @@ def query(
         and (not kinds or f["kind"] in kinds)
         and (not stage or f["stage"] == stage)
         and (not waiting or (f["viewers"] == 0 and f["stage"] == "new"))
+        and (only is None or f["id"] in only)
+        and (not noted or f["note"] is not None)
     ]
     rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
@@ -1600,6 +1621,7 @@ def query(
         "waiting_promising": sum(1 for f in shown if f["viewers"] == 0 and f["stage"] == "new" and f["kind"] in PROMISING_KINDS),
         "promising": sum(1 for f in shown if f["kind"] in PROMISING_KINDS),
         "promising_kinds": list(PROMISING_KINDS),
+        "noted": sum(1 for f in shown if f["note"] is not None),
         "identification": {
             "pending": pending,
             "unavailable": unavailable,

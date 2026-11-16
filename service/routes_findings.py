@@ -98,6 +98,8 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         stage: str | None = Query(None),
         waiting: bool = Query(False),
         kinds: str | None = Query(None, description="several kinds, comma separated"),
+        ids: str | None = Query(None, max_length=4000, description="only these finds (comma separated ids)"),
+        noted: bool = Query(False, description="only the finds that carry a machine note (they look like an artefact)"),
         lite: bool = Query(False, description="only what a card shows (no data, spectrum, catalogue answers)"),
     ) -> Any:
         """{count, total, counts[kind]{all, unexplained, known}, stages{stage: n}, waiting, promising, identification{pending, unavailable, catalogues},
@@ -129,6 +131,8 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 waiting=waiting,
                 kinds=many or None,
                 clip_rank=rank,
+                only=frozenset(i for i in ids.split(",") if i) if ids is not None else None,
+                noted=noted,
             )
         )
         body = enrich(body)
@@ -166,6 +170,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     for pre in dict.fromkeys((prefix, "/api")):
         router.add_api_route(f"{pre}/findings", findings, methods=["GET"], include_in_schema=pre == prefix)
-        router.add_api_route(f"{pre}/findings/{{find_id}}", one, methods=["GET"], include_in_schema=pre == prefix)
+        if pre == prefix:  # one find by id answers under /api/v1 only: /api/findings/submitted and its like belong to the accounts
+            router.add_api_route(f"{pre}/findings/{{find_id}}", one, methods=["GET"])
         router.add_api_route(f"{pre}/findings/{{find_id}}/viewed", viewed, methods=["POST"], include_in_schema=pre == prefix)
     return router

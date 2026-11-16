@@ -555,6 +555,9 @@ def test_flow_fields_promise_first_and_the_looks_people_gave(tmp_path: Path) -> 
     # finds that can have no clip go to the end; within equal promise a ready clip comes first
     order = query(db, None, "all", None, 100, 0, flow=flow, sort="promise", clip_rank=lambda f: 2 if f["kind"] == "mover" else 0)
     assert order["finds"][-1]["kind"] == "mover" and order["count"] == again["count"]
+    # only the named finds; only the finds that carry a machine note (none of this test's finds does)
+    assert query(db, None, "all", None, 100, 0, only=frozenset({lead["id"]}))["count"] == 1
+    assert query(db, None, "all", None, 100, 0, noted=True)["count"] == 0 and again["noted"] == 0 and seen["note"] is None
     # the old call and the old fields stay as they were
     old = query(db, None, "all", None, 100, 0)
     assert old["total"] == 5 and {"status", "verdict", "idents"} <= set(old["finds"][0])
