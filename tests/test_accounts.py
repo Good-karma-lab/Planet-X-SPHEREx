@@ -46,6 +46,11 @@ def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[FastAPI, _Sta
     return app, st, mail
 
 
+def _unread(c: TestClient) -> int:
+    """Unread notifications, the achievements apart (they have their own tests)."""
+    return sum(1 for n in c.get("/api/me/notifications").json()["notifications"] if not n["read"] and n["kind"] != "achievement")
+
+
 def _client(app: FastAPI) -> TestClient:
     return TestClient(app, base_url="http://localhost", follow_redirects=False)
 
@@ -189,7 +194,8 @@ def test_history_notifications_and_name(site: tuple[FastAPI, _State, _Mail]) -> 
     uid = c.get("/api/me").json()["user"]["id"]
     accounts.get(st).db.notify(uid, "status", "Finding x: the status is now “candidate”.", "x")
     n = c.get("/api/me/notifications").json()
-    assert n["unread"] == 1 and n["notifications"][0]["ref"] == "x"
+    assert _unread(c) == 1 and next(x for x in n["notifications"] if x["kind"] == "status")["ref"] == "x"
+    assert any(x["text"].startswith("Achievement: Named.") for x in n["notifications"])  # the name was chosen above
     c.post("/api/me/notifications/read", json={})
     assert c.get("/api/me/notifications").json()["unread"] == 0
     assert c.delete("/api/me/history").status_code == 204 and c.get("/api/me/history").json() == {"history": []}
@@ -292,11 +298,11 @@ def test_investigation_and_submit_only_when_the_checks_allow(site: tuple[FastAPI
     public = _client(app).get("/api/findings/submitted").json()["findings"]
     assert [(x["name"], x["role"]) for x in public[0]["credit"]] == [("ann", "submitted"), ("ann", "marked")]
     assert "email" not in str(public)
-    assert c.get("/api/me/notifications").json()["unread"] == 1
+    assert _unread(c) == 1
     # the verdict reaches the user
     assert accounts.get(st).db.set_status(out["finding_id"], "candidate") == 1
     assert c.get("/api/me/findings").json()["findings"][0]["status"] == "candidate"
-    assert c.get("/api/me/notifications").json()["unread"] == 2
+    assert _unread(c) == 2
     assert c.delete(f"/api/me/investigations/{iid}").status_code == 204
 
 
@@ -377,7 +383,7 @@ def test_declared_submit_finishes_by_itself(site: tuple[FastAPI, _State, _Mail])
         return {"job": "x", "state": state, "checks": [{"id": i, "state": s, "detail": d} for i, s, d in checks], "can_submit": ok}
 
     def texts() -> list[str]:
-        return [n["text"] for n in c.get("/api/me/notifications").json()["notifications"]]
+        return [n["text"] for n in c.get("/api/me/notifications").json()["notifications"] if n["kind"] != "achievement"]
 
     def new(title: str) -> str:
         iid: str = c.post("/api/me/investigations", json={"title": title, "mark_ids": [MARK["id"]]}).json()["id"]

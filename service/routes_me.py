@@ -25,10 +25,11 @@ import time
 import uuid
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from service import accounts
+from service.accounts import score as scoring
 from service.accounts import submit as auto
 from service.accounts.db import LimitReachedError, iso
 
@@ -40,7 +41,8 @@ MAX_NOTES, MAX_FRAMES, MAX_THUMB = 200, 60, 200_000
 
 
 class NameIn(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
+    name: str | None = Field(None, min_length=1, max_length=60)
+    hide_from_board: bool | None = None
 
 
 class MarkIn(BaseModel):
@@ -60,6 +62,11 @@ class MarkIn(BaseModel):
 class DoneIn(BaseModel):
     result: str = Field(max_length=20)
     mark_ids: list[str] = Field(default_factory=list, max_length=500)
+    # what the lab says about the look (the score: a square counts with at least 60 s and every pass shown)
+    seconds: float | None = Field(None, ge=0, le=86400)
+    passes_shown: int | None = Field(None, ge=0, le=10000)
+    passes_total: int | None = Field(None, ge=0, le=10000)
+    local_hour: int | None = Field(None, ge=0, le=23)
 
 
 class HistoryIn(BaseModel):
@@ -102,6 +109,8 @@ class InvestigationPatch(BaseModel):
     notes: list[Note] | None = Field(None, max_length=MAX_NOTES)
     frames: list[Frame] | None = Field(None, max_length=MAX_FRAMES)
     checks_job: str | None = Field(None, max_length=80)
+    ruler: dict[str, Any] | None = None  # {rate, catalogue_rate, object}: a motion measured with the lab's ruler
+    old_survey: dict[str, Any] | None = None  # {survey, ra, dec}: the same object found in an old survey
 
 
 class DeclareIn(BaseModel):
@@ -154,6 +163,9 @@ def make_me_router(st: Any) -> APIRouter:
         """What happened since the user last looked, said once each: a checks job of theirs finished; a square they looked through
         got a machine find. (A finding's new status is said when the verdict is set: AccountsDB.set_status.)"""
         auto.settle_user(st, acc.db, u["id"])  # a declared submit finishes here too, should the checks' own signal be missed
+        sc = score_of(acc)
+        sc.settle(u["id"])  # answers whose finding got its final stage since
+        sc.award(u["id"])
         for inv in acc.db.investigations(u["id"]):
             body = None if inv["submitted"] or inv["declared"] else checks_of(inv["checks_job"])
             if body is not None and body.get("state") == "done":
@@ -180,11 +192,30 @@ def make_me_router(st: Any) -> APIRouter:
         resp.delete_cookie(accounts.COOKIE, path="/")
         return resp
 
+    def score_of(acc: accounts.Accounts) -> scoring.Score:
+        return scoring.get(st, acc.db)
+
     @router.patch("/api/me")
-    def rename(body: NameIn, request: Request) -> Any:
+    def change_me(body: NameIn, request: Request) -> Any:
         acc, u = me(request)
-        acc.db.rename(u["id"], body.name.strip() or u["name"])
+        if body.name is not None and body.name.strip() and body.name.strip() != u["name"]:
+            acc.db.rename(u["id"], body.name.strip())
+            score_of(acc).renamed(u["id"])
+        if body.hide_from_board is not None:
+            score_of(acc)  # the column is made with the score's tables
+            acc.db._conn().execute("UPDATE acc_users SET hide_board=? WHERE id=?", (int(body.hide_from_board), u["id"]))
         return {"user": acc.db.user(u["id"])}
+
+    @router.get("/api/me/score")
+    def my_score(request: Request) -> Any:
+        acc, u = me(request)
+        return score_of(acc).summary(u["id"])
+
+    @router.get("/api/leaders")
+    def leaders(request: Request, period: str = Query("week", pattern="^(week|month|all)$")) -> Any:
+        acc = accounts.get(st)
+        u = acc.current_user(request)
+        return score_of(acc).leaders(period, u["id"] if u else None)
 
     # ---------------------------------------------------------------------------------------------------------------------- marks
 
@@ -205,6 +236,7 @@ def make_me_router(st: Any) -> APIRouter:
             raise HTTPException(409, "too many marks in this account") from None
         if out is None:
             raise HTTPException(409, "this mark id is taken")
+        score_of(acc).mark_put(u["id"])
         return out
 
     @router.delete("/api/me/marks/{mark_id}", status_code=204)
@@ -235,11 +267,20 @@ def make_me_router(st: Any) -> APIRouter:
         allowed = CELL_RESULTS if task["kind"] == "cell" else FINDING_RESULTS
         if body.result not in allowed:
             raise HTTPException(422, f"result is one of {', '.join(allowed)}")
+        already = task["state"] == "done"
         acc.db.claim_task(task_id, u["id"])
         task = acc.db.finish_task(task_id, body.result, body.mark_ids)
-        if task["kind"] == "finding" and task["finding_id"]:
+        sc = score_of(acc)
+        if already:
+            points = 0  # a task closed twice counts once
+        elif task["kind"] == "finding" and task["finding_id"]:
             acc.db.credit(task["finding_id"], u["id"], "checked", body.result)
-        return {"task": task}
+            points = sc.answered(u["id"], task["finding_id"], body.result)
+        else:
+            look = body.model_dump(include={"seconds", "passes_shown", "passes_total", "local_hour"})
+            marks = [m for m in acc.db.marks(u["id"]) if m["id"] in set(body.mark_ids)]
+            points = sc.square_done(u["id"], task, look, marks)
+        return {"task": task, "points": points, "achievements": sc.award(u["id"])}
 
     # -------------------------------------------------------------------------------------------------------------------- history
 
@@ -313,6 +354,12 @@ def make_me_router(st: Any) -> APIRouter:
         changes = body.model_dump(exclude_unset=True)
         if changes.get("title", "") is None:
             raise HTTPException(422, "the title cannot be empty")
+        extra = {k: changes.pop(k) for k in ("ruler", "old_survey") if changes.get(k) is not None}
+        for k in ("ruler", "old_survey"):
+            changes.pop(k, None)
+        if extra:
+            score_of(acc)  # the column is made with the score's tables
+            changes["extra"] = extra
         for k in ("mark_ids", "notes", "frames"):
             if k in changes:
                 changes[k] = _stamp(changes[k] or []) if k != "mark_ids" else (changes[k] or [])
@@ -386,14 +433,7 @@ def make_me_router(st: Any) -> APIRouter:
         rows = [c for c in checks.get("checks") or [] if isinstance(c, dict)]
         if any(c.get("state") == "warn" for c in rows) and not inv["notes"]:
             raise HTTPException(409, "a check gave a warning: add a note to the investigation that explains it")
-        place = {k: checks.get(k) for k in ("field_key", "ra", "dec")}
-        if place["ra"] is None and inv["mark_ids"]:
-            first = next((m for m in acc.db.marks(u["id"]) if m["id"] in inv["mark_ids"]), None)
-            if first is not None:
-                place = {k: first[k] for k in ("field_key", "ra", "dec")}
-        sub = acc.db.submit(u["id"], inv, body.checks_job, place, [{k: c.get(k) for k in ("id", "state", "detail")} for c in rows])
-        for mid in inv["mark_ids"][:1]:
-            acc.db.credit(sub["finding_id"], u["id"], "marked", mid)
+        sub = auto.submit_now(st, acc.db, u["id"], inv, body.checks_job, checks)
         return {"finding_id": sub["finding_id"], "status": sub["status"]}
 
     @router.get("/api/findings/submitted")

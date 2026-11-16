@@ -72,12 +72,17 @@ def place_of(db: AccountsDB, user_id: str, inv: dict[str, Any], body: dict[str, 
     return place
 
 
-def submit_now(db: AccountsDB, user_id: str, inv: dict[str, Any], job: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Record the finding (the checks allow it): the credit, the notification, the investigation marked submitted."""
-    rows = rows_of(body)
-    sub = db.submit(user_id, inv, job, place_of(db, user_id, inv, body), [{k: c.get(k) for k in ("id", "state", "detail")} for c in rows])
+def submit_now(st: Any, db: AccountsDB, user_id: str, inv: dict[str, Any], job: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Record the finding (the checks allow it): the credit, the notification, the investigation marked submitted, the points."""
+    from service.accounts import score
+
+    rows = [{k: c.get(k) for k in ("id", "state", "detail")} for c in rows_of(body)]
+    sub = db.submit(user_id, inv, job, place_of(db, user_id, inv, body), rows)
     for mid in inv["mark_ids"][:1]:
         db.credit(sub["finding_id"], user_id, "marked", mid)
+    sc = score.get(st, db)
+    sc.submitted(user_id, sub["finding_id"], rows)
+    sc.award(user_id)
     return sub
 
 
@@ -104,7 +109,7 @@ def settle(st: Any, db: AccountsDB, user_id: str, inv: dict[str, Any]) -> str:
             user_id, f"comment:{job}:{need}", "checks", f"{text} for the warnings ({names}); then it is submitted by itself.", ref
         )
         return state
-    submit_now(db, user_id, inv, job, body)
+    submit_now(st, db, user_id, inv, job, body)
     return "submitted"
 
 

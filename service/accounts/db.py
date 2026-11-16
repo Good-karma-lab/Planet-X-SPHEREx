@@ -398,6 +398,12 @@ class AccountsDB:
         return inv
 
     def patch_investigation(self, user_id: str, inv_id: str, changes: dict[str, Any]) -> dict[str, Any] | None:
+        if "extra" in changes:  # what the lab adds (the ruler's result, the old-survey match): merged, never replaced as a whole
+            c = self._conn()
+            r = c.execute("SELECT extra FROM acc_investigations WHERE id=? AND user_id=?", (inv_id, user_id)).fetchone()
+            if r is not None:
+                merged = {**json.loads(r["extra"] or "{}"), **changes["extra"]}
+                c.execute("UPDATE acc_investigations SET extra=? WHERE id=? AND user_id=?", (json.dumps(merged), inv_id, user_id))
         cols = {"title": str, "finding_id": str, "checks_job": str, "mark_ids": json.dumps, "notes": json.dumps, "frames": json.dumps}
         sets = [(k, v if v is None or cols[k] is str else json.dumps(v)) for k, v in changes.items() if k in cols]
         if sets:
