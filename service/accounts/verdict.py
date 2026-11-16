@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import sys
 
-from service.accounts.db import STATUSES, AccountsDB, product_db_path
+from service.accounts.db import STATUSES, AccountsDB
 from service.config import load
+from service.storage import product_db_path
 
 
 def main(argv: list[str]) -> int:

@@ -207,6 +207,9 @@ export function taskHash(t: Task): string {
   }
   q.set('fov', t.kind === 'cell' ? '20' : '5');
   q.set('task', t.id);
+  q.set('kind', t.kind); // the lab of a guest cannot look a task up by its id
+  if (t.kind === 'cell' && t.cell_id) q.set('cell', t.cell_id);
+  if (t.kind === 'finding' && t.finding_id) q.set('finding', t.finding_id);
   return `#/lab?${q}`;
 }
 

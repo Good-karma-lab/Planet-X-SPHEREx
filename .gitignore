@@ -29,3 +29,6 @@ cache/
 .vscode/
 .claude/launch.json
 docs/submission/demo/out/
+sweep-store/
+product.sqlite*
+sweep-trial.*
