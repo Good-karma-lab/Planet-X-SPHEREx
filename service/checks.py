@@ -291,7 +291,9 @@ def neowise_path(marks: list[Mark], rows: list[dict[str, float]]) -> Answer:
 
 def neowise_orbit_answer(res: dict[str, Any], orbit: dict[str, Any]) -> Answer:
     years = res.get("years") or [2014, 2024]
-    head = f"NEOWISE {years[0]:.0f}–{years[-1]:.0f}, {res.get('frames', 0)} exposures"
+    lost = int(res.get("frames_failed") or 0)
+    read = f"{res.get('frames', 0) - lost} of {res.get('frames', 0)} exposures read" if lost else f"{res.get('frames', 0)} exposures"
+    head = f"NEOWISE {years[0]:.0f}–{years[-1]:.0f}, {read}"
     if res.get("status") != "ok":
         why = {
             "no-frames": "too few exposures cover the orbit's strip",
