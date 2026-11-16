@@ -20,7 +20,7 @@ export interface CardFind {
   promise: number;
   viewers: number;
   credit: { found_by: string; machine: boolean; first_marked_by: string | null; checked_by: string[]; looks: Record<string, number> };
-  clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string; still?: string } | null;
+  clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string; still?: string; blink?: string[] | null; note?: string } | null;
   name: string | null;
   /** what the review of the clips saw, when it looks like an artefact (a note, not a status) */
   note?: string | null;
@@ -260,6 +260,7 @@ export function FindCard({ f, onOpen, current, mine = false }: { f: CardFind; on
           </span>
           {mine && <span class="fcard-mine">viewed by me</span>}
         </span>
+        {f.kind === 'peak' && f.clip?.state === 'ready' && !f.clip.blink && <span class="mono-s fcard-sub">the sum along the orbit is not kept here: the passes alone are shown</span>}
         {f.note && (
           <span class="fcard-note" title="A machine note from the review of the clips. It sets no status: judge it in the lab.">
             Machine note: {f.note}
