@@ -24,6 +24,10 @@ export interface Investigation {
   checks_job: string | null;
   submitted: string | null;
   checks: { state: string; checks: Check[] | null; can_submit: boolean } | null;
+  /** open | checking | needs_comment | blocked | submitted: a declared submit finishes by itself on the server */
+  state: string;
+  /** what the running checks say they are doing */
+  progress: string;
   updated: string;
 }
 export interface MyFinding {
@@ -73,6 +77,7 @@ const TAB_NAME: Record<Tab, string> = {
   account: 'Account',
 };
 const RESULT: Record<string, string> = { nothing: 'Nothing here', marks: 'Done, with marks', moves: 'It moves', artefact: 'Artefact', known: 'Known object' };
+const INV_STATE: Record<string, string> = { open: 'not submitted', checking: 'checking', needs_comment: 'comment needed', blocked: 'not submitted: a check failed', submitted: 'submitted' };
 const ROLE: Record<string, string> = { submitted: 'Submitted by me', checked: 'Checked by me', marked: 'Marked by me' };
 
 const when = (iso: string | null) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
@@ -268,13 +273,14 @@ export function Cabinet({ route }: { route: Route }) {
       (e: Error) => setStatus(e.message),
     );
   const squares = mine?.tasks.filter((t) => t.kind === 'cell') ?? [];
+  const inflight = mine?.investigations.filter((i) => ['checking', 'needs_comment', 'blocked'].includes(i.state)) ?? [];
   const unread = mine?.notifications.filter((n) => !n.read).length ?? 0;
   const count: Record<Tab, number> = {
     squares: squares.length,
     marks: mine?.marks.length ?? 0,
     findings: mine?.findings.length ?? 0,
     investigations: mine?.investigations.length ?? 0,
-    tasks: mine?.tasks.filter((t) => t.state === 'open').length ?? 0,
+    tasks: (mine?.tasks.filter((t) => t.state === 'open').length ?? 0) + inflight.length,
     history: mine?.history.length ?? 0,
     notifications: unread,
     account: 0,
@@ -415,13 +421,8 @@ export function Cabinet({ route }: { route: Route }) {
                                 </span>
                               </span>
                               <span class="cb-side">
-                                {inv.submitted ? (
-                                  <span class="badge st-submitted">submitted</span>
-                                ) : c ? (
-                                  <span class={`badge ${c.can_submit ? 'st-pass' : c.state === 'done' ? 'st-fail' : 'st-open'}`}>{c.can_submit ? 'ready to submit' : c.state === 'done' ? 'checks block submit' : 'checks running'}</span>
-                                ) : (
-                                  <span class="badge">{inv.checks_job ? 'checks not answering' : 'not checked'}</span>
-                                )}
+                                <span class={`badge st-inv-${inv.state}`}>{INV_STATE[inv.state] ?? words(inv.state)}</span>
+                                {c && !inv.submitted && inv.state === 'open' && <span class="mono-s">{c.can_submit ? 'checks passed' : c.state === 'done' ? 'checks block submit' : 'checks running'}</span>}
                               </span>
                             </a>
                           );
@@ -442,7 +443,21 @@ export function Cabinet({ route }: { route: Route }) {
                         </button>
                       </span>
                     </h3>
-                    {mine.tasks.length === 0 && <Empty text="No tasks yet" />}
+                    {mine.tasks.length === 0 && inflight.length === 0 && <Empty text="No tasks yet" />}
+                    <div class="cb-list">
+                      {inflight.map((inv) => (
+                        <a key={inv.id} class="cb-row haspic" href={`#/me?tab=investigations&inv=${inv.id}`} data-testid="submit-row">
+                          <Pic findingId={inv.finding_id} ra={mine.marks.find((m) => inv.mark_ids.includes(m.id))?.ra} dec={mine.marks.find((m) => inv.mark_ids.includes(m.id))?.dec} label={inv.title} />
+                          <span class="cb-main">
+                            <b>Submit: {inv.title}</b>
+                            <span class="mono-s">{inv.state === 'checking' ? inv.progress || 'checks running' : inv.state === 'needs_comment' ? 'every check has answered · a comment is needed' : 'a check blocks the submit'}</span>
+                          </span>
+                          <span class="cb-side">
+                            <span class={`badge st-inv-${inv.state}`}>{INV_STATE[inv.state] ?? words(inv.state)}</span>
+                          </span>
+                        </a>
+                      ))}
+                    </div>
                     <div class="cb-list">
                       {mine.tasks.map((t) => (
                         <TaskRow key={t.id} t={t} />
