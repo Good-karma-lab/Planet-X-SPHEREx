@@ -509,7 +509,7 @@ TRACK_FRAME_MS = 1400
 TRACK_SN_DARK, TRACK_SN_FULL = 1.5, 9.0  # the added picture: below 1.5 sigma black, 9 sigma white
 
 
-def ring_sn(img: F, cx: float, cy: float, radius: float) -> float:
+def ring_sn(img: F, cx: float, cy: float, radius: float, speckled: bool = False) -> float:
     """How far the brightest pixel inside the ring stands above the picture: (peak in the ring - median outside) / (1.4826 x MAD
     outside), on the pixels that have a value. 0 when the picture has too little to measure."""
     h, w = img.shape
@@ -521,6 +521,8 @@ def ring_sn(img: F, cx: float, cy: float, radius: float) -> float:
     out = img[~inside & ok]
     med = float(np.median(out))
     sig = 1.4826 * float(np.median(np.abs(out - med)))
+    if speckled:  # a sum of residuals has bright specks all over (a crowded field): its scatter, not its quiet floor, is the noise
+        sig = max(sig, float(np.std(out)))
     return float((float(img[inside & ok].max()) - med) / sig) if sig > 0 else 0.0
 
 
@@ -588,7 +590,7 @@ def render_track(find: dict[str, Any], store: Store, key: str, meta: dict[str, A
     pics, sns = [], []
     for acc, cnt in ((along, n_along), (still, n_still)):
         sn = np.where(cnt > 0, acc / np.sqrt(np.maximum(cnt, 1)), np.nan)
-        sns.append(ring_sn(sn, c, c, max(1.5, MEASURE_ARCSEC / step)))
+        sns.append(ring_sn(sn, c, c, max(1.5, MEASURE_ARCSEC / step), speckled=True))
         grey = np.clip((np.nan_to_num(sn, nan=0.0) - TRACK_SN_DARK) / (TRACK_SN_FULL - TRACK_SN_DARK), 0.0, 1.0) ** 0.8
         pics.append(np.repeat(grey[..., None], 3, axis=-1))
     d0, d1 = _mjd_date(float(frames_meta[used[0]]["mjd"])), _mjd_date(float(frames_meta[used[-1]]["mjd"]))
