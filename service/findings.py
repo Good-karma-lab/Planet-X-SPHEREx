@@ -1369,6 +1369,14 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
     return text
 
 
+def find_row(db: FindingsDB, find_id: str) -> dict[str, Any] | None:
+    """One find as the table keeps it (no catalogue answers): what a clip needs to know about it."""
+    r = db.db.execute("SELECT id, kind, place, fov, ra, dec, rate, data FROM finds WHERE id = ?", (find_id,)).fetchone()
+    if r is None:
+        return None
+    return {**{k: r[k] for k in ("id", "kind", "place", "fov", "ra", "dec", "rate")}, "data": json.loads(r["data"] or "{}")}
+
+
 def query(db: FindingsDB, kind: str | None, status: str | None, place: str | None, limit: int, offset: int) -> dict[str, Any]:
     rows = db.db.execute("SELECT * FROM finds").fetchall()
     ids = [r["id"] for r in rows]
