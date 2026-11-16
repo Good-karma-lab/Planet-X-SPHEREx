@@ -71,7 +71,7 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
             raise HTTPException(404, str(e)) from e
         row = D().get(cid)
         out = grid.view_of(ce, row, D().viewers([cid]).get(cid, 0))
-        out["finds"] = json.loads((row or {}).get("find_ids") or "[]")
+        out["finds"] = json.loads((row or {}).get("find_ids") or "[]") or finds_in(st, ce)
         out["n_finds"] = int((row or {}).get("finds") or 0)
         out["field_key"] = (row or {}).get("field_key") or field_key_of(st, ce)
         out["open"] = {"ra": round(ce.ra, 5), "dec": round(ce.dec, 5), "fov": grid.FIELD_FOV_ARCMIN}
@@ -116,3 +116,25 @@ def field_key_of(st: Any, ce: grid.Cell) -> str | None:
         return product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
     except Exception:
         return None
+
+
+FIND_KINDS = ("mover", "browndwarf", "pair", "film", "peak")  # red sources and spectral anomalies are not finds of a square's search
+
+
+def finds_in(st: Any, ce: grid.Cell) -> list[str]:
+    """The ids of the Findings rows that lie in the square (for squares searched before the grid: their finds have no ids kept)."""
+    import sqlite3
+
+    store_dir = getattr(getattr(st, "cfg", None), "store_dir", None)
+    path = store_dir / "findings.db" if store_dir is not None else None
+    if path is None or not path.is_file():
+        return []
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2) as c:
+            q = (
+                f"SELECT id FROM finds WHERE kind IN ({','.join('?' * len(FIND_KINDS))}) AND dec>=? AND dec<? AND ra>=? AND ra<?"
+                " ORDER BY id LIMIT 500"
+            )
+            return [r[0] for r in c.execute(q, (*FIND_KINDS, ce.dec0, ce.dec1, ce.ra0, ce.ra1))]
+    except sqlite3.Error:
+        return []
