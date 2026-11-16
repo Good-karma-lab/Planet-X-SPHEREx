@@ -162,6 +162,9 @@ class AccountsDB:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._conn().executescript(SCHEMA)
+        if "mjd" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_marks)")}:
+            # added on 16 Nov 2026: the date of the frame a mark was put on (the checks tell fast movers from slow ones by it)
+            self._conn().execute("ALTER TABLE acc_marks ADD COLUMN mjd REAL")
         cols = {r[1] for r in self._conn().execute("PRAGMA table_info(acc_investigations)")}
         if "declared" not in cols:  # added on 16 Nov 2026: when the user said "Check and submit" (the submit then finishes by itself)
             self._conn().execute("ALTER TABLE acc_investigations ADD COLUMN declared REAL")
@@ -249,7 +252,7 @@ class AccountsDB:
     def _mark(r: sqlite3.Row) -> dict[str, Any]:
         return {
             "id": r["id"], "field_key": r["field_key"], "cell_id": r["cell_id"], "ra": r["ra"], "dec": r["dec"], "pass": r["pass"],
-            "label": r["label"], "level": r["level"], "note": r["note"], "created": r["created"],
+            "label": r["label"], "level": r["level"], "note": r["note"], "created": r["created"], "mjd": r["mjd"],
         }  # fmt: skip
 
     def marks(self, user_id: str, field_key: str | None = None) -> list[dict[str, Any]]:
@@ -265,11 +268,11 @@ class AccountsDB:
         if have is None and c.execute("SELECT COUNT(*) FROM acc_marks WHERE user_id=?", (user_id,)).fetchone()[0] >= MAX_MARKS:
             raise LimitReachedError
         c.execute(
-            "INSERT INTO acc_marks(id,user_id,field_key,cell_id,ra,dec,pass,label,level,note,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO acc_marks(id,user_id,field_key,cell_id,ra,dec,pass,label,level,note,created,updated,mjd) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(id) DO UPDATE SET field_key=excluded.field_key, cell_id=excluded.cell_id, ra=excluded.ra, dec=excluded.dec,"
-            " pass=excluded.pass, label=excluded.label, level=excluded.level, note=excluded.note, updated=excluded.updated",
+            " pass=excluded.pass, label=excluded.label, level=excluded.level, note=excluded.note, updated=excluded.updated, mjd=excluded.mjd",
             (m["id"], user_id, m["field_key"], m["cell_id"], m["ra"], m["dec"], m["pass"], m["label"], m["level"], m["note"], m["created"],
-             time.time()),
+             time.time(), m.get("mjd")),
         )  # fmt: skip
         return self._mark(c.execute("SELECT * FROM acc_marks WHERE id=?", (m["id"],)).fetchone())
 

@@ -93,7 +93,7 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
       const first = own[0];
       if (!body && first) {
         const key = /^[A-Za-z0-9_,.+-]*$/.test(first.field_key) ? first.field_key : ''; // a store key, or the lab's "ra,dec,fov"
-        body = { field_key: key, ra: first.ra, dec: first.dec, marks: own.map((m) => ({ pass: m.pass ?? 0, ra: m.ra, dec: m.dec })) };
+        body = { field_key: key, ra: first.ra, dec: first.dec, marks: own.map((m) => ({ pass: m.pass ?? 0, ra: m.ra, dec: m.dec, ...(m.mjd != null ? { mjd: m.mjd } : {}) })) };
       }
       if (!body) throw new Error('No marks in this investigation: put a mark in the lab first');
       const r = await api<{ job: string }>('/api/checks', { method: 'POST', body });
