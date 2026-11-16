@@ -42,6 +42,7 @@ import {
 import { useDistantPlan } from './search/distant';
 import { FPX_AUTO } from '../lib/flags';
 import { useAsteroidSearch } from './asteroids';
+import { useLabFlow, type LabFlow } from './lab/flow';
 
 const SIZES = [2, 5, 10, 20, 60];
 type View = 'picture' | 'bands' | 'det';
@@ -163,6 +164,8 @@ interface Opts {
   mono: boolean;
   artifacts: boolean;
   motion: boolean;
+  /** Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame */
+  known: boolean;
 }
 
 interface Track {
@@ -436,6 +439,7 @@ export function Lab({ route }: { route: Route }) {
     mono: p['blend'] === 'mono',
     artifacts: p['art'] === '1',
     motion: p['mot'] === '1',
+    known: p['known'] === '1',
   };
 
   const set = (params: Record<string, string | null>) => {
@@ -556,6 +560,7 @@ export function Lab({ route }: { route: Route }) {
   const bodiesRef = useRef<{ state: string; bodies: KnownBody[]; vLimit: number } | null>(null);
   bodiesRef.current = filmBodies;
   const rendRef = useRef<Renderer | null>(null);
+  const flowRef = useRef<LabFlow | null>(null);
   const layoutRef = useRef<{
     rects: { x: number; y: number; w: number; h: number }[];
     inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number } } | null;
@@ -1753,6 +1758,8 @@ export function Lab({ route }: { route: Route }) {
         }
       }
       ctx.restore();
+      // the product flow's layer (Known objects, marks, the ruler): on top of the lab's own rings, at the date shown
+      flowRef.current?.draw({ ctx, rects, wall, uvOf, year, fovArc, placed, hidden: underInset });
       if (!st.opts.rings) return;
       // speed rings, centred on the field: how far a body of that speed moves between the first and the last season
       // (in the Days scale: between the first and the last visit, in ″ per hour)
@@ -2236,6 +2243,25 @@ export function Lab({ route }: { route: Route }) {
     window.addEventListener('keydown', on);
     return () => window.removeEventListener('keydown', on);
   }, [meta, shown, speed, p, visit]);
+
+  // the product flow (Known objects, marks, the ruler): the dates on show are the passes, or in Days the visits of the pass
+  const yearOf = (mjd: number) => 2000 + (mjd - 51544.5) / 365.25;
+  const flowDays = film !== null && !!filmData;
+  const flow = useLabFlow({
+    ra,
+    dec,
+    fov,
+    grid: flowDays ? filmData.meta.grid : film === null ? (meta?.grid ?? null) : null,
+    epochs: flowDays ? filmData.meta.frames.map((f) => f.mjd) : film === null ? (meta?.passes ?? []).map((q) => q.mjd_mid) : [],
+    epochNow: flowDays
+      ? yearOf(filmData.meta.frames[visit]?.mjd ?? filmData.meta.pass.mjd0)
+      : ((q) => (q ? yearOf(q.mjd_mid) : null))(meta?.passes.find((x) => x.index === (shown?.pass ?? 0)) ?? meta?.passes[0]),
+    pass: film === null ? (shown?.pass ?? 0) : null,
+    single: film !== null || view === 'picture',
+    side,
+    known: opts.known,
+  });
+  flowRef.current = flow;
 
   if (!valid) {
     return (
@@ -2945,6 +2971,11 @@ export function Lab({ route }: { route: Route }) {
                   return;
                 }
                 if ((e.target as HTMLElement).closest('.float')) return;
+                {
+                  // a mark put or opened, a ruler point: the click is the flow's, not a pick
+                  const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                  if (flow.click(e.clientX - r.left, e.clientY - r.top)) return;
+                }
                 if (film !== null && filmData && ft.state === 'ok') {
                   // a click on a track's badge selects the track and opens the findings
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -2963,15 +2994,17 @@ export function Lab({ route }: { route: Route }) {
                 }
                 pick(e);
               }}
+              onPointerLeave={() => flow.pointer(null)}
               onPointerDown={(e) => {
-                if (film !== null || view !== 'picture' || !meta || (e.target as HTMLElement).closest('.float')) return;
+                if (film !== null || view !== 'picture' || !meta || flow.tool || (e.target as HTMLElement).closest('.float')) return;
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
                 dragFrom.current = { x: e.clientX - r.left, y: e.clientY - r.top };
               }}
               onPointerMove={(e) => {
                 const f = dragFrom.current;
-                if (!f) return;
                 const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                flow.pointer((e.target as HTMLElement).closest('.float') ? null : { x: e.clientX - r.left, y: e.clientY - r.top });
+                if (!f) return;
                 const x = e.clientX - r.left;
                 const y = e.clientY - r.top;
                 if (Math.hypot(x - f.x, y - f.y) > 12) setDragBox({ x0: f.x, y0: f.y, x1: x, y1: y });
@@ -3014,6 +3047,7 @@ export function Lab({ route }: { route: Route }) {
                 data-testid="picture"
               />
               <canvas ref={overlay} class="ov" />
+              {flow.floats}
               {labels.map((l) =>
                 l.empty ? (
                   <div
@@ -3480,6 +3514,13 @@ export function Lab({ route }: { route: Route }) {
                       : 'the anomaly search of this field has not finished yet',
                   )}
                   {sw(
+                    'knownChk',
+                    'Known objects',
+                    'Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame, at its place on the date shown. What moves and has no ring is unknown',
+                    opts.known,
+                    (v) => set({ known: v ? '1' : null }),
+                  )}
+                  {sw(
                     'maskChk',
                     'Artifacts',
                     'Artifacts: red where the SPHEREx pipeline flagged the pixel in many exposures of the season shown',
@@ -3608,6 +3649,7 @@ export function Lab({ route }: { route: Route }) {
                   'Months scale only',
                 )}
               </section>
+              {flow.tools}
             </div>
           )}
           {tab === 'obj' && (
