@@ -4,7 +4,7 @@
 .markedit .me-row .inp { flex: 1; min-width: 0; }
 .markedit .inp { height: 26px; font-size: 12px; padding: 0 7px; }
 .markedit .me-levels { display: flex; }
-.markedit .me-levels button { flex: 1; padding: 3px 4px; font-size: 11px; gap: 4px; display: inline-flex; align-items: center; justify-content: center; }
+.markedit .me-levels button { flex: 1 1 0; min-width: 0; padding: 3px 2px; font-size: 10.5px; gap: 4px; display: inline-flex; align-items: center; justify-content: center; }
 .markedit .me-levels i, .ft-mark i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; transform: rotate(45deg); }
 .markedit .me-meta { flex: 1; font: 500 11px var(--mono); color: var(--muted); }
 .flowtools .ft-row { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -16,3 +16,27 @@
 .ft-mark span { color: var(--muted); font-size: 10.5px; }
 .vsq .fflow { left: 12px; bottom: 46px; max-width: min(72%, 560px); padding: 3px 9px; font: 600 12px var(--mono); color: #ffd9a0; pointer-events: none; white-space: normal; }
 .vsq.compact .fflow { left: 10px; bottom: 70px; font-size: 10.5px; }
+.markedit .me-hint { min-height: 14px; font: 500 10.5px var(--font); color: var(--amber); line-height: 1.3; }
+.flowtools .ft-row + .ft-row { margin-top: 6px; }
+.flowtools .ft-row .inp { height: 26px; font-size: 11.5px; padding: 0 6px; min-width: 0; }
+.flowtools .ft-blink select.inp { flex: 1; }
+.flowtools .ft-note { flex: 1; }
+.flowtools .ft-line { min-height: 16px; margin-top: 6px; font: 500 11px var(--mono); color: var(--muted); }
+.checks { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.checks .chk { display: flex; align-items: center; gap: 7px; height: 20px; font-size: 11.5px; color: var(--ink); }
+.checks .chk i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, 0.22); flex: none; }
+.checks .chk span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checks .chk em { font: 500 10.5px var(--mono); color: var(--muted); font-style: normal; }
+.checks .chk.pass i { background: #5fe3a1; }
+.checks .chk.warn i { background: var(--amber); }
+.checks .chk.fail i { background: #ff6b6b; }
+.checks .chk.fail em { color: #ff9c9c; }
+.checks .chk.warn em { color: var(--amber); }
+.taskpanel { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--edge-soft); }
+.taskpanel .tp-head { display: flex; align-items: baseline; gap: 8px; }
+.taskpanel .tp-head b { font: 700 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-l); }
+.taskpanel .tp-head span { font-size: 11.5px; color: var(--muted); }
+.taskpanel .tp-ask { font: 600 13.5px var(--font); color: var(--ink); }
+.taskpanel .tp-line { height: 16px; font: 500 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.taskpanel .tp-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.taskpanel .tp-btns .btn { flex: 1; white-space: nowrap; }

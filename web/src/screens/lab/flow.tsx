@@ -2,9 +2,11 @@
 // calls; it returns what the lab draws on its overlay, what it puts over the picture and in the Controls panel, and its status line.
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { addMark, allMarks, fieldKey, MARK_LEVELS, marksSyncNote, onMarks, removeMark, updateMark, type Mark, type MarkLevel } from '../../lib/marks';
+import { addMark, allMarks, MARK_LEVELS, marksSyncNote, onMarks, removeMark, updateMark, type Mark, type MarkLevel } from '../../lib/marks';
 import { drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, type KnownDrawEnv, type KnownState } from './known';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
+import { ChecksList, checksStatus, useChecks, useLabTask } from './task';
+import { placeAt } from './known';
 import './flow.css';
 
 export interface FlowGrid {
@@ -31,8 +33,15 @@ export interface FlowArgs {
   /** the picture's side in CSS px */
   side: number;
   known: boolean;
-  /** the field key and cell of the task the lab was opened with, when there is one */
-  taskField?: { field_key: string; cell_id: string | null } | null;
+  /** the service's key of the field on show (null until it is known) */
+  fieldKey: string | null;
+  /** the lab's address parameters, and how another lab address is opened */
+  params: Record<string, string>;
+  open: (params: Record<string, string>) => void;
+  /** the passes of the field: index and a short date ("Sep ’25") */
+  passes: { index: number; label: string }[];
+  /** a small JPEG of the picture as it is now (a data URL), null when it cannot be made */
+  thumb: () => string | null;
 }
 
 export type FlowTool = 'mark' | 'ruler' | null;
@@ -64,6 +73,10 @@ export interface LabFlow {
   marksHere: Mark[];
   ruler: RulerPoint[];
   setTool(t: FlowTool): void;
+  /** the two passes to blink between (their indexes), null when every pass plays */
+  blink: [number, number] | null;
+  /** the Task panel, null when the lab was opened without a task */
+  taskPanel: ComponentChildren;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -235,8 +248,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       const [ra, dec] = skyOf(x / a.side, y / a.side);
       const n = marksRef.current.length + 1;
       const m = addMark({
-        field_key: a.taskField?.field_key ?? fieldKey(a.ra, a.dec, a.fov),
-        cell_id: a.taskField?.cell_id ?? null,
+        field_key: a.fieldKey ?? '',
+        cell_id: a.params['cell'] ?? null,
         ra,
         dec,
         pass: a.pass,
@@ -254,11 +267,96 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     return false;
   };
 
+  /** what the data already says about a mark's place: the frame's edge, a bright star beside it ('' when nothing) */
+  const hintOf = (m: Mark): string => {
+    const [u, v] = uvOf(m.ra, m.dec);
+    const out: string[] = [];
+    if (Math.min(u, v, 1 - u, 1 - v) < 0.03) out.push('at the frame edge');
+    if (known.state === 'ok' && a.epochNow != null) {
+      let best: { name: string; mag: number; d: number } | null = null;
+      for (const o of known.objects) {
+        if (o.source === 'jpl' || o.mag == null || o.mag > 10) continue;
+        const at = placeAt(o, a.epochNow);
+        if (!at) continue;
+        const d = Math.hypot((((at[0] - m.ra + 540) % 360) - 180) * Math.cos((m.dec * Math.PI) / 180), at[1] - m.dec) * 3600;
+        // a ghost or a spike of a bright star: within 60″, or 120″ of a star brighter than magnitude 6
+        if (d > 2 && d < (o.mag <= 6 ? 120 : 60) && (!best || d < best.d)) best = { name: o.name, mag: o.mag, d };
+      }
+      if (best) out.push(`${best.d.toFixed(0)}″ from ${best.name || 'a bright star'} (mag ${best.mag.toFixed(1)})`);
+    }
+    return out.length ? `Artefact hint: ${out.join(' · ')}` : '';
+  };
+
+  // Blink of two chosen passes
+  const [pair, setPair] = useState<[number, number]>([0, 1]);
+  const [blinkOn, setBlinkOn] = useState(false);
+  const idx = a.passes.map((q) => q.index);
+  const pa = idx.includes(pair[0]) ? pair[0] : (idx[0] ?? 0);
+  const pb = idx.includes(pair[1]) && pair[1] !== pa ? pair[1] : (idx.find((i) => i !== pa) ?? pa);
+  const blink: [number, number] | null = blinkOn && a.pass !== null && idx.length > 1 && pa !== pb ? [pa, pb] : null;
+
+  // the investigation of this field: saved frames and notes, the checks, the submit
+  const [inv, setInv] = useState<string | null>(a.params['inv'] ?? null);
+  const [invNote, setInvNote] = useState('');
+  const [invLine, setInvLine] = useState('');
+  const [showChecks, setShowChecks] = useState(false);
+  const checks = useChecks();
+  useEffect(() => {
+    setInv(a.params['inv'] ?? null);
+    setInvLine('');
+    setShowChecks(false);
+    checks.reset();
+  }, [a.ra, a.dec, a.fov, a.params['inv']]);
+  const call = async (path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> | null }> => {
+    try {
+      const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      return { status: r.status, json: r.ok ? ((await r.json().catch(() => null)) as Record<string, unknown> | null) : null };
+    } catch {
+      return { status: 0, json: null };
+    }
+  };
+  const saveFrame = async () => {
+    setInvLine('saving…');
+    const frame = { ref: location.hash.slice(0, 600), title: `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`, note: invNote, thumb: a.thumb() };
+    let r;
+    if (inv) r = await call(`/api/me/investigations/${encodeURIComponent(inv)}/frames`, frame);
+    else
+      r = await call('/api/me/investigations', {
+        title: marksHere[0]?.label || frame.title,
+        finding_id: a.params['finding'] ?? null,
+        mark_ids: marksHere.map((m) => m.id),
+        notes: invNote ? [{ text: invNote }] : [],
+        frames: [frame],
+        checks_job: checks.view.job,
+      });
+    const id = r.json?.['id'];
+    if (r.status >= 200 && r.status < 300) {
+      if (typeof id === 'string') setInv(id);
+      setInvNote('');
+      setInvLine('Saved to the investigation');
+    } else setInvLine(r.status === 401 ? 'Sign in to save' : 'Not saved: the service did not answer');
+  };
+  const runChecks = () => {
+    if (!a.fieldKey) return;
+    setShowChecks(true);
+    const real = marksHere.filter((m) => m.level !== 'artefact');
+    const at = (open ? real.find((m) => m.id === open) : null) ?? real[0];
+    checks.start(a.fieldKey, at?.ra ?? a.ra, at?.dec ?? a.dec, real);
+  };
+  const submit = async () => {
+    if (!checks.view.job) return;
+    if (!inv) return setInvLine('Save to an investigation first');
+    const r = await call('/api/findings/submit', { investigation_id: inv, checks_job: checks.view.job });
+    const fid = r.json?.['finding_id'];
+    setInvLine(typeof fid === 'string' ? `Submitted: ${fid}` : r.status === 401 ? 'Sign in to submit' : 'Submit did not answer');
+  };
+  const taskPanel = useLabTask({ params: a.params, open: a.open, ra: a.ra, dec: a.dec, fieldKey: a.fieldKey, marksHere });
+
   const cur = open ? (marks.find((m) => m.id === open) ?? null) : null;
   let floats: ComponentChildren = null;
   if (cur && g && a.single && inFrame(cur)) {
     const [u, v] = uvOf(cur.ra, cur.dec);
-    const W = 232;
+    const W = 272;
     const x = u * a.side;
     const y = v * a.side;
     // right of the mark, else left; below it, else above: always inside the picture
@@ -304,6 +402,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           onInput={(e) => updateMark(cur.id, { note: (e.target as HTMLInputElement).value })}
           data-testid="mark-note"
         />
+        <div class="me-hint" data-testid="mark-hint">
+          {hintOf(cur)}
+        </div>
         <div class="me-row">
           <span class="me-meta">{cur.pass != null ? `pass ${cur.pass + 1}` : 'no pass'}</span>
           <button
@@ -350,6 +451,72 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           Ruler
         </button>
       </div>
+      <div class="ft-row ft-blink" role="group" aria-label="Blink of two passes">
+        <button
+          class={`mini ${blink ? 'on' : ''}`}
+          aria-pressed={!!blink}
+          disabled={a.pass === null || idx.length < 2}
+          onClick={() => setBlinkOn((v) => !v)}
+          title="Blink: only the two chosen passes play, one after the other"
+          data-testid="tool-blink"
+        >
+          Blink
+        </button>
+        {([0, 1] as const).map((k) => (
+          <select
+            key={k}
+            class="inp"
+            aria-label={k ? 'Second pass' : 'First pass'}
+            disabled={a.pass === null || idx.length < 2}
+            value={String(k ? pb : pa)}
+            onChange={(e) => {
+              const v = Number((e.target as HTMLSelectElement).value);
+              setPair(k ? [pa, v] : [v, pb]);
+            }}
+            data-testid={`blink-${k ? 'b' : 'a'}`}
+          >
+            {a.passes.map((q) => (
+              <option key={q.index} value={String(q.index)} disabled={q.index === (k ? pa : pb)}>
+                {q.label}
+              </option>
+            ))}
+          </select>
+        ))}
+      </div>
+      <div class="ft-row">
+        <input
+          class="inp ft-note"
+          value={invNote}
+          maxLength={400}
+          placeholder="Note"
+          aria-label="Note for the investigation"
+          onInput={(e) => setInvNote((e.target as HTMLInputElement).value)}
+          data-testid="inv-note"
+        />
+        <button class="mini" onClick={() => void saveFrame()} title="Save to investigation: this frame and the note" data-testid="tool-save">
+          Save to investigation
+        </button>
+      </div>
+      <div class="ft-row">
+        <button
+          class="mini"
+          disabled={!a.fieldKey || checks.view.state === 'running'}
+          onClick={runChecks}
+          title="Check and submit: every check runs first; the submit opens when all have answered and none failed"
+          data-testid="tool-check"
+        >
+          Check and submit
+        </button>
+        {checks.view.can_submit && (
+          <button class="mini on" onClick={() => void submit()} data-testid="tool-submit">
+            Submit
+          </button>
+        )}
+      </div>
+      <div class="ft-line" data-testid="tools-line">
+        {invLine || (showChecks ? checksStatus(checks.view) : '')}
+      </div>
+      {showChecks && <ChecksList view={checks.view} />}
       {marksHere.length > 0 && (
         <div class="ft-marks" data-testid="marks-list">
           {marksHere.map((m) => (
@@ -400,5 +567,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     marksHere,
     ruler,
     setTool,
+    blink,
+    taskPanel,
   };
 }

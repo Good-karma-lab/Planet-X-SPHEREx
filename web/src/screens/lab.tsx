@@ -1004,7 +1004,11 @@ export function Lab({ route }: { route: Route }) {
         setBandsWait((w) => (w === bandsPending ? w : bandsPending));
         const all = r.loaded(stack);
         // Difference: the reference pass shows no change, so the loop plays the passes compared with it
-        const loaded = st.time === 'diff' && all.length > 1 && st.frame === null ? all.filter((k) => k > 0) : all;
+        const loaded0 = st.time === 'diff' && all.length > 1 && st.frame === null ? all.filter((k) => k > 0) : all;
+        // Blink of two chosen passes (Tools): only those two play
+        const bl = flowRef.current?.blink;
+        const two = bl && st.time === 'loop' ? loaded0.filter((k) => k === bl[0] || k === bl[1]) : [];
+        const loaded = two.length === 2 ? two : loaded0;
         const waiting = st.view !== 'picture' && !all.length;
         setWallWait((w) => (w === waiting ? w : waiting));
         if (loaded.length) {
@@ -2260,6 +2264,28 @@ export function Lab({ route }: { route: Route }) {
     single: film !== null || view === 'picture',
     side,
     known: opts.known,
+    fieldKey: clientRef.current?.key ?? null,
+    params: p,
+    open: (q) => {
+      location.hash = formatHash({ screen: 'lab', params: q });
+    },
+    passes: (meta?.passes ?? []).map((q) => ({ index: q.index, label: season(q.mjd_mid) })),
+    thumb: () => {
+      // the picture with its rings, 240 px wide
+      const c = canvas.current;
+      if (!c || !c.width) return null;
+      try {
+        const t = document.createElement('canvas');
+        t.width = 240;
+        t.height = Math.round((240 * c.height) / c.width);
+        const g = t.getContext('2d')!;
+        g.drawImage(c, 0, 0, t.width, t.height);
+        if (overlay.current?.width) g.drawImage(overlay.current, 0, 0, t.width, t.height);
+        return t.toDataURL('image/jpeg', 0.8);
+      } catch {
+        return null;
+      }
+    },
   });
   flowRef.current = flow;
 
@@ -3407,6 +3433,7 @@ export function Lab({ route }: { route: Route }) {
           </div>
         </div>
         <aside class="panel">
+          {flow.taskPanel}
           <div class="panel-head">
             <div class="seg sm" role="group" aria-label="Panel">
               {(
@@ -3642,8 +3669,8 @@ export function Lab({ route }: { route: Route }) {
                 </div>
                 {sw(
                   'archChk',
-                  `Archive images · ${ARCHIVE.length} · 1985–2010`,
-                  'Archive images: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
+                  `Old surveys · ${ARCHIVE.length} · 1985–2010`,
+                  'Old surveys: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
                   opts.archive,
                   film !== null ? null : (v) => set({ arch: v ? '1' : null }),
                   'Months scale only',
