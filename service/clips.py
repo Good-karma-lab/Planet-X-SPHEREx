@@ -42,7 +42,7 @@ from service.products.store import Store
 from service.products.sxp import decode
 from service.storage import atomic_write_bytes
 
-VERSION = "c3"
+VERSION = "c4"
 WINDOW_ARCMIN = 3.0  # the side of the clip on the sky
 SIZE = 320  # the side of the clip in pixels
 FRAME_MS = 1000  # one pass on screen
@@ -401,7 +401,7 @@ def render(
     shown: list[dict[str, Any]] = []
     motion = motion_of(find) if with_ring else None
     seen_sn = 0.0
-    ring_r = RING_ARCSEC / grid.step_arcsec
+    ring_r = max(1.5, MEASURE_ARCSEC / grid.step_arcsec)
     for p in passes:
         if max_frames is not None and len(frames) >= max_frames:
             break
@@ -500,6 +500,8 @@ def film_picture(sky: NDArray[np.uint8], fill: list[NDArray[np.uint8]] | None = 
     return np.repeat(v[..., None], 3, axis=-1)
 
 
+# the S/N "in the ring" is taken within one detector pixel of the ring's centre: the whole ring would hold a 3 sigma noise peak by chance
+MEASURE_ARCSEC = 7.0
 VISIBLE_SN = 3.0  # an object whose ring holds less than this against the noise of its own picture is not visible in it
 TRACK_MIN_GAIN = 1.5  # S/N in the ring along the motion must exceed the S/N without motion by this much
 TRACK_WINDOW_ARCMIN = 6.0
@@ -586,7 +588,7 @@ def render_track(find: dict[str, Any], store: Store, key: str, meta: dict[str, A
     pics, sns = [], []
     for acc, cnt in ((along, n_along), (still, n_still)):
         sn = np.where(cnt > 0, acc / np.sqrt(np.maximum(cnt, 1)), np.nan)
-        sns.append(ring_sn(sn, c, c, ring_px))
+        sns.append(ring_sn(sn, c, c, max(1.5, MEASURE_ARCSEC / step)))
         grey = np.clip((np.nan_to_num(sn, nan=0.0) - TRACK_SN_DARK) / (TRACK_SN_FULL - TRACK_SN_DARK), 0.0, 1.0) ** 0.8
         pics.append(np.repeat(grey[..., None], 3, axis=-1))
     d0, d1 = _mjd_date(float(frames_meta[used[0]]["mjd"])), _mjd_date(float(frames_meta[used[-1]]["mjd"]))
