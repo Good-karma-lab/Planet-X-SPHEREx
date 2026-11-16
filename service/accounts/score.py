@@ -40,6 +40,7 @@ CONTROL_RADIUS_ARCSEC = 60.0  # a mark this close to the known mover's place (at
 CONTROL_MIN_PM_ARCSEC_YR = 1.0  # a test target is a control mover when it moves at least this fast
 CONTROL_EPOCH = 2025.9  # the middle of the SPHEREx passes: where the control mover is put
 RANK_MIN_ANSWERS = 10  # the leaderboard ranks a user only after this many settled answers
+RARITY_MIN_SEARCHERS = 50  # "N% of searchers have it" is shown only from this many searchers (a share of two people says nothing)
 LEVELS = ((0, "Observer"), (100, "Searcher"), (500, "Tracker"), (2500, "Hunter"), (10000, "Discoverer"))
 FINAL_STAGES = ("known", "artefact", "candidate", "confirmed")
 #: the answer of the task "Check a machine finding" and the final stages it agrees with
@@ -687,7 +688,7 @@ class Score:
                     "earned_at": iso(got[a.id]) if earned else None,
                     "progress": 1.0 if earned else (0.0 if secret else round(min(1.0, have / need), 3)),
                     "have": None if secret else int(min(have, need)), "need": None if secret else int(need),
-                    "rarity": None if total == 0 else round(100.0 * have_it.get(a.id, 0) / total, 1),
+                    "rarity": None if total < RARITY_MIN_SEARCHERS else round(100.0 * have_it.get(a.id, 0) / total, 1),
                 }
             )  # fmt: skip
         return out
