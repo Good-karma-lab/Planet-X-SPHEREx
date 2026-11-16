@@ -549,16 +549,24 @@ class Checks:
         ra = a["ra"] + east * mid / span / 3600.0 / max(math.cos(math.radians(a["dec"])), 1e-3)
         dec = a["dec"] + north * mid / span / 3600.0
         cones = [(ra, dec, (rate * half + 2 * NEOWISE_MATCH_ARCSEC) / 3600.0), (a["ra"], a["dec"], NEOWISE_MATCH_ARCSEC / 3600.0)]
-        where = " OR ".join(f"CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {x:.6f}, {y:.6f}, {r:.6f})) = 1" for x, y, r in cones)
-        q = f"SELECT ra, dec, mjd FROM neowiser_p1bs_psd WHERE qual_frame > 0 AND ({where})"
         job.checks["neowise"]["detail"] = "Asking IRSA for the NEOWISE sources along the path."
-        r = await self.client.post(IRSA_TAP, data={"QUERY": q, "FORMAT": "csv", "LANG": "ADQL", "REQUEST": "doQuery"})
-        r.raise_for_status()
-        if r.text.lstrip().startswith("<"):
-            raise ValueError("IRSA answered an error page")
-        rows = [
-            {"ra": float(x["ra"]), "dec": float(x["dec"]), "mjd": float(x["mjd"])}
-            for x in csv.DictReader(io.StringIO(r.text))
-            if x.get("mjd") and x.get("ra") and x.get("dec")
-        ]
+
+        async def cone(x: float, y: float, radius: float) -> list[dict[str, float]]:
+            # one cone per query: IRSA's TAP does not take two regions joined by OR
+            q = (
+                "SELECT ra, dec, mjd FROM neowiser_p1bs_psd WHERE qual_frame > 0 AND "
+                f"CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {x:.6f}, {y:.6f}, {radius:.6f})) = 1"
+            )
+            r = await self.client.post(IRSA_TAP, data={"QUERY": q, "FORMAT": "csv", "LANG": "ADQL", "REQUEST": "doQuery"})
+            r.raise_for_status()
+            if r.text.lstrip().startswith("<"):
+                raise ValueError("IRSA answered an error page")
+            return [
+                {"ra": float(v["ra"]), "dec": float(v["dec"]), "mjd": float(v["mjd"])}
+                for v in csv.DictReader(io.StringIO(r.text))
+                if v.get("mjd") and v.get("ra") and v.get("dec")
+            ]
+
+        found = await asyncio.gather(*(cone(*c) for c in cones))
+        rows = [row for part in found for row in part]
         return neowise_path(marks, rows)
