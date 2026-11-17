@@ -289,3 +289,26 @@ Each test is done in a real browser (Chrome, and the globe also in Firefox) and 
 10. **Grid API:** `/api/grid/meta` (38 imported squares, scheme dec20), `/api/grid/coverage?corners=1`.
 11. **Checks:** one "Check and submit" declared by a guest is refused with 401 (submitting needs an account).
     With sign-in on: one real job runs to its end (JPL and NEOWISE take up to about 20 min) and the notification arrives.
+
+## The disk keeper (production, from 17 Nov)
+
+On 17 Nov the VM's / was 70% full (134 of 193 GB): raw/bands 96 GB (the cached rows of SPHEREx files), products 11 GB, index
+0.8 GB, spectra 0.7 GB, journal 0.3 GB, tmp 0.3 GB.
+
+- **What runs:** `tools/disk_keeper.py`, from `deploy/systemd/sky-disk.service` + `sky-disk.timer`. It runs hourly (randomised by up to
+  5 min) as root, using /opt/sky/.venv's Python with no bytecode written, at the lowest disk priority. The timer is enabled only after a
+  dry run on the VM was reported.
+- **Every run:** tmp/ older than a day; clips of finds that no longer exist in findings.db, and clip-version folders that are not
+  current; only the newest 7 backups in /var/lib/sky-backup.
+- **Above 75%, down to 60%:** raw/bands, least recently used first (atime, else mtime; nothing used in the last hour). Only when
+  raw/bands is under 5 GB: finished, unpinned fields, least recently used first, never within 0.6° of the five test targets, never one
+  holding a find or a person's mark or investigation object, never one used in the last hour. Each field's row in catalogue.sqlite
+  goes with it.
+- **Never touched:** findings.db, product.sqlite, catalogue.sqlite (except the rows of deleted fields), index/, fpx_known/,
+  raw/calib, raw/psf, raw/headers, /etc/sky.
+- **Log:** one JSON line per run in the journal (`journalctl -u sky-disk`): fill before and after, GB freed by folder.
+- **Alerts:** one e-mail a day at most, through Resend to good.karma.lab.ltd@gmail.com, when / is still above 85% after a run, or the
+  run failed.
+- **journald:** `deploy/journald/sky.conf` (SystemMaxUse=500M) goes to /etc/systemd/journald.conf.d/.
+- **/api/v1/health:** `disk: {free_gb, used_pct}`.
+- **Dry run by hand:** `sudo /opt/sky/.venv/bin/python /opt/sky/tools/disk_keeper.py --store /var/lib/sky --dry-run`.
