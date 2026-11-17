@@ -4,6 +4,7 @@ The grid and the checks of the other streams are stood in for here by small fake
 
 from __future__ import annotations
 
+import json
 import re
 import sqlite3
 from pathlib import Path
@@ -71,7 +72,7 @@ MARK = {"id": "m-0001-abcdef", "field_key": "f" * 24, "cell_id": "b10c20", "ra":
 
 def test_guest_gets_401_and_me_says_null(site: tuple[FastAPI, _State, _Mail]) -> None:
     c = _client(site[0])
-    assert c.get("/api/me").json() == {"user": None, "auth": {"google": False, "dev": False}}
+    assert c.get("/api/me").json() == {"user": None, "auth": {"email": True, "google": False, "dev": False}}
     for path in ("marks", "tasks", "history", "notifications", "investigations", "findings"):
         assert c.get(f"/api/me/{path}").status_code == 401
     assert c.post("/api/me/marks", json=MARK).status_code == 401
@@ -449,3 +450,70 @@ def test_declared_submit_finishes_by_itself(site: tuple[FastAPI, _State, _Mail])
     assert two["state"] == "submitted" and two["submitted"]
     assert texts()[0] == "Your finding “Fast” is submitted and waits for the verdict."
     assert len(c.get("/api/me/findings").json()["findings"]) == 3
+
+
+def test_sign_in_opens_soon_without_a_mail_sender_and_google(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SKY_PRODUCT_DB", str(tmp_path / "product.sqlite"))
+    for k in ("SKY_AUTH_DEV", "SKY_PUBLIC_URL", "SKY_GOOGLE_CLIENT_ID", "SKY_GOOGLE_CLIENT_SECRET", "SKY_RESEND_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    st = _State(tmp_path)
+    app = FastAPI()
+    register_accounts(app, st)
+    c = _client(app)
+    assert c.get("/api/me").json() == {"user": None, "auth": {"email": False, "google": False, "dev": False}}
+    r = c.post("/api/auth/email", json={"email": "ann@example.org"})
+    assert r.status_code == 503 and r.json()["detail"] == "Sign-in opens soon"
+    db = sqlite3.connect(accounts.get(st).db.path)
+    assert db.execute("SELECT COUNT(*) FROM acc_login_tokens").fetchone()[0] == 0  # the address was not taken
+    assert c.get("/api/me/marks").status_code == 401 and c.get("/api/leaders").status_code == 200  # the rest of the site works
+    # dev mode opens it (the link on the page); so does a real sender
+    monkeypatch.setenv("SKY_AUTH_DEV", "1")
+    assert c.get("/api/me").json()["auth"]["email"] is True
+    monkeypatch.delenv("SKY_AUTH_DEV")
+    accounts.get(st).mail = _Mail()
+    assert c.get("/api/me").json()["auth"] == {"email": True, "google": False, "dev": False}
+
+
+def test_resend_sender_sends_the_link_and_keeps_the_key_out_of_the_log(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from service.accounts.mail import LogSender, MailFailedError, ResendSender, sender_from_env
+
+    monkeypatch.delenv("SKY_RESEND_API_KEY", raising=False)
+    assert isinstance(sender_from_env(), LogSender)
+    monkeypatch.setenv("SKY_RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("SKY_MAIL_FROM", "SPHEREx Space <hello@spherex.space>")
+    sender = sender_from_env()
+    assert isinstance(sender, ResendSender)
+    seen: list[httpx.Request] = []
+    status = [200]
+
+    def resend(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(status[0], json={"id": "1"})
+
+    sender.transport = httpx.MockTransport(resend)
+    link = "https://www.spherex.space/api/auth/callback?token=abc&x=1"
+    sender.send_link("ann@example.org", link, 15)
+    req = seen[0]
+    body = json.loads(req.content)
+    assert str(req.url) == "https://api.resend.com/emails" and req.headers["authorization"] == "Bearer re_test_key"
+    assert body["from"] == "SPHEREx Space <hello@spherex.space>" and body["to"] == ["ann@example.org"]
+    assert link in body["text"] and "token=abc&amp;x=1" in body["html"] and "15 minutes" in body["text"]
+    status[0] = 422
+    with caplog.at_level("WARNING"), pytest.raises(MailFailedError):
+        sender.send_link("ann@example.org", link, 15)
+    assert "re_test_key" not in caplog.text and "ann@example.org" not in caplog.text and "token=abc" not in caplog.text
+    # through the route: a mail that could not be sent is said, and the service opens e-mail sign-in with this sender
+    monkeypatch.setenv("SKY_PRODUCT_DB", str(tmp_path / "product.sqlite"))
+    st = _State(tmp_path)
+    app = FastAPI()
+    register_accounts(app, st)
+    mail = accounts.get(st).mail
+    assert isinstance(mail, ResendSender)
+    mail.transport = httpx.MockTransport(resend)
+    c = _client(app)
+    assert c.get("/api/me").json()["auth"]["email"] is True
+    assert c.post("/api/auth/email", json={"email": "ann@example.org"}).status_code == 502
+    status[0] = 200
+    assert c.post("/api/auth/email", json={"email": "ann@example.org"}).json() == {"sent": True, "minutes": 15}
