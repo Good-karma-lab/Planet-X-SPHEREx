@@ -338,6 +338,8 @@ def test_google_sign_in_with_a_fake_google(site: tuple[FastAPI, _State, _Mail], 
     assert c.get("/api/auth/google").status_code == 404  # hidden when not set up
     monkeypatch.setenv("SKY_GOOGLE_CLIENT_ID", "cid")
     monkeypatch.setenv("SKY_GOOGLE_CLIENT_SECRET", "secret")
+    assert c.get("/api/me").json()["auth"]["google"] is False  # keys set, the Google app not yet published: no button
+    monkeypatch.setenv("SKY_GOOGLE_PUBLIC", "1")
     assert c.get("/api/me").json()["auth"]["google"] is True
 
     def google(request: httpx.Request) -> httpx.Response:
