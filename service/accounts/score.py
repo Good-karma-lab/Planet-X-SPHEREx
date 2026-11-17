@@ -47,7 +47,14 @@ FINAL_STAGES = ("known", "artefact", "candidate", "confirmed")
 #: the answer of the task "Check a machine finding" and the final stages it agrees with
 AGREES = {"known": ("known",), "artefact": ("artefact",), "moves": ("candidate", "confirmed")}
 #: the stage a machine finding has by its catalogue status alone (service.findings.STAGE_OF_STATUS); other statuses are not final
-STAGE_OF_STATUS = {"known": "known", "residual": "artefact", "galaxy": "artefact", "below": "artefact", "halo": "artefact"}
+STAGE_OF_STATUS = {
+    "known": "known",
+    "residual": "artefact",
+    "galaxy": "artefact",
+    "below": "artefact",
+    "halo": "artefact",
+    "set_aside": "artefact",
+}
 GALACTIC_PLANE_DEG = 5.0
 ECLIPTIC_DEG = 10.0  # the grid's ecliptic band
 P9_RA, P9_BETA = (15.0, 105.0), (-25.0, 15.0)  # the predicted Planet Nine band (service.grid, Brown & Batygin 2021)

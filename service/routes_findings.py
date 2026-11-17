@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -42,6 +43,38 @@ def card_extras(x: dict[str, Any]) -> dict[str, Any]:
 
 def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
     router = APIRouter()
+
+    aside_cache: dict[str, Any] = {"at": 0.0, "v": {}}
+
+    def people_aside() -> dict[str, dict[str, Any]]:
+        """The machine finds people set aside as artefacts (kept out of the leads and the default list), read every 30 s at most."""
+        now = time.time()
+        if now - aside_cache["at"] > 30.0:
+            try:
+                from service.accounts import field_people
+
+                aside_cache["v"] = field_people.set_aside(st)
+            except Exception:  # no accounts here (a test service, a standby without the database): nobody set anything aside
+                aside_cache["v"] = {}
+            aside_cache["at"] = now
+        v: dict[str, dict[str, Any]] = aside_cache["v"]
+        return v
+
+    raised_cache: dict[str, Any] = {"at": 0.0, "v": {}}
+
+    def people_raised() -> dict[str, str]:
+        """The finds people raised up the queue (first in the promise order), read every 30 s at most."""
+        now = time.time()
+        if now - raised_cache["at"] > 30.0:
+            try:
+                from service.accounts import people
+
+                raised_cache["v"] = people.raised(st)
+            except Exception:  # no accounts here: nothing is raised
+                raised_cache["v"] = {}
+            raised_cache["at"] = now
+        v: dict[str, str] = raised_cache["v"]
+        return v
 
     def need() -> Any:
         f = getattr(st, "findings", None)
@@ -91,7 +124,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     async def findings(
         kind: str | None = Query(None),
-        status: str | None = Query(None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo)$"),
+        status: str | None = Query(None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside)$"),
         place: str | None = Query(None),
         limit: int = Query(300, ge=1, le=2000),
         offset: int = Query(0, ge=0),
@@ -121,6 +154,8 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         if clips is not None and os.environ.get("SKY_CLIPS_PRERENDER", "1") == "1":
             clips.prerender(every_find)  # the background queue starts with the first look at the list
         rank = clips.rank if clips is not None else None
+        aside = await asyncio.to_thread(people_aside)
+        raised = await asyncio.to_thread(people_raised)
         body: dict[str, Any] = await asyncio.to_thread(
             lambda: query(
                 f.db,
@@ -139,6 +174,8 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 noted=noted,
                 seen=clips.seen if clips is not None else None,
                 visibility=visibility,
+                aside=aside,
+                raised=raised,
             )
         )
         body = enrich(body)
@@ -148,11 +185,12 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     async def one(find_id: str) -> Any:
         f = need()
-        body: dict[str, Any] = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st)))
+        aside = await asyncio.to_thread(people_aside)
+        body: dict[str, Any] = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), aside=aside))
         hidden: dict[str, Any] = {"finds": []}
         if not any(x["id"] == find_id for x in body["finds"]) and find_row(f.db, find_id) is not None:
-            for hs in ("residual", "galaxy", "below", "halo"):  # a find kept out of the lists still has its page
-                hidden = await asyncio.to_thread(partial(query, f.db, None, hs, None, 5000, 0, flow=flow_of(st)))
+            for hs in ("residual", "galaxy", "below", "halo", "set_aside"):  # a find kept out of the lists still has its page
+                hidden = await asyncio.to_thread(partial(query, f.db, None, hs, None, 5000, 0, flow=flow_of(st), aside=aside))
                 if any(x["id"] == find_id for x in hidden["finds"]):
                     break
         for x in body["finds"] + hidden["finds"]:

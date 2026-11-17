@@ -1,5 +1,6 @@
 import '../planetx/planetx.css';
 import type { ComponentChildren } from 'preact';
+import { useEffect, useState } from 'preact/hooks';
 
 /** The figures of the Method page, by the name a text gives them in `[figure: name | caption]`. Every picture is a real product of the service. */
 
@@ -38,7 +39,19 @@ function Row({ items, cols }: { items: { src: string; alt: string; tag?: string;
 
 /** A short muted loop recorded from spherex.space (every number in it is the live site's), with its poster. */
 function Vid({ f, label }: { f: string; label: string }) {
-  return <video class="mf-vid" src={M(`live/${f}.mp4`)} poster={M(`live/${f}.jpg`)} muted loop playsInline autoPlay preload="metadata" aria-label={label} />;
+  return (
+    <video
+      class="mf-vid"
+      src={M(`live/${f}.mp4`)}
+      poster={M(`live/${f}.jpg`)}
+      muted
+      loop
+      playsInline
+      autoPlay
+      preload="metadata"
+      aria-label={label}
+    />
+  );
 }
 
 /** Eris, found blind and linked by the live service (spherex.space production jobs, 2026-11-15): each pass alone gives a wide range
@@ -48,6 +61,107 @@ const ERIS_PASSES: [string, number, number, number, number, number][] = [
   ['9 Jan 2026', 14.6, 14.2, 93.2, 85.3, 111.0],
   ['17 Jul 2026', 13.6, 10.9, 81.2, 47.1, 143.8],
 ];
+/** The reply of GET /api/people/counts (service/accounts/people.py counts()). */
+interface PeopleCountsReply {
+  series: Record<string, { answers: number; controls: number; results: Record<string, number>; settled: Record<string, number> }>;
+  rules: {
+    series: string;
+    said: string;
+    label: string;
+    rule: string;
+    answers: number;
+    times: number;
+    share: number | null;
+    settled: number;
+  }[];
+  exposures?: { flagged: number; bad: number };
+  taps?: Record<string, number>;
+}
+
+const SERIES_WORD: Record<string, string> = {
+  track: 'Tracks',
+  slow: 'Slow movers',
+  peak: 'Planet X peaks',
+  red: 'Red sources',
+  anomaly: 'Anomalies',
+};
+
+/** What people have answered so far: one row per question series, then how often an answer goes against a rule of the machine. */
+function PeopleCounts() {
+  const [c, setC] = useState<PeopleCountsReply | null | 'none'>(null);
+  useEffect(() => {
+    let on = true;
+    fetch('/api/people/counts')
+      .then((r) => (r.ok ? (r.json() as Promise<PeopleCountsReply>) : null))
+      .then((d) => on && setC(d ?? 'none'))
+      .catch(() => on && setC('none'));
+    return () => {
+      on = false;
+    };
+  }, []);
+  if (c === null) return <p class="mono-s">Asking the service…</p>;
+  if (c === 'none') return <p class="mono-s">The counts are not available here.</p>;
+  const settled = (m: Record<string, number>) =>
+    Object.entries(m)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => `${k.replace(/_/g, ' ')} ${n}`)
+      .join(' · ') || '—';
+  return (
+    <div data-testid="people-counts">
+      <table class="v">
+        <thead>
+          <tr>
+            <th>Series</th>
+            <th>Answers</th>
+            <th>Settled</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(c.series).map(([k, v]) => (
+            <tr key={k}>
+              <td>{SERIES_WORD[k] ?? k}</td>
+              <td>
+                {v.answers}
+                {v.controls ? ` (${v.controls} controls)` : ''}
+              </td>
+              <td>{settled(v.settled)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {c.rules.length > 0 && (
+        <table class="v">
+          <thead>
+            <tr>
+              <th>Answer</th>
+              <th>Against the rule</th>
+              <th>Said</th>
+            </tr>
+          </thead>
+          <tbody>
+            {c.rules.map((r) => (
+              <tr key={`${r.series}-${r.said}`}>
+                <td>{r.label}</td>
+                <td>{r.rule}</td>
+                <td>
+                  {r.times} of {r.answers}
+                  {r.share != null ? ` (${Math.round(r.share * 100)}%)` : ''}
+                  {r.settled ? ` · settled ${r.settled}` : ''}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {c.exposures && (
+        <p class="mono-s">
+          Exposures called broken: {c.exposures.flagged}; left out of every stack and spectrum (two people or more): {c.exposures.bad}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function ErisLive() {
   const x = (d: number) => `${((d - 40) / 125) * 100}%`;
   const row = (lab: string, sub: string, lo: number, hi: number, best: number, link = false) => (
@@ -69,7 +183,9 @@ function ErisLive() {
       {row('three passes linked', 'one orbit · a 69.4 au, e 0.45 · misfit 1.6″', 95.2, 96.0, 95.6, true)}
       <div class="er-axis">
         {[40, 60, 80, 100, 120, 140, 160].map((d) => (
-          <span key={d} style={{ left: x(d) }}>{d}</span>
+          <span key={d} style={{ left: x(d) }}>
+            {d}
+          </span>
         ))}
         <em>au</em>
       </div>
@@ -84,7 +200,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'The six detectors side by side on Barnard’s Star, the passes playing: the star jumps the same way in all of them',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="wall-detectors" label='The six SPHEREx detectors side by side on Barnard’s Star, playing through the passes' />
+        <Vid f="wall-detectors" label="The six SPHEREx detectors side by side on Barnard’s Star, playing through the passes" />
       </Fig>
     ),
   },
@@ -106,7 +222,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'The blink idea on our own plates: Barnard’s field in 1950, 1991 and 2026, one star moving',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="blink-pluto" label='Barnard’s Star field in 1950, 1991 and 2026 blinked' />
+        <Vid f="blink-pluto" label="Barnard’s Star field in 1950, 1991 and 2026 blinked" />
       </Fig>
     ),
   },
@@ -129,7 +245,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'From the raw exposures to a time-lapse: raw frames, the stack of the passes, colour by wavelength, then the passes played',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="raw-to-video" label='Raw exposures, the stack, the coloured stack and the passes as a time-lapse' />
+        <Vid f="raw-to-video" label="Raw exposures, the stack, the coloured stack and the passes as a time-lapse" />
       </Fig>
     ),
   },
@@ -137,7 +253,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'A click on a star: its spectrum is measured in every exposure that covers it, point by point, coloured by detector',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="spectrum-source" label='The spectrum of a field star filling in point by point' />
+        <Vid f="spectrum-source" label="The spectrum of a field star filling in point by point" />
       </Fig>
     ),
   },
@@ -145,7 +261,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'The Days time-lapse of the 60′ ecliptic field, December 2025: the visits hours apart, the known asteroids ringed and named',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="film-ecliptic-dec2025" label='The Days time-lapse of the ecliptic field with the asteroid tracks' />
+        <Vid f="film-ecliptic-dec2025" label="The Days time-lapse of the ecliptic field with the asteroid tracks" />
       </Fig>
     ),
   },
@@ -157,11 +273,19 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
       </Fig>
     ),
   },
+  'people-counts': {
+    cap: 'What people have answered so far, live',
+    make: (cap, name) => (
+      <Fig name={name} cap={cap}>
+        <PeopleCounts />
+      </Fig>
+    ),
+  },
   'p9-orbits': {
     cap: 'The Solar System with the published range of Planet Nine orbits and the fields searched for it',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="p9-orbits" label='The Planet X model slowly turning' />
+        <Vid f="p9-orbits" label="The Planet X model slowly turning" />
         <a class="p9link" href="#/planetx">
           Open the Planet X page →
         </a>
@@ -172,7 +296,17 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'The raw exposures of one place played in a row: the pixel grid, the wavelength and the brightness change from frame to frame',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <video class="mf-vid" src={M('raw-exposures.mp4')} poster={M('raw-exposures.jpg')} muted loop playsInline autoPlay preload="metadata" aria-label="Raw SPHEREx exposures of one place played one after another" />
+        <video
+          class="mf-vid"
+          src={M('raw-exposures.mp4')}
+          poster={M('raw-exposures.jpg')}
+          muted
+          loop
+          playsInline
+          autoPlay
+          preload="metadata"
+          aria-label="Raw SPHEREx exposures of one place played one after another"
+        />
       </Fig>
     ),
   },
@@ -180,7 +314,17 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'One pass stack coloured by wavelength: each exposure is tinted by its own wavelength, a flat spectrum is white',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <video class="mf-vid" src={M('spectral-colour.mp4')} poster={M('spectral-colour.jpg')} muted loop playsInline autoPlay preload="metadata" aria-label="A pass stack coloured by wavelength" />
+        <video
+          class="mf-vid"
+          src={M('spectral-colour.mp4')}
+          poster={M('spectral-colour.jpg')}
+          muted
+          loop
+          playsInline
+          autoPlay
+          preload="metadata"
+          aria-label="A pass stack coloured by wavelength"
+        />
       </Fig>
     ),
   },
@@ -188,15 +332,15 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'The ε Indi B field: the anomalies and red sources ringed in the picture and listed with their scores',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="anomaly-map" label='The anomaly map of the epsilon Indi B field' />
+        <Vid f="anomaly-map" label="The anomaly map of the epsilon Indi B field" />
       </Fig>
     ),
   },
-  'difference': {
+  difference: {
     cap: 'The difference of passes: what moved shows as a pair of colours, what stayed cancels out',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="difference" label='The difference view of Barnard’s Star' />
+        <Vid f="difference" label="The difference view of Barnard’s Star" />
       </Fig>
     ),
   },
@@ -204,7 +348,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'Archive images over time: the photographic plates and the infrared surveys before SPHEREx, in the same field',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="archive-over-time" label='Archive images of Barnard’s field played in time order' />
+        <Vid f="archive-over-time" label="Archive images of Barnard’s field played in time order" />
       </Fig>
     ),
   },
@@ -212,7 +356,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'A click on an object: its portrait, position, proper motion and what the catalogues know',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="object-portrait" label='The object card of Barnard’s Star' />
+        <Vid f="object-portrait" label="The object card of Barnard’s Star" />
       </Fig>
     ),
   },
@@ -220,7 +364,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'The same place at 2′, 5′, 10′, 20′ and 60′: one click changes how much sky the lab reads',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="field-size-zoom" label='Barnard’s Star field from 2 to 60 arcminutes' />
+        <Vid f="field-size-zoom" label="Barnard’s Star field from 2 to 60 arcminutes" />
       </Fig>
     ),
   },
@@ -228,7 +372,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'ε Indi B in the pendulum: the orange-red brown dwarf steps between the four passes',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="epsindi-pendulum" label='Epsilon Indi B stepping between passes' />
+        <Vid f="epsindi-pendulum" label="Epsilon Indi B stepping between passes" />
       </Fig>
     ),
   },
@@ -236,7 +380,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'ε Indi B in named bands: water, methane, ice, dust, CO₂ and CO side by side',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="epsindi-bands" label='Epsilon Indi B in the named bands' />
+        <Vid f="epsindi-bands" label="Epsilon Indi B in the named bands" />
       </Fig>
     ),
   },
@@ -244,7 +388,7 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     cap: 'ε Indi B on the six detectors: the brown dwarf is brightest at the long wavelengths',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="epsindi-wall" label='Epsilon Indi B on the six detectors' />
+        <Vid f="epsindi-wall" label="Epsilon Indi B on the six detectors" />
       </Fig>
     ),
   },

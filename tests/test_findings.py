@@ -584,3 +584,39 @@ def test_flow_fields_promise_first_and_the_looks_people_gave(tmp_path: Path) -> 
     old = query(db, None, "all", None, 100, 0)
     assert old["total"] == 5 and {"status", "verdict", "idents"} <= set(old["finds"][0])
     assert flow_fields({"kind": "peak", "status": "halo", "score": 7.0}, None)["stage"] == "artefact"
+
+
+def test_finds_people_set_aside_leave_the_leads_but_keep_their_page(tmp_path: Path) -> None:
+    """Two people agreed a machine find is an artefact (service/accounts/field_people.set_aside): it leaves the default list and the
+    leads like a halo, is listed under status=set_aside with the agreement in its sentence; a catalogue's answer stays stronger."""
+    rows, keys = _store(tmp_path)
+    finds, _ = collect(tmp_path, rows, keys, TARGETS)
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds(finds)
+    red = next(f for f in finds if f["kind"] == "red")
+    known = next(f for f in finds if f["kind"] == "mover")  # Gaia matches the track: known
+    aside = {red["id"]: {"look": "ghost", "agree": 2, "total": 2}, known["id"]: {"look": "streak", "agree": 2, "total": 3}}
+    before = query(db, None, "all", None, 100, 0)
+    out = query(db, None, "all", None, 100, 0, aside=aside)
+    assert red["id"] in {f["id"] for f in before["finds"]} and red["id"] not in {f["id"] for f in out["finds"]}
+    assert out["counts"]["red"]["set_aside"] == 1 and out["counts"]["red"]["leads"] == before["counts"]["red"]["leads"] - 1
+    hid = query(db, None, "set_aside", None, 100, 0, aside=aside)
+    r = next(f for f in hid["finds"] if f["id"] == red["id"])
+    assert r["status"] == "set_aside" and r["stage"] == "artefact" and "People set it aside (2 of 2)" in r["verdict"]
+    assert next(f for f in out["finds"] if f["id"] == known["id"])["status"] == "known"  # a catalogue's word stays
+
+
+def test_a_find_people_raised_comes_first(tmp_path: Path) -> None:
+    """People raised a find up the queue (service/accounts/people.raised): it is first in the promise order; a known one is not."""
+    rows, keys = _store(tmp_path)
+    finds, _ = collect(tmp_path, rows, keys, TARGETS)
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds(finds)
+    base = query(db, None, "all", None, 100, 0, sort="promise")["finds"]
+    leads = [f for f in base if f["status"] in ("unexplained", "unchecked")]
+    last = leads[-1]
+    out = query(db, None, "all", None, 100, 0, sort="promise", raised={last["id"]: "moves_old"})["finds"]
+    assert out[0]["id"] == last["id"] and out[0]["people_raised"] == "moves_old"
+    known = next(f for f in base if f["status"] == "known")
+    out2 = query(db, None, "all", None, 100, 0, sort="promise", raised={known["id"]: "candidate"})["finds"]
+    assert "people_raised" not in next(f for f in out2 if f["id"] == known["id"])
