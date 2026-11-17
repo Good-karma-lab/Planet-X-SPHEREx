@@ -33,6 +33,9 @@ const FAKE = {
     { id: 'bad2', source: 'simbad', positions: [{ epoch: 'x', ra: 1, dec: 2 }] },
   ],
   answered: { gaia: true, simbad: true, jpl: false },
+  // the deeper catalogues, for matching only
+  match: [{ id: 'catwise:J1', catalogues: ['CatWISE2020'], mag: 15.1, positions: [{ epoch: 60926.0, ra: 269.4265, dec: 4.7785 }] }],
+  status: { match: { gaia: { state: 'ok' }, catwise: { state: 'ok' }, allwise: { state: 'ok' }, twomass: { state: 'ok' } } },
 };
 
 describe('known objects of a lab field', () => {
@@ -46,7 +49,10 @@ describe('known objects of a lab field', () => {
     expect(k.objects.map((o) => o.id)).toEqual(['gaia:4472832130942575872', 'gaia:1', 'jpl:433 Eros']);
     expect(k.objects[0]!.positions[0]!.epoch).toBeCloseTo(yearOfMjd(60926.0), 9);
     expect(k.answered).toEqual({ gaia: true, simbad: true, jpl: false });
-    expect(parseKnown(null)).toEqual({ objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [] });
+    expect(parseKnown(null)).toMatchObject({ objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [], deep: [] });
+    expect(parseKnown(null).deepSilent).toHaveLength(4);
+    expect(k.deep.map((o) => o.id)).toEqual(['catwise:J1']);
+    expect(k.deepSilent).toEqual([]);
   });
 
   it('puts a star between its two places by the date, and beyond them on the same line', () => {
@@ -83,9 +89,12 @@ describe('known objects of a lab field', () => {
   });
 
   it('counts what the picture shows, and waits for a catalogue the service is still asking', () => {
-    const k = parseKnown({ ...FAKE, status: { jpl: { state: 'pending' } } });
+    const k = parseKnown({ ...FAKE, status: { ...FAKE.status, jpl: { state: 'pending' } } });
     expect(k.pending).toEqual(['jpl']);
-    expect(knownStatus({ state: 'ok', ...k }, { known: 212, noMatch: 7 })).toBe('known 212 · no match 7 · JPL: waiting');
+    expect(knownStatus({ state: 'ok', ...k }, { known: 212, noMatch: 7 })).toBe('known 212 · unknown 7 · JPL: waiting');
+    // a deeper catalogue that did not answer: the sources are without a match so far, not unknown
+    const half = parseKnown({ ...FAKE, status: { match: { gaia: { state: 'ok' }, catwise: { state: 'unavailable' }, allwise: { state: 'ok' }, twomass: { state: 'ok' } } } });
+    expect(knownStatus({ state: 'ok', ...half }, { known: 3, noMatch: 2 })).toBe('known 3 · no match 2 · CatWISE did not answer · JPL did not answer');
   });
 
   it('rings only catalogue objects with a detected source, and points at sources with no match', () => {
@@ -103,5 +112,9 @@ describe('known objects of a lab field', () => {
     const m = matchKnown(k.objects, peaks, 100, 3, uvOf, year);
     expect([...m.shown]).toEqual(['gaia:4472832130942575872']);
     expect(m.noMatch).toEqual([{ u: 0.8, v: 0.2, snr: 12 }]);
+    // the same source is known when a deeper catalogue has it within 3″ at that date
+    const [du, dv] = [0.8, 0.2];
+    const deep = [{ id: 'catwise:x', source: 'gaia' as const, name: '', label: false, positions: [{ epoch: year, ra: 269.4465 - ((du - 0.5) * 300) / 3600 / cosd + 0.0002, dec: 4.7685 - ((dv - 0.5) * 300) / 3600 }] }];
+    expect(matchKnown(k.objects, peaks, 100, 3, uvOf, year, deep).noMatch).toEqual([]);
   });
 });

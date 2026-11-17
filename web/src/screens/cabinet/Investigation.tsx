@@ -133,6 +133,11 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
           {VERDICT[stage] ?? words(stage)} Finding {inv.submitted}
         </p>
       )}
+      {inv.submitted && (
+        <a class="btn sm cb-back" href={`#/findings/${inv.submitted}/story`} data-testid="to-story">
+          Write the story and share it
+        </a>
+      )}
 
       <h4>Marks</h4>
       {own.length === 0 && <span class="mono-s">No marks</span>}

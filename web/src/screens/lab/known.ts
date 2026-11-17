@@ -28,6 +28,10 @@ export interface KnownReply {
   answered: Record<KnownSource, boolean>;
   /** catalogues the service is still asking (it answers them later: the lab asks again) */
   pending: KnownSource[];
+  /** the deeper catalogues (Gaia to G 21, CatWISE2020, AllWISE, 2MASS), for matching only: never drawn */
+  deep: KnownObject[];
+  /** the deeper catalogues that did not answer, by name (empty when all did): "no match" means unknown only then */
+  deepSilent: string[];
 }
 
 export interface KnownState {
@@ -36,9 +40,15 @@ export interface KnownState {
   objects: KnownObject[];
   answered: Record<KnownSource, boolean>;
   pending: KnownSource[];
+  deep: KnownObject[];
+  deepSilent: string[];
 }
 
-export const KNOWN_OFF: KnownState = { state: 'off', objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [] };
+/** the deeper catalogues of the `match` list, as the status line names them */
+const DEEP: Record<string, string> = { gaia: 'Gaia G 21', catwise: 'CatWISE', allwise: 'AllWISE', twomass: '2MASS' };
+const DEEP_NAMES = Object.values(DEEP);
+
+export const KNOWN_OFF: KnownState = { state: 'off', objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [], deep: [], deepSilent: [...DEEP_NAMES] };
 
 /** the service takes at most this many dates in one question */
 export const MAX_EPOCHS = 40;
@@ -61,8 +71,18 @@ export function parseKnown(raw: unknown): KnownReply {
   const r = (raw ?? {}) as {
     objects?: unknown;
     answered?: Partial<Record<KnownSource, unknown>>;
-    status?: Partial<Record<KnownSource, { state?: string }>>;
+    status?: Partial<Record<KnownSource, { state?: string }>> & { match?: Record<string, { state?: string }> };
+    match?: unknown;
   };
+  const deep: KnownObject[] = [];
+  for (const m of Array.isArray(r.match) ? (r.match as Partial<KnownObject>[]) : []) {
+    if (!m || !Array.isArray(m.positions)) continue;
+    const positions = m.positions
+      .filter((q) => q && Number.isFinite(q.epoch) && Number.isFinite(q.ra) && Number.isFinite(q.dec))
+      .map((q) => ({ epoch: q.epoch > 3000 ? yearOfMjd(q.epoch) : q.epoch, ra: q.ra, dec: q.dec }))
+      .sort((a, b) => a.epoch - b.epoch);
+    if (positions.length) deep.push({ id: String(m.id ?? `deep:${deep.length}`), source: 'gaia', name: '', positions, label: false });
+  }
   const objects: KnownObject[] = [];
   for (const o of Array.isArray(r.objects) ? (r.objects as Partial<KnownObject>[]) : []) {
     if (!o || !KNOWN_SOURCES.includes(o.source as KnownSource) || !Array.isArray(o.positions)) continue;
@@ -88,6 +108,10 @@ export function parseKnown(raw: unknown): KnownReply {
     objects,
     answered: { gaia: r.answered?.gaia === true, simbad: r.answered?.simbad === true, jpl: r.answered?.jpl === true },
     pending: KNOWN_SOURCES.filter((c) => r.answered?.[c] !== true && r.status?.[c]?.state === 'pending'),
+    deep,
+    deepSilent: Object.keys(DEEP)
+      .filter((c) => r.status?.match?.[c]?.state !== 'ok')
+      .map((c) => DEEP[c]!),
   };
 }
 
@@ -112,7 +136,7 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
       if (stop) return;
       if (reply) on({ state: 'ok', ...reply });
       else if (n === RETRIES || n === 0) on({ ...KNOWN_OFF, state: 'failed' });
-      if (reply && KNOWN_SOURCES.every((s) => reply.answered[s])) return;
+      if (reply && KNOWN_SOURCES.every((s) => reply.answered[s]) && !reply.deepSilent.length) return;
       await new Promise((res) => setTimeout(res, RETRY_MS));
     }
   })();
@@ -127,7 +151,11 @@ export function knownStatus(k: KnownState, counts?: { known: number; noMatch: nu
   if (k.state === 'off') return '';
   if (k.state === 'loading') return 'asking Gaia, SIMBAD and JPL…';
   const parts: string[] = [];
-  if (counts && k.state === 'ok') parts.push(`known ${counts.known}`, `no match ${counts.noMatch}`);
+  // "unknown" is said only when every deeper catalogue answered; else the sources are without a match so far, and it says who is silent
+  const deepOk = k.state === 'ok' && !k.deepSilent.length;
+  if (counts && k.state === 'ok') parts.push(`known ${counts.known}`, `${deepOk ? 'unknown' : 'no match'} ${counts.noMatch}`);
+  if (k.state === 'ok' && k.deepSilent.length)
+    parts.push(k.deepSilent.length === DEEP_NAMES.length ? 'deep catalogues did not answer' : `${k.deepSilent.join(', ')} did not answer`);
   const waiting = k.state === 'ok' ? k.pending : [];
   for (const c of waiting) parts.push(`${SOURCE_WORD[c]}: waiting`);
   const silent = KNOWN_SOURCES.filter((c) => (k.state === 'failed' || !k.answered[c]) && !waiting.includes(c)).map((c) => SOURCE_WORD[c]);
@@ -205,6 +233,9 @@ export interface KnownMatch {
 
 /** a catalogue object within this of a detected peak is that source: 7″ (a SPHEREx pixel is 6.2″), at least 2 grid pixels */
 export const MATCH_ARCSEC = 7;
+/** a detection with no ring is a known source when a deeper-catalogue entry is this close at the date shown (their places are
+ *  good to an arcsecond; the peak is a pixel centre): 3″, at least one grid pixel */
+export const DEEP_ARCSEC = 3;
 /** when there is no picture to compare with (Days, a field still loading): objects at least this bright are ringed */
 export const SHOWN_MAG = 15;
 
@@ -216,8 +247,18 @@ export function matchKnown(
   step: number,
   uvOf: (ra: number, dec: number) => [number, number],
   year: number,
+  deep: KnownObject[] = [],
 ): KnownMatch {
   const r = Math.max(2, MATCH_ARCSEC / step);
+  const rd = Math.max(1, DEEP_ARCSEC / step);
+  const dpts: { x: number; y: number }[] = [];
+  for (const o of deep) {
+    const at = placeAt(o, year);
+    if (!at) continue;
+    const [u, v] = uvOf(at[0], at[1]);
+    if (u >= -0.05 && v >= -0.05 && u <= 1.05 && v <= 1.05) dpts.push({ x: u * n, y: v * n });
+  }
+  const dcat = new Buckets(dpts, Math.max(4, rd));
   const pts: { x: number; y: number; o: KnownObject }[] = [];
   for (const o of objects) {
     const at = placeAt(o, year);
@@ -236,7 +277,7 @@ export function matchKnown(
   for (const p of peaks) {
     const hit = cat.near(p.x, p.y, r);
     if (hit) shown.add(hit.o.id);
-    else if (p.snr >= NOMATCH_SIGMA && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r)) noMatch.push({ u: p.x / n, v: p.y / n, snr: p.snr });
+    else if (p.snr >= NOMATCH_SIGMA && !dcat.near(p.x, p.y, rd) && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r)) noMatch.push({ u: p.x / n, v: p.y / n, snr: p.snr });
   }
   return { shown, noMatch };
 }

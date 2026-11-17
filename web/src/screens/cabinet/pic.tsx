@@ -18,7 +18,7 @@ export function clipUrl(p: { findingId?: string | null; ra?: number | null; dec?
 const seen = new Map<string, 'ready' | 'none'>();
 
 export function Pic({ findingId, ra, dec, size = 96, label }: { findingId?: string | null; ra?: number | null; dec?: number | null; size?: number; label: string }) {
-  const url = clipUrl({ findingId, ra, dec });
+  const url = clipUrl({ findingId, ra, dec }, size >= 200 ? 320 : 170);
   const box = useRef<HTMLSpanElement>(null);
   const [near, setNear] = useState(false);
   const [big, setBig] = useState(false);

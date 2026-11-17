@@ -36,19 +36,21 @@ def make_known_field_router(st: Any, prefix: str = "/api") -> APIRouter:
         epochs: str = Query(..., max_length=800),
         compact: int = Query(0, ge=0, le=1),
         match: int = Query(1, ge=0, le=1),
+        wait: float = Query(1.0, ge=0.0, le=60.0),
     ) -> Any:
         """Every Gaia DR3 star, SIMBAD object and JPL body of the square frame, with its place at each epoch (a Julian year such as
         2025.93, or an MJD above 3000: the pass date, which JPL bodies need). `answered` says which catalogue answered.
         `compact=1`: objects without a label carry only id, source, positions, mag. `match` (unless `match=0`): the sources of the
         deeper catalogues (Gaia to G 21, CatWISE2020, AllWISE, 2MASS) merged by position, for matching only, never drawn; their states
-        in `status.match`. Sent gzip-compressed."""
+        in `status.match`. `wait` (seconds, default 1): the answer comes within about that long with whatever is ready; a catalogue still
+        being asked is `pending` in `status` and goes on in the background, so the next ask brings more. Sent gzip-compressed."""
         try:
             eps = [float(x) for x in epochs.split(",") if x.strip()]
         except ValueError:
             raise HTTPException(400, "epochs: numbers separated by commas") from None
         if not eps or len(eps) > MAX_EPOCHS or not all(1990.0 <= e <= 2100.0 or 48000.0 <= e <= 90000.0 for e in eps):
             raise HTTPException(400, f"epochs: 1 to {MAX_EPOCHS} Julian years (1990-2100) or MJDs")
-        out = await known_field_of(st).objects(round(ra, 5), round(dec, 5), round(size_arcmin, 1), eps, match=bool(match))
+        out = await known_field_of(st).objects(round(ra, 5), round(dec, 5), round(size_arcmin, 1), eps, match=bool(match), wait_s=wait)
         if compact:  # objects without a label keep only what a thin ring needs
             keep = ("id", "source", "positions", "mag", "label")
             out = {**out, "objects": [o if o["label"] else {k: o[k] for k in keep} for o in out["objects"]]}
@@ -61,3 +63,14 @@ def make_known_field_router(st: Any, prefix: str = "/api") -> APIRouter:
         return Response(body, media_type="application/json", headers=headers)
 
     return r
+
+
+def prewarm(st: Any, ra: float, dec: float, size_arcmin: float, mjds: list[float]) -> None:
+    """Starts asking every catalogue of a frame in the background (a field build has just finished), so that the cache is warm before
+    anyone presses Known objects. The same rounding as the route, so the lab's ask finds what this kept."""
+    if not mjds:
+        return
+    kf = known_field_of(st)
+    eps = [round(m, 4) for m in mjds[:MAX_EPOCHS]]
+    task = asyncio.get_running_loop().create_task(kf.objects(round(ra, 5), round(dec, 5), round(size_arcmin, 1), eps, wait_s=0.0))
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())

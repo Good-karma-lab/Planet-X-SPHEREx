@@ -151,8 +151,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       const pk = `${pic.pass}:${pic.n}:${pic.rgb.length}:${pic.bg}`;
       let peaks = peaksRef.current.get(pk);
       if (!peaks) peaksRef.current.set(pk, (peaks = findPeaks(pic.rgb, pic.n, pic.bg, pic.sigma)));
-      const mk = `${pk}:${kn.objects.length}:${env.year.toFixed(4)}`;
-      if (matchRef.current?.key !== mk) matchRef.current = { key: mk, m: matchKnown(kn.objects, peaks, pic.n, pic.step, uv, env.year) };
+      const mk = `${pk}:${kn.objects.length}:${kn.deep.length}:${env.year.toFixed(4)}`;
+      if (matchRef.current?.key !== mk) matchRef.current = { key: mk, m: matchKnown(kn.objects, peaks, pic.n, pic.step, uv, env.year, kn.deep) };
       match = matchRef.current.m;
     }
     const ck = match ? `${match.shown.size}:${match.noMatch.length}` : '';

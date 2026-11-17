@@ -556,6 +556,9 @@ class Score:
             if status == "confirmed":  # a confirmed finding was a candidate on the way
                 self._event(who["user_id"], "candidate", finding_id, POINTS["candidate"], None, {})
         self.settle(finding_id=finding_id)
+        from service.accounts import agreement  # the "Does it really move?" answers wait for the same stage
+
+        agreement.Agreement(self).settle_moves(finding_id=finding_id)
         for r in c.execute("SELECT DISTINCT user_id FROM acc_score_events WHERE ref=?", (finding_id,)).fetchall():
             self.award(r["user_id"])
 
@@ -706,7 +709,7 @@ class Score:
         hide = self.db._conn().execute("SELECT hide_board FROM acc_users WHERE id=?", (user_id,)).fetchone()
         shown = [
             {"kind": e["kind"], "ref": e["ref"], "points": e["points"], "right": e["right"], "at": iso(e["at"]),
-             "target": e["detail"].get("target"), "answer": e["detail"].get("answer"), "stage": e["detail"].get("stage")}
+             "target": e["detail"].get("target"), "answer": e["detail"].get("answer"), "stage": e["detail"].get("stage"), "result": e["detail"].get("result")}
             for e in reversed(ev)
             if e["kind"] != "mark"
         ]  # fmt: skip

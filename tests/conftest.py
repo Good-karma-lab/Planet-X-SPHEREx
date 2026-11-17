@@ -5,6 +5,7 @@ import os
 import pytest
 
 os.environ.setdefault("SKY_WARM", "0")  # the warm runner is tested on its own; services built in tests do not warm
+os.environ.setdefault("SKY_KNOWN_PREWARM", "0")  # a finished field does not ask the catalogues from a test
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

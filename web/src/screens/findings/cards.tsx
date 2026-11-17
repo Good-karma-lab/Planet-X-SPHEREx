@@ -20,7 +20,14 @@ export interface CardFind {
   promise: number;
   viewers: number;
   credit: { found_by: string; machine: boolean; first_marked_by: string | null; checked_by: string[]; looks: Record<string, number> };
-  clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string; still?: string; blink?: string[] | null; note?: string } | null;
+  clip: {
+    url: string;
+    state: 'ready' | 'waiting' | 'building' | 'none';
+    reason?: string;
+    still?: string;
+    blink?: string[] | null;
+    note?: string;
+  } | null;
   name: string | null;
   /** is the object visible in its own picture (S/N in the ring of 3 or more)? null: the picture is not made yet */
   visible?: boolean | null;
@@ -41,7 +48,15 @@ export const STAGE_LABEL: Record<string, string> = {
   candidate: 'Candidate',
   confirmed: 'Confirmed',
 };
-const STAGE_BADGE: Record<string, string> = { new: 'orange', in_review: 'blue', submitted: 'purple', known: 'green', artefact: '', candidate: 'yellow', confirmed: 'green' };
+const STAGE_BADGE: Record<string, string> = {
+  new: 'orange',
+  in_review: 'blue',
+  submitted: 'purple',
+  known: 'green',
+  artefact: '',
+  candidate: 'yellow',
+  confirmed: 'green',
+};
 export const KIND_ONE: Record<string, string> = {
   mover: 'Mover',
   browndwarf: 'Brown dwarf',
@@ -79,8 +94,22 @@ export function cardTitle(f: CardFind): string {
 export function checkHref(f: CardFind): string {
   const fp = f.field;
   const base = fp
-    ? { ra: fp.ra.toFixed(5), dec: fp.dec.toFixed(5), fov: String(fp.fov), find: f.id, find_ra: f.ra.toFixed(5), find_dec: f.dec.toFixed(5) }
-    : { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id, find_ra: f.ra.toFixed(5), find_dec: f.dec.toFixed(5) };
+    ? {
+        ra: fp.ra.toFixed(5),
+        dec: fp.dec.toFixed(5),
+        fov: String(fp.fov),
+        find: f.id,
+        find_ra: f.ra.toFixed(5),
+        find_dec: f.dec.toFixed(5),
+      }
+    : {
+        ra: f.ra.toFixed(5),
+        dec: f.dec.toFixed(5),
+        fov: f.kind === 'film' ? '60' : '20',
+        find: f.id,
+        find_ra: f.ra.toFixed(5),
+        find_dec: f.dec.toFixed(5),
+      };
   return formatHash({ screen: 'lab', params: { ...base, task: 'finding', finding: f.id } });
 }
 
@@ -126,7 +155,13 @@ export function submittedCard(s: Submitted): CardFind {
     stage,
     promise: 0,
     viewers: (s.credit ?? []).filter((c) => c.role === 'checked').length,
-    credit: { found_by: names[0] ?? 'a person', machine: false, first_marked_by: names[0] ?? null, checked_by: (s.credit ?? []).filter((c) => c.role === 'checked').map((c) => c.name), looks: {} },
+    credit: {
+      found_by: names[0] ?? 'a person',
+      machine: false,
+      first_marked_by: names[0] ?? null,
+      checked_by: (s.credit ?? []).filter((c) => c.role === 'checked').map((c) => c.name),
+      looks: {},
+    },
     clip: has ? { url: `/api/clips/place.webp?ra=${s.ra!.toFixed(4)}&dec=${s.dec!.toFixed(4)}&size=320&ring=1`, state: 'waiting' } : null,
     name: s.title ?? 'Submitted finding',
     field: null,
@@ -164,7 +199,9 @@ export function Clip({ f }: { f: CardFind }) {
   const box = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const url = f.clip?.url ?? null;
-  const [state, setState] = useState<ClipState>(() => (url && known.get(url) === 'ready' ? 'ready' : !url || known.get(url) === 'none' ? 'none' : 'idle'));
+  const [state, setState] = useState<ClipState>(() =>
+    url && known.get(url) === 'ready' ? 'ready' : !url || known.get(url) === 'none' ? 'none' : 'idle',
+  );
   useEffect(() => {
     const el = box.current;
     if (!el || typeof IntersectionObserver === 'undefined') return setNear(true);
@@ -193,8 +230,7 @@ export function Clip({ f }: { f: CardFind }) {
           const b = (await r.json().catch(() => ({}))) as { state?: string; reason?: string };
           if (b.state === 'none') reason = b.reason ?? '';
           else code = 0; // not the clip's own answer (the service is restarting): asked again
-        }
-        else await r.arrayBuffer(); // the clip is now in the browser's cache: the picture below reads it from there
+        } else await r.arrayBuffer(); // the clip is now in the browser's cache: the picture below reads it from there
       } catch {
         code = 0;
       } finally {
@@ -222,8 +258,24 @@ export function Clip({ f }: { f: CardFind }) {
   const why = (url && reasons.get(url)) || f.clip?.reason || 'no SPHEREx field covers this place yet';
   return (
     <div class="fclip" ref={box}>
-      {state === 'ready' && near && url && <img src={url} alt={`Time-lapse of ${cardTitle(f)}: one frame per SPHEREx pass, the object ringed`} width={320} height={320} decoding="async" />}
-      {state !== 'ready' && near && f.clip?.still && <img class="fstill" src={f.clip.still} alt="" loading="lazy" onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />}
+      {state === 'ready' && near && url && (
+        <img
+          src={url}
+          alt={`Time-lapse of ${cardTitle(f)}: one frame per SPHEREx pass, the object ringed`}
+          width={320}
+          height={320}
+          decoding="async"
+        />
+      )}
+      {state !== 'ready' && near && f.clip?.still && (
+        <img
+          class="fstill"
+          src={f.clip.still}
+          alt=""
+          loading="lazy"
+          onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
+        />
+      )}
       {state === 'asking' && <span class="mono-s">rendering the time-lapse…</span>}
       {state === 'building' && <span class="mono-s">building the field of this time-lapse…</span>}
       {state === 'none' && <span class="mono-s">no time-lapse: {why}</span>}
@@ -231,13 +283,35 @@ export function Clip({ f }: { f: CardFind }) {
   );
 }
 
-export function FindCard({ f, onOpen, current, mine = false }: { f: CardFind; onOpen: (id: string) => void; current: boolean; mine?: boolean }) {
+export function FindCard({
+  f,
+  onOpen,
+  current,
+  mine = false,
+  people = '',
+}: {
+  f: CardFind;
+  onOpen: (id: string) => void;
+  current: boolean;
+  mine?: boolean;
+  /** what people said in the classification tasks, one line (empty: nobody classified it) */
+  people?: string;
+}) {
   const looks = f.viewers;
-  const by = f.credit.first_marked_by ? `Marked first by ${f.credit.first_marked_by}` : `Found by ${f.credit.found_by.replace(/^SPHEREx Space, /, '')}`;
-  const checked = f.credit.checked_by.length ? ` · checked by ${f.credit.checked_by.slice(0, 2).join(', ')}${f.credit.checked_by.length > 2 ? ` +${f.credit.checked_by.length - 2}` : ''}` : '';
+  const by = f.credit.first_marked_by
+    ? `Marked first by ${f.credit.first_marked_by}`
+    : `Found by ${f.credit.found_by.replace(/^SPHEREx Space, /, '')}`;
+  const checked = f.credit.checked_by.length
+    ? ` · checked by ${f.credit.checked_by.slice(0, 2).join(', ')}${f.credit.checked_by.length > 2 ? ` +${f.credit.checked_by.length - 2}` : ''}`
+    : '';
   return (
     <li class={`fcard glass${current ? ' on' : ''}`}>
-      <button class="fcard-pic" onClick={() => onOpen(f.id)} title="Open the report of this finding" aria-label={`Open the report: ${cardTitle(f)}`}>
+      <button
+        class="fcard-pic"
+        onClick={() => onOpen(f.id)}
+        title="Open the report of this finding"
+        aria-label={`Open the report: ${cardTitle(f)}`}
+      >
         <Clip f={f} />
         <span class={`badge ${STAGE_BADGE[f.stage] ?? ''} fcard-stage`}>{STAGE_LABEL[f.stage] ?? f.stage}</span>
         {f.kind !== 'submitted' && (
@@ -247,7 +321,11 @@ export function FindCard({ f, onOpen, current, mine = false }: { f: CardFind; on
         )}
       </button>
       <div class="fcard-body">
-        <a class="fcard-title" href={f.kind === 'submitted' ? checkHref(f) : `#/findings/${encodeURIComponent(f.id)}`} title="Open the page of this finding">
+        <a
+          class="fcard-title"
+          href={f.kind === 'submitted' ? checkHref(f) : `#/findings/${encodeURIComponent(f.id)}`}
+          title="Open the page of this finding"
+        >
           {cardTitle(f)}
         </a>
         <span class="mono-s fcard-sub">
@@ -263,15 +341,25 @@ export function FindCard({ f, onOpen, current, mine = false }: { f: CardFind; on
           </span>
           {mine && <span class="fcard-mine">viewed by me</span>}
           {f.visible_sn != null && (
-            <span class={f.visible ? '' : 'wait'} title="How far the brightest point inside the ring stands above the noise of this picture">
+            <span
+              class={f.visible ? '' : 'wait'}
+              title="How far the brightest point inside the ring stands above the noise of this picture"
+            >
               S/N {f.visible_sn.toFixed(1)} in the ring
             </span>
           )}
         </span>
-        {f.kind === 'peak' && f.clip?.state === 'ready' && !f.clip.blink && <span class="mono-s fcard-sub">the sum along the orbit is not kept here: the passes alone are shown</span>}
+        {f.kind === 'peak' && f.clip?.state === 'ready' && !f.clip.blink && (
+          <span class="mono-s fcard-sub">the sum along the orbit is not kept here: the passes alone are shown</span>
+        )}
         {f.note && (
           <span class="fcard-note" title="A machine note from the review of the clips. It sets no status: judge it in the lab.">
             Machine note: {f.note}
+          </span>
+        )}
+        {people && (
+          <span class="mono-s fcard-people" title="What people answered about this find in the classification tasks">
+            {people}
           </span>
         )}
         <span class="mono-s fcard-credit" title={`${f.credit.found_by}${checked}`}>

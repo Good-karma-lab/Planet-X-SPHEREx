@@ -126,3 +126,4 @@
 .fcard-mine { font: 600 10.5px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--good); }
 a.fcard-title { color: var(--ink); text-decoration: none; display: block; }
 a.fcard-title:hover { color: var(--accent); }
+.fcard-people { color: var(--muted); }
