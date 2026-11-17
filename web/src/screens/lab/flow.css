@@ -109,11 +109,11 @@
 .candlist .cr-details .sbar .tray-head { display: none; }
 
 /* a tree of plain questions: the answers one under another, each with its example pictures; the views keep one height per task */
-.taskpanel .tp-tree { display: flex; flex-direction: column; gap: 5px; }
+.taskpanel .tp-tree { display: flex; flex-direction: column; gap: 5px; min-height: 218px; } /* three answers with example pictures and Back: every step is as tall */
 .taskpanel .tp-ans { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; text-align: left; white-space: normal; }
 .taskpanel .tp-ans span { flex: 1; min-width: 0; }
 .taskpanel .tp-ex { width: 44px; height: 44px; flex: none; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.16); object-fit: cover; background: #000; }
-.taskpanel .tp-back { align-self: flex-start; }
+.taskpanel .tp-back { align-self: flex-start; margin-top: auto; }
 .tv.tv-fixed { min-height: 214px; }
 .tv .tv-trio { display: flex; flex-direction: column; gap: 1px; }
 .tv .tv-cap { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--ink); }
