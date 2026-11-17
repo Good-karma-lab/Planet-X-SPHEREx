@@ -158,7 +158,7 @@ def test_public_server_needs_its_address_and_a_secure_cookie(site: tuple[FastAPI
 def test_marks_are_kept_per_user_and_seen_from_a_second_browser(site: tuple[FastAPI, _State, _Mail]) -> None:
     app, _, mail = site
     a = _sign_in(app, mail)
-    assert a.post("/api/me/marks", json=MARK).json() == {**MARK, "mjd": None}
+    assert a.post("/api/me/marks", json=MARK).json() == {**MARK, "mjd": None, "kind": None, "look": None, "exposures": []}
     dated = a.post("/api/me/marks", json={**MARK, "mjd": 61118.31214}).json()  # the lab's date of the frame is kept and given back
     assert dated["mjd"] == 61118.31214 and a.get("/api/me/marks").json()["marks"][0]["mjd"] == 61118.31214
     assert a.post("/api/me/marks", json={**MARK, "mjd": 12.0}).status_code == 422
@@ -211,34 +211,55 @@ def _fake_grid(st: _State) -> None:
     db = accounts.get(st).db._conn()
     db.executescript(
         "CREATE TABLE grid_cells (id TEXT PRIMARY KEY, state TEXT, finds INTEGER, field_key TEXT, searched_at TEXT);"
-        "CREATE TABLE grid_views (cell_id TEXT, viewer TEXT, result TEXT, at REAL);"
+        "CREATE TABLE grid_views (cell_id TEXT, viewer TEXT, result TEXT, at REAL, quarter TEXT NOT NULL DEFAULT '');"
         "INSERT INTO grid_cells VALUES ('294-0148','searched',0,'k1','2026-11-16'),('294-0149','searched',3,'k2','2026-11-16'),"
         "('294-0150','searched',0,'k3','2026-11-16'),('294-0151','queued',0,NULL,NULL);"
-        "INSERT INTO grid_views VALUES ('294-0149','anon:x','nothing',1.0);"
+        # 294-0149 was looked through whole by a signed-in person before the quarters; a guest's row never counts
+        "INSERT INTO grid_views VALUES ('294-0149','user:someone','nothing',1.0,''),('294-0150','anon:x','nothing',1.0,'NW');"
     )
 
 
 def test_cell_tasks_walk_the_least_viewed_squares(site: tuple[FastAPI, _State, _Mail]) -> None:
+    """People look through a square a quarter (10′) at a time: the least-looked square, then its least-looked quarter this user
+    has not taken, ties NW, NE, SW, SE."""
     app, st, mail = site
     guest = _client(app)
     assert guest.get("/api/tasks/next", params={"kind": "cell"}).status_code == 503  # no grid yet
     _fake_grid(st)
     t = guest.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
-    assert t["kind"] == "cell" and t["cell_id"] == "294-0148" and t["field_key"] == "k1"
+    assert (t["kind"], t["cell_id"], t["quarter"], t["fov"], t["field_key"]) == ("cell", "294-0148", "NE", 10.0, "k1")
+    from service import grid
+
+    ne = grid.quarter(grid.by_id("294-0148"), "NE")
+    assert (t["ra"], t["dec"]) == (pytest.approx(ne.ra), pytest.approx(ne.dec))  # the quarter's centre, not the square's
     assert guest.post(f"/api/me/tasks/{t['id']}/done", json={"result": "nothing", "mark_ids": []}).status_code == 401
     c = _sign_in(app, mail)
     t1 = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
-    assert t1["cell_id"] == "294-0148"
+    assert (t1["cell_id"], t1["quarter"]) == ("294-0148", "NE")
     assert c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]["id"] == t1["id"]  # the open task comes back
     assert c.post(f"/api/me/tasks/{t1['id']}/done", json={"result": "moves", "mark_ids": []}).status_code == 422
     done = c.post(f"/api/me/tasks/{t1['id']}/done", json={"result": "marks", "mark_ids": ["m1"]}).json()["task"]
     assert done["state"] == "done" and done["result"] == "marks" and done["mark_ids"] == ["m1"] and done["done_at"]
-    t2 = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
-    assert t2["cell_id"] == "294-0150"  # c2 has a viewer already, so it comes last
-    c.post(f"/api/me/tasks/{t2['id']}/done", json={"result": "nothing", "mark_ids": []})
+    walked = [(t1["cell_id"], t1["quarter"])]
+    for _ in range(4):
+        t2 = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+        walked.append((t2["cell_id"], t2["quarter"]))
+        c.post(f"/api/me/tasks/{t2['id']}/done", json={"result": "nothing", "mark_ids": []})
+    # the rest of the same square first, in the lab's order; then 294-0150 (a guest's row does not count); 294-0149 comes last
+    assert walked == [("294-0148", q) for q in ("NE", "NW", "SE", "SW")] + [("294-0150", "NE")]
+    # in the same square: a quarter somebody signed in has looked through comes after the ones nobody has, and a quarter this
+    # user looked through (the grid's view, without a task) is not offered again
+    db = accounts.get(st).db._conn()
+    uid = c.get("/api/me").json()["user"]["id"]
+    db.execute(
+        "INSERT INTO grid_views VALUES ('294-0150','user:x','nothing',2.0,'NW'), ('294-0150',?,'nothing',2.0,'SE')", (f"user:{uid}",)
+    )
+    assert c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]["quarter"] == "SW"
     t3 = c.get("/api/tasks/next", params={"kind": "cell", "cell_id": "294-0151"}).json()["task"]  # "Take this square" on the globe
-    assert t3["cell_id"] == "294-0151" and t3["field_key"] is None
-    assert [x["cell_id"] for x in c.get("/api/me/tasks").json()["tasks"]] == ["294-0151", "294-0150", "294-0148"]
+    assert (t3["cell_id"], t3["quarter"], t3["field_key"]) == ("294-0151", "NE", None)
+    t4 = c.get("/api/tasks/next", params={"kind": "cell", "cell_id": "294-0151", "quarter": "SE"}).json()["task"]
+    assert (t4["cell_id"], t4["quarter"]) == ("294-0151", "SE") and t4["id"] != t3["id"]
+    assert c.get("/api/tasks/next", params={"kind": "cell", "quarter": "XX"}).status_code == 422
     bob = _sign_in(app, mail, "bob@example.org")
     assert bob.post(f"/api/me/tasks/{t3['id']}/done", json={"result": "nothing", "mark_ids": []}).status_code == 404
     # a task taken as a guest is closed after signing in
@@ -365,13 +386,45 @@ def test_download_and_delete_my_data(site: tuple[FastAPI, _State, _Mail]) -> Non
     r = c.get("/api/me/export")
     assert "attachment" in r.headers["content-disposition"]
     data = r.json()
-    assert data["user"]["email"] == "ann@example.org" and data["marks"] == [{**MARK, "mjd": None}] and len(data["history"]) == 1
+    assert (
+        data["user"]["email"] == "ann@example.org"
+        and data["marks"] == [{**MARK, "mjd": None, "kind": None, "look": None, "exposures": []}]
+        and len(data["history"]) == 1
+    )
     other = _sign_in(app, mail)
     assert _client(app).delete("/api/me").status_code == 401
+    # rows other results stand on are kept with an id nothing links to her; her own rows go (spec: "everything linked to you")
+    acc = accounts.get(st)
+    uid = c.get("/api/me").json()["user"]["id"]
+    db = acc.db._conn()
+    db.executescript(
+        "CREATE TABLE IF NOT EXISTS grid_views (cell_id TEXT, viewer TEXT, result TEXT, at REAL, quarter TEXT NOT NULL DEFAULT '',"
+        " PRIMARY KEY (cell_id, viewer, quarter));"
+        "CREATE TABLE IF NOT EXISTS finding_views (find_id TEXT NOT NULL, at REAL NOT NULL, result TEXT, user_id TEXT, user_name TEXT);"
+    )
+    db.execute(
+        "INSERT INTO grid_views VALUES ('294-0148',?,'nothing',1.0,'NE'), ('294-0148',?,'nothing',1.0,'NW')", (f"user:{uid}", f"user:{uid}")
+    )
+    db.execute("INSERT INTO finding_views VALUES ('film:1', 1.0, 'moves', ?, 'ann')", (uid,))
+    from service.accounts import agreement
+
+    agreement.get(st, acc.db)  # its tables
+    db.execute("INSERT INTO acc_task_answers(user_id,kind,finding_id,answer,at) VALUES(?, 'red', 'red:1', 'galaxy', 1.0)", (uid,))
+    db.execute("INSERT INTO acc_score_events(user_id,kind,ref,points,right,at) VALUES(?, 'check', 'x', 10, 1, 1.0)", (uid,))
+    db.execute("INSERT INTO acc_answers(user_id,finding_id,answer,at) VALUES(?, 'f1', 'moves', 1.0)", (uid,))
     assert c.delete("/api/me").status_code == 204
     assert c.get("/api/me").json()["user"] is None and other.get("/api/me").json()["user"] is None  # every session ended
     dump = "\n".join(sqlite3.connect(accounts.get(st).db.path).iterdump())
     assert "ann@example.org" not in dump and MARK["id"] not in dump
+    assert uid not in dump and "'ann'" not in dump  # nothing keyed by her id, and her name is gone from the looks
+    viewers = {r[0] for r in db.execute("SELECT viewer FROM grid_views WHERE cell_id='294-0148'")}
+    assert len(viewers) == 1 and next(iter(viewers)).startswith("user:gone-")  # still one viewer of the square: the counts stay
+    assert db.execute("SELECT COUNT(*) FROM acc_task_answers WHERE finding_id='red:1'").fetchone()[0] == 1
+    assert db.execute("SELECT COUNT(*) FROM finding_views WHERE find_id='film:1' AND user_name IS NULL").fetchone()[0] == 1
+    assert (
+        db.execute("SELECT COUNT(*) FROM acc_score_events").fetchone()[0] == 0
+        and db.execute("SELECT COUNT(*) FROM acc_answers").fetchone()[0] == 0
+    )
     again = _sign_in(app, mail)  # the address can start anew, empty
     assert again.get("/api/me/marks").json() == {"marks": []}
 

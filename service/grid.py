@@ -28,6 +28,9 @@ CELL_DEG = 1.0 / 3.0  # 20′: the search field
 N_BANDS = 540  # 180° / 20′
 FIELD_FOV_ARCMIN = 20.0
 STATES = ("new", "queued", "searching", "searched", "failed")
+# people look through a square a quarter at a time (10′ × 10′): the halves of the square in RA and in Dec
+QUARTERS = ("NE", "NW", "SE", "SW")  # the picture's reading order: north up, east left
+QUARTER_FOV_ARCMIN = 10.0
 
 # Order of the background sweep. The Planet Nine band: Brown & Batygin (2021, AJ 162, 219) put the most likely sky position of
 # Planet Nine in a band along its predicted orbit plane, densest between RA ~1h and ~5h near the ecliptic (Cetus, Taurus, Eridanus);
@@ -94,6 +97,16 @@ class Cell:
 
 def _r(x: float) -> float:
     return round(x % 360.0, 6)
+
+
+def quarter(ce: Cell, q: str) -> Cell:
+    """One quarter of a square: its north or south half in Dec and east or west half in RA (east is larger RA)."""
+    if q not in QUARTERS:
+        raise ValueError(f"not a quarter: {q!r} (one of {', '.join(QUARTERS)})")
+    dm, rm = 0.5 * (ce.dec0 + ce.dec1), 0.5 * (ce.ra0 + ce.ra1)
+    d0, d1 = (dm, ce.dec1) if q[0] == "N" else (ce.dec0, dm)
+    r0, r1 = (rm, ce.ra1) if q[1] == "E" else (ce.ra0, rm)
+    return Cell(f"{ce.id}:{q}", ce.band, ce.col, r0, r1, d0, d1)
 
 
 def cell(band: int, col: int) -> Cell:
@@ -225,7 +238,8 @@ CREATE TABLE IF NOT EXISTS grid_views (
   viewer TEXT NOT NULL,
   result TEXT,
   at REAL NOT NULL,
-  PRIMARY KEY (cell_id, viewer)
+  quarter TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (cell_id, viewer, quarter)
 );
 CREATE TABLE IF NOT EXISTS grid_sweep_log (
   at REAL NOT NULL,
@@ -248,6 +262,15 @@ class GridDB:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         with self._conn() as c:
+            cols = [r[1] for r in c.execute("PRAGMA table_info(grid_views)")]
+            if cols and "quarter" not in cols:  # the views before quarters: one row per person and whole square (quarter '')
+                c.executescript(
+                    "ALTER TABLE grid_views RENAME TO grid_views_v1;"
+                    + SCHEMA
+                    + "INSERT OR IGNORE INTO grid_views(cell_id,viewer,result,at,quarter)"
+                    " SELECT cell_id,viewer,result,at,'' FROM grid_views_v1;"
+                    "DROP TABLE grid_views_v1;"
+                )
             c.executescript(SCHEMA)
 
     def _conn(self) -> sqlite3.Connection:
@@ -273,11 +296,32 @@ class GridDB:
         return out
 
     def viewers(self, ids: list[str]) -> dict[str, int]:
+        """How many signed-in people looked at each square (at any of its quarters)."""
         out: dict[str, int] = {}
         for i in range(0, len(ids), 500):
             part = ids[i : i + 500]
-            q = f"SELECT cell_id, COUNT(*) n FROM grid_views WHERE cell_id IN ({','.join('?' * len(part))}) GROUP BY cell_id"
+            q = (
+                f"SELECT cell_id, COUNT(DISTINCT viewer) n FROM grid_views WHERE viewer LIKE 'user:%' AND cell_id IN"
+                f" ({','.join('?' * len(part))}) GROUP BY cell_id"
+            )
             out.update({r["cell_id"]: int(r["n"]) for r in self._conn().execute(q, part)})
+        return out
+
+    def quarters_viewed(self, ids: list[str]) -> dict[str, dict[str, int]]:
+        """For each square, how many signed-in people looked through each quarter ({NE: n, ...}; a whole-square view of before the
+        quarters counts for all four)."""
+        out: dict[str, dict[str, int]] = {}
+        for i in range(0, len(ids), 500):
+            part = ids[i : i + 500]
+            q = (
+                f"SELECT cell_id, quarter, COUNT(DISTINCT viewer) n FROM grid_views WHERE viewer LIKE 'user:%' AND cell_id IN"
+                f" ({','.join('?' * len(part))}) GROUP BY cell_id, quarter"
+            )
+            for r in self._conn().execute(q, part):
+                d = out.setdefault(r["cell_id"], dict.fromkeys(QUARTERS, 0))
+                for qq in QUARTERS if r["quarter"] == "" else (r["quarter"],):
+                    if qq in d:
+                        d[qq] += int(r["n"])
         return out
 
     def put(self, cid: str, state: str, **kw: Any) -> None:
@@ -304,19 +348,32 @@ class GridDB:
             (cid, state, *row.values(), time.time()),
         )
 
-    def view(self, cid: str, viewer: str, result: str | None) -> int:
+    def quarters_of(self, cid: str, viewer: str) -> set[str]:
+        """The quarters of a square this viewer has looked through (all four for a whole-square view of before the quarters)."""
+        got: set[str] = set()
+        for r in self._conn().execute("SELECT quarter FROM grid_views WHERE cell_id=? AND viewer=?", (cid, viewer)):
+            got |= set(QUARTERS) if r[0] == "" else {r[0]}
+        return got
+
+    def view(self, cid: str, viewer: str, result: str | None, quarter: str) -> int:
+        """A signed-in person has looked through one quarter of a square (confirmed by them); returns the square's viewers."""
+        if quarter not in QUARTERS:
+            raise ValueError(quarter)
         self._conn().execute(
-            "INSERT INTO grid_views(cell_id,viewer,result,at) VALUES(?,?,?,?) ON CONFLICT(cell_id,viewer) DO UPDATE SET"
-            " result=COALESCE(excluded.result, grid_views.result), at=excluded.at",
-            (cid, viewer, result, time.time()),
+            "INSERT INTO grid_views(cell_id,viewer,result,at,quarter) VALUES(?,?,?,?,?) ON CONFLICT(cell_id,viewer,quarter) DO UPDATE"
+            " SET result=COALESCE(excluded.result, grid_views.result), at=excluded.at",
+            (cid, viewer, result, time.time(), quarter),
         )
         return self.viewers([cid]).get(cid, 0)
 
     def coverage(self, corners: bool = False) -> list[dict[str, Any]]:
-        """Every square that is not `new`: a row in grid_cells or at least one viewer."""
+        """Every square that is not `new`: a row in grid_cells or at least one signed-in viewer; with the number of its quarters
+        people have looked through (0-4)."""
         c = self._conn()
         rows = {r["id"]: dict(r) for r in c.execute("SELECT id, state, finds FROM grid_cells")}
-        views = {r["cell_id"]: int(r["n"]) for r in c.execute("SELECT cell_id, COUNT(*) n FROM grid_views GROUP BY cell_id")}
+        viewed = [r[0] for r in c.execute("SELECT DISTINCT cell_id FROM grid_views WHERE viewer LIKE 'user:%'")]
+        views = self.viewers(viewed)
+        quarters = self.quarters_viewed(viewed)
         out = []
         for cid in sorted(set(rows) | set(views)):
             r = rows.get(cid, {"state": "new", "finds": 0})
@@ -331,6 +388,7 @@ class GridDB:
                 "state": r["state"],
                 "finds": int(r["finds"]),
                 "viewers": views.get(cid, 0),
+                "quarters": sum(1 for n in quarters.get(cid, {}).values() if n > 0),
             }
             if corners:
                 item["corners"] = ce.corners()
@@ -341,7 +399,9 @@ class GridDB:
         c = self._conn()
         searched = c.execute("SELECT COUNT(*) FROM grid_cells WHERE state='searched'").fetchone()[0]
         finds = c.execute("SELECT COUNT(*) FROM grid_cells WHERE finds>0").fetchone()[0]
-        viewed = c.execute("SELECT COUNT(DISTINCT cell_id) FROM grid_views").fetchone()[0]
+        # viewed by people: all four quarters looked through by signed-in people
+        ids = [r[0] for r in c.execute("SELECT DISTINCT cell_id FROM grid_views WHERE viewer LIKE 'user:%'")]
+        viewed = sum(1 for d in self.quarters_viewed(ids).values() if all(n > 0 for n in d.values()))
         by_state = {r[0]: int(r[1]) for r in c.execute("SELECT state, COUNT(*) FROM grid_cells GROUP BY state")}
         return {
             "searched": int(searched),

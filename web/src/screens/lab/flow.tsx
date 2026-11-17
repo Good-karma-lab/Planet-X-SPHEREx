@@ -120,8 +120,6 @@ export interface LabFlow {
   marksHere: Mark[];
   ruler: RulerPoint[];
   setTool(t: FlowTool): void;
-  /** a mark can be put on what is on show (one picture, its grid known): the Mark button of touch windows is on only then */
-  markable: boolean;
   /** the two passes to blink between (their indexes), null when every pass plays */
   blink: [number, number] | null;
   /** the Task panel, null when the lab was opened without a task */
@@ -849,7 +847,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     marksHere,
     ruler,
     setTool,
-    markable: a.single && !!g,
     blink,
     taskPanel,
     focus: !!task && focusKind(task.kind) && !others,

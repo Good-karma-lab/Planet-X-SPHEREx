@@ -26,7 +26,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from service import accounts
-from service.accounts import agreement
+from service.accounts import agreement, people
 from service.accounts.score import STAGE_OF_STATUS
 
 REF_ID = re.compile(r"^[A-Za-z0-9_\-:.]{1,80}$")
@@ -59,7 +59,8 @@ def searched_cells(acc: accounts.Accounts) -> list[dict[str, Any]] | None:
         rows = (
             acc.db._conn()
             .execute(
-                "SELECT c.id, c.field_key, c.finds, (SELECT COUNT(*) FROM grid_views v WHERE v.cell_id=c.id) AS viewers"
+                "SELECT c.id, c.field_key, c.finds, (SELECT COUNT(DISTINCT v.viewer) FROM grid_views v WHERE v.cell_id=c.id"
+                " AND v.viewer LIKE 'user:%') AS viewers"
                 " FROM grid_cells c WHERE c.state='searched' ORDER BY viewers, c.finds DESC, c.searched_at, c.id LIMIT 2000"
             )
             .fetchall()
@@ -67,6 +68,80 @@ def searched_cells(acc: accounts.Accounts) -> list[dict[str, Any]] | None:
     except sqlite3.OperationalError:
         return None
     return [{"cell_id": r["id"], "field_key": r["field_key"]} for r in rows]
+
+
+QUARTERS = ("NE", "NW", "SE", "SW")  # the grid's and the lab's order (north up, east left): ties go NE, NW, SE, SW
+QUARTER_FOV = 10.0  # arcmin: people look through a square a quarter at a time
+
+
+def quarters_viewed(acc: accounts.Accounts, cell_ids: list[str]) -> dict[str, dict[str, int]]:
+    """{square: {quarter: signed-in people who looked through it}} from the grid's table; a whole-square view of before the
+    quarters counts for all four. Empty while the grid has no table."""
+    out: dict[str, dict[str, int]] = {}
+    for i in range(0, len(cell_ids), 500):
+        part = cell_ids[i : i + 500]
+        try:
+            rows = (
+                acc.db._conn()
+                .execute(
+                    f"SELECT cell_id, COALESCE(quarter,'') q, COUNT(DISTINCT viewer) n FROM grid_views WHERE viewer LIKE 'user:%'"
+                    f" AND cell_id IN ({','.join('?' * len(part))}) GROUP BY cell_id, q",
+                    part,
+                )
+                .fetchall()
+            )
+        except sqlite3.OperationalError:  # the grid's table, before it had quarters, or not at all
+            try:
+                rows = (
+                    acc.db._conn()
+                    .execute(
+                        f"SELECT cell_id, '' q, COUNT(DISTINCT viewer) n FROM grid_views WHERE viewer LIKE 'user:%'"
+                        f" AND cell_id IN ({','.join('?' * len(part))}) GROUP BY cell_id",
+                        part,
+                    )
+                    .fetchall()
+                )
+            except sqlite3.OperationalError:
+                return {}
+        for r in rows:
+            d = out.setdefault(r["cell_id"], dict.fromkeys(QUARTERS, 0))
+            for q in QUARTERS if r["q"] == "" else (r["q"],):
+                if q in d:
+                    d[q] += int(r["n"])
+    return out
+
+
+def quarter_place(cell_id: str, q: str) -> dict[str, Any]:
+    """The centre of a quarter of a square (the grid's own geometry), or the square's centre without the grid module."""
+    g = _grid()
+    if g is None or not hasattr(g, "quarter"):
+        return cell_place(cell_id) or {"ra": None, "dec": None}
+    qc = g.quarter(g.by_id(cell_id), q)
+    return {"ra": float(qc.ra), "dec": float(qc.dec)}
+
+
+def pick_quarter(viewed: dict[str, int], taken: set[str]) -> str | None:
+    """The least-looked quarter this user has not taken; ties go NE, NW, SE, SW."""
+    left = [q for q in QUARTERS if q not in taken]
+    return min(left, key=lambda q: (viewed.get(q, 0), QUARTERS.index(q))) if left else None
+
+
+def quarters_looked(acc: accounts.Accounts, user_id: str) -> dict[str, set[str]]:
+    """{square: quarters this user has a task for, or has looked through (the grid's views; a whole-square view of before the
+    quarters counts for all four)}."""
+    out = acc.db.quarters_taken(user_id)
+    try:
+        rows = (
+            acc.db._conn().execute("SELECT cell_id, COALESCE(quarter,'') q FROM grid_views WHERE viewer=?", (f"user:{user_id}",)).fetchall()
+        )
+    except sqlite3.OperationalError:
+        try:
+            rows = acc.db._conn().execute("SELECT cell_id, '' q FROM grid_views WHERE viewer=?", (f"user:{user_id}",)).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+    for r in rows:
+        out.setdefault(r["cell_id"], set()).update(set(QUARTERS) if r["q"] == "" else {r["q"]})
+    return out
 
 
 def cell_field_key(acc: accounts.Accounts, cell_id: str) -> str | None:
@@ -99,30 +174,101 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
     ]
 
 
+def find_rows(st: Any) -> list[dict[str, Any]]:
+    """The machine findings in the Findings page's order (a test may put its own list in `st.task_findings`); 503 without them."""
+    source = getattr(st, "task_findings", None)
+    rows = source() if callable(source) else lead_findings(st)
+    if rows is None:
+        raise HTTPException(503, "the findings database is not loaded")
+    return list(rows)
+
+
+def find_row(st: Any, finding_id: str) -> dict[str, Any] | None:
+    """One machine find as a task needs it, with its data (the visits of a track), or None."""
+    row = next((r for r in find_rows(st) if r["finding_id"] == finding_id), None)
+    if row is None or "data" in row:
+        return row
+    f = getattr(st, "findings", None)
+    if f is not None:
+        from service.findings import find_row as one
+
+        full = one(f.db, finding_id)
+        if full is not None:
+            row = {**row, "data": full.get("data") or {}}
+    return row
+
+
+#: the question and the answers of the task kinds that are not a series (spec §5e "More ways people help")
+ASK = {
+    "find_again": ("Tap it if you see it.", (("seen", "Done"), ("not_seen", "I don't see it"), (people.CANT_TELL, "Not sure"))),
+    "recentre": (
+        "Tap the centre of the object in each picture where the ring sits off it.",
+        (("done", "Done"), (people.CANT_TELL, "Not sure")),
+    ),
+    "bad_picture": ("Does this picture look broken (a streak, cut off, glare)?",
+                    (("broken", "Yes, broken"), ("fine", "No, it looks fine"), (people.CANT_TELL, "Not sure"))),
+    "second_look": ("Is this a real object?", people.SECOND_LOOK_ANSWERS),
+}  # fmt: skip
+
+
 def make_tasks_router(st: Any) -> APIRouter:
     router = APIRouter()
 
     def findings() -> list[dict[str, Any]]:
-        source = getattr(st, "task_findings", None)  # a test may put its own list here
-        rows = source() if callable(source) else lead_findings(st)
-        if rows is None:
-            raise HTTPException(503, "the findings database is not loaded")
-        return list(rows)
+        return find_rows(st)
 
-    def next_cell(acc: accounts.Accounts, user_id: str | None, cell_id: str | None) -> dict[str, Any] | None:
+    def next_cell(acc: accounts.Accounts, user_id: str | None, cell_id: str | None, quarter: str | None = None) -> dict[str, Any] | None:
+        """A quarter (10′) of a square. The next quarter of the square this user is looking through, while it has one they have
+        not looked at; then the least-looked searched square and its least-looked quarter (ties NE, NW, SE, SW). `cell_id` asks
+        for one square ("Take this square"), `quarter` for one of its quarters."""
+        taken = quarters_looked(acc, user_id) if user_id else {}
         if cell_id is not None:
-            place = cell_place(cell_id)
-            if place is None:
+            if cell_place(cell_id) is None:
                 raise HTTPException(404, "no such square")
-            return {"cell_id": cell_id, "field_key": cell_field_key(acc, cell_id), **place}
+            q = quarter or pick_quarter(quarters_viewed(acc, [cell_id]).get(cell_id, {}), taken.get(cell_id, set())) or QUARTERS[0]
+            return {
+                "cell_id": cell_id,
+                "quarter": q,
+                "fov": QUARTER_FOV,
+                "field_key": cell_field_key(acc, cell_id),
+                **quarter_place(cell_id, q),
+            }
+        if user_id:  # the same square first: the lab asks for the next task after each closing answer
+            last = (
+                acc.db._conn()
+                .execute(
+                    "SELECT cell_id FROM acc_tasks WHERE user_id=? AND kind='cell' AND quarter IS NOT NULL ORDER BY created DESC LIMIT 1",
+                    (user_id,),
+                )
+                .fetchone()
+            )
+            if last is not None:
+                here = str(last["cell_id"])
+                nxt = pick_quarter(quarters_viewed(acc, [here]).get(here, {}), taken.get(here, set()))
+                if nxt is not None:
+                    return {
+                        "cell_id": here,
+                        "quarter": nxt,
+                        "fov": QUARTER_FOV,
+                        "field_key": cell_field_key(acc, here),
+                        **quarter_place(here, nxt),
+                    }
         rows = searched_cells(acc)
         if rows is None:
             raise HTTPException(503, "the sky grid is not loaded")
-        seen = acc.db.task_refs(user_id, "cell") if user_id else set()
-        for r in rows:
-            if r["cell_id"] not in seen:
-                return {**r, **(cell_place(r["cell_id"]) or {})}
-        return None
+        rows = [r for r in rows if len(taken.get(r["cell_id"], set())) < len(QUARTERS)]
+        viewed = quarters_viewed(acc, [r["cell_id"] for r in rows[:500]])
+        # the square whose least-looked open quarter has the fewest viewers; the grid's own order among equals
+        best: tuple[int, int, dict[str, Any], str] | None = None
+        for i, r in enumerate(rows[:500]):
+            v = viewed.get(r["cell_id"], {})
+            open_q = pick_quarter(v, taken.get(r["cell_id"], set()))
+            if open_q is not None and (best is None or (v.get(open_q, 0), i) < best[:2]):
+                best = (v.get(open_q, 0), i, r, open_q)
+        if best is None:
+            return None
+        row, q = best[2], best[3]
+        return {**row, "quarter": q, "fov": QUARTER_FOV, **quarter_place(row["cell_id"], q)}
 
     def next_finding(acc: accounts.Accounts, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
         rows = findings()
@@ -138,7 +284,7 @@ def make_tasks_router(st: Any) -> APIRouter:
         return leads[0] if leads else None
 
     def next_judged(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
-        """Does it really move? / What is this red source? / What is this spectral anomaly?"""
+        """A question series (spec §5e): moves (tracks, slow movers, Planet X peaks), red, anomaly."""
         rows = findings()
         if finding_id is not None:
             one = next((r for r in rows if r["finding_id"] == finding_id), None)
@@ -146,23 +292,61 @@ def make_tasks_router(st: Any) -> APIRouter:
                 raise HTTPException(404, "no such finding")
             return one
         seen = acc.db.task_refs(user_id, kind) if user_id else set()
-        return agreement.get(st, acc.db).pick(kind, rows, user_id, seen)
+        return people.get(st, acc.db).pick(kind, rows, user_id, seen)
+
+    def next_other(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
+        """find_again, recentre, bad_picture, second_look."""
+        p = people.get(st, acc.db)
+        if kind == "bad_picture":
+            return p.pick_exposure(user_id)
+        if kind == "second_look":
+            return p.pick_second_look(user_id)
+        rows = findings()
+        if finding_id is not None:
+            one = next((r for r in rows if r["finding_id"] == finding_id), None)
+            if one is None:
+                raise HTTPException(404, "no such finding")
+            return one
+        seen = acc.db.task_refs(user_id, kind) if user_id else set()
+        kinds = people.FIND_AGAIN_KINDS if kind == "find_again" else people.RECENTRE_KINDS
+        done = (
+            {r[0] for r in acc.db._conn().execute("SELECT DISTINCT finding_id FROM acc_taps WHERE kind=? AND user_id=?", (kind, user_id))}
+            if user_id
+            else set()
+        )
+        pool = [r for r in rows if r.get("kind") in kinds and r.get("stage") is None and r["finding_id"] not in seen | done]
+        return pool[0] if pool else None
 
     def with_ask(task: dict[str, Any] | None) -> dict[str, Any] | None:
-        """The question and the answers of a judged task, for the lab's panel."""
-        if task is not None and task["kind"] in agreement.KINDS:
-            task["question"] = agreement.QUESTION[task["kind"]]
-            task["answers"] = [{"id": a, "label": label} for a, label in agreement.ANSWERS[task["kind"]]]
-            tree = agreement.tree_of(task["kind"])
-            if tree is not None:  # plain questions, not classes: the lab asks the tree and sends the path of answers
-                task["tree"] = tree
+        """What the lab's panel asks: the question series of the find (spec §5e), or the question of the other task kinds. The
+        old one-click classes are not offered any more (they asked what a person cannot judge or the machine already knows)."""
+        if task is None:
+            return None
+        kind = task["kind"]
+        if kind in ("moves", "red", "anomaly", "finding") and task.get("finding_id"):
+            series = people.series_of(str(task["finding_id"]).split(":")[0])
+            if series is not None:
+                task["series"] = {"id": series, "steps": people.steps_of(series)}
+                if series == "track":
+                    task["pictures"] = people.picture_list(find_row(st, task["finding_id"]))
+        elif kind in ASK:
+            q, answers = ASK[kind]
+            task["question"] = q
+            task["answers"] = [{"id": a, "label": label} for a, label in answers]
+            if kind == "bad_picture":
+                task["exposure"] = task["finding_id"]
         return task
 
     @router.get("/api/tasks/results")
     def results(ids: str = Query(..., max_length=8000)) -> Any:
         """{results:{find id: {kind, result, label, agree, total, text}}}: what people said about red sources and anomalies."""
         acc = accounts.get(st)
-        return {"results": agreement.get(st, acc.db).people_say([i for i in ids.split(",") if i][:500])}
+        wanted = [i for i in ids.split(",") if i][:500]
+        out = agreement.get(st, acc.db).people_say(wanted)  # the one-click answers of before
+        p = people.get(st, acc.db)
+        out.update(p.set_aside_results(wanted))  # artefact marks of two people (spec §5g)
+        out.update(p.results(wanted))  # the question series
+        return {"results": out}
 
     @router.get("/api/tasks/brown-dwarf-queue")
     def brown_dwarf_queue() -> Any:
@@ -173,8 +357,9 @@ def make_tasks_router(st: Any) -> APIRouter:
     @router.get("/api/tasks/next")
     def next_task(
         request: Request,
-        kind: str = Query(..., pattern="^(cell|finding|moves|red|anomaly)$"),
+        kind: str = Query(..., pattern="^(cell|finding|moves|red|anomaly|find_again|recentre|bad_picture|second_look)$"),
         cell_id: str | None = Query(None, max_length=80),
+        quarter: str | None = Query(None, pattern="^(NW|NE|SW|SE)$"),
         finding_id: str | None = Query(None, max_length=80),
     ) -> Any:
         acc = accounts.get(st)
@@ -183,14 +368,16 @@ def make_tasks_router(st: Any) -> APIRouter:
         asked = cell_id if kind == "cell" else finding_id
         if asked is not None and not REF_ID.match(asked):
             raise HTTPException(422, "this is not an id")
-        if asked is None and uid is not None:
+        if asked is None and uid is not None and not (kind == "cell" and quarter):
             have = acc.db.open_task(uid, kind)
             if have is not None:
                 return {"task": with_ask(have)}
         if kind == "cell":
-            ref = next_cell(acc, uid, cell_id)
+            ref = next_cell(acc, uid, cell_id, quarter)
         elif kind == "finding":
             ref = next_finding(acc, uid, finding_id)
+        elif kind in people.TASK_KINDS:
+            ref = next_other(acc, kind, uid, finding_id)
         else:
             ref = next_judged(acc, kind, uid, finding_id)
         if ref is None:

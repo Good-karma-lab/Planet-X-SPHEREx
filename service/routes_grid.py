@@ -4,16 +4,15 @@
     GET  /api/grid/coverage[?corners=1]  {cells:[{id, state, finds, viewers[, corners]}]}    every square that is not "new"
     GET  /api/grid/cells?ra=&dec=&radius= {cells:[{id, ra, dec, corners, state, finds, viewers, bar, searched_at}]}
     GET  /api/grid/cell/{id}             the same + finds:[finding ids] + field_key + open:{ra, dec, fov}
-    POST /api/grid/cell/{id}/viewed      {result:"nothing"|"marks"} → {viewers}
+    POST /api/grid/cell/{id}/viewed      {quarter, confirm:true, result?} → {viewers, quarter, quarters}   signed-in only (401)
 
-A viewer is the signed-in user when the accounts module tells who it is (`st.current_user(request)`), else an anonymous id kept in
-the `sky_vid` cookie; one viewer counts once per square.
+People look through a square a quarter (10′ × 10′) at a time. A view is counted only for a signed-in user (`st.current_user`) and
+only when they confirm it themselves; a square is viewed by people when all four quarters are. Opening a field never counts.
 """
 
 from __future__ import annotations
 
 import json
-import secrets
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
@@ -23,10 +22,14 @@ from service import grid
 from service.grid import GridDB
 
 MAX_RADIUS_DEG = 5.0
-VIEWER_COOKIE = "sky_vid"
 
 
 class Viewed(BaseModel):
+    """A person says they have looked through one quarter of a square: their own click ("I have looked through this square", or a
+    look task's closing button), never the opening of a field."""
+
+    quarter: Literal["NW", "NE", "SW", "SE"]
+    confirm: Literal[True]
     result: Literal["nothing", "marks"] | None = None
 
 
@@ -65,7 +68,11 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         rows, views = D().rows(ids), D().viewers(ids)
         return {"cells": [grid.view_of(c, rows.get(c.id), views.get(c.id, 0)) for c in cs]}
 
-    def one(cid: str) -> dict[str, Any]:
+    def user_of(request: Request | None) -> dict[str, Any] | None:
+        cu = getattr(st, "current_user", None)
+        return cu(request) if callable(cu) and request is not None else None
+
+    def one(cid: str, request: Request | None = None) -> dict[str, Any]:
         try:
             ce = grid.by_id(cid)
         except ValueError as e:
@@ -77,30 +84,40 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         out["field_key"] = (row or {}).get("field_key") or field_key_of(st, ce)
         out["open"] = {"ra": round(ce.ra, 5), "dec": round(ce.dec, 5), "fov": grid.FIELD_FOV_ARCMIN}
         out["error"] = (row or {}).get("error")
+        seen = D().quarters_viewed([cid]).get(cid, dict.fromkeys(grid.QUARTERS, 0))
+        u = user_of(request)
+        mine = D().quarters_of(cid, f"user:{u['id']}") if u else set()
+        out["quarters"] = [
+            {
+                "id": q,
+                "ra": round(qc.ra, 6),
+                "dec": round(qc.dec, 6),
+                "fov": grid.QUARTER_FOV_ARCMIN,
+                "corners": qc.corners(),
+                "viewers": seen[q],
+                "mine": q in mine,
+            }
+            for q, qc in ((q, grid.quarter(ce, q)) for q in grid.QUARTERS)
+        ]
         return out
 
     @router.get("/api/grid/cell/{cid}")
-    async def cell(cid: str) -> Any:
-        return one(cid)
+    async def cell(cid: str, request: Request) -> Any:
+        return one(cid, request)
 
     @router.post("/api/grid/cell/{cid}/viewed")
-    async def viewed(cid: str, body: Viewed, request: Request, response: Response) -> Any:
+    async def viewed(cid: str, body: Viewed, request: Request) -> Any:
+        """Signed-in people only (a guest's look is not counted): 401 without an account."""
         try:
             grid.parse_id(cid)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
-        who = None
-        cu = getattr(st, "current_user", None)
-        if callable(cu):
-            u = cu(request)
-            who = f"user:{u['id']}" if u else None
-        if who is None:
-            vid = request.cookies.get(VIEWER_COOKIE)
-            if not vid or len(vid) > 64:
-                vid = secrets.token_urlsafe(16)
-                response.set_cookie(VIEWER_COOKIE, vid, max_age=3600 * 24 * 365, httponly=True, samesite="lax")
-            who = f"anon:{vid}"
-        return {"viewers": D().view(cid, who, body.result)}
+        u = user_of(request)
+        if not u:
+            raise HTTPException(401, "sign in to count a square as looked through")
+        viewers = D().view(cid, f"user:{u['id']}", body.result, body.quarter)
+        q = D().quarters_viewed([cid]).get(cid, dict.fromkeys(grid.QUARTERS, 0))
+        return {"viewers": viewers, "quarter": body.quarter, "quarters": sum(1 for n in q.values() if n > 0)}
 
     return router
 

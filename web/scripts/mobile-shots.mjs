@@ -242,7 +242,7 @@ async function run(sizeKey) {
       await labReady();
       await page.waitForTimeout(4000);
       await shot('06-lab-known');
-      const tool = page.getByTestId('tool-mark');
+      const tool = page.getByTestId('tool-mark').first();
       await tool.scrollIntoViewIfNeeded();
       await shot('07-lab-tools');
       await tap(tool);
@@ -252,7 +252,8 @@ async function run(sizeKey) {
       const p = [b.x + b.width * 0.4, b.y + b.height * 0.4];
       if (S.mobile) await page.touchscreen.tap(p[0], p[1]);
       else await page.mouse.click(p[0], p[1]);
-      await page.getByTestId('mark-editor').waitFor({ timeout: 8000 });
+      // the mark is on the picture and its card is in the panel
+      await page.waitForTimeout(1200);
       await shot('08-lab-mark');
       await shot('08-lab-mark-full', true);
     });
