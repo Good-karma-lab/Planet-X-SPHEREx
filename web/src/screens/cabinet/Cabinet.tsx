@@ -2,13 +2,15 @@
 // panel for a guest. Everything shown is read from the account API (lib/account.ts).
 
 import { useCallback, useEffect, useState } from 'preact/hooks';
-import { api, loadUser, nextTask, refreshUnread, renameUser, signOut, taskHash, useUser, type AccountMark, type Task, type User } from '../../lib/account';
+import { api, describeHash, nextTask, refreshUnread, taskHash, useUser, type AccountMark, type Task, type User } from '../../lib/account';
 import { InvestigationPage } from './Investigation';
 import { SignInCard } from '../../ui/SignInCard';
 import { Pic } from './pic';
-import { ScorePanel } from './Score';
+import { Badge, ScorePanel, badgeSrc, type MyScore } from './Score';
+import { AccountMenu, Bell, type Notice } from './Corner';
 import type { Route } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
+import { icon } from '../../ui/icons';
 import './cabinet.css';
 
 interface Check {
@@ -65,14 +67,6 @@ interface HistoryRow {
   title: string;
   at: string;
 }
-interface Notice {
-  id: number;
-  kind: string;
-  text: string;
-  ref: string | null;
-  created: string;
-  read: boolean;
-}
 interface Mine {
   marks: AccountMark[];
   tasks: Task[];
@@ -80,26 +74,16 @@ interface Mine {
   investigations: Investigation[];
   history: HistoryRow[];
   notifications: Notice[];
+  score: MyScore | null;
 }
 
-const TABS = ['squares', 'marks', 'findings', 'investigations', 'tasks', 'history', 'notifications', 'score', 'account'] as const;
-type Tab = (typeof TABS)[number];
-const TAB_NAME: Record<Tab, string> = {
-  squares: 'My squares',
-  marks: 'My marks',
-  findings: 'My findings',
-  investigations: 'Investigations',
-  tasks: 'Tasks',
-  history: 'View history',
-  notifications: 'Notifications',
-  score: 'Score',
-  account: 'Account',
-};
+/** "My work": one switch over what the person has done. */
+const WORK = ['squares', 'marks', 'findings', 'history'] as const;
+type Work = (typeof WORK)[number];
+const WORK_NAME: Record<Work, string> = { squares: 'Squares', marks: 'Marks', findings: 'Findings', history: 'History' };
 const RESULT: Record<string, string> = { nothing: 'Nothing here', marks: 'Done, with marks', moves: 'It moves', artefact: 'Artefact', known: 'Known object' };
-const INV_STATE: Record<string, string> = { open: 'not submitted', checking: 'checking', needs_comment: 'comment needed', blocked: 'not submitted: a check failed', submitted: 'submitted' };
 const ROLE: Record<string, string> = { submitted: 'Submitted by me', checked: 'Checked by me', marked: 'Marked by me' };
 
-const when = (iso: string | null) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
 const words = (s: string) => s.replace(/_/g, ' ');
 const place = (ra: number | null, dec: number | null) => (ra == null || dec == null ? '' : `${formatRA(ra, true)} ${formatDec(dec, true)}`);
 
@@ -121,7 +105,7 @@ function placeOf(ref: string): { findingId?: string; ra?: number; dec?: number }
   return Number.isFinite(ra) && Number.isFinite(dec) ? { ra, dec } : {};
 }
 
-function useMine(user: User | null, tab: string, inv: string): { mine: Mine | null; error: string; reload: () => void } {
+function useMine(user: User | null, view: string, inv: string): { mine: Mine | null; error: string; reload: () => void } {
   const [mine, setMine] = useState<Mine | null>(null);
   const [error, setError] = useState('');
   const [n, setN] = useState(0);
@@ -132,16 +116,17 @@ function useMine(user: User | null, tab: string, inv: string): { mine: Mine | nu
     }
     const stop = new AbortController();
     const get = <K extends keyof Mine>(k: K) => api<Record<K, Mine[K]>>(`/api/me/${k}`, { signal: stop.signal }).then((r) => r[k]);
-    Promise.all([get('marks'), get('tasks'), get('findings'), get('investigations'), get('history'), get('notifications')]).then(
-      ([marks, tasks, findings, investigations, history, notifications]) => {
-        setMine({ marks, tasks, findings, investigations, history, notifications });
+    const score = api<MyScore>('/api/me/score', { signal: stop.signal }).catch(() => null);
+    Promise.all([get('marks'), get('tasks'), get('findings'), get('investigations'), get('history'), get('notifications'), score]).then(
+      ([marks, tasks, findings, investigations, history, notifications, score]) => {
+        setMine({ marks, tasks, findings, investigations, history, notifications, score });
         setError('');
         refreshUnread(notifications.filter((x) => !x.read).length);
       },
       (e: Error) => !stop.signal.aborted && setError(`Not loaded: ${e.message}`),
     );
     return () => stop.abort();
-  }, [user?.id, n, tab, inv]);
+  }, [user?.id, n, view, inv]);
   return { mine, error, reload: useCallback(() => setN((x) => x + 1), []) };
 }
 
@@ -159,451 +144,387 @@ function Empty({ text }: { text: string }) {
   return <p class="cb-empty">{text}</p>;
 }
 
-/** The whole sky, RA growing to the left as on the sky; a dot per square. */
-function SquaresMap({ tasks }: { tasks: Task[] }) {
-  const pts = tasks.filter((t) => t.ra != null && t.dec != null);
-  return (
-    <svg class="cb-map" viewBox="0 0 360 180" role="img" aria-label={`Sky map of my squares: ${pts.length} shown`}>
-      {[60, 120, 180, 240, 300].map((x) => (
-        <line class="g" x1={x} y1={0} x2={x} y2={180} />
-      ))}
-      {[30, 60, 90, 120, 150].map((y) => (
-        <line class="g" x1={0} y1={y} x2={360} y2={y} />
-      ))}
-      <polyline class="ecl" points={Array.from({ length: 73 }, (_, i) => `${360 - i * 5},${(90 - 23.44 * Math.sin((i * 5 * Math.PI) / 180)).toFixed(1)}`).join(' ')} />
-      <text x={3} y={8}>RA 24h</text>
-      <text x={340} y={8}>0h</text>
-      <text x={3} y={176}>Dec −90°</text>
-      {pts.map((t) => (
-        <circle key={t.id} class={t.state} cx={360 - t.ra!} cy={90 - t.dec!} r={2.2}>
-          <title>{`${t.cell_id}: ${t.state === 'done' ? (RESULT[t.result ?? ''] ?? '') : 'open'}`}</title>
-        </circle>
-      ))}
-    </svg>
-  );
+const num = (n: number) => n.toLocaleString('en-US');
+const ago = (iso: string | null) => {
+  const s = iso ? (Date.now() - Date.parse(iso)) / 1000 : NaN;
+  if (!Number.isFinite(s)) return '';
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return iso!.slice(0, 10);
+};
+
+/** What came of an investigation, in one word and one status line; `tone` colours both. */
+export function verdictOf(inv: Investigation, finding: MyFinding | null): { word: string; line: string; tone: 'good' | 'warn' | 'bad' | 'run' | 'idle' } {
+  const rows = inv.checks?.checks ?? [];
+  const failed = rows.find((c) => c.state === 'fail');
+  if (inv.submitted) {
+    const st = finding?.status ?? 'submitted';
+    const word: Record<string, string> = { submitted: 'Submitted', in_review: 'In review', candidate: 'Candidate', confirmed: 'Confirmed', known: 'Known object', artefact: 'Artefact' };
+    return { word: word[st] ?? words(st), line: `finding ${inv.submitted}`, tone: st === 'candidate' || st === 'confirmed' ? 'good' : st === 'artefact' || st === 'known' ? 'bad' : 'warn' };
+  }
+  if (inv.state === 'checking') return { word: 'Checking', line: inv.progress || 'checks running', tone: 'run' };
+  if (inv.state === 'needs_comment') return { word: 'Comment needed', line: 'every check has answered · a check warns', tone: 'warn' };
+  if (inv.state === 'blocked') return { word: 'Not submitted', line: failed ? `${words(failed.id)}: ${failed.detail ?? 'failed'}` : 'a check failed', tone: 'bad' };
+  if (inv.checks?.can_submit) return { word: 'Ready to submit', line: 'every check passed', tone: 'good' };
+  const n = (inv.items ?? []).length;
+  return { word: 'Gathering', line: `${n} ${n === 1 ? 'object' : 'objects'} · ${inv.mark_ids.length} marks · ${inv.notes.length} notes`, tone: 'idle' };
 }
 
-function TaskRow({ t }: { t: Task }) {
+function InvCard({ inv, marks, finding }: { inv: Investigation; marks: AccountMark[]; finding: MyFinding | null }) {
+  const first = (inv.items ?? [])[0];
+  const m = marks.find((x) => inv.mark_ids.includes(x.id));
+  const v = verdictOf(inv, finding);
+  const rows = inv.checks?.checks ?? [];
   return (
-    <a class="cb-row haspic" href={taskHash(t)} data-testid="task-row">
-      <Pic findingId={t.finding_id} ra={t.ra} dec={t.dec} label={t.kind === 'cell' ? `square ${t.cell_id}` : `finding ${t.finding_id}`} />
-      <span class="cb-main">
-        <b>{t.kind === 'cell' ? `Square ${t.cell_id}${t.quarter ? ` · ${t.quarter} quarter` : ''}` : `Finding ${t.finding_id}`}</b>
-        <span class="mono-s">
-          {place(t.ra, t.dec)} · taken {when(t.created)}
-          {t.done_at ? ` · closed ${when(t.done_at)}` : ''}
+    <a class={`cb-inv2 tone-${v.tone}`} href={`#/me?inv=${encodeURIComponent(inv.id)}`} data-testid="investigation">
+      <Pic findingId={inv.submitted ?? inv.finding_id} ra={first?.ra ?? m?.ra} dec={first?.dec ?? m?.dec} thumb={first?.thumb ?? inv.frames[0]?.thumb} size={84} label={inv.title} />
+      <span class="cb-invbody">
+        <span class="cb-invtop">
+          <b>{inv.title}</b>
+          <span class="mono-s">{ago(inv.updated)}</span>
         </span>
-      </span>
-      <span class="cb-side">
-        <span class={`badge st-${t.state}`}>{t.state === 'done' ? (RESULT[t.result ?? ''] ?? 'done') : 'open'}</span>
-        {t.mark_ids.length > 0 && <span class="mono-s">{t.mark_ids.length} marks</span>}
+        <span class="cb-verdict">
+          <span class="cb-vword">{v.word}</span>
+          <span class="mono-s">{v.line}</span>
+        </span>
+        {rows.length > 0 && (
+          <span class="cb-dots" aria-label={`${rows.filter((c) => ['pass', 'warn', 'fail'].includes(c.state)).length} of ${rows.length} checks answered`}>
+            {rows.map((c) => (
+              <i key={c.id} class={`d-${c.state}`} title={`${words(c.id)}: ${c.state}${c.detail ? ` · ${c.detail}` : ''}`} />
+            ))}
+          </span>
+        )}
       </span>
     </a>
   );
 }
 
-/** "Hide me from the leaderboard": the points are still earned. */
-function HideFromBoard() {
-  const [hide, setHide] = useState<boolean | null>(null);
-  const [status, setStatus] = useState('');
-  useEffect(() => {
-    void api<{ hide_from_board: boolean }>('/api/me/score').then((s) => setHide(s.hide_from_board), () => setHide(false));
-  }, []);
-  const set = (v: boolean) => {
-    setHide(v);
-    api('/api/me', { method: 'PATCH', body: { hide_from_board: v } }).then(
-      () => setStatus(''),
-      (e: Error) => setStatus(e.message),
-    );
-  };
+/** Name, level and points, and the one next thing to do. */
+function Hero({ mine, take }: { mine: Mine; take: (k: 'cell' | 'finding') => void }) {
+  const s = mine.score;
+  const cur = s ? ([...s.levels].reverse().find((l) => s.points >= l.at) ?? s.levels[0]!) : null;
+  const toNext = s && cur && s.next_level_at != null ? (s.points - cur.at) / (s.next_level_at - cur.at) : 1;
+  const nextName = s?.levels.find((l) => l.at === s.next_level_at)?.name;
+  const openCell = mine.tasks.find((t) => t.kind === 'cell' && t.state === 'open');
+  const openCheck = mine.tasks.find((t) => t.kind !== 'cell' && t.state === 'open');
+  const quarters = (s as (MyScore & { quarters?: number }) | null)?.quarters ?? mine.tasks.filter((t) => t.kind === 'cell' && t.state === 'done').length;
   return (
-    <div class="cb-line">
-      <label class="chk">
-        <input type="checkbox" checked={hide === true} disabled={hide === null} onChange={(e) => set((e.target as HTMLInputElement).checked)} data-testid="hide-board" />
-        Hide me from the leaderboard
-      </label>
-      <span class="mono-s">points are still earned</span>
-      {status && <span class="cb-status bad">{status}</span>}
+    <div class="card glass cb-hero" data-testid="hero">
+      <div class="cb-me">
+        {s && <img class="cb-levelbadge" src={badgeSrc(`level_${s.level.toLowerCase()}`)} alt="" width={64} height={64} data-testid="level-badge" />}
+        <div class="cb-melines">
+          <span class="cb-lvl" data-testid="score-level">
+            {s?.level ?? '—'}
+            <span class="cb-pts2" data-testid="score-points">
+              {num(s?.points ?? 0)} points
+            </span>
+          </span>
+          <span class="cb-bar" role="progressbar" aria-valuenow={Math.round(toNext * 100)} aria-valuemin={0} aria-valuemax={100} aria-label="Progress to the next level">
+            <i style={{ width: `${Math.round(toNext * 100)}%` }} />
+          </span>
+          <span class="mono-s">{!s ? '' : s.next_level_at == null ? 'the highest level' : `${num(s.next_level_at - s.points)} to ${nextName}`}</span>
+        </div>
+      </div>
+      <div class="cb-stats">
+        <span>
+          <b>{quarters}</b>quarters
+        </span>
+        <span>
+          <b>{mine.marks.length}</b>marks
+        </span>
+        <span>
+          <b>{mine.findings.length}</b>findings
+        </span>
+        {s && s.answered > 0 && s.accuracy != null && (
+          <span data-testid="score-accuracy" title={`${s.right} of ${s.answered} settled answers`}>
+            <b>{Math.round(s.accuracy * 100)}%</b>answers right
+          </span>
+        )}
+      </div>
+      <div class="cb-next2">
+        {openCell ? (
+          <a class="btn primary big" href={taskHash(openCell)} data-testid="next-square">
+            Continue · square {openCell.cell_id}
+            {openCell.quarter ? ` ${openCell.quarter}` : ''}
+          </a>
+        ) : (
+          <button class="btn primary big" onClick={() => take('cell')} data-testid="next-square">
+            Give me a square
+          </button>
+        )}
+        {openCheck ? (
+          <a class="btn" href={taskHash(openCheck)} data-testid="next-check">
+            Check a finding
+          </a>
+        ) : (
+          <button class="btn" onClick={() => take('finding')} data-testid="next-check">
+            Check a finding
+          </button>
+        )}
+      </div>
     </div>
   );
 }
 
-/** The public page #/u/<slug>: off until the user turns it on (sharing an achievement turns it on too). */
-function PublicProfile() {
-  const [p, setP] = useState<{ slug: string; public: boolean } | null>(null);
-  const [status, setStatus] = useState('');
-  useEffect(() => {
-    void api<{ slug: string; public: boolean }>('/api/me/profile').then(setP, () => undefined);
-  }, []);
-  const set = (v: boolean) => {
-    if (p) setP({ ...p, public: v });
-    api('/api/me', { method: 'PATCH', body: { public_profile: v } }).then(
-      () => setStatus(''),
-      (e: Error) => setStatus(e.message),
-    );
-  };
+/** The badges as one strip: the earned ones, the closest next one, and the full list behind a button. */
+function BadgeStrip({ score }: { score: MyScore }) {
+  const all = score.achievements;
+  const earned = all.filter((a) => a.earned_at).sort((a, b) => (b.earned_at ?? '').localeCompare(a.earned_at ?? ''));
+  const next = all.filter((a) => !a.earned_at && !a.hidden).sort((a, b) => b.progress - a.progress)[0];
+  const tiers = (fam: string) => all.filter((a) => a.family === fam).length;
   return (
-    <div class="cb-line">
-      <label class="chk">
-        <input type="checkbox" checked={p?.public === true} disabled={!p} onChange={(e) => set((e.target as HTMLInputElement).checked)} data-testid="public-profile" />
-        Public profile page
-      </label>
-      {p && (
-        <a class="btn sm" href={`#/u/${p.slug}`} data-testid="open-profile">
-          Open my page
-        </a>
+    <a class="card glass cb-strip" href="#/me?view=badges" data-testid="badge-strip">
+      <span class="cb-striphead">
+        <b>Badges</b>
+        <span class="mono-s">
+          {earned.length} of {all.length}
+        </span>
+      </span>
+      <span class="cb-earned">
+        {earned.slice(0, 9).map((a) => (
+          <span key={a.id} title={a.name}>
+            <Badge a={a} tiers={tiers(a.family)} size={40} />
+          </span>
+        ))}
+        {earned.length === 0 && <span class="mono-s">none yet</span>}
+      </span>
+      {next && (
+        <span class="cb-stripnext" data-testid="next">
+          <Badge a={next} tiers={tiers(next.family)} size={40} />
+          <span class="cb-stripnexttext">
+            <span>
+              Next: <b>{next.name}</b>
+            </span>
+            <span class="cb-bar">
+              <i style={{ width: `${Math.round(next.progress * 100)}%` }} />
+            </span>
+            <span class="mono-s">
+              {next.have} of {next.need}
+            </span>
+          </span>
+        </span>
       )}
-      <span class="mono-s">name, points, badges and findings; never the e-mail</span>
-      {status && <span class="cb-status bad">{status}</span>}
+      <span class="cb-stripgo">All badges →</span>
+    </a>
+  );
+}
+
+function SmallRow({ href, pic, title, line, side, testid }: { href?: string; pic: { findingId?: string | null; ra?: number | null; dec?: number | null; label: string; icon?: string }; title: string; line: string; side?: preact.ComponentChildren; testid: string }) {
+  const body = (
+    <>
+      {pic.icon ? <span class="cb-pic cb-icontile" style={{ width: '52px', height: '52px' }} dangerouslySetInnerHTML={{ __html: icon(pic.icon, 24) }} /> : <Pic {...pic} size={52} />}
+      <span class="cb-main">
+        <b>{title}</b>
+        <span class="mono-s">{line}</span>
+      </span>
+      <span class="cb-side">{side}</span>
+    </>
+  );
+  return href ? (
+    <a class="cb-row2" href={href} data-testid={testid}>
+      {body}
+    </a>
+  ) : (
+    <div class="cb-row2" data-testid={testid}>
+      {body}
     </div>
   );
 }
 
-function Who({ user }: { user: User }) {
-  const [editing, setEditing] = useState(false);
-  const [name, setName] = useState(user.name);
-  const [status, setStatus] = useState('');
-  const save = (e: Event) => {
-    e.preventDefault();
-    renameUser(name.trim() || user.name).then(
-      () => setEditing(false),
-      (x: Error) => setStatus(x.message),
-    );
-  };
+const SCREEN_NAME: Record<string, [string, string]> = {
+  explore: ['Globe', 'globe'],
+  globe: ['Globe', 'globe'],
+  findings: ['Findings', 'sparkle'],
+  lab: ['Lab', 'chart-line-up'],
+  planetx: ['Planet X', 'planet-x'],
+  method: ['Method', 'sigma'],
+  about: ['About', 'info'],
+  index: ['Index', 'database'],
+};
+
+/** A history row: the place's own title, else what the address names; the place's picture, else the screen's icon. */
+function HistoryItem({ h }: { h: HistoryRow }) {
+  const pl = placeOf(h.ref);
+  const screen = h.ref.replace(/^#\/?/, '').split(/[?/]/)[0] ?? '';
+  const [name, ic] = SCREEN_NAME[screen] ?? ['This place', 'compass'];
+  const title = h.title || describeHash(h.ref)?.title || name;
+  const has = pl.findingId || pl.ra != null;
+  return <SmallRow testid="history-row" href={h.ref} pic={has ? { ...pl, label: title } : { label: title, icon: ic }} title={title} line={ago(h.at)} />;
+}
+
+function WorkPanel({ mine, work, run }: { mine: Mine; work: Work; run: (p: Promise<unknown>) => void }) {
+  const squares = mine.tasks.filter((t) => t.kind === 'cell');
+  const count: Record<Work, number> = { squares: squares.length, marks: mine.marks.length, findings: mine.findings.length, history: mine.history.length };
+  const set = (w: Work) => (location.hash = w === 'squares' ? '#/me' : `#/me?work=${w}`);
   return (
-    <div class="cb-who" data-testid="who">
-      {editing ? (
-        <form onSubmit={save} style={{ display: 'contents' }}>
-          <input class="inp" aria-label="Name shown in the credit line" maxLength={60} value={name} onInput={(e) => setName((e.target as HTMLInputElement).value)} />
-          <button class="btn sm" type="submit">
-            Save
+    <section class="card glass cb-work" data-testid={`panel-${work}`}>
+      <div class="cb-secthead">
+        <h3>My work</h3>
+        {work === 'history' && mine.history.length > 0 && (
+          <button class="cb-link" onClick={() => confirm('Clear the view history?') && run(api('/api/me/history', { method: 'DELETE' }))}>
+            Clear
           </button>
-        </form>
-      ) : (
-        <>
-          <b data-testid="who-name">{user.name}</b>
-          <span class="mono-s">{user.email}</span>
-          <button class="btn sm" onClick={() => setEditing(true)} title="The name shown in the credit line of your findings">
-            Change name
+        )}
+      </div>
+      <div class="seg sm cb-seg" role="tablist">
+        {WORK.map((w) => (
+          <button key={w} role="tab" aria-selected={work === w} class={work === w ? 'on' : ''} onClick={() => set(w)} data-testid={`tab-${w}`}>
+            {WORK_NAME[w]}
+            <span class="cb-n">{count[w]}</span>
           </button>
-        </>
-      )}
-      <button class="btn sm" data-testid="signout" onClick={() => void signOut().catch((x: Error) => setStatus(x.message))}>
-        Sign out
-      </button>
-      {status && <span class="cb-status bad">{status}</span>}
-    </div>
+        ))}
+      </div>
+      <div class="cb-worklist">
+        {work === 'squares' &&
+          (squares.length === 0 ? (
+            <Empty text="No squares yet" />
+          ) : (
+            <>
+              {squares.map((t) => (
+                <SmallRow
+                  key={t.id}
+                  testid="task-row"
+                  href={taskHash(t)}
+                  pic={{ ra: t.ra, dec: t.dec, label: `square ${t.cell_id}` }}
+                  title={`${t.cell_id}${t.quarter ? ` · ${t.quarter}` : ''}`}
+                  line={`${t.done_at ? `closed ${ago(t.done_at)}` : `taken ${ago(t.created)}`}${t.mark_ids.length ? ` · ${t.mark_ids.length} marks` : ''}`}
+                  side={<span class={`badge st-${t.state}`}>{t.state === 'done' ? (RESULT[t.result ?? ''] ?? 'done') : 'open'}</span>}
+                />
+              ))}
+            </>
+          ))}
+        {work === 'marks' &&
+          (mine.marks.length === 0 ? (
+            <Empty text="No marks yet" />
+          ) : (
+            mine.marks.map((m) => (
+              <SmallRow
+                key={m.id}
+                testid="mark-row"
+                pic={{ ra: m.ra, dec: m.dec, label: m.label || 'mark' }}
+                title={m.label || 'Mark'}
+                line={`${place(m.ra, m.dec)}${m.pass != null ? ` · pass ${m.pass + 1}` : ''}${m.note ? ` · ${m.note}` : ''}`}
+                side={
+                  <>
+                    <span class={`badge st-${m.level}`}>{m.level}</span>
+                    <a class="btn sm" href={markHash(m)}>
+                      Lab
+                    </a>
+                    <button class="cb-x" title="Delete this mark" aria-label="Delete this mark" onClick={() => confirm('Delete this mark?') && run(api(`/api/me/marks/${encodeURIComponent(m.id)}`, { method: 'DELETE' }))}>
+                      ×
+                    </button>
+                  </>
+                }
+              />
+            ))
+          ))}
+        {work === 'findings' &&
+          (mine.findings.length === 0 ? (
+            <Empty text="No findings yet" />
+          ) : (
+            mine.findings.map((f) => (
+              <SmallRow
+                key={`${f.finding_id}${f.role}`}
+                testid="finding-row"
+                href={f.role === 'submitted' ? `#/findings/${f.finding_id}/story` : `#/findings?lead=${encodeURIComponent(f.finding_id)}`}
+                pic={{ findingId: f.finding_id, ra: f.ra, dec: f.dec, label: f.title || `finding ${f.finding_id}` }}
+                title={f.title || `Finding ${f.finding_id}`}
+                line={`${ROLE[f.role] ?? f.role}${f.result ? `: ${RESULT[f.result] ?? f.result}` : ''} · ${ago(f.created)}`}
+                side={<span class={`badge st-${f.status}`}>{words(f.status)}</span>}
+              />
+            ))
+          ))}
+        {work === 'history' &&
+          (mine.history.length === 0 ? (
+            <Empty text="Nothing opened yet" />
+          ) : (
+            mine.history.map((h) => (
+              <HistoryItem key={h.id} h={h} />
+            ))
+          ))}
+      </div>
+    </section>
   );
 }
 
 export function Cabinet({ route }: { route: Route }) {
   const { user, ready } = useUser();
   const [status, setStatus] = useState('');
-  const tab: Tab = (TABS as readonly string[]).includes(route.params['tab'] ?? '') ? (route.params['tab'] as Tab) : 'squares';
-  const invId = route.params['inv'] ?? '';
-  const { mine, error, reload } = useMine(user, tab, invId);
-  // a sign-in link opened again (or too late) while this browser is signed in: said once, then the address is cleaned
-  const stale = route.params['signin'] === 'expired' && !!user;
-  const opened = tab === 'investigations' && invId ? (mine?.investigations.find((i) => i.id === invId) ?? null) : null;
-  const go = (t: Tab) => (location.hash = t === 'squares' ? '#/me' : `#/me?tab=${t}`);
-  const run = (job: Promise<unknown>) => job.then(reload, (e: Error) => setStatus(e.message));
+  const p = route.params;
+  // older addresses (#/me?tab=…) still land on the right place
+  const tab = p['tab'] ?? '';
+  const invId = p['inv'] ?? '';
+  const view = p['view'] === 'badges' || tab === 'score' ? 'badges' : invId ? 'inv' : 'home';
+  const work: Work = (WORK as readonly string[]).includes(p['work'] ?? '') ? (p['work'] as Work) : tab === 'tasks' ? 'squares' : (WORK as readonly string[]).includes(tab) ? (tab as Work) : 'squares';
+  const { mine, error, reload } = useMine(user, `${view}${work}`, invId);
+  const stale = p['signin'] === 'expired' && !!user;
+  const opened = invId ? (mine?.investigations.find((i) => i.id === invId) ?? null) : null;
+  const run = (job: Promise<unknown>) => void job.then(reload, (e: Error) => setStatus(e.message));
   const take = (kind: 'cell' | 'finding') =>
-    nextTask(kind).then(
+    void nextTask(kind).then(
       (t) => (t ? (location.hash = taskHash(t)) : setStatus(kind === 'cell' ? 'No searched square is waiting for a look' : 'No finding is waiting for a check')),
       (e: Error) => setStatus(e.message),
     );
-  const squares = mine?.tasks.filter((t) => t.kind === 'cell') ?? [];
-  const inflight = mine?.investigations.filter((i) => ['checking', 'needs_comment', 'blocked'].includes(i.state)) ?? [];
-  const unread = mine?.notifications.filter((n) => !n.read).length ?? 0;
-  const count: Record<Tab, number> = {
-    squares: squares.length,
-    marks: mine?.marks.length ?? 0,
-    findings: mine?.findings.length ?? 0,
-    investigations: mine?.investigations.length ?? 0,
-    tasks: (mine?.tasks.filter((t) => t.state === 'open').length ?? 0) + inflight.length,
-    history: mine?.history.length ?? 0,
-    notifications: unread,
-    score: 0,
-    account: 0,
-  };
+  const findingOf = (inv: Investigation) => mine?.findings.find((f) => f.finding_id === inv.submitted) ?? null;
+  const RANK: Record<string, number> = { checking: 0, needs_comment: 1, blocked: 2, open: 3, submitted: 4 };
+  const invs = [...(mine?.investigations ?? [])].sort((a, b) => (RANK[a.state] ?? 9) - (RANK[b.state] ?? 9) || b.updated.localeCompare(a.updated));
+  const line = error || status || (stale ? 'This link was already used or has expired · you are signed in' : user && !mine ? 'Loading…' : '');
   return (
     <div class="screen">
-      <div class="ipage" data-testid="cabinet">
-        <div class="pg-h cb-head">
-          <div>
-            <h1>Cabinet</h1>
-            {user && <p class="hint">Your squares, marks, findings and investigations, kept under your name.</p>}
-          </div>
-          {user && <Who user={user} />}
+      <div class="ipage cb2" data-testid="cabinet">
+        <div class="cb-top">
+          <h1>Cabinet</h1>
+          <span class={`cb-status ${error || status ? 'bad' : ''}`} role="status" data-testid="cabinet-status">
+            {line}
+          </span>
+          {user && (
+            <div class="cb-corner">
+              <Bell notices={mine?.notifications ?? null} initiallyOpen={tab === 'notifications'} reload={reload} />
+              <AccountMenu user={user} initiallyOpen={tab === 'account'} />
+            </div>
+          )}
         </div>
         {!ready ? (
           <div class="mono-s">Loading…</div>
         ) : !user ? (
-          <SignIn expired={route.params['signin']} />
+          <SignIn expired={p['signin']} />
+        ) : !mine ? null : view === 'badges' ? (
+          <div class="card glass cb-card" data-testid="panel-score">
+            <a class="btn sm cb-back" href="#/me">
+              ← Cabinet
+            </a>
+            <ScorePanel />
+          </div>
+        ) : view === 'inv' ? (
+          <div class="card glass cb-card" data-testid="panel-investigations">
+            {opened ? <InvestigationPage inv={opened} marks={mine.marks} finding={findingOf(opened)} reload={reload} /> : <Empty text="No such investigation" />}
+          </div>
         ) : (
           <>
-            <div class="cb-tabs" role="tablist">
-              {TABS.map((t) => (
-                <button key={t} role="tab" aria-selected={tab === t} class={tab === t ? 'on' : ''} onClick={() => go(t)} data-testid={`tab-${t}`}>
-                  {TAB_NAME[t]}
-                  {t !== 'account' && t !== 'score' && <span>{count[t]}</span>}
-                </button>
-              ))}
-              <span class={`cb-status ${error || status ? 'bad' : ''}`} role="status" data-testid="cabinet-status">
-                {error || status || (stale ? 'This link was already used or has expired · you are signed in' : !mine ? 'Loading…' : '')}
-              </span>
+            <Hero mine={mine} take={take} />
+            {mine.score && <BadgeStrip score={mine.score} />}
+            <div class="cb-cols">
+              <section class="card glass cb-invs" data-testid="panel-investigations">
+                <div class="cb-secthead">
+                  <h3>
+                    Investigations <span class="cb-n">{invs.length}</span>
+                  </h3>
+                  <a class="cb-link" href="#/lab">
+                    Open the lab
+                  </a>
+                </div>
+                {invs.length === 0 ? (
+                  <Empty text="No investigations yet" />
+                ) : (
+                  <div class="cb-invlist">
+                    {invs.map((inv) => (
+                      <InvCard key={inv.id} inv={inv} marks={mine.marks} finding={findingOf(inv)} />
+                    ))}
+                  </div>
+                )}
+              </section>
+              <WorkPanel mine={mine} work={work} run={run} />
             </div>
-            {mine && (
-              <div class="card glass cb-card" data-testid={`panel-${tab}`}>
-                {tab === 'squares' && (
-                  <>
-                    <h3>
-                      My squares
-                      <span class="cb-actions">
-                        <button class="btn sm" onClick={() => void take('cell')}>
-                          Take a square
-                        </button>
-                      </span>
-                    </h3>
-                    {squares.length === 0 ? (
-                      <Empty text="No squares yet" />
-                    ) : (
-                      <div class="cb-split">
-                        <div class="cb-list">
-                          {squares.map((t) => (
-                            <TaskRow key={t.id} t={t} />
-                          ))}
-                        </div>
-                        <SquaresMap tasks={squares} />
-                      </div>
-                    )}
-                  </>
-                )}
-                {tab === 'marks' && (
-                  <>
-                    <h3>My marks</h3>
-                    {mine.marks.length === 0 && <Empty text="No marks yet" />}
-                    <div class="cb-list">
-                      {mine.marks.map((m) => (
-                        <div key={m.id} class="cb-row haspic" data-testid="mark-row">
-                          <Pic ra={m.ra} dec={m.dec} label={m.label || 'mark'} />
-                          <span class="cb-main">
-                            <b>{m.label || 'Mark'}</b>
-                            <span class="mono-s">
-                              {place(m.ra, m.dec)}
-                              {m.pass != null ? ` · pass ${m.pass + 1}` : ''}
-                              {m.cell_id ? ` · square ${m.cell_id}` : ''} · {when(m.created)}
-                            </span>
-                            {m.note && <span class="cb-note">{m.note}</span>}
-                          </span>
-                          <span class="cb-side">
-                            <span class={`badge st-${m.level}`}>{m.level}</span>
-                            <a class="btn sm" href={markHash(m)}>
-                              Open in the lab
-                            </a>
-                            <button class="btn sm" onClick={() => confirm('Delete this mark?') && void run(api(`/api/me/marks/${encodeURIComponent(m.id)}`, { method: 'DELETE' }))}>
-                              Delete
-                            </button>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-                {tab === 'findings' && (
-                  <>
-                    <h3>
-                      My findings
-                      <span class="cb-actions">
-                        <button class="btn sm" onClick={() => void take('finding')}>
-                          Check a finding
-                        </button>
-                      </span>
-                    </h3>
-                    {mine.findings.length === 0 && <Empty text="No findings yet" />}
-                    <div class="cb-list">
-                      {mine.findings.map((f) => (
-                        <a key={`${f.finding_id}${f.role}`} class="cb-row haspic" href={`#/findings?lead=${encodeURIComponent(f.finding_id)}`} data-testid="finding-row">
-                          <Pic findingId={f.finding_id} ra={f.ra} dec={f.dec} label={f.title || `finding ${f.finding_id}`} />
-                          <span class="cb-main">
-                            <b>{f.title || `Finding ${f.finding_id}`}</b>
-                            <span class="mono-s">
-                              {ROLE[f.role] ?? f.role}
-                              {f.result ? `: ${RESULT[f.result] ?? f.result}` : ''} · {place(f.ra, f.dec)} {when(f.created)}
-                            </span>
-                          </span>
-                          <span class="cb-side">
-                            {f.role === 'submitted' && (
-                              <button class="btn sm" onClick={(e) => (e.preventDefault(), (location.hash = `#/findings/${f.finding_id}/story`))} data-testid="to-story">
-                                Story and share
-                              </button>
-                            )}
-                            <span class={`badge st-${f.status}`}>{words(f.status)}</span>
-                          </span>
-                        </a>
-                      ))}
-                    </div>
-                  </>
-                )}
-                {tab === 'investigations' &&
-                  (opened ? (
-                    <InvestigationPage inv={opened} marks={mine.marks} finding={mine.findings.find((f) => f.finding_id === opened.submitted) ?? null} reload={reload} />
-                  ) : (
-                    <>
-                      <h3>Investigations</h3>
-                      {invId && <Empty text="No such investigation" />}
-                      {mine.investigations.length === 0 && <Empty text="No investigations yet" />}
-                      <div class="cb-list">
-                        {mine.investigations.map((inv) => {
-                          const first = mine.marks.find((m) => inv.mark_ids.includes(m.id));
-                          const c = inv.checks;
-                          return (
-                            <a key={inv.id} class="cb-row haspic" href={`#/me?tab=investigations&inv=${inv.id}`} data-testid="investigation">
-                              <Pic findingId={inv.finding_id} ra={first?.ra} dec={first?.dec} label={inv.title} />
-                              <span class="cb-main">
-                                <b>{inv.title}</b>
-                                <span class="mono-s">
-                                  {(inv.items ?? []).length} objects · {inv.mark_ids.length} marks · {inv.notes.length} notes · changed {when(inv.updated)}
-                                </span>
-                              </span>
-                              <span class="cb-side">
-                                <span class={`badge st-inv-${inv.state}`}>{INV_STATE[inv.state] ?? words(inv.state)}</span>
-                                {c && !inv.submitted && inv.state === 'open' && <span class="mono-s">{c.can_submit ? 'checks passed' : c.state === 'done' ? 'checks block submit' : 'checks running'}</span>}
-                              </span>
-                            </a>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ))}
-                {tab === 'tasks' && (
-                  <>
-                    <h3>
-                      Tasks
-                      <span class="cb-actions">
-                        <button class="btn sm" onClick={() => void take('cell')}>
-                          Take a square
-                        </button>
-                        <button class="btn sm" onClick={() => void take('finding')}>
-                          Check a finding
-                        </button>
-                      </span>
-                    </h3>
-                    {mine.tasks.length === 0 && inflight.length === 0 && <Empty text="No tasks yet" />}
-                    <div class="cb-list">
-                      {inflight.map((inv) => (
-                        <a key={inv.id} class="cb-row haspic" href={`#/me?tab=investigations&inv=${inv.id}`} data-testid="submit-row">
-                          <Pic findingId={inv.finding_id} ra={mine.marks.find((m) => inv.mark_ids.includes(m.id))?.ra} dec={mine.marks.find((m) => inv.mark_ids.includes(m.id))?.dec} label={inv.title} />
-                          <span class="cb-main">
-                            <b>Submit: {inv.title}</b>
-                            <span class="mono-s">{inv.state === 'checking' ? inv.progress || 'checks running' : inv.state === 'needs_comment' ? 'every check has answered · a comment is needed' : 'a check blocks the submit'}</span>
-                          </span>
-                          <span class="cb-side">
-                            <span class={`badge st-inv-${inv.state}`}>{INV_STATE[inv.state] ?? words(inv.state)}</span>
-                          </span>
-                        </a>
-                      ))}
-                    </div>
-                    <div class="cb-list">
-                      {mine.tasks.map((t) => (
-                        <TaskRow key={t.id} t={t} />
-                      ))}
-                    </div>
-                  </>
-                )}
-                {tab === 'history' && (
-                  <>
-                    <h3>
-                      View history
-                      {mine.history.length > 0 && (
-                        <span class="cb-actions">
-                          <button class="btn sm" onClick={() => confirm('Clear the view history?') && void run(api('/api/me/history', { method: 'DELETE' }))}>
-                            Clear
-                          </button>
-                        </span>
-                      )}
-                    </h3>
-                    {mine.history.length === 0 && <Empty text="Nothing opened yet" />}
-                    <div class="cb-list">
-                      {mine.history.map((h) => (
-                        <a key={h.id} class="cb-row haspic" href={h.ref} data-testid="history-row">
-                          <Pic {...placeOf(h.ref)} label={h.title || 'this place'} />
-                          <span class="cb-main">
-                            <b>{h.title || h.ref}</b>
-                            <span class="mono-s">{when(h.at)}</span>
-                          </span>
-                          <span class="cb-side">
-                            <span class="badge">{h.kind}</span>
-                          </span>
-                        </a>
-                      ))}
-                    </div>
-                  </>
-                )}
-                {tab === 'score' && (
-                  <>
-                    <h3>Score</h3>
-                    <ScorePanel />
-                  </>
-                )}
-                {tab === 'account' && (
-                  <>
-                    <h3>Account</h3>
-                    <div class="cb-account">
-                      <div class="cb-line">
-                        <b>{user.name}</b>
-                        <span class="mono-s">{user.email}</span>
-                      </div>
-                      <HideFromBoard />
-                      <PublicProfile />
-                      <div class="cb-line">
-                        <a class="btn sm" href="/api/me/export" download="spherex-space-my-data.json" data-testid="download-data">
-                          Download my data
-                        </a>
-                        <span class="mono-s">JSON: marks, squares, tasks, investigations, findings, history, notifications</span>
-                      </div>
-                      <div class="cb-line">
-                        <button
-                          class="btn sm danger"
-                          data-testid="delete-account"
-                          onClick={() =>
-                            confirm('Delete your account and all your data? Marks, squares, investigations, history and notifications are removed and cannot be restored. Findings you submitted stay, without your name.') &&
-                            void api('/api/me', { method: 'DELETE' }).then(() => loadUser(), (e: Error) => setStatus(e.message))
-                          }
-                        >
-                          Delete my account and my data
-                        </button>
-                      </div>
-                    </div>
-                  </>
-                )}
-                {tab === 'notifications' && (
-                  <>
-                    <h3>
-                      Notifications
-                      {unread > 0 && (
-                        <span class="cb-actions">
-                          <button class="btn sm" onClick={() => void run(api('/api/me/notifications/read', { method: 'POST', body: {} }))}>
-                            Mark all read
-                          </button>
-                        </span>
-                      )}
-                    </h3>
-                    {mine.notifications.length === 0 && <Empty text="No notifications" />}
-                    <div class="cb-list">
-                      {mine.notifications.map((n) => (
-                        <a key={n.id} class={`cb-row cb-wrap ${n.read ? '' : 'unread'}`} href={!n.ref ? '#/me?tab=notifications' : n.ref.startsWith('#/') ? n.ref : `#/findings?lead=${encodeURIComponent(n.ref)}`} data-testid="notice-row">
-                          <span class="cb-main">
-                            <b>{n.text}</b>
-                            <span class="mono-s">{when(n.created)}</span>
-                          </span>
-                        </a>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
           </>
         )}
       </div>

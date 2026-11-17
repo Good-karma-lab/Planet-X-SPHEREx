@@ -69,10 +69,20 @@ export function Tour({ auto = true }: { auto?: boolean }) {
     const on = () => setK(0);
     window.addEventListener('spherex:tour', on);
     // only on the bare globe: the front page (landing) and a link that names a place or an object (#/explore?ra=..) are never taken over by the tour
-    if (auto && !seen() && /^#\/(globe|explore)$/.test(location.hash)) {
-      const t = setTimeout(() => setK(0), 2500);
+    const bare = () => /^#\/(globe|explore)$/.test(location.hash);
+    if (auto && !seen() && bare()) {
+      // it starts only for someone still on the bare globe: a click on the rail (or any other address) before it is due cancels it,
+      // so the tour never takes a person back to the globe
+      const t = setTimeout(() => {
+        if (bare()) setK(0);
+      }, 2500);
+      const away = () => {
+        if (!bare()) clearTimeout(t);
+      };
+      window.addEventListener('hashchange', away);
       return () => {
         clearTimeout(t);
+        window.removeEventListener('hashchange', away);
         window.removeEventListener('spherex:tour', on);
       };
     }

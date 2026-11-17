@@ -123,7 +123,7 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
   const stage = inv.submitted ? (finding?.status ?? 'submitted') : null;
   return (
     <div class="cb-page" data-testid="investigation-page">
-      <a class="btn sm cb-back" href="#/me?tab=investigations">
+      <a class="btn sm cb-back" href="#/me">
         ← All investigations
       </a>
       <div class="cb-title">
@@ -285,7 +285,7 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
         {!inv.submitted && (
           <button
             class="btn sm danger"
-            onClick={() => confirm(`Delete the investigation “${inv.title}”?`) && void api(`/api/me/investigations/${inv.id}`, { method: 'DELETE' }).then(() => (location.hash = '#/me?tab=investigations'), (e: Error) => setStatus(e.message))}
+            onClick={() => confirm(`Delete the investigation “${inv.title}”?`) && void api(`/api/me/investigations/${inv.id}`, { method: 'DELETE' }).then(() => (location.hash = "#/me"), (e: Error) => setStatus(e.message))}
           >
             Delete
           </button>

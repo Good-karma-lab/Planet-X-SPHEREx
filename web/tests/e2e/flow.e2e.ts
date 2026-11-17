@@ -131,7 +131,7 @@ test('5. Check and submit on a known star: the checks run and the submit is refu
   expect(made, 'a known mover near Barnard\'s Star with a measured path is in the findings').not.toBeNull();
   expect(made!.marks).toBeGreaterThanOrEqual(2);
 
-  await page.goto(`/#/me?tab=investigations&inv=${made!.inv}`);
+  await page.goto(`/#/me?inv=${made!.inv}`);
   await expect(page.getByTestId('investigation-page')).toBeVisible();
   await page.getByTestId('check-submit').click();
   // "Check and submit" is said once; a quick check that fails ends the job early and the page says which
@@ -162,22 +162,22 @@ test('6. a case that passes: the fast-mover lead is checked, commented and submi
     (lead) => fetch('/api/me/investigations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Fast mover near Barnard (end-to-end)', finding_id: lead }) }).then((r) => r.json()).then((d: { id: string }) => d.id),
     LEAD,
   );
-  await page.goto(`/#/me?tab=investigations&inv=${inv}`);
+  await page.goto(`/#/me?inv=${inv}`);
   // said once, with the first comment given up front; then the user leaves the page
   await page.getByTestId('declare-note').fill('Not one straight line: the body is 0.4 au away and its path curves over 169 hours; the track search fits all five visits.');
   await page.getByTestId('check-submit').click();
   await expect(page.getByTestId('checks-status')).toHaveText(/^(Submit declared · .*you may leave|Every check has answered · one comment needed)/, { timeout: 60_000 });
   await shot('6-declared');
-  await page.getByTestId('tab-tasks').click();
-  await expect(page.getByTestId('submit-row').filter({ hasText: 'Fast mover near Barnard (end-to-end)' })).toBeVisible();
+  await page.goto('/#/me');
+  await expect(page.getByTestId('investigation').filter({ hasText: 'Fast mover near Barnard (end-to-end)' })).toBeVisible();
   await shot('6-tasks-progress');
   // JPL is asked for each of the five visits (minutes): the server goes on without the page and says when a comment is needed
   await expect(async () => {
-    await page.getByTestId('tab-history').click();
+    await page.keyboard.press('Escape'); // the bell's panel closed, then opened again: it reads the notifications anew
     await page.getByTestId('tab-notifications').click();
     await expect(page.getByTestId('panel-notifications')).toContainText('“Fast mover near Barnard (end-to-end)”: every check has answered. One comment is needed', { timeout: 5000 });
   }).toPass({ timeout: 1_500_000, intervals: [15_000] });
-  await page.goto(`/#/me?tab=investigations&inv=${inv}`);
+  await page.goto(`/#/me?inv=${inv}`);
   await expect(page.getByTestId('checks-status')).toHaveText(/one comment needed for the warnings/);
   await expect(page.getByTestId('checks').getByText(/^two passes: pass$/i)).toBeVisible();
   // the second comment is all it waited for: the finding is submitted with no further click
@@ -186,13 +186,13 @@ test('6. a case that passes: the fast-mover lead is checked, commented and submi
   await expect(page.getByTestId('verdict')).toContainText('Submitted. Waiting for the verdict.');
   submitted = true;
   await shot('6-submitted');
-  await page.getByTestId('tab-findings').click();
+  await page.goto('/#/me?work=findings');
   await expect(page.getByTestId('panel-findings')).toContainText('Fast mover near Barnard (end-to-end)');
   await expect(page.getByTestId('panel-findings')).toContainText(/submitted/i);
-  // Findings: the card of the lead carries the user's name
-  await page.getByTestId('nav-findings').click();
+  // Findings: the lead carries the user's name (its own page: the list shows the most promising first, and there are a thousand)
   const name = email.split('@')[0]!;
-  await expect(page.locator('.fcard-credit', { hasText: name }).first()).toBeVisible({ timeout: 60_000 });
+  await page.goto(`/#/findings/${encodeURIComponent(LEAD)}`);
+  await expect(page.getByRole('heading', { name: 'Credit' }).locator('xpath=..')).toContainText(`marked first by ${name}`, { timeout: 60_000 });
   await shot('6-findings-credit');
 });
 
@@ -205,10 +205,11 @@ test('7. the verdict tool changes the status and the Cabinet tab shows the unrea
   await page.evaluate(() => fetch('/api/me/notifications/read', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
   const out = execSync(`${process.env.UV ?? 'uv'} run --project .. python -m service.accounts.verdict ${LEAD} candidate`, { cwd: '..', env: { ...process.env, SKY_PRODUCT_DB: process.env.SKY_FLOW_PRODUCT_DB } }).toString();
   expect(out).toContain('candidate');
-  await page.getByTestId('tab-history').click();
+  await page.keyboard.press('Escape');
   await page.getByTestId('tab-notifications').click();
   await expect(page.getByTestId('panel-notifications')).toContainText('the status is now “candidate”');
   await expect(page.getByTestId('nav-unread')).toBeVisible();
+  await page.keyboard.press('Escape');
   await page.getByTestId('tab-findings').click();
   await expect(page.getByTestId('panel-findings')).toContainText(/candidate/i);
   await shot('7-verdict');
@@ -230,6 +231,7 @@ test('8. the cabinet keeps the work: the investigation, its marks with pictures,
   } else {
     test.info().annotations.push({ type: 'note', description: 'the checks job was still running (JPL): the "checks finished" notification was not asserted' });
   }
+  await page.keyboard.press('Escape');
   await page.getByTestId('tab-history').click();
   await expect(page.getByTestId('panel-history')).toBeVisible();
   await shot('8-cabinet');
@@ -237,6 +239,7 @@ test('8. the cabinet keeps the work: the investigation, its marks with pictures,
 
 test('9. the user signs out; the site still works for a guest', async () => {
   await page.goto('/#/me');
+  await page.getByTestId('account-menu').click();
   await page.getByTestId('signout').click();
   await expect(page.getByTestId('signin')).toBeVisible();
   expect(await page.evaluate(() => fetch('/api/me/marks').then((r) => r.status))).toBe(401);
