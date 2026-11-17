@@ -6,9 +6,12 @@ import { addMark, allMarks, fieldKey, MARK_LEVELS, marksSyncNote, onMarks, remov
 import { drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, matchKnown, type KnownDrawEnv, type KnownMatch, type KnownState } from './known';
 import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
-import { awardLine, ChecksList, checksStatus, declaredWord, declareSubmit, followDeclared, useChecks, useLabTask } from './task';
+import { awardLine, ChecksList, checksStatus, declaredWord, declareSubmit, focusKind, followDeclared, taskOfParams, useChecks, useLabTask } from './task';
+import { AnomalyView, MoverView, RedView } from './taskviews';
+import type { Anomaly, Source } from '../spectrum';
 import { motionOf } from './known';
 import { placeAt } from './known';
+import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
 import './flow.css';
 
 export interface FlowGrid {
@@ -44,6 +47,28 @@ export interface FlowArgs {
   passes: { index: number; label: string }[];
   /** a small JPEG of the picture as it is now (a data URL), null when it cannot be made */
   thumb: () => string | null;
+  /** the lab's selected object (in a task: the object in question) */
+  sel: Source | null;
+  /** the mover tracks the search of the field found: places per pass */
+  tracks: FlowTrack[];
+  /** the anomalies the search of the field found */
+  anomalies: Anomaly[];
+  /** changes address parameters of the lab; opens a tab of its panel; selects an anomaly or a track by its number */
+  set: (params: Record<string, string | null>) => void;
+  setTab: (tab: 'ctl' | 'obj' | 'spec' | 'cand') => void;
+  pickAnomaly: (n: number) => void;
+  pickTrack: (i: number) => void;
+}
+
+export interface FlowTrack {
+  passes: number[];
+  mjd: number[];
+  ra: number[];
+  dec: number[];
+  ra_2025_9: number;
+  dec_2025_9: number;
+  speed: number;
+  pa: number;
 }
 
 export type FlowTool = 'mark' | 'ruler' | null;
@@ -51,6 +76,8 @@ export type FlowTool = 'mark' | 'ruler' | null;
 export interface FlowDrawEnv extends Omit<KnownDrawEnv, 'pointer' | 'match'> {
   /** a wall of tiles: rings and marks without names */
   wall: boolean;
+  /** a task about one object: nothing else may draw the eye (no rings on sources without a match) */
+  focus?: boolean;
   /** the picture of the pass on show and its noise (null in Days, on a wall, or before it has arrived) */
   picture: { pass: number; n: number; rgb: Uint16Array; bg: number; sigma: number; step: number } | null;
 }
@@ -83,6 +110,8 @@ export interface LabFlow {
   blink: [number, number] | null;
   /** the Task panel, null when the lab was opened without a task */
   taskPanel: ComponentChildren;
+  /** a task about one object, the others not asked for: only that object is bright, every other overlay a quiet outline */
+  focus: boolean;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -160,7 +189,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       countsRef.current = ck;
       setCounts(match ? { known: match.shown.size, noMatch: match.noMatch.length } : null);
     }
-    drawKnown({ ...env, pointer: ptr.current, match }, kn);
+    drawKnown({ ...env, pointer: ptr.current, match: match && env.focus ? { ...match, noMatch: [] } : match }, kn);
     const ms = marksRef.current;
     const rl = rulerRef.current;
     if (!ms.length && !rl.length) return;
@@ -423,7 +452,118 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       body: JSON.stringify({ ruler: { rate: Number(r.rate.toFixed(3)), catalogue_rate: Number(best.rate.toFixed(3)), object: best.name } }),
     }).catch(() => {});
   }, [inv, ruler, known.state]);
+  // ---- a task about one object (spec §5b): what the lab sets up and shows for its question
+  const task = taskOfParams(a.params);
+  const taskKey = task ? `${task.kind}|${task.id}|${task.finding_id}|${a.ra}|${a.dec}|${a.fov}` : '';
+  const sep = (ra1: number, dec1: number, ra2: number, dec2: number) =>
+    Math.hypot((((ra1 - ra2 + 540) % 360) - 180) * Math.cos((dec2 * Math.PI) / 180), dec1 - dec2) * 3600;
+  // the object in question: the lab's selected object, else the field's centre (a find is opened at its own place)
+  const at = a.sel ?? { ra: a.ra, dec: a.dec };
+  // the places the object may be given at: the selected object's catalogue place and its place during the survey (a moving one
+  // carries its J2000 place and its motion), the field's centre, and the place the address names for the find
+  const spots = useMemo(() => {
+    const out: [number, number][] = [[a.ra, a.dec]];
+    const fr = Number(a.params['find_ra']);
+    const fd = Number(a.params['find_dec']);
+    if (a.params['find_ra'] != null && Number.isFinite(fr) && Number.isFinite(fd)) out.push([fr, fd]);
+    if (a.sel) {
+      out.push([a.sel.ra, a.sel.dec]);
+      if (a.sel.pmra || a.sel.pmdec) out.push(atEpoch(a.sel.ra, a.sel.dec, a.sel.pmra ?? 0, a.sel.pmdec ?? 0, SURVEY_EPOCH));
+    }
+    return out;
+  }, [a.ra, a.dec, a.sel?.ra, a.sel?.dec, a.sel?.pmra, a.sel?.pmdec, a.params['find_ra'], a.params['find_dec']]);
+  const nearSpot = (ra: number, dec: number) => Math.min(...spots.map(([r, d]) => sep(ra, dec, r, d)));
+  // the track of the search at the object: the nearest within 20″ of any of its places; kept for the task once found
+  const found = useRef<{ key: string; track: number; anomaly: number }>({ key: '', track: -1, anomaly: -1 });
+  if (found.current.key !== taskKey) found.current = { key: taskKey, track: -1, anomaly: -1 };
+  const trackIx = useMemo(() => {
+    if (found.current.track >= 0 && found.current.track < a.tracks.length) return found.current.track;
+    let best = -1;
+    let bd = 20;
+    a.tracks.forEach((t, i) => {
+      const d = Math.min(nearSpot(t.ra_2025_9, t.dec_2025_9), ...t.ra.map((r, k) => nearSpot(r, t.dec[k]!)));
+      if (d < bd) {
+        bd = d;
+        best = i;
+      }
+    });
+    found.current.track = best;
+    return best;
+  }, [a.tracks, spots, taskKey]);
+  const track = trackIx >= 0 ? a.tracks[trackIx]! : null;
+  const anomaly = useMemo(() => {
+    const kept = a.anomalies.find((x) => x.n === found.current.anomaly);
+    if (kept) return kept;
+    let best: Anomaly | null = null;
+    let bd = 15;
+    for (const x of a.anomalies) {
+      const now = atEpoch(x.ra, x.dec, x.pmra ?? 0, x.pmdec ?? 0, SURVEY_EPOCH);
+      const d = Math.min(nearSpot(x.ra, x.dec), nearSpot(now[0], now[1]));
+      if (d < bd) {
+        bd = d;
+        best = x;
+      }
+    }
+    found.current.anomaly = best?.n ?? -1;
+    return best;
+  }, [a.anomalies, spots, taskKey]);
+  // set up once per task, when what it needs has arrived
+  const setUp = useRef('');
+  useEffect(() => {
+    if (!task || setUp.current === taskKey) return;
+    if (task.kind === 'mover') {
+      if (!track || track.passes.length < 2) return;
+      setUp.current = taskKey;
+      // the two passes with the largest shift between them: the Blink plays those two, the ruler lies from one to the other
+      let i0 = 0;
+      let i1 = 1;
+      let far = -1;
+      for (let i = 0; i < track.passes.length; i++)
+        for (let j = i + 1; j < track.passes.length; j++) {
+          const d = sep(track.ra[i]!, track.dec[i]!, track.ra[j]!, track.dec[j]!);
+          if (d > far) {
+            far = d;
+            i0 = i;
+            i1 = j;
+          }
+        }
+      const yr = (mjd: number) => 2000 + (mjd - 51544.5) / 365.25;
+      setPair([track.passes[i0]!, track.passes[i1]!]);
+      setBlinkOn(true);
+      setRuler([
+        { ra: track.ra[i0]!, dec: track.dec[i0]!, epoch: yr(track.mjd[i0]!), pass: track.passes[i0]! },
+        { ra: track.ra[i1]!, dec: track.dec[i1]!, epoch: yr(track.mjd[i1]!), pass: track.passes[i1]! },
+      ]);
+      a.pickTrack(trackIx);
+    } else if (task.kind === 'red') {
+      setUp.current = taskKey;
+      a.set({ arch: '1' }); // the old surveys (DSS2, 2MASS, AllWISE) play before the SPHEREx passes
+      a.setTab('obj'); // the passport
+    } else if (task.kind === 'anomaly') {
+      if (!anomaly) return;
+      setUp.current = taskKey;
+      a.pickAnomaly(anomaly.n); // its passport
+    } else setUp.current = taskKey;
+  }, [taskKey, track, anomaly]);
+  const labelOf = (i: number) => a.passes.find((q) => q.index === i)?.label ?? `pass ${i + 1}`;
+  const taskSrc: Source | null = task && (task.kind === 'red' || task.kind === 'anomaly') && a.grid ? at : null;
+  const extra =
+    task?.kind === 'mover' ? (
+      <MoverView
+        blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'off' : 'waits for the search of the field'}
+        ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
+        search={track ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes` : 'no track at this place yet'}
+      />
+    ) : task?.kind === 'red' ? (
+      <RedView src={taskSrc} />
+    ) : task?.kind === 'anomaly' ? (
+      <AnomalyView src={taskSrc} anomaly={anomaly} />
+    ) : null;
+  const others = a.params['others'] === '1';
   const taskPanel = useLabTask({
+    extra,
+    others,
+    setOthers: (on) => a.set({ others: on ? '1' : null }),
     params: a.params,
     open: a.open,
     ra: a.ra,
@@ -648,5 +788,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     markable: a.single && !!g,
     blink,
     taskPanel,
+    focus: !!task && focusKind(task.kind) && !others,
   };
 }
