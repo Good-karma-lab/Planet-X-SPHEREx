@@ -121,8 +121,9 @@ def test_a_build_asked_from_a_worker_thread_is_submitted_on_the_loop() -> None:
 
 
 def test_people_are_spread_and_a_newcomer_never_gets_a_famous_square(
-    site: tuple[FastAPI, _State, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:  # noqa: F811
+    site: tuple[FastAPI, _State, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Two guests do not all get the same square: a random one of the first few (built ones first); and a newcomer's first square is
     never one a famous test target stands in."""
     import random
