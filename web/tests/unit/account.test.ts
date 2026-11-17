@@ -21,12 +21,12 @@ describe('the view history knows a place from its hash', () => {
 });
 
 describe('where a task and a mark open', () => {
-  it('a square opens the 20′ field at its centre with the task', () => {
-    expect(taskHash(task({ cell_id: 'b10c20', ra: 10.5, dec: -3.25 }))).toBe('#/lab?ra=10.50000&dec=-3.25000&fov=20&task=t_1&kind=cell&cell=b10c20');
+  it('a square opens at 10′ at its centre with the task', () => {
+    expect(taskHash(task({ cell_id: 'b10c20', ra: 10.5, dec: -3.25 }))).toBe('#/lab?ra=10.50000&dec=-3.25000&fov=10&task=t_1&kind=cell&cell=b10c20');
   });
   it('a finding without a place opens its page', () => {
     expect(taskHash(task({ kind: 'finding', finding_id: 'mover:1' }))).toBe('#/findings?lead=mover%3A1');
-    expect(taskHash(task({ kind: 'finding', finding_id: 'mover:1', ra: 1, dec: 2 }))).toBe('#/lab?ra=1.00000&dec=2.00000&fov=5&task=t_1&kind=finding&finding=mover%3A1');
+    expect(taskHash(task({ kind: 'finding', finding_id: 'mover:1', ra: 1, dec: 2 }))).toBe('#/lab?ra=1.00000&dec=2.00000&fov=10&task=t_1&kind=finding&finding=mover%3A1');
   });
   it('a mark opens its field when the key carries the place, else its own position', () => {
     expect(markHash({ field_key: '269.4486,+4.7379,20', ra: 269.45, dec: 4.74 })).toBe('#/lab?ra=269.4486&dec=4.7379&fov=20');

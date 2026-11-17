@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "e2e:flow": "playwright test -c playwright.flow.config.ts"
   },
   "dependencies": {
     "preact": "10.24.3",

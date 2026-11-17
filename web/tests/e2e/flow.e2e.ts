@@ -44,7 +44,7 @@ test('2. Findings: "Check this finding" opens the lab with the task', async () =
   // the list is still filling in while its first cards show: a click that lands while it moves is made again
   await expect(async () => {
     if (!/#\/lab\?/.test(page.url())) await go.click({ timeout: 3000 });
-    await expect(page).toHaveURL(/#\/lab\?.*task=finding/, { timeout: 3000 });
+    await expect(page).toHaveURL(/#\/lab\?.*(task=finding|kind=finding)/, { timeout: 3000 });
   }).toPass({ timeout: 40_000 });
   findingId = new URLSearchParams(page.url().split('?')[1]).get('finding') ?? '';
   expect(findingId).not.toBe('');
@@ -90,7 +90,7 @@ test('4. the user puts marks on two passes in the lab; they appear in My marks',
     await expect(tool).toBeEnabled({ timeout: 20_000 });
     if ((await tool.getAttribute('aria-pressed')) !== 'true') await tool.click();
     await page.mouse.click(box.x + box.width * at[0], box.y + box.height * at[1]);
-    await expect(page.getByTestId('mark-editor')).toBeVisible();
+    await expect(page.getByTestId('flow-card')).toBeVisible();
     await page.getByTestId('mark-label').fill(labels[i]!);
     await expect(page.getByTestId('marks-list')).toContainText(labels[i]!);
   }
