@@ -4,6 +4,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useUser } from '../../lib/account';
+import { clearDo, pendingDo, useSignIn } from './signin';
 
 export type Quarter = 'NE' | 'NW' | 'SE' | 'SW';
 /** the picture's reading order: north up, east left */
@@ -15,7 +16,8 @@ export interface GridCell {
   ra: number;
   dec: number;
   corners: [number, number][];
-  quarters?: { id: string; ra?: number; dec?: number; viewers?: number; mine?: boolean }[];
+  /** the service's quarters (named `id`, or `q` in an earlier shape), with how many people looked and whether I did */
+  quarters?: { id?: string; q?: string; ra?: number; dec?: number; viewers?: number; mine?: boolean }[];
 }
 
 const wrap = (d: number) => ((d + 540) % 360) - 180;
@@ -117,8 +119,15 @@ export function useSquareLook(a: SquareArgs): SquareLook {
   // the look: seconds with the finished picture on show (page visible), and the passes shown
   const look = useRef({ seconds: 0, passes: new Set<number>() });
   const [, beat] = useState(0);
+  const lookKey = `spherex.look.${fieldKey}`;
   useEffect(() => {
     look.current = { seconds: 0, passes: new Set<number>() };
+    try {
+      const kept = JSON.parse(localStorage.getItem(lookKey) ?? 'null') as { seconds: number; passes: number[]; at: number } | null;
+      if (kept && Date.now() - kept.at < 2 * 3600e3) look.current = { seconds: kept.seconds, passes: new Set(kept.passes) };
+    } catch {
+      /* no store: the look starts at 0 */
+    }
   }, [fieldKey]);
   if (a.ready && a.pass != null) look.current.passes.add(a.pass);
   const readyRef = useRef(a.ready);
@@ -132,6 +141,11 @@ export function useSquareLook(a: SquareArgs): SquareLook {
       last = now;
       if (!readyRef.current || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) return;
       const before = Math.floor(look.current.seconds);
+      try {
+        localStorage.setItem(lookKey, JSON.stringify({ seconds: look.current.seconds, passes: [...look.current.passes], at: Date.now() }));
+      } catch {
+        /* a full store: the look is kept for this page only */
+      }
       look.current.seconds += dt;
       if (Math.floor(look.current.seconds) !== before && look.current.seconds <= LOOK_SECONDS + 2) beat((x) => x + 1);
     }, 1000);
@@ -157,31 +171,44 @@ export function useSquareLook(a: SquareArgs): SquareLook {
         .join(' · ')
     : '';
 
+  // a look is counted per quarter (the service takes no look at a whole square): a 20′ square looked through counts its four
+  // quarters. Only from the person's own click, and `confirm: true` says so
   const confirm = async (result?: 'nothing' | 'marks'): Promise<boolean> => {
     if (!cell || !canCount) return false;
-    try {
-      const r = await fetch(`/api/grid/cell/${encodeURIComponent(cell.id)}/viewed`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ confirm: true, ...(result ? { result } : {}), ...(quarter ? { quarter } : {}) }),
-      });
-      return r.ok;
-    } catch {
-      return false;
+    let ok = true;
+    for (const q of quarter ? [quarter] : QUARTERS) {
+      try {
+        const r = await fetch(`/api/grid/cell/${encodeURIComponent(cell.id)}/viewed`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ quarter: q, confirm: true, ...(result ? { result } : {}) }),
+        });
+        if (r.status === 401) {
+          setLine2('Sign in to count your look');
+          return false;
+        }
+        ok = ok && r.ok;
+      } catch {
+        ok = false;
+      }
     }
+    setTick((x) => x + 1); // the square again, with my quarters
+    return ok;
   };
 
   // the free lab's button; after a quarter, the next one of the square not yet looked through opens
   const inTask = !!a.params['task'];
+  const si = useSignIn();
   const done = async () => {
+    if (!user) return si.ask('look', 'look'); // a guest: the popup; the link comes back with do=look
     setLine2('saving…');
     const ok = await confirm();
-    if (!ok) return setLine2('Not counted: the service did not answer');
+    if (!ok) return setLine2((l) => l || 'Not counted: the service did not answer');
     if (!quarter || !cell) {
       setLine2('Counted');
       return setTick((x) => x + 1);
     }
-    const seen = new Set((cell.quarters ?? []).filter((q) => q.mine).map((q) => q.id));
+    const seen = new Set((cell.quarters ?? []).filter((q) => q.mine).map((q) => q.id ?? q.q));
     seen.add(quarter);
     const next = QUARTERS.slice(QUARTERS.indexOf(quarter) + 1)
       .concat(QUARTERS)
@@ -193,12 +220,18 @@ export function useSquareLook(a: SquareArgs): SquareLook {
     }
     a.open({ ...a.params, ra: at[0].toFixed(5), dec: at[1].toFixed(5), fov: '10', cell: cell.id, quarter: next });
   };
+  useEffect(() => {
+    if (pendingDo(a.params) === 'look' && !inTask && canCount) {
+      clearDo();
+      void done();
+    }
+  }, [canCount, !!user]);
   const button =
     cell && !inTask ? (
       <div class="sqlook" data-testid="square-look">
         <button
           class="btn sm primary"
-          disabled={!canCount}
+          disabled={!!user && !canCount}
           title={canCount ? 'Count your look at this part of the sky' : why}
           onClick={() => void done()}
           data-testid="square-look-button"
@@ -208,6 +241,7 @@ export function useSquareLook(a: SquareArgs): SquareLook {
         <span class="sq-line" data-testid="square-look-line">
           {line2 || why}
         </span>
+        {si.popup}
       </div>
     ) : null;
 
