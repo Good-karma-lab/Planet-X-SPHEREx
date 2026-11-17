@@ -3478,7 +3478,7 @@ export function Lab({ route }: { route: Route }) {
         </div>
         <aside class="panel">
           {/* phones and upright tablets: the panel is a bottom sheet pulled up by this grabber (not displayed on a desktop) */}
-          <SheetGrip peek=".taskpanel, .panel-head" under=".lab .tbar" label="Lab panel" />
+          <SheetGrip peek=".taskpanel, :scope:not(:has(.taskpanel)) > .panel-head" under=".lab .tbar" label="Lab panel" />
           {flow.taskPanel}
           <div class="panel-head">
             <div class="seg sm" role="group" aria-label="Panel">

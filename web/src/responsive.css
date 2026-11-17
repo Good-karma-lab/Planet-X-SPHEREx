@@ -109,7 +109,7 @@
     border-radius: 0;
     border-width: 1px 0 0;
     overflow: visible;
-    background: rgba(6, 14, 19, 0.92);
+    background: #060e13;
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.45);
   }
   :root .rail .brand {
@@ -1705,7 +1705,7 @@
     border-radius: 0;
     border-width: 0 1px 0 0;
     overflow: visible;
-    background: rgba(6, 14, 19, 0.92);
+    background: #060e13;
   }
   :root .rail .brand {
     display: none;
@@ -2101,5 +2101,86 @@
   }
   :root .ipage:has(.fbar) .pg-h .hint {
     display: none;
+  }
+}
+
+/* ----- phones: nothing on a page can push it sideways (a browser that draws its scroll bar inside the window makes 100vw wider than
+   the page), and a card's title that is a link is a 44 px target ----- */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root,
+  :root body {
+    overflow-x: clip;
+    max-width: 100%;
+  }
+  :root .fcard-title a,
+  :root a.fcard-title {
+    display: flex;
+    align-items: center;
+    min-height: var(--hit);
+  }
+}
+
+/* =====================================================================================================================
+   PHONE, upright, in a LOW window (Safari gives an iPhone 13 a page 390 x 664): the picture keeps its width.
+   The task alone is the sheet's header (ui/Sheet.tsx is told so in lab.tsx), its block is tight, and the band chips lie
+   over the bottom edge of the picture, as they do on a desktop, instead of taking a row of their own.
+   ===================================================================================================================== */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .taskpanel {
+    gap: 4px;
+    padding: 0 14px 8px;
+  }
+  :root .taskpanel .tp-ask {
+    font-size: 15px;
+    line-height: 1.25;
+  }
+  :root .taskpanel .tp-line {
+    font-size: 12px;
+    height: 18px;
+  }
+  :root .taskpanel .tp-btns {
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+  :root .taskpanel .tp-btns .btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 6px;
+    font-size: 14px;
+    white-space: normal;
+    line-height: 1.15;
+  }
+}
+@media (max-width: 599.98px) and (min-height: 480px) and (max-height: 739.98px) {
+  /* the kind of the task is said by its question; the label above it gives its line to the picture */
+  :root .taskpanel .tp-head {
+    display: none;
+  }
+  :root .lab .vstage {
+    margin-bottom: 0;
+  }
+  :root .vsq .fbands,
+  :root .vsq.compact .fbands {
+    top: auto;
+    bottom: 0;
+    height: 50px;
+    padding: 3px 8px;
+    background: linear-gradient(to top, rgba(2, 7, 10, 0.75), rgba(2, 7, 10, 0));
+  }
+  :root .vsq .fbands .bchip,
+  :root .vsq.compact .fbands .bchip {
+    background: rgba(6, 12, 18, 0.82);
+  }
+  :root .vsq .fstatus,
+  :root .vsq.compact .fstatus {
+    bottom: 56px;
+  }
+  :root .vsq .float.fmark {
+    bottom: 56px;
+  }
+  :root .tbar {
+    grid-template-rows: 46px 44px;
+    gap: 2px 8px;
+    padding: 3px 8px;
   }
 }
