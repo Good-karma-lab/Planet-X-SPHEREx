@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
+import { useRetry } from '../lab/progress';
+import type { Held } from '../lab/known';
 import './search.css';
 
 /** One catalogue's answer inside /api/v1/context: ok (with the fields of that catalogue), none (it answered: nothing here) or unavailable. */
@@ -31,13 +33,31 @@ export const hasPending = (r: ContextReply): boolean => Object.values(r).some((p
 
 type Ask = { state: 'loading' } | { state: 'absent' } | { state: 'error'; error: string } | { state: 'ok'; reply: ContextReply };
 
-/** What the catalogues know about a place at an epoch. `absent`: the service has no such route yet (the component then renders nothing). */
-export function useContext(ra: number, dec: number, epoch = 2025.9, radius = 6): Ask {
+/** What the catalogues know about a place at an epoch. `absent`: the service has no such route yet (the component then renders nothing).
+ *  `skip`: catalogues the page already holds (not asked); `pm`: the held motion, mas/yr, that places the infrared surveys then. `nonce`:
+ *  a new value asks again (the retry of a catalogue that did not answer). */
+export function useContext(
+  ra: number,
+  dec: number,
+  epoch = 2025.9,
+  radius = 6,
+  skip: string[] = [],
+  pm: [number, number] | null = null,
+  nonce = 0,
+): Ask {
   const [a, setA] = useState<Ask>({ state: 'loading' });
+  const skipKey = skip.join(',');
+  const pmKey = pm ? `${pm[0]},${pm[1]}` : '';
   useEffect(() => {
-    setA({ state: 'loading' });
+    // a retry keeps what is shown until the new answer lands
+    if (!nonce) setA({ state: 'loading' });
     const ctl = new AbortController();
     const q = new URLSearchParams({ ra: ra.toFixed(6), dec: dec.toFixed(6), epoch: String(epoch), radius: String(radius) });
+    if (skipKey) q.set('skip', skipKey);
+    if (pm && skipKey.includes('gaia') && skipKey.includes('simbad')) {
+      q.set('pmra', String(pm[0]));
+      q.set('pmdec', String(pm[1]));
+    }
     const ask = async (n: number): Promise<void> => {
       const r = await fetch(`/api/v1/context?${q}`, { signal: ctl.signal });
       if (r.status === 404) return setA({ state: 'absent' });
@@ -53,7 +73,7 @@ export function useContext(ra: number, dec: number, epoch = 2025.9, radius = 6):
       if (!ctl.signal.aborted) setA({ state: 'error', error: String(e.message ?? e) });
     });
     return () => ctl.abort();
-  }, [ra, dec, epoch, radius]);
+  }, [ra, dec, epoch, radius, skipKey, pmKey, nonce]);
   return a;
 }
 
@@ -136,6 +156,19 @@ function useCloudAllwise(ra: number, dec: number, pmra: number, pmdec: number, r
 }
 const mag = (v: number | null | undefined) => (typeof v === 'number' ? v.toFixed(2) : '—');
 
+/** A catalogue row as the field's lookup already answered it, or null when the lookup did not cover that catalogue. */
+export function heldRow(key: keyof ContextReply, held: Held | null | undefined): string | null {
+  if (!held || !held.covered.includes(key as 'gaia' | 'simbad')) return null;
+  if (key === 'simbad') return held.simbad === 'none' || !held.simbad ? 'no entry' : `${held.simbad.name}${held.simbad.type ? ` · ${held.simbad.type}` : ''}`;
+  const g = held.gaia;
+  if (!g) return 'no entry';
+  const parts = [g.source_id];
+  if (g.g != null) parts.push(`G ${g.g.toFixed(2)}`);
+  if (g.parallax != null && g.parallax > 0) parts.push(`parallax ${g.parallax.toFixed(2)} mas`);
+  if (g.pmra != null && g.pmdec != null) parts.push(`motion ${(Math.hypot(g.pmra, g.pmdec) / 1000).toFixed(2)} ″/yr`);
+  return parts.join(' · ');
+}
+
 /** What else is known at a place: one row per catalogue (SIMBAD, Gaia, 2MASS, AllWISE, CatWISE, VSX, NED). A catalogue that did not answer is said, never left out. */
 export function ContextRows({
   ra,
@@ -143,21 +176,41 @@ export function ContextRows({
   epoch,
   pmra = 0,
   pmdec = 0,
+  held = null,
 }: {
   ra: number;
   dec: number;
   epoch?: number;
   pmra?: number;
   pmdec?: number;
+  /** what the field's lookup already holds about this source (a ringed known star): its rows are shown from it, not asked again */
+  held?: Held | null;
 }) {
-  const a = useContext(ra, dec, epoch);
+  const skip = held?.covered ?? [];
+  const hpm: [number, number] | null = held?.gaia?.pmra != null && held.gaia.pmdec != null ? [held.gaia.pmra, held.gaia.pmdec] : null;
+  const [nonce, setNonce] = useState(0);
+  const a = useContext(ra, dec, epoch, 6, skip, hpm, nonce);
   const cloud = useCloudAllwise(ra, dec, pmra, pmdec);
+  // a catalogue that did not answer here is asked again by itself, on the field lookup's schedule, with its countdown
+  const silent = a.state === 'error' || (a.state === 'ok' && !hasPending(a.reply) && ROWS.some((r) => (a.reply[r.key] as Part | undefined)?.state === 'unavailable'));
+  const retry = useRetry(silent, () => setNonce((n) => n + 1), `${ra.toFixed(5)},${dec.toFixed(5)}`);
+  const known = !!held || (a.state === 'ok' && ['simbad', 'gaia', 'twomass', 'allwise', 'catwise'].some((k) => (a.reply[k as keyof ContextReply] as Part | undefined)?.state === 'ok'));
+  const nextTry = retry.nextIn != null ? ` · next try in ${retry.nextIn} s` : '';
   if (a.state === 'absent') return null;
   return (
     <div class="ctxbox">
       <div class="search-h">What else is known here</div>
-      {a.state === 'loading' && <div class="mono-s">Asking SIMBAD, Gaia and the infrared catalogues…</div>}
-      {a.state === 'error' && <div class="mono-s">The catalogues could not be asked: {a.error}</div>}
+      {a.state === 'loading' && (
+        <div class="mono-s">
+          {skip.length ? 'Asking the infrared catalogues, VSX and NED…' : 'Asking SIMBAD, Gaia and the infrared catalogues…'}
+        </div>
+      )}
+      {a.state === 'error' && (
+        <div class="mono-s">
+          The catalogues could not be asked: {a.error}
+          {nextTry}
+        </div>
+      )}
       {a.state === 'ok' && (
         <>
           <div class="okv">
@@ -168,7 +221,11 @@ export function ContextRows({
               let tip: string | undefined;
               let href: string | undefined;
               const fromCloud = p?.state === 'unavailable' && (row.key === 'twomass' || row.key === 'allwise') ? cloud : null;
-              if (fromCloud?.state === 'ok') {
+              const h = heldRow(row.key, held);
+              if (h) {
+                text = h;
+                tip = "the field's catalogue lookup already answered this: not asked again";
+              } else if (fromCloud?.state === 'ok') {
                 const c = fromCloud.row;
                 const sep = typeof c.sep_arcsec === 'number' ? ` · ${c.sep_arcsec.toFixed(1)}″ away` : '';
                 text =
@@ -186,10 +243,11 @@ export function ContextRows({
                 text = 'asking…';
                 tip = 'the catalogue has not answered yet: this page asks again';
               } else if (p?.state === 'unavailable') {
-                text = 'did not answer';
+                text = `did not answer${nextTry}`;
                 tip = p.error;
               } else if (p?.state === 'none') {
-                text = `nothing within ${radius}″`;
+                // a known source that one catalogue does not list: a quiet "no entry", not the headline of an unknown
+                text = known ? 'no entry' : `nothing within ${radius}″`;
                 tip = 'the catalogue answered: no source at this place';
               } else if (p?.state === 'ok') {
                 text = row.ok(p);
@@ -213,7 +271,16 @@ export function ContextRows({
           </div>
           <div class="mono-s">
             searched at the epoch of the passes, radius {a.reply.radius ?? 6}″
-            {a.reply.complete === false ? ' · at least one catalogue did not answer: asked again next time' : ''}
+            {skip.length ? ` · ${skip.map((k) => (k === 'gaia' ? 'Gaia' : 'SIMBAD')).join(' and ')} from the field’s lookup` : ''}
+            {silent ? ` · a catalogue did not answer: asked again by itself${nextTry}` : ''}
+            {silent && (
+              <>
+                {' '}
+                <button class="lnk" onClick={retry.tryNow}>
+                  try now
+                </button>
+              </>
+            )}
           </div>
         </>
       )}

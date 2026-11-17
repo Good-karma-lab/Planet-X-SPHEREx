@@ -202,7 +202,14 @@ def test_route(tmp_path: Path) -> None:
         assert r.headers.get("content-encoding") == "gzip"
         small = c.get("/api/known", params={"ra": 269.449, "dec": 4.741, "size_arcmin": 6, "epochs": "2025.9,2026.6", "compact": 1}).json()
         thin = next(x for x in small["objects"] if not x["label"])
-        assert set(thin) == {"id", "source", "positions", "mag", "label"} and len(small["objects"]) == len(r.json()["objects"])
+        # a thin ring keeps the identity the passport takes from it: motion, parallax (and a SIMBAD name when it has one)
+        assert (
+            {"id", "source", "positions", "mag", "label"}
+            <= set(thin)
+            <= {"id", "source", "positions", "mag", "label", "pmra", "pmdec", "parallax", "name", "type", "simbad"}
+        )
+        assert "pm_total" not in thin and len(small["objects"]) == len(r.json()["objects"])
+        assert all(("simbad" in x) == ("simbad" in y) for x, y in zip(small["objects"], r.json()["objects"], strict=True))
         assert c.get("/api/known", params={"ra": 1, "dec": 1, "size_arcmin": 6, "epochs": "x"}).status_code == 400
         assert c.get("/api/known", params={"ra": 1, "dec": 1, "size_arcmin": 600, "epochs": "2026"}).status_code == 422
 

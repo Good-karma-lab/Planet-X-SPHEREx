@@ -18,6 +18,11 @@ export interface Ident {
   raw?: unknown;
   note?: string;
 }
+
+/** A find some catalogue knows (not the halo check): a miss in another catalogue is then a quiet "no entry", not the word of an unknown. */
+export function knownIn(idents: Ident[]): boolean {
+  return idents.some((i) => i.catalogue !== 'halo' && i.state === 'ok');
+}
 export interface Find {
   id: string;
   kind: string;
@@ -473,7 +478,9 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
                   : i.state === 'none'
                     ? i.catalogue === 'halo'
                       ? 'no bright star within 60″'
-                      : 'nothing within 6″'
+                      : knownIn(f.idents)
+                        ? 'no entry'
+                        : 'nothing within 6″'
                     : i.state === 'unavailable'
                       ? 'did not answer'
                       : 'not asked yet'}

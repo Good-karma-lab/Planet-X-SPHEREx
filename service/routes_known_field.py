@@ -51,10 +51,16 @@ def make_known_field_router(st: Any, prefix: str = "/api") -> APIRouter:
         if not eps or len(eps) > MAX_EPOCHS or not all(1990.0 <= e <= 2100.0 or 48000.0 <= e <= 90000.0 for e in eps):
             raise HTTPException(400, f"epochs: 1 to {MAX_EPOCHS} Julian years (1990-2100) or MJDs")
         out = await known_field_of(st).objects(round(ra, 5), round(dec, 5), round(size_arcmin, 1), eps, match=bool(match), wait_s=wait)
-        if compact:  # objects without a label keep only what a thin ring needs
-            keep = ("id", "source", "positions", "mag", "label")
-            out = {**out, "objects": [o if o["label"] else {k: o[k] for k in keep} for o in out["objects"]]}
-            out["match"] = [{k: m[k] for k in ("id", "catalogues", "positions", "mag")} for m in out.get("match", [])]
+        if compact:  # objects without a label keep what a thin ring needs and what the passport takes as the source's identity
+            keep = ("id", "source", "positions", "mag", "label", "pmra", "pmdec", "parallax")
+            named = ("name", "type", "simbad")  # a SIMBAD object, or a Gaia star SIMBAD names: its name is its identity
+
+            def thin(o: dict[str, Any]) -> dict[str, Any]:
+                ks = keep + named if (o["source"] != "gaia" or o.get("simbad")) else keep
+                return {k: o[k] for k in ks if k in o}
+
+            out = {**out, "objects": [o if o["label"] else thin(o) for o in out["objects"]]}
+            out["match"] = [{k: m[k] for k in ("id", "catalogues", "ids", "positions", "mag") if k in m} for m in out.get("match", [])]
         body = json.dumps(out, separators=(",", ":")).encode()
         headers = {"Vary": "Accept-Encoding"}
         if len(body) > 1000 and "gzip" in request.headers.get("accept-encoding", ""):
