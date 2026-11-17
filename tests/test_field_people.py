@@ -91,6 +91,9 @@ def test_it_moves_on_two_passes_starts_the_checks_and_a_finding_found_by_people(
     assert (
         _mark(ann, "mv-0000003", "moves", 40.1006, 10.1002, **{"pass": 2})["effect"]["state"] == "checking" and len(st.started) == 1
     )  # one job per object
+    # another body in the same 10′ field (100″ away, on the first pass): its own object, not "checking" already
+    other = _mark(ann, "mv-0000009", "moves", 40.1 + 100 / 3600, 10.1, **{"pass": 0, "mjd": 61100.1})
+    assert other["effect"] == {"effect": "moves", "state": "needs_another_pass"} and len(st.started) == 1
     # the checks answer, none failed: submitted by itself, under her name
     st.jobs["j1"] = {"job": "j1", "state": "done", "checks": [{"id": "gaia", "state": "pass", "detail": ""}], "can_submit": True}
     st.on_checks_done(st.jobs["j1"])
@@ -206,3 +209,24 @@ def test_the_field_layer_merges_by_place_and_kind_and_shows_what_was_said_only_a
     assert hidden["mover:9"] == {"finding_id": "mover:9", "ra": 40.001, "dec": 10.001, "seen": False, "answers": 3}
     counts = ann.get("/api/people/counts").json()["field"]
     assert counts["marks"]["artefact"] == 3 and counts["artefact_looks"] == {"blinks": 2, "spike": 1} and counts["marks"]["moves"] == 1
+
+
+def test_mover_marks_link_only_across_passes_and_within_reach() -> None:
+    """Marks on the same picture are two objects; between passes months apart a body travels at most ~120″/yr, between visits
+    hours apart up to ~150″/h (field_people.mover_linked)."""
+    from service.accounts.field_people import mover_groups, mover_linked
+
+    d = 1 / 3600
+    a = {"ra": 40.0, "dec": 10.0, "pass": 0, "mjd": 61100.0}
+    assert not mover_linked(a, {**a, "ra": 40.0 + 5 * d})  # the same pass and visit: another object
+    assert mover_linked(a, {"ra": 40.0 + 40 * d, "dec": 10.0, "pass": 1, "mjd": 61280.0})  # half a year, 40″: a slow mover
+    assert not mover_linked(a, {"ra": 40.0 + 300 * d, "dec": 10.0, "pass": 1, "mjd": 61280.0})  # 300″ in half a year: another
+    assert mover_linked(a, {"ra": 40.0 + 300 * d, "dec": 10.0, "pass": 0, "mjd": 61100.1})  # 300″ in 2.4 h: an asteroid's visits
+    assert not mover_linked(a, {"ra": 40.0 + 300 * d, "dec": 10.0, "pass": 0, "mjd": 61100.01})  # 300″ in 14 minutes: too fast
+    assert mover_linked({**a, "mjd": None}, {"ra": 40.0 + 50 * d, "dec": 10.0, "pass": 1})  # no dates: 60″ between passes
+    marks = [
+        a,
+        {"ra": 40.0 + 40 * d, "dec": 10.0, "pass": 1, "mjd": 61280.0},
+        {"ra": 40.0 + 200 * d, "dec": 10.0, "pass": 0, "mjd": 61100.0},
+    ]
+    assert sorted(len(g) for g in mover_groups(marks)) == [1, 2]

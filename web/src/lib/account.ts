@@ -249,7 +249,8 @@ export function taskHash(t: Task): string {
     q.set('dec', t.dec.toFixed(5));
   }
   // every task opens at 10′ (a square a quarter at a time); a time-lapse keeps its own size
-  q.set('fov', t.kind === 'cell' ? String(t.fov ?? 10) : t.finding_id?.startsWith('film:') ? '60' : '10');
+  // the service's own size when it gives one (a finding task: the smallest field that holds the whole track); else 10′, a time-lapse 60′
+  q.set('fov', t.fov ? String(t.fov) : t.kind === 'cell' ? '10' : t.finding_id?.startsWith('film:') ? '60' : '10');
   q.set('task', t.id);
   q.set('kind', t.kind); // the lab of a guest cannot look a task up by its id
   if (t.kind === 'cell' && t.cell_id) q.set('cell', t.cell_id);

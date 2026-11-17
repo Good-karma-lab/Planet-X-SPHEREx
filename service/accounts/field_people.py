@@ -41,7 +41,13 @@ LOOKS = {
 }
 KIND_LABEL = {"moves": "it moves", "not_in_catalogues": "not in the catalogues", "artefact": "artefact", "odd": "something odd"}
 SAME_PLACE_ARCSEC = 6.0  # marks this close are one place
-LINK_ARCSEC = 600.0  # one person's "it moves" marks this close to each other (chained) are one moving object
+# one person's "it moves" marks are one moving object when they are on different passes (or visits) and no farther apart than a body
+# can travel in the time between them: LINK_BASE_ARCSEC plus a rate. Two marks on the same pass and visit are two objects.
+LINK_BASE_ARCSEC = 30.0  # the marks' own scatter (a click is good to a few pixels)
+LINK_VISIT_ARCSEC_H = 150.0  # visits of one pass (dated marks, hours apart): up to a near-Earth asteroid's rate
+LINK_PASS_ARCSEC_YR = 120.0  # passes months apart: up to the fastest nearby stars and slow distant bodies
+LINK_UNDATED_ARCSEC = 60.0  # two passes without dates: a slow mover
+LINK_MAX_ARCSEC = 600.0
 MATCH_ARCSEC = 3.0  # a catalogue source this close to a "not in the catalogues" mark is the source
 ARTEFACT_AGREE = 2  # distinct people marking an artefact at one place set the machine's finds there aside
 LOOKUP_SIZE_ARCMIN = 1.0  # the patch asked of the catalogues around a "not in the catalogues" mark
@@ -99,6 +105,29 @@ def clusters(points: list[dict[str, Any]], radius: float) -> list[list[dict[str,
     return groups
 
 
+def mover_linked(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    """Two "it moves" marks of one person are one body: on different passes or visits, and within what a body travels between them."""
+    ta, tb = a.get("mjd"), b.get("mjd")
+    if a.get("pass") == b.get("pass") and (ta is None or tb is None or abs(float(ta) - float(tb)) < 1e-4):
+        return False  # the same picture: two different objects
+    if ta is not None and tb is not None:
+        dt_d = abs(float(ta) - float(tb))
+        reach = LINK_BASE_ARCSEC + (LINK_VISIT_ARCSEC_H * dt_d * 24.0 if dt_d < 5.0 else LINK_PASS_ARCSEC_YR * dt_d / 365.25)
+    else:
+        reach = LINK_UNDATED_ARCSEC
+    return sep(a["ra"], a["dec"], b["ra"], b["dec"]) <= min(LINK_MAX_ARCSEC, reach)
+
+
+def mover_groups(points: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
+    """One person's "it moves" marks in a field, grouped into bodies by `mover_linked` (chained)."""
+    groups: list[list[dict[str, Any]]] = []
+    for p in points:
+        near = [g for g in groups if any(mover_linked(p, q) for q in g)]
+        merged = [p, *[q for g in near for q in g]]
+        groups = [g for g in groups if g not in near] + [merged]
+    return groups
+
+
 class FieldPeople:
     def __init__(self, st: Any, db: AccountsDB) -> None:
         self.st = st
@@ -129,7 +158,7 @@ class FieldPeople:
             for m in json.loads(r[0])
         }
         mine = [m for m in self.db.marks(user_id, mark["field_key"]) if m.get("kind") == "moves"]
-        group = next((g for g in clusters(mine, LINK_ARCSEC) if any(x["id"] == mark["id"] for x in g)), [mark])
+        group = next((g for g in mover_groups(mine) if any(x["id"] == mark["id"] for x in g)), [mark])
         if any(x["id"] in taken for x in group):
             return {"effect": "moves", "state": "checking"}  # this object is being checked already
         dates = {(x.get("pass"), round(float(x["mjd"]), 4) if x.get("mjd") is not None else None) for x in group}

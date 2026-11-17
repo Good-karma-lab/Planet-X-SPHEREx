@@ -19,6 +19,7 @@ Where the choices come from:
 from __future__ import annotations
 
 import importlib
+import math
 import re
 import sqlite3
 from typing import Any
@@ -221,6 +222,30 @@ def find_row(st: Any, finding_id: str) -> dict[str, Any] | None:
     return row
 
 
+TASK_FOVS = (10.0, 20.0, 60.0)  # the field sizes a finding task opens at: the smallest that holds the whole track
+
+
+def task_fov(row: dict[str, Any] | None) -> float:
+    """The field a finding task opens at: 10′, or the smallest of 20′ / 60′ that holds the whole track with a margin; a time-lapse
+    at its own field (60′ unless it says)."""
+    if not row:
+        return TASK_FOVS[0]
+    data = row.get("data") or {}
+    if str(row.get("finding_id", "")).startswith("film:") or row.get("kind") == "film":
+        fp = data.get("field_params") or {}
+        return float(fp.get("fov") or 60.0)
+    tr = data.get("track") or {}
+    pts = [(a, d) for a, d in zip(tr.get("ra") or [], tr.get("dec") or [], strict=False) if a is not None and d is not None]
+    if len(pts) < 2:
+        return TASK_FOVS[0]
+    dec0 = sum(d for _, d in pts) / len(pts)
+    cosd = math.cos(math.radians(dec0))
+    ras = [((a - pts[0][0] + 540.0) % 360.0 - 180.0) * cosd for a, _ in pts]
+    span = max(max(ras) - min(ras), max(d for _, d in pts) - min(d for _, d in pts)) * 60.0  # arcmin
+    need = span * 1.25 + 2.0
+    return next((f for f in TASK_FOVS if f >= need), TASK_FOVS[-1])
+
+
 #: the question and the answers of the task kinds that are not a series (spec §5e "More ways people help")
 ASK = {
     "find_again": ("Tap it if you see it.", (("seen", "Done"), ("not_seen", "I don't see it"), (people.CANT_TELL, "Not sure"))),
@@ -397,6 +422,7 @@ def make_tasks_router(st: Any) -> APIRouter:
             return None
         kind = task["kind"]
         if kind in ("moves", "red", "anomaly", "finding") and task.get("finding_id"):
+            task["fov"] = task_fov(find_row(st, task["finding_id"]))  # the whole track in the picture
             series = people.series_of(str(task["finding_id"]).split(":")[0])
             if series is not None:
                 task["series"] = {"id": series, "steps": people.steps_of(series)}
