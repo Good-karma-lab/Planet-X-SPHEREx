@@ -176,6 +176,8 @@ interface NextTask {
   fov?: number | null;
   /** red sources and anomalies: the tree of plain questions the lab asks */
   tree?: TreeStep[];
+  /** a square task: the quarter of the square to look through (fov 10) */
+  quarter?: string | null;
 }
 
 async function takeTask(kind: Takeable, ref?: string | null): Promise<NextTask | null | 'failed'> {
@@ -196,10 +198,11 @@ export function taskParams(t: NextTask): Record<string, string> | null {
   return {
     ra: t.ra.toFixed(5),
     dec: t.dec.toFixed(5),
-    fov: String(t.fov && t.fov > 0 ? t.fov : t.kind === 'cell' ? 20 : 5),
+    fov: String(t.fov && t.fov > 0 ? t.fov : t.kind === 'cell' ? (t.quarter ? 10 : 20) : 5),
     task: t.id,
     kind: t.kind,
     ...(t.cell_id ? { cell: t.cell_id } : {}),
+    ...(t.quarter ? { quarter: t.quarter } : {}),
     // the find is the lab's selected object (`find`): the one thing the task rings brightly
     ...(t.finding_id ? { finding: t.finding_id, find: t.finding_id } : {}),
   };
@@ -216,6 +219,8 @@ export interface TaskArgs {
   /** the pass on show (null in Days) and how many passes the field has: a square is looked through when every pass was shown */
   pass: number | null;
   passesTotal: number;
+  /** a square task: whether a look can be counted now, why not, and the count itself (lab/square.tsx) */
+  square?: { canCount: boolean; why: string; confirm: (result?: 'nothing' | 'marks') => Promise<boolean> } | null;
   /** what the lab shows for the task's question (the mover's blink and ruler), or for one step of a question tree (`show` of the step) */
   view?: (show: string | null) => ComponentChildren;
   /** the other overlays are on show (off by default in a task about one object); and the switch for it */
@@ -228,7 +233,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
   const task = taskOfParams(a.params);
   const key = task ? `${task.kind}|${task.id}|${task.cell_id}|${task.finding_id}` : '';
   const [id, setId] = useState<string | null>(task?.id ?? null);
-  const [refs, setRefs] = useState<{ cell: string | null; finding: string | null }>({ cell: task?.cell_id ?? null, finding: task?.finding_id ?? null });
+  const [, setRefs] = useState<{ cell: string | null; finding: string | null }>({ cell: task?.cell_id ?? null, finding: task?.finding_id ?? null });
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState('');
   // a tree of plain questions (red source, anomaly): the service's own when the task brought it, and the answers given so far
@@ -287,8 +292,9 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     setBusy(true);
     setLine('saving…');
     const markIds = a.marksHere.map((m) => m.id);
-    if (task.kind === 'cell' && refs.cell) await post(`/api/grid/cell/${encodeURIComponent(refs.cell)}/viewed`, { result });
-    // closing needs an account; a guest's answer still counts the square as viewed, and the next task opens
+    // a square task's answer counts the look only for a signed-in person after 60 s and every pass (lab/square.tsx); a guest's
+    // answer counts nothing, and the next task opens all the same
+    if (task.kind === 'cell' && a.square?.canCount) await a.square.confirm(result === 'marks' ? 'marks' : 'nothing');
     if (id) {
       const r = await post(`/api/me/tasks/${encodeURIComponent(id)}/done`, {
         // a tree of questions: the path of answers goes, and the service says which class it leads to
@@ -348,7 +354,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
       <div class="tp-line" data-testid="task-line">
         {line ||
           (task.kind === 'cell'
-            ? `${n} mark${n === 1 ? '' : 's'} in this square`
+            ? [`${n} mark${n === 1 ? '' : 's'}`, a.square?.why ?? ''].filter(Boolean).join(' · ')
             : step && tree
                 ? `Question ${path.length + 1} of at most ${tree.length}`
                 : '')}
@@ -393,7 +399,12 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
             <button
               key={result}
               class={`btn sm${(task.kind === 'cell' ? result === 'marks' : k === 0) ? ' primary' : ''}${result === 'cant_tell' ? ' quiet' : ''}`}
-              disabled={busy || (task.kind === 'cell' && result === 'marks' && n === 0)}
+              disabled={
+                busy ||
+                (task.kind === 'cell' && result === 'marks' && n === 0) ||
+                // signed in: the look must be long enough to count; a guest may go on (nothing is counted)
+                (task.kind === 'cell' && !!a.square && !a.square.canCount && a.square.why !== 'Sign in to count your look')
+              }
               title={tip}
               onClick={() => void close(result)}
               data-testid={`task-${result}`}

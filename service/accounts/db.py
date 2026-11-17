@@ -163,6 +163,9 @@ class AccountsDB:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._conn().executescript(SCHEMA)
+        if "quarter" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_tasks)")}:
+            # added on 17 Nov 2026: people look through a square a quarter (10′) at a time; NULL = the whole square (before)
+            self._conn().execute("ALTER TABLE acc_tasks ADD COLUMN quarter TEXT")
         if "extra" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_investigations)")}:
             # what the lab adds to an investigation: the objects gathered (`items`), the ruler's result, the old-survey match
             self._conn().execute("ALTER TABLE acc_investigations ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'")
@@ -288,7 +291,8 @@ class AccountsDB:
     @staticmethod
     def _task(r: sqlite3.Row) -> dict[str, Any]:
         return {
-            "id": r["id"], "kind": r["kind"], "cell_id": r["cell_id"], "finding_id": r["finding_id"], "field_key": r["field_key"],
+            "id": r["id"], "kind": r["kind"], "cell_id": r["cell_id"], "quarter": r["quarter"], "fov": 10.0 if r["quarter"] else None,
+            "finding_id": r["finding_id"], "field_key": r["field_key"],
             "ra": r["ra"], "dec": r["dec"], "state": r["state"], "result": r["result"], "mark_ids": json.loads(r["mark_ids"]),
             "created": iso(r["created"]), "done_at": iso(r["done_at"]),
         }  # fmt: skip
@@ -309,6 +313,14 @@ class AccountsDB:
         )
         return None if r is None else self._task(r)
 
+    def quarters_taken(self, user_id: str) -> dict[str, set[str]]:
+        """{square: quarters this user has a task for}. A task of before the quarters (no quarter) took all four."""
+        out: dict[str, set[str]] = {}
+        for r in self._conn().execute("SELECT cell_id, quarter FROM acc_tasks WHERE user_id=? AND kind='cell'", (user_id,)):
+            if r["cell_id"]:
+                out.setdefault(r["cell_id"], set()).update({r["quarter"]} if r["quarter"] else {"NW", "NE", "SW", "SE"})
+        return out
+
     def task_refs(self, user_id: str, kind: str) -> set[str]:
         """The squares (or findings) this user already has a task for."""
         col = "cell_id" if kind == "cell" else "finding_id"
@@ -320,14 +332,15 @@ class AccountsDB:
         col = "cell_id" if kind == "cell" else "finding_id"
         if user_id is not None:
             r = c.execute(
-                f"SELECT * FROM acc_tasks WHERE user_id=? AND kind=? AND {col}=? AND state='open'", (user_id, kind, ref[col])
+                f"SELECT * FROM acc_tasks WHERE user_id=? AND kind=? AND {col}=? AND COALESCE(quarter,'')=? AND state='open'",
+                (user_id, kind, ref[col], ref.get("quarter") or ""),
             ).fetchone()
             if r is not None:
                 return self._task(r)
         tid = new_id("t")
         c.execute("DELETE FROM acc_tasks WHERE user_id IS NULL AND created < ?", (time.time() - 7 * 86400,))  # guests' tasks are not kept
         c.execute(
-            "INSERT INTO acc_tasks(id,user_id,kind,cell_id,finding_id,field_key,ra,dec,created) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO acc_tasks(id,user_id,kind,cell_id,finding_id,field_key,ra,dec,created,quarter) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
                 tid,
                 user_id,
@@ -338,6 +351,7 @@ class AccountsDB:
                 ref.get("ra"),
                 ref.get("dec"),
                 time.time(),
+                ref.get("quarter"),
             ),
         )
         return self._task(c.execute("SELECT * FROM acc_tasks WHERE id=?", (tid,)).fetchone())
@@ -659,14 +673,35 @@ class AccountsDB:
             "notifications": self.notifications(user_id, 100000),
         }
 
+    #: rows that are the person's own: deleted with the account
+    OWN_TABLES = (
+        "acc_sessions", "acc_marks", "acc_tasks", "acc_investigations", "acc_history", "acc_notifications", "acc_notified",
+        "acc_credits", "acc_answers", "acc_score_events", "acc_achievements", "acc_stories", "acc_comments", "acc_comment_reports",
+    )  # fmt: skip
+    #: rows whose counts other people's results stand on (answers that settled a find, flags of a picture, tapped places): kept,
+    #: but given an id made at random for the deletion, which nothing links to the person or to their other data
+    COUNTED_TABLES = ("acc_task_answers", "acc_series_answers", "acc_exposure_flags", "acc_taps")
+
     def delete_user(self, user_id: str) -> None:
-        """The account and everything in it. A finding the user submitted stays a finding, without a name."""
+        """The account and everything linked to it. Deleted: the person's own rows (OWN_TABLES), the e-mail and its sign-in links.
+        Made anonymous (the counts stay, the link to the person goes): answers and flags other results stand on (COUNTED_TABLES),
+        the squares they looked through (grid_views) and the looks at findings (finding_views, the name removed). A finding the
+        person submitted stays a finding, without a name."""
         c = self._conn()
+        have = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        gone = f"gone-{secrets.token_hex(8)}"
         c.execute("BEGIN")
         try:
-            for table in ("acc_sessions", "acc_marks", "acc_tasks", "acc_investigations", "acc_history", "acc_notifications",
-                          "acc_notified", "acc_credits"):  # fmt: skip
-                c.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+            for table in self.OWN_TABLES:
+                if table in have:
+                    c.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+            for table in self.COUNTED_TABLES:
+                if table in have:
+                    c.execute(f"UPDATE OR REPLACE {table} SET user_id=? WHERE user_id=?", (gone, user_id))
+            if "grid_views" in have:  # the grid's table: one viewer per person, the id made anonymous
+                c.execute("UPDATE OR REPLACE grid_views SET viewer=? WHERE viewer=?", (f"user:{gone}", f"user:{user_id}"))
+            if "finding_views" in have:  # the findings' table: the look stays, the person and the name go
+                c.execute("UPDATE finding_views SET user_id=?, user_name=NULL WHERE user_id=?", (gone, user_id))
             c.execute("UPDATE acc_submissions SET user_id='' WHERE user_id=?", (user_id,))
             email = c.execute("SELECT email FROM acc_users WHERE id=?", (user_id,)).fetchone()
             if email is not None:

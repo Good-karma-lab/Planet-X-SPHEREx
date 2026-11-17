@@ -12,6 +12,7 @@ The session cookie is HttpOnly, SameSite=Lax, and Secure everywhere except local
 
 from __future__ import annotations
 
+import os
 import re
 import secrets
 from typing import Any
@@ -29,6 +30,14 @@ from service.accounts.mail import MailFailedError
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 NEXT = re.compile(r"^#/[A-Za-z0-9_\-/?=&.%+:,~]*$")  # only a place inside this app
 GOOGLE_AUTH = "https://accounts.google.com/o/oauth2/v2/auth"
+
+
+def google_public() -> bool:
+    """The "Continue with Google" button is shown only once the Google app is published (SKY_GOOGLE_PUBLIC=1): until then Google
+    lets only its test users in. The routes themselves work whenever the keys are set (for those test users)."""
+    return os.environ.get("SKY_GOOGLE_PUBLIC", "0") == "1"
+
+
 GOOGLE_TOKEN = "https://oauth2.googleapis.com/token"
 GOOGLE_USERINFO = "https://openidconnect.googleapis.com/v1/userinfo"
 
@@ -59,7 +68,10 @@ def make_auth_router(st: Any) -> APIRouter:
     @router.get("/api/me")
     def me(request: Request) -> Any:
         acc = accounts.get(st)
-        return {"user": acc.current_user(request), "auth": {"email": acc.email, "google": acc.google is not None, "dev": acc.dev}}
+        return {
+            "user": acc.current_user(request),
+            "auth": {"email": acc.email, "google": acc.google is not None and google_public(), "dev": acc.dev},
+        }
 
     @router.post("/api/auth/email")
     def email_link(body: EmailIn, request: Request) -> Any:

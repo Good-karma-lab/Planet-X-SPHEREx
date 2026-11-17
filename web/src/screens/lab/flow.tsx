@@ -48,6 +48,8 @@ export interface FlowArgs {
   thumb: () => string | null;
   /** the passes are being blinked (Months scale, Blink mode): the two pass pickers of the playback bar act */
   blinkable: boolean;
+  /** the field is a grid square or one of its quarters (lab/square.tsx): its outline, its status words, the count for a task */
+  square: { outline: [number, number][] | null; line: string; canCount: boolean; why: string; confirm: (result?: 'nothing' | 'marks') => Promise<boolean> } | null;
   /** the lab's selected object (in a task: the object in question) */
   sel: Source | null;
   /** the mover tracks the search of the field found: places per pass */
@@ -118,8 +120,6 @@ export interface LabFlow {
   marksHere: Mark[];
   ruler: RulerPoint[];
   setTool(t: FlowTool): void;
-  /** a mark can be put on what is on show (one picture, its grid known): the Mark button of touch windows is on only then */
-  markable: boolean;
   /** the two passes to blink between (their indexes), null when every pass plays */
   blink: [number, number] | null;
   /** the Task panel, null when the lab was opened without a task */
@@ -210,6 +210,30 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // unmatched (the ring would appear and go when the catalogue arrives): the count on the status line says how many so far
     const noRings = env.focus || kn.deepPending.length > 0;
     drawKnown({ ...env, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
+    // the whole grid square: a thin dashed outline (a quarter of it is on show at 10′)
+    const sqo = argsRef.current.square?.outline;
+    if (sqo && sqo.length >= 4 && !wall) {
+      ctx.save();
+      for (const box of rects) {
+        ctx.beginPath();
+        sqo.forEach(([r, d], i) => {
+          const [u, v] = uv(r, d);
+          const x = box.x + u * box.w;
+          const y = box.y + v * box.h;
+          if (i) ctx.lineTo(x, y);
+          else ctx.moveTo(x, y);
+        });
+        ctx.closePath();
+        ctx.setLineDash([6, 5]);
+        ctx.lineWidth = 2.4;
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(255,214,140,0.75)';
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
     const ms = marksRef.current;
     const rl = rulerRef.current;
     if (!ms.length && !rl.length) return;
@@ -572,6 +596,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     marksHere,
     pass: a.pass,
     passesTotal: a.passes.length,
+    square: a.square && a.square.outline ? a.square : null,
   });
 
   const cur = open ? (marks.find((m) => m.id === open) ?? null) : null;
@@ -796,7 +821,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       : ruler.length === 2
         ? `Ruler: ${rulerWord(rulerOf(ruler[0]!, ruler[1]!))}`
         : '';
-  const status = [a.known ? knownStatus(known, counts) : '', tool === 'mark' ? 'Mark: click a place' : '', rulerStatus, marksSyncNote()].filter(Boolean).join(' · ');
+  const status = [a.square?.line ?? '', a.known ? knownStatus(known, counts) : '', tool === 'mark' ? 'Mark: click a place' : '', rulerStatus, marksSyncNote()].filter(Boolean).join(' · ');
   // what a closed task earned stays on the line for a few seconds
   const [awardNow, setAwardNow] = useState('');
   useEffect(() => {
@@ -822,7 +847,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     marksHere,
     ruler,
     setTool,
-    markable: a.single && !!g,
     blink,
     taskPanel,
     focus: !!task && focusKind(task.kind) && !others,

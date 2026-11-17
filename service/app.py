@@ -59,6 +59,7 @@ from service.routes_grid import make_grid_router
 from service.routes_known import make_known_router
 from service.routes_known_field import make_known_field_router
 from service.routes_known_field import prewarm as known_prewarm
+from service.routes_legal import make_legal_router
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
 from service.routes_search import make_router
@@ -512,6 +513,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_export_router(st))
     app.include_router(make_planetx_router(st))
     app.include_router(make_grid_router(st))  # the sky grid and its coverage (product flow)
+    app.include_router(make_legal_router())  # /privacy and /terms, plain server pages (Google's consent screen fetches them)
     register_accounts(app, st)  # accounts, sign-in, marks, tasks, investigations, submit (stream B3)
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
     register_extras(app)

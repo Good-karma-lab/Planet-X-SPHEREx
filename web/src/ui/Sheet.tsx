@@ -34,7 +34,7 @@ export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string
   const grip = useRef<HTMLButtonElement>(null);
   const [detent, setDetent] = useState<Detent>(start);
   const [active, setActive] = useState(false);
-  const live = useRef({ detent, heights: { peek: 0, half: 0, full: 0 } as Record<Detent, number> });
+  const live = useRef({ detent, head: 0, heights: { peek: 0, half: 0, full: 0 } as Record<Detent, number> });
   live.current.detent = detent;
 
   useEffect(() => {
@@ -60,7 +60,10 @@ export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string
         const r = e.getBoundingClientRect();
         if (r.height > 0) end = Math.max(end, r.bottom - top);
       });
-      const head = Math.ceil(end);
+      // the header's height is taken while the sheet is at rest: a header that shows more when the sheet is up (a task's example
+      // picture) must not change the room kept for it under the picture
+      if (live.current.detent === 'peek' || !live.current.head) live.current.head = Math.ceil(end);
+      const head = live.current.head;
       const box = sheet.getBoundingClientRect();
       const u = under ? document.querySelector<HTMLElement>(under) : null;
       const room = u && u.getBoundingClientRect().height > 0 ? Math.floor(box.bottom - u.getBoundingClientRect().bottom) : 0;

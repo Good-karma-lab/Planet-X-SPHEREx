@@ -262,6 +262,8 @@ We cut the whole sky into a fixed grid of squares, one square for one 20′ sear
 
 A square is `new` until something happens to it, then `searching`, then `searched` or `failed`. With it we keep the number of finds, the ids of those finds, the bar the search used, and how many people have looked at it (one person counts once).
 
+People look through a square a quarter at a time: its north and south halves in declination and east and west halves in right ascension, about 10′ × 10′ each, because a whole 20′ square is too much to look through at once. A quarter counts as looked through only when a signed-in person says so themselves; opening a field never counts. A square is looked through by people when all four of its quarters are.
+
 The machine walks the squares one after another, in its own process, never inside the service that serves people. For each square it asks a private instance of our own service for the 20′ field at the square's centre, then the search between passes and the brown-dwarf search, exactly as a visitor would. The order is:
 
 1. the predicted Planet Nine band (after Brown & Batygin 2021): RA 15°–105°, ecliptic latitude −25° to +15°, from its centre at RA 50°, Dec +8° outwards (31 680 squares);
