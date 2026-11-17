@@ -144,11 +144,14 @@ function useMine(user: User | null, tab: string, inv: string): { mine: Mine | nu
   return { mine, error, reload: useCallback(() => setN((x) => x + 1), []) };
 }
 
+/** The status line of a sign-in link that was used before or is too old (the server sends the browser to #/me?signin=expired). */
+const EXPIRED = 'This link was already used or has expired · send a new one';
+
 function SignIn({ expired, google, email: emailOpen }: { expired: string | undefined; google: string | null; email: boolean }) {
   const [email, setEmail] = useState('');
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState<{ to: string; minutes: number; dev_link?: string } | null>(null);
-  const [error, setError] = useState(expired === 'expired' ? 'This link has expired or was already used. Ask for a new one.' : expired === 'google' ? 'Google sign-in did not finish. Try again.' : '');
+  const [error, setError] = useState(expired === 'expired' ? EXPIRED : expired === 'google' ? 'Google sign-in did not finish · try again' : '');
   const send = (e: Event) => {
     e.preventDefault();
     if (busy || !email.trim()) return;
@@ -167,6 +170,11 @@ function SignIn({ expired, google, email: emailOpen }: { expired: string | undef
         <p class="cb-status" role="status" data-testid="signin-soon">
           Sign-in opens soon · your marks are kept in this browser
         </p>
+        {expired === 'expired' && (
+          <p class="cb-status bad" role="status" data-testid="signin-status">
+            {EXPIRED}
+          </p>
+        )}
       </div>
     );
   return (
@@ -351,6 +359,8 @@ export function Cabinet({ route }: { route: Route }) {
   const tab: Tab = (TABS as readonly string[]).includes(route.params['tab'] ?? '') ? (route.params['tab'] as Tab) : 'squares';
   const invId = route.params['inv'] ?? '';
   const { mine, error, reload } = useMine(user, tab, invId);
+  // a sign-in link opened again (or too late) while this browser is signed in: said once, then the address is cleaned
+  const stale = route.params['signin'] === 'expired' && !!user;
   const opened = tab === 'investigations' && invId ? (mine?.investigations.find((i) => i.id === invId) ?? null) : null;
   const go = (t: Tab) => (location.hash = t === 'squares' ? '#/me' : `#/me?tab=${t}`);
   const run = (job: Promise<unknown>) => job.then(reload, (e: Error) => setStatus(e.message));
@@ -397,7 +407,7 @@ export function Cabinet({ route }: { route: Route }) {
                 </button>
               ))}
               <span class={`cb-status ${error || status ? 'bad' : ''}`} role="status" data-testid="cabinet-status">
-                {error || status || (!mine ? 'Loading…' : '')}
+                {error || status || (stale ? 'This link was already used or has expired · you are signed in' : !mine ? 'Loading…' : '')}
               </span>
             </div>
             {mine && (
