@@ -252,7 +252,8 @@ function SpectrumChart({
       c.fillStyle = 'rgba(200,210,215,0.85)';
       c.font = '500 10px ui-monospace, Menlo, monospace';
       c.textAlign = 'right';
-      c.fillText(`○ ${out.length} left out by people`, W - R - 4, T + (refs.length ? 24 : 10));
+      // at the bottom right, clear of the catalogue diamonds' labels at the top
+      c.fillText(`○ ${out.length} left out by people`, W - R - 4, H - B - 6);
       c.restore();
     }
     for (const p of ok) {
