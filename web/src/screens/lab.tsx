@@ -1,7 +1,6 @@
 import { isSquareTask } from './lab/rules';
 import { LoadOverlay, loadStep } from './lab/loading';
-import { useSquareLook } from './lab/square';
-import { GiveSquare } from './lab/task';
+import { HereSquare, useSquareLook } from './lab/square';
 import { FindStatus } from './lab/passport';
 import { SearchMark, SearchRow, searchingLine, useRetry, type SearchInfo } from './lab/progress';
 import type { ComponentChildren } from 'preact';
@@ -3296,6 +3295,7 @@ export function Lab({ route }: { route: Route }) {
         const n = filmData?.meta.grid.n ?? meta?.grid.n;
         return q && n ? ([(q.x + 0.5) / n, (q.y + 0.5) / n] as [number, number]) : null;
       })(t.pts[t.pts.length >> 1]),
+      path: ((n) => (n ? t.pts.map((q) => [(q.x + 0.5) / n, (q.y + 0.5) / n] as [number, number]) : undefined))(filmData?.meta.grid.n ?? meta?.grid.n),
       pick: rowPick(`ast:${i}`, () => {
         selectTrack(i);
         if (film === null) toDays();
@@ -3552,8 +3552,12 @@ export function Lab({ route }: { route: Route }) {
                 tabIndex={0}
                 title="Place: type another RA and Dec"
                 onClick={() => {
-                  colRef.current?.querySelector('#sec-place')?.scrollIntoView({ block: 'end', behavior: 'smooth' });
-                  setTimeout(() => (document.getElementById('raIn') as HTMLInputElement | null)?.focus(), 350);
+                  // the place is typed in the View tab
+                  setPtab('view');
+                  setTimeout(() => {
+                    colRef.current?.querySelector('#sec-place')?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+                    (document.getElementById('raIn') as HTMLInputElement | null)?.focus();
+                  }, 120);
                 }}
               >
                 <b>{fieldName}</b>
@@ -3898,7 +3902,7 @@ export function Lab({ route }: { route: Route }) {
           {ptab === 'task' && flow.taskPanel}
           {ptab === 'task' && square.button}
           <div class="pbody pcol" ref={colRef}>
-            {ptab === 'task' && !inTask && <GiveSquare />}
+            {ptab === 'task' && !inTask && !square.cell && <HereSquare ra={ra} dec={dec} open={(q) => (location.hash = formatHash({ screen: 'lab', params: q }))} />}
             {ptab === 'task' && flow.markOpen && (
               <section class="psec" id="sec-mark" data-testid="sec-mark">
                 <div class="psh">Mark</div>

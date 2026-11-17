@@ -21,6 +21,8 @@ export interface FindRow {
   status: FindStatus;
   /** where it is on the picture now, as fractions of it (u right, v down); null when it is not on show */
   uv: [number, number] | null;
+  /** a track: its visits' places on the picture (fractions), drawn over the still so a fast mover's row shows its path */
+  path?: [number, number][];
   /** selects it on the picture and opens its card */
   pick: () => void;
   /** a red source or a spectral anomaly: as in Findings these are kept apart, in one folded group, and never counted */
@@ -60,7 +62,7 @@ const STILL = 44;
 export const TOP_ROWS = 4;
 
 /** A small still of a find: the pixels of the lab's picture around its place, taken when the row appears and every few seconds. */
-function Still({ uv, picture }: { uv: [number, number] | null; picture: () => HTMLCanvasElement | null }) {
+function Still({ uv, picture, path }: { uv: [number, number] | null; picture: () => HTMLCanvasElement | null; path?: [number, number][] }) {
   const cv = useRef<HTMLCanvasElement>(null);
   const key = uv ? `${uv[0].toFixed(4)},${uv[1].toFixed(4)}` : '';
   useEffect(() => {
@@ -78,6 +80,22 @@ function Still({ uv, picture }: { uv: [number, number] | null; picture: () => HT
       try {
         g.imageSmoothingEnabled = true;
         g.drawImage(src, x, y, s, s, 0, 0, c.width, c.height);
+        // a track: its visits as dots on a thin line, in the still's own scale (it may run out of the still: then it is clipped)
+        if (path && path.length > 1) {
+          const k = c.width / s;
+          const pts = path.map(([u, v]) => [(u * src.width - x) * k, (v * src.height - y) * k] as const);
+          g.beginPath();
+          pts.forEach(([px, py], i) => (i ? g.lineTo(px, py) : g.moveTo(px, py)));
+          g.strokeStyle = 'rgba(255,200,110,0.85)';
+          g.lineWidth = 1.5;
+          g.stroke();
+          for (const [px, py] of pts) {
+            g.beginPath();
+            g.arc(px, py, 2.6, 0, 7);
+            g.fillStyle = '#ffd08a';
+            g.fill();
+          }
+        }
       } catch {
         /* a picture not yet drawn: the still stays empty */
       }
@@ -85,7 +103,7 @@ function Still({ uv, picture }: { uv: [number, number] | null; picture: () => HT
     draw();
     // the picture changes with the pass: the still follows it every 4 s, never in a hidden tab
     return visibleInterval(draw, 4000);
-  }, [key]);
+  }, [key, path?.length]);
   // a find that is not on the picture on show (a track inside one pass) keeps the place of its still, empty
   return <canvas ref={cv} class="cr-still" style={{ visibility: uv ? 'visible' : 'hidden' }} width={STILL * 2} height={STILL * 2} aria-hidden="true" />;
 }
@@ -199,7 +217,7 @@ export function CandList({
     return (
       <div key={r.key} class="crow-wrap">
         <button class={`crow s-${r.status}${selected === r.key ? ' on' : ''}`} onClick={r.pick} data-testid="cand-row">
-          <Still uv={r.uv} picture={picture} />
+          <Still uv={r.uv} picture={picture} path={r.path} />
           <span class="cr-text">
             <b title={r.name}>{r.name}</b>
             <span title={r.line}>{r.line}</span>
