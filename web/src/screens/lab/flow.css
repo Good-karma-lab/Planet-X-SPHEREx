@@ -86,3 +86,24 @@
 .vsq .fstatus .invchip:hover { background: rgba(95, 227, 214, 0.14); }
 /* a mark's card is open: the Object tab is the mark's alone (the selected source's passport waits) */
 .pobj.mark-open > :not(.objcard) { display: none; }
+
+/* the Candidates tab: one list of the field's finds */
+.candlist { display: flex; flex-direction: column; gap: 4px; }
+.candlist .crow { display: flex; align-items: center; gap: 9px; padding: 5px 8px 5px 5px; border-radius: 10px; border: 1px solid var(--edge-soft); background: rgba(255, 255, 255, 0.035); color: var(--ink); text-align: left; cursor: pointer; min-height: 56px; }
+.candlist .crow:hover { border-color: rgba(95, 227, 214, 0.5); }
+.candlist .crow.on { border-color: rgba(95, 227, 214, 0.85); background: rgba(95, 227, 214, 0.1); }
+.candlist .crow.s-known { opacity: 0.62; }
+.candlist .cr-still { width: 44px; height: 44px; flex: none; border-radius: 7px; background: #000; border: 1px solid rgba(255, 255, 255, 0.1); }
+.candlist .cr-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.candlist .cr-text b { font: 600 12.5px var(--font); overflow-wrap: anywhere; line-height: 1.25; }
+.candlist .cr-text span { font-size: 11px; color: var(--muted); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.candlist .cr-badge { flex: none; font: 600 10px var(--font); font-style: normal; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 8px; border: 1px solid var(--edge); color: var(--muted); white-space: nowrap; }
+.candlist .cr-badge.s-unexplained { color: #ffd08a; border-color: rgba(255, 180, 84, 0.6); background: rgba(255, 180, 84, 0.1); }
+.candlist .cr-badge.s-checking { color: var(--accent-l); border-color: rgba(95, 227, 214, 0.4); }
+.candlist .cr-badge.s-jpl { color: #ffb3b3; border-color: rgba(255, 107, 107, 0.5); }
+.candlist .cr-none { font-size: 11.5px; color: var(--muted); padding: 6px 2px; }
+.candlist .cr-also { min-height: 16px; margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.candlist .cr-details { margin-top: 8px; border-top: 1px solid var(--edge-soft); padding-top: 6px; }
+.candlist .cr-details > summary { cursor: pointer; font: 600 10.5px var(--font); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 4px 0; }
+.candlist .cr-details .sbar { max-height: none; overflow: visible; background: none; border-top: 1px solid var(--edge-soft); padding: 8px 0 0; margin-top: 8px; cursor: default; }
+.candlist .cr-details .sbar .tray-head { display: none; }

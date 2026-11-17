@@ -44,6 +44,7 @@ import { useDistantPlan } from './search/distant';
 import { FPX_AUTO } from '../lib/flags';
 import { useAsteroidSearch } from './asteroids';
 import { useLabFlow, type LabFlow } from './lab/flow';
+import { alsoLine, CandList, unexplainedCount, useJplState, type FindRow } from './lab/candidates';
 import { SheetGrip } from '../ui/Sheet';
 
 const SIZES = [2, 5, 10, 20, 60];
@@ -610,7 +611,11 @@ export function Lab({ route }: { route: Route }) {
   const [trackSel, setTrackSel] = useState(-1);
   const [note, setNote] = useState('');
   const [wallWait, setWallWait] = useState(false);
-  const [trayOpen, setTrayOpen] = useState(() => typeof innerWidth === 'number' && innerWidth > 860 && innerHeight > 860);
+  const [trayOpen, setTrayOpen] = useState(true);
+  // the find picked in the Candidates list: it alone is bright on the picture until the picture is clicked
+  const [candSel, setCandSel] = useState<string | null>(null);
+  const candSelRef = useRef<string | null>(null);
+  candSelRef.current = candSel;
   const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
   const dwarfsRef = useRef<DwarfView | null>(null);
   dwarfsRef.current = dwarfs;
@@ -1501,7 +1506,7 @@ export function Lab({ route }: { route: Route }) {
           };
       }
       const all = selMark ? [...marks, selMark] : marks;
-      const focus = !!flowRef.current?.focus;
+      const focus = !!flowRef.current?.focus || candSelRef.current !== null;
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
       let labelled = 0;
       const ring = (x: number, y: number, mk: Mark, rr: number, ticks: boolean) => {
@@ -2342,6 +2347,10 @@ export function Lab({ route }: { route: Route }) {
     },
   });
   flowRef.current = flow;
+  // for the Candidates list: whether JPL answered for the asteroid tracks of the pass, and the SIMBAD names of the red sources
+  // (a named one is known)
+  const jplState = useJplState(ast.filmKey);
+  useIdentNames((redv?.result?.red ?? []).map((x) => ({ ra_2025_9: x.ra, dec_2025_9: x.dec }) as unknown as Track));
 
   if (!valid) {
     return (
@@ -3026,12 +3035,141 @@ export function Lab({ route }: { route: Route }) {
             : null,
     ],
   ];
-  const foundCount =
-    (mvr?.tracks.length ?? 0) +
-    pairs.length +
-    (redv?.result?.red.length ?? 0) +
-    (an?.result?.anomalies.length ?? 0) +
-    (ast.tracks?.length ?? 0);
+  // ---- the finds of the field as one list (Candidates tab): unexplained first; known ones never count
+  const yearNow = passMeta ? 2000 + (passMeta.mjd_mid - 51544.5) / 365.25 : 2025.9;
+  const uvNow = (pra: number, pdec: number): [number, number] | null => {
+    const g = meta?.grid;
+    if (!g) return null;
+    const fa = g.n * g.step_arcsec;
+    const u = 0.5 - ((((pra - g.ra0 + 540) % 360) - 180) * Math.cos((g.dec0 * Math.PI) / 180) * 3600) / fa;
+    const v = 0.5 - ((pdec - g.dec0) * 3600) / fa;
+    return u >= 0 && v >= 0 && u <= 1 && v <= 1 ? [u, v] : null;
+  };
+  const placeWord = (pra: number, pdec: number) => `${formatRA(pra)} ${formatDec(pdec)}`;
+  /** a place's SIMBAD name as already asked: a name, null (none), or undefined (being asked) */
+  const identOf = (pra: number, pdec: number): string | null | undefined => {
+    const k = `${pra.toFixed(5)},${pdec.toFixed(5)}`;
+    return identCache.has(k) ? identCache.get(k) : undefined;
+  };
+  const rowPick = (key: string, f: () => void) => () => {
+    setCandSel(key);
+    f();
+  };
+  const findRows: FindRow[] = [
+    ...(mvr?.tracks ?? []).map((t, i): FindRow => {
+      const nm = trackNames[i] || t.name || '';
+      const named = !!nm && !nm.startsWith('Gaia DR3');
+      const yrs = yearNow - 2025.9;
+      const dnow = t.dec_2025_9 + (t.v_north * yrs) / 3600;
+      return {
+        key: `mover:${i}`,
+        name: nm || placeWord(t.ra_2025_9, t.dec_2025_9),
+        line: `moves ${rateText(t)} toward ${t.pa.toFixed(0)}° · ${t.passes.length} passes`,
+        status: t.check === 'same' || named ? 'known' : t.check === 'pending' ? 'checking' : 'unexplained',
+        uv: uvNow(t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((dnow * Math.PI) / 180), dnow),
+        pick: rowPick(`mover:${i}`, () => pickTrack(t, trackNames[i] ?? '')),
+      };
+    }),
+    ...[
+      ...(dwarfs?.result?.candidates ?? []).map((c) => ({ c, known: false })),
+      ...(dwarfs?.result?.known ?? []).map((c) => ({ c, known: true })),
+    ].map(({ c, known }, i): FindRow => {
+      const pra = c.ra_j2000 ?? c.ra ?? ra;
+      const pdec = c.dec_j2000 ?? c.dec ?? dec;
+      const now = c.ra_j2000 != null ? atEpoch(pra, pdec, c.pmra ?? 0, c.pmdec ?? 0, yearNow) : ([pra, pdec] as [number, number]);
+      return {
+        key: `bd:${i}`,
+        name: c.simbad?.name ?? placeWord(now[0], now[1]),
+        line: `red and moving${c.pm != null ? ` ${(c.pm / 1000).toFixed(1)}″/yr` : ''}: a brown dwarf ${known ? 'of the catalogues' : 'candidate'}`,
+        status: known ? 'known' : 'unexplained',
+        uv: uvNow(now[0], now[1]),
+        pick: rowPick(`bd:${i}`, () => {
+          setSelAn(null);
+          setSel({
+            ra: pra,
+            dec: pdec,
+            pmra: c.ra_j2000 != null ? c.pmra : undefined,
+            pmdec: c.ra_j2000 != null ? c.pmdec : undefined,
+            name: c.simbad?.name ?? (known ? 'Known red mover' : `Brown dwarf candidate ${i + 1}`),
+          });
+          setTab('obj');
+        }),
+      };
+    }),
+    ...pairs.map((pr, i): FindRow => {
+      const [c0, c1] = pr.components;
+      return {
+        key: `pair:${i}`,
+        name: placeWord((c0.ra + c1.ra) / 2, (c0.dec + c1.dec) / 2),
+        line: `two sources ${pr.separation_arcsec.toFixed(1)}″ apart whose brightness changes between the passes`,
+        status: 'unexplained',
+        uv: uvNow((c0.ra + c1.ra) / 2, (c0.dec + c1.dec) / 2),
+        pick: rowPick(`pair:${i}`, () => openPair(i)),
+      };
+    }),
+    ...(redv?.result?.red ?? []).map((x, k): FindRow => {
+      const tr = trackOfRed(x);
+      const id = identOf(x.ra, x.dec);
+      const times = redv?.result?.median_colour ? `${x.lower_limit ? 'over ' : ''}${(x.colour / redv.result.median_colour).toFixed(1)}× redder than the field's stars` : 'red';
+      return {
+        key: `red:${k}`,
+        name: id || placeWord(x.ra, x.dec),
+        line: `${times}${tr ? ` · moves ${rateText(tr)}` : ''}`,
+        status: id ? 'known' : id === undefined ? 'checking' : 'unexplained',
+        uv: uvNow(x.ra, x.dec),
+        pick: rowPick(`red:${k}`, () => pickRed(k)),
+      };
+    }),
+    ...(an?.result?.anomalies ?? []).map((a): FindRow => {
+      const now = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, yearNow);
+      const nm = a.identified?.simbad?.name;
+      return {
+        key: `anomaly:${a.n}`,
+        name: nm ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : placeWord(now[0], now[1])),
+        line: `spectrum unlike the field's stars: ${driverWords(a)[0] ?? `score ${a.score.toFixed(1)}`}`,
+        status: nm ? 'known' : 'unexplained',
+        uv: uvNow(now[0], now[1]),
+        pick: rowPick(`anomaly:${a.n}`, () => pickAnomaly(a.n)),
+      };
+    }),
+    ...(ast.state === 'done' ? (ast.tracks ?? []) : []).slice(0, 8).map(
+      (t, i): FindRow => ({
+        key: `ast:${i}`,
+        name: t.known ? t.known.name : `Track of ${astMjd ? season(astMjd) : 'one pass'}`,
+        line: `crosses the field at ${t.rate.toFixed(1)}″/h · ${t.n} visits of one pass`,
+        // without JPL's answer a track is not a lead: it may be a known asteroid nobody could name
+        status: t.known ? 'known' : jplState === 'unavailable' ? 'jpl' : jplState === 'asking' ? 'checking' : 'unexplained',
+        uv: null,
+        pick: rowPick(`ast:${i}`, () => {
+          selectTrack(i);
+          if (film === null) toDays();
+          setFrame(t.pts[0]?.f ?? 0);
+          setPlaying(false);
+        }),
+      }),
+    ),
+    ...(FPX_AUTO && !fpx ? fpxLeads : []).map(
+      (l, i): FindRow => ({
+        key: `px:${i}`,
+        name: placeWord(l.ra, l.dec),
+        line: `Find Planet X peak · S/N ${l.sn} · ${l.d} au · photometry ${l.phot != null ? `${l.phot}σ` : 'n/a'}`,
+        status: 'unexplained',
+        uv: uvNow(l.ra, l.dec),
+        pick: rowPick(`px:${i}`, l.open),
+      }),
+    ),
+  ];
+  const stateOf = (done: boolean, n: number, failed = false) => (failed ? 'failed' : !done ? 'running' : n ? 'found' : 'nothing') as 'failed' | 'running' | 'found' | 'nothing';
+  const searchStates = [
+    { name: 'movers', state: stateOf(mv?.state === 'done', mvr?.tracks.length ?? 0, mv?.state === 'failed') },
+    { name: 'pairs', state: stateOf(mv?.state === 'done', pairs.length, mv?.state === 'failed') },
+    { name: 'brown dwarfs', state: stateOf(dwarfs?.state === 'done', (dwarfs?.result?.candidates.length ?? 0) + (dwarfs?.result?.known.length ?? 0)) },
+    { name: 'red sources', state: stateOf(redv?.state === 'done', redv?.result?.red.length ?? 0, redv?.state === 'failed') },
+    { name: 'anomalies', state: stateOf(an?.state === 'done', an?.result?.anomalies.length ?? 0, an?.state === 'failed') },
+    { name: 'asteroids', state: stateOf(ast.state === 'done' || ast.state === 'none', ast.tracks?.length ?? 0, ast.state === 'failed') },
+    ...(FPX_AUTO && !fpx ? [{ name: 'Planet X', state: stateOf(fpxAllOver, fpxLeads.length) }] : []),
+  ];
+  const foundCount = unexplainedCount(findRows);
 
   return (
     <div class="screen">
@@ -3057,6 +3195,7 @@ export function Lab({ route }: { route: Route }) {
                   return;
                 }
                 if ((e.target as HTMLElement).closest('.float')) return;
+                setCandSel(null); // a click on the picture: every ring is on show again
                 {
                   // a mark put or opened, a ruler point: the click is the flow's, not a pick
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -3914,7 +4053,13 @@ export function Lab({ route }: { route: Route }) {
                   onBack={() => setPairSel(null)}
                 />
               )}
-              <div class="psh">Candidates in this field</div>
+              <CandList
+                rows={findRows}
+                also={alsoLine(searchStates)}
+                selected={candSel}
+                picture={() => canvas.current}
+                details={
+                  <>
               <section class="psec fsec">
                 <div class="fsh">Movers between passes</div>
                 <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
@@ -4196,8 +4341,6 @@ export function Lab({ route }: { route: Route }) {
                   ))}
                 {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
               </section>
-            </div>
-          )}
           <div class={`sbar ${trayOpen ? '' : 'tray'}`} data-testid="scans">
             <button
               class="tray-head"
@@ -4333,6 +4476,11 @@ export function Lab({ route }: { route: Route }) {
               </div>
             )}
           </div>
+                  </>
+                }
+              />
+            </div>
+          )}
         </aside>
       </div>
     </div>
