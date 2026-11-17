@@ -76,6 +76,8 @@ export function useSpectrum(src: Source | null): {
       q.set('pmra', String(src.pmra ?? 0));
       q.set('pmdec', String(src.pmdec ?? 0));
     }
+    // a find: the service leaves out the exposures people said a neighbour touches it in (and the broken ones, always)
+    if (src.finding) q.set('finding', src.finding);
     const poll = async () => {
       while (!stop) {
         try {
@@ -114,7 +116,7 @@ export function useSpectrum(src: Source | null): {
     return () => {
       stop = true;
     };
-  }, [src?.ra, src?.dec, src?.pmra, src?.pmdec]);
+  }, [src?.ra, src?.dec, src?.pmra, src?.pmdec, src?.finding]);
   return { view, points, error };
 }
 
@@ -234,6 +236,23 @@ function SpectrumChart({
       }
       c.textAlign = 'right';
       c.fillText('◇ catalogue (2MASS, WISE)', W - R - 4, T + 10);
+      c.restore();
+    }
+    // exposures people left out (a neighbour star touches it here, or the picture is broken): kept on the chart, not used, hollow
+    const out = points.filter((p) => !p.ok && p.flux != null && /^left out: people/.test(p.why ?? ''));
+    if (out.length) {
+      c.save();
+      c.strokeStyle = 'rgba(200,210,215,0.75)';
+      c.lineWidth = 1.2;
+      for (const p of out) {
+        c.beginPath();
+        c.arc(x(p.lam), y(p.flux!), 3, 0, 7);
+        c.stroke();
+      }
+      c.fillStyle = 'rgba(200,210,215,0.85)';
+      c.font = '500 10px ui-monospace, Menlo, monospace';
+      c.textAlign = 'right';
+      c.fillText(`○ ${out.length} left out by people`, W - R - 4, T + (refs.length ? 24 : 10));
       c.restore();
     }
     for (const p of ok) {

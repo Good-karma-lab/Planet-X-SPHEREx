@@ -272,6 +272,24 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const [tapHere, setTapHere] = useState<{ id: string; label: string; ra: number; dec: number; pass: number; passLabel: string } | null>(null);
   const tapRef = useRef(tapHere);
   tapRef.current = tapHere;
+  // a track people corrected (GET /api/v1/findings?ids=…: data.people_track): its path is drawn beside the machine's
+  type PeopleTrack = { state?: string; rate?: number; n?: number; missing?: number[]; visits?: { ra: number; dec: number; mjd: number }[] };
+  const [peopleTrack, setPeopleTrack] = useState<PeopleTrack | null>(null);
+  const ptRef = useRef(peopleTrack);
+  ptRef.current = peopleTrack;
+  const findParam = a.params['task'] ? (a.params['finding'] ?? '') : '';
+  useEffect(() => {
+    setPeopleTrack(null);
+    if (!findParam) return;
+    let stop = false;
+    fetch(`/api/v1/findings?ids=${encodeURIComponent(findParam)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { finds?: { data?: { people_track?: PeopleTrack } }[] } | null) => !stop && setPeopleTrack(d?.finds?.[0]?.data?.people_track ?? null))
+      .catch(() => undefined);
+    return () => {
+      stop = true;
+    };
+  }, [findParam]);
   // the People's marks of this field (GET /api/field/{key}/people): places merged by kind with counts, words only where I said something
   type PeoplePlace = { ra: number; dec: number; people: number; mine: boolean; seen: boolean; text?: string; kinds?: { kind: string }[] };
   type PeopleFind = { finding_id: string; ra: number; dec: number; seen: boolean; set_aside?: boolean };
@@ -515,6 +533,42 @@ export function useLabFlow(a: FlowArgs): LabFlow {
             ctx.fillText(q.text, x + 11, y + 4);
           }
         }
+      ctx.restore();
+    }
+    // the people's corrected path of this track: violet, dashed, beside the machine's
+    const pt = ptRef.current;
+    if (pt?.visits && pt.visits.length >= 2 && !wall) {
+      ctx.save();
+      for (const box of rects) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(box.x, box.y, box.w, box.h);
+        ctx.clip();
+        ctx.beginPath();
+        pt.visits.forEach((q, k) => {
+          const [u, v] = uv(q.ra, q.dec);
+          const x = box.x + u * box.w;
+          const y = box.y + v * box.h;
+          if (k) ctx.lineTo(x, y);
+          else ctx.moveTo(x, y);
+        });
+        ctx.setLineDash([2, 4]);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.stroke();
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = '#d7a6ff';
+        ctx.stroke();
+        ctx.setLineDash([]);
+        for (const q of pt.visits) {
+          const [u, v] = uv(q.ra, q.dec);
+          ctx.beginPath();
+          ctx.arc(box.x + u * box.w, box.y + v * box.h, 2.4, 0, 2 * Math.PI);
+          ctx.fillStyle = '#d7a6ff';
+          ctx.fill();
+        }
+        ctx.restore();
+      }
       ctx.restore();
     }
     // "tap it here": where the first mark of the mover was, a dashed ring of half a minute of arc on the pass asked
@@ -1370,6 +1424,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
   }, [eff, tapHere?.id]);
   const status = [
+    peopleTrack?.state ? `people: ${peopleTrack.state === 'relinked' ? `relinked · ${peopleTrack.rate != null ? `${peopleTrack.rate.toFixed(1)}″/h` : ''}${peopleTrack.missing?.length ? ` without ${peopleTrack.missing.length} visit${peopleTrack.missing.length === 1 ? '' : 's'}` : ''}` : peopleTrack.state}` : '',
     tapHere ? `It moves · tap it here in ${tapHere.passLabel}` : open && eff && (eff.id === open || marks.some((m) => m.id === eff.id && headOf(m, marks)?.id === open)) ? effectWord(eff) : '',
     a.square?.line ?? '',
     a.known ? knownStatus(known, counts, knownSilent ? knownRetry.nextIn : null) : '',

@@ -725,7 +725,7 @@ export function Lab({ route }: { route: Route }) {
     const fdec = Number(p['find_dec']);
     const own = p['find_ra'] != null && p['find_dec'] != null && Number.isFinite(fra) && Number.isFinite(fdec);
     // a film find is a moving body: no variable-star verdict for it
-    setSel({ ra: own ? fra : ra, dec: own ? fdec : dec, name, ...(kind === 'film' ? { moving: { V: null, visits: [] } } : {}) });
+    setSel({ ra: own ? fra : ra, dec: own ? fdec : dec, name, finding: findId, ...(kind === 'film' ? { moving: { V: null, visits: [] } } : {}) });
   }, [findId, meta, ra, dec, fov, p['find_ra'], p['find_dec']]);
   // when the selected source changed: its ring pulses for a few seconds, so that a click in a list shows where on the picture the thing is
   const selAtRef = useRef(0);
