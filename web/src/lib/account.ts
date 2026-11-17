@@ -9,6 +9,8 @@ export interface User {
   email: string;
 }
 export interface AuthInfo {
+  /** e-mail sign-in is open (a mail sender is set up, or dev mode); false with google false: "Sign-in opens soon" */
+  email: boolean;
   /** Google sign-in is set up on the server */
   google: boolean;
   /** dev mode: the sign-in link is shown on the page */
@@ -87,7 +89,7 @@ export async function api<T>(path: string, init?: { method?: string; body?: unkn
 // ------------------------------------------------------------------------------------------------------------------ the user
 
 let user: User | null = null;
-let auth: AuthInfo = { google: false, dev: false };
+let auth: AuthInfo = { email: true, google: false, dev: false };
 let loaded = false;
 const listeners = new Set<(u: User | null) => void>();
 
@@ -119,8 +121,8 @@ function setUser(u: User | null): void {
 /** Ask the server who this is (at the start, and after coming back from a sign-in link). */
 export async function loadUser(): Promise<User | null> {
   try {
-    const r = await api<{ user: User | null; auth?: AuthInfo }>('/api/me');
-    if (r.auth) auth = r.auth;
+    const r = await api<{ user: User | null; auth?: Partial<AuthInfo> & { google: boolean; dev: boolean } }>('/api/me');
+    if (r.auth) auth = { email: true, ...r.auth }; // a server from before this field has e-mail sign-in open
     setUser(r.user);
   } catch {
     setUser(null); // the service is away: a guest
