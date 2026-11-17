@@ -27,6 +27,7 @@ interface ScoreEvent {
   target: string | null;
   answer: string | null;
   stage: string | null;
+  result?: string | null;
 }
 export interface MyScore {
   points: number;
@@ -58,6 +59,7 @@ interface LeaderRow {
 const when = (iso: string | null) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
 const pct = (x: number | null) => (x == null ? '—' : `${Math.round(x * 100)}%`);
 const num = (n: number) => n.toLocaleString('en-US');
+const words = (v: string | null | undefined) => (v ?? '').replace(/_/g, ' ');
 const ANSWER: Record<string, string> = { moves: 'It moves', artefact: 'Artefact', known: 'Known object' };
 
 function eventLine(e: ScoreEvent): string {
@@ -68,6 +70,11 @@ function eventLine(e: ScoreEvent): string {
       return e.right ? `Known mover caught in a control square: ${e.target}` : `Control square ${e.ref}: the known mover was not marked`;
     case 'check':
       return `Finding ${e.ref}: answered “${ANSWER[e.answer ?? ''] ?? e.answer}”, the stage is “${e.stage}”`;
+    case 'moves':
+      return `Does it move? ${e.ref}: answered “${words(e.answer)}”, the stage is “${e.stage}”`;
+    case 'red':
+    case 'anomaly':
+      return `${e.kind === 'red' ? 'Red source' : 'Spectral anomaly'} ${e.ref}: answered “${words(e.answer)}”, people say “${words(e.result)}”`;
     case 'submit':
       return `Finding ${e.ref} submitted: it passed every check`;
     case 'candidate':

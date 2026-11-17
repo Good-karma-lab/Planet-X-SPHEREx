@@ -1,6 +1,9 @@
 """Taking a task: the next square to look through, or the next machine finding to check.
 
-  GET /api/tasks/next?kind=cell|finding[&cell_id=|&finding_id=]   → {task:{id, kind, cell_id|finding_id, field_key, ra, dec}|null}
+  GET /api/tasks/next?kind=cell|finding|moves|red|anomaly[&cell_id=|&finding_id=]
+                                     → {task:{id, kind, cell_id|finding_id, field_key, ra, dec[, question, answers:[{id, label}]]}|null}
+  GET /api/tasks/results?ids=a,b     → what people said about red sources and anomalies (service/accounts/agreement.py)
+  GET /api/tasks/brown-dwarf-queue   → red sources people call cold brown dwarfs, for the brown-dwarf search
 
 A guest may take a task too (trying needs no account); it is kept for the signed-in user only (GET /api/me/tasks) and closed by
 POST /api/me/tasks/{id}/done. A signed-in user gets their own open task of this kind back until it is closed, then the next one:
@@ -22,6 +25,8 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from service import accounts
+from service.accounts import agreement
+from service.accounts.score import STAGE_OF_STATUS
 
 REF_ID = re.compile(r"^[A-Za-z0-9_\-:.]{1,80}$")
 LEADS = ("unexplained", "unchecked")
@@ -80,7 +85,15 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
 
     body = query(f.db, None, None, None, 100000, 0)
     return [
-        {"finding_id": x["id"], "field_key": (x.get("scans") or [None])[0], "ra": x["ra"], "dec": x["dec"], "status": x["status"]}
+        {
+            "finding_id": x["id"],
+            "field_key": (x.get("scans") or [None])[0],
+            "ra": x["ra"],
+            "dec": x["dec"],
+            "status": x["status"],
+            "kind": x["kind"],
+            "stage": STAGE_OF_STATUS.get(x["status"]),
+        }
         for x in body["finds"]
     ]
 
@@ -123,10 +136,40 @@ def make_tasks_router(st: Any) -> APIRouter:
         leads.sort(key=lambda r: checked.get(r["finding_id"], 0))  # stable: the page's order among the equally checked
         return leads[0] if leads else None
 
+    def next_judged(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
+        """Does it really move? / What is this red source? / What is this spectral anomaly?"""
+        rows = findings()
+        if finding_id is not None:
+            one = next((r for r in rows if r["finding_id"] == finding_id), None)
+            if one is None:
+                raise HTTPException(404, "no such finding")
+            return one
+        seen = acc.db.task_refs(user_id, kind) if user_id else set()
+        return agreement.get(st, acc.db).pick(kind, rows, user_id, seen)
+
+    def with_ask(task: dict[str, Any] | None) -> dict[str, Any] | None:
+        """The question and the answers of a judged task, for the lab's panel."""
+        if task is not None and task["kind"] in agreement.KINDS:
+            task["question"] = agreement.QUESTION[task["kind"]]
+            task["answers"] = [{"id": a, "label": label} for a, label in agreement.ANSWERS[task["kind"]]]
+        return task
+
+    @router.get("/api/tasks/results")
+    def results(ids: str = Query(..., max_length=8000)) -> Any:
+        """{results:{find id: {kind, result, label, agree, total, text}}}: what people said about red sources and anomalies."""
+        acc = accounts.get(st)
+        return {"results": agreement.get(st, acc.db).people_say([i for i in ids.split(",") if i][:500])}
+
+    @router.get("/api/tasks/brown-dwarf-queue")
+    def brown_dwarf_queue() -> Any:
+        """{candidates:[{finding_id, ra, dec, agree, total, at}]}: red sources people call cold brown dwarfs, for the brown-dwarf search."""
+        acc = accounts.get(st)
+        return {"candidates": agreement.get(st, acc.db).brown_dwarf_queue()}
+
     @router.get("/api/tasks/next")
     def next_task(
         request: Request,
-        kind: str = Query(..., pattern="^(cell|finding)$"),
+        kind: str = Query(..., pattern="^(cell|finding|moves|red|anomaly)$"),
         cell_id: str | None = Query(None, max_length=80),
         finding_id: str | None = Query(None, max_length=80),
     ) -> Any:
@@ -139,10 +182,15 @@ def make_tasks_router(st: Any) -> APIRouter:
         if asked is None and uid is not None:
             have = acc.db.open_task(uid, kind)
             if have is not None:
-                return {"task": have}
-        ref = next_cell(acc, uid, cell_id) if kind == "cell" else next_finding(acc, uid, finding_id)
+                return {"task": with_ask(have)}
+        if kind == "cell":
+            ref = next_cell(acc, uid, cell_id)
+        elif kind == "finding":
+            ref = next_finding(acc, uid, finding_id)
+        else:
+            ref = next_judged(acc, kind, uid, finding_id)
         if ref is None:
             return {"task": None}
-        return {"task": acc.db.add_task(uid, kind, ref)}
+        return {"task": with_ask(acc.db.add_task(uid, kind, ref))}
 
     return router
