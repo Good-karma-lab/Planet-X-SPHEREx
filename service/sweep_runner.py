@@ -183,7 +183,7 @@ class SweepRunner:
 
     async def lab_field(self, params: dict[str, Any]) -> dict[str, Any]:
         t0 = time.time()
-        self._say("warming a find's field", field=params)
+        self._say("warming a find's field", field=params, step=None)
         key, job = self.st.submit_field(params, Priority.P2)
         while job is not None and job.state not in ("done", "error", "cancelled") and time.time() - t0 < SQUARE_LIMIT_S:
             await asyncio.sleep(5.0)
@@ -196,7 +196,7 @@ class SweepRunner:
         db, store = self.st.grid, self.st.store
         t0 = time.time()
         await asyncio.to_thread(db.put, ce.id, "searching", source="sweep")
-        self._say("searching", square=ce.id)
+        self._say("searching", square=ce.id, step="building its field")
         params = fieldjob.canonical(ce.ra, ce.dec, float(grid.FIELD_FOV_ARCMIN))
         key, job = self.st.submit_field(params, Priority.P2)
         while job is not None and job.state not in ("done", "error", "cancelled"):
@@ -214,6 +214,7 @@ class SweepRunner:
         if passes < 2:
             bar["note"] = "fewer than two passes: nothing can be seen to move"
         else:
+            self._say("searching", square=ce.id, step="the searches")
             found = await self.searches(key, ce)
             bar |= found.get("bar") or {}
         ids = list(dict.fromkeys(found.get("find_ids") or []))
@@ -272,7 +273,7 @@ class SweepRunner:
                     await asyncio.to_thread(self.strip_expired)
             why = self.gate()
             if why is not None:
-                self._say("paused", why=why)
+                self._say("paused", why=why, step=None)
                 await asyncio.sleep(IDLE_S)
                 continue
             lab = await asyncio.to_thread(self.next_lab_field)
@@ -303,4 +304,4 @@ class SweepRunner:
                 self.status["squares_today"] += 1
                 self.status["finds_today"] += int(got.get("finds") or 0)
                 self.status["seconds_today"] += float(got.get("seconds") or 0)
-            self._say("idle", last=ce.id, last_result=got)
+            self._say("idle", last=ce.id, last_result=got, step=None)
