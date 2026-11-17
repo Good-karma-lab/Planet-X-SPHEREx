@@ -12,7 +12,8 @@
 /* ===== everywhere: the parts that exist only for touch windows are not displayed ===== */
 .tab-more,
 .sheet-grip,
-.touch-only {
+.touch-only,
+.vsq .float.touch-only {
   display: none;
 }
 
@@ -186,7 +187,7 @@
     border-radius: 18px 18px 0 0;
     border: 1px solid var(--edge);
     border-bottom: 0;
-    background: linear-gradient(160deg, rgba(22, 40, 52, 0.97), rgba(7, 15, 21, 0.97));
+    background: linear-gradient(160deg, #14262f, #070f15);
     box-shadow: 0 -14px 44px rgba(0, 0, 0, 0.5);
   }
   :root .more-head {
@@ -243,6 +244,12 @@
     gap: 0;
   }
 
+}
+
+/* =====================================================================================================================
+   PHONE, upright and on its side: the globe
+   ===================================================================================================================== */
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px) {
   /* ===== globe ===== */
   :root .screen .globe-wrap {
     position: absolute;
@@ -388,7 +395,7 @@
     padding: 6px 16px 14px;
     border-radius: 18px 18px 0 0;
     border-width: 1px 0 0;
-    background: linear-gradient(160deg, rgba(20, 38, 49, 0.97), rgba(7, 15, 21, 0.97));
+    background: linear-gradient(160deg, #14262f, #070f15);
     box-shadow: 0 -14px 44px rgba(0, 0, 0, 0.55);
     font-size: 15px;
   }
@@ -547,7 +554,7 @@
     left: 8px;
   }
   /* the Mark tool on the picture (touch windows only) */
-  :root .vsq .fmark {
+  :root .vsq .float.fmark {
     display: inline-flex;
     right: 8px;
     bottom: 8px;
@@ -710,7 +717,7 @@
     transition: height 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
     border-radius: 18px 18px 0 0;
     border-top: 1px solid var(--edge-hi);
-    background: linear-gradient(160deg, rgba(20, 38, 49, 0.98), rgba(7, 15, 21, 0.98));
+    background: linear-gradient(160deg, #14262f, #070f15);
     box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.55);
     overflow: hidden;
   }
@@ -771,7 +778,7 @@
     gap: 10px;
     border-radius: 18px 18px 0 0;
     border-width: 1px 0 0;
-    background: linear-gradient(160deg, rgba(20, 38, 49, 0.99), rgba(7, 15, 21, 0.99));
+    background: linear-gradient(160deg, #14262f, #070f15);
     box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.6);
   }
   :root .markedit .inp {
@@ -789,5 +796,1310 @@
   :root .markedit .me-meta,
   :root .markedit .me-hint {
     font-size: 12px;
+  }
+}
+
+/* =====================================================================================================================
+   PHONE, upright: pages that scroll (Findings, Cabinet, Planet X, Index, Method, About)
+   ===================================================================================================================== */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .screen:has(.ipage) {
+    position: relative;
+    inset: auto;
+    overflow: visible;
+  }
+  :root .ipage {
+    padding: 10px 14px 28px;
+    gap: 14px;
+    font-size: 15px;
+  }
+  :root .pg-h h1 {
+    font-size: 24px;
+  }
+  :root .pg-h .hint {
+    font-size: 15px;
+    line-height: 1.45;
+  }
+  /* a row of chips is ONE strip that slides sideways, 44 px high (filters of Findings and Index, the Cabinet's tabs) */
+  :root .ipage .chips,
+  :root .fkinds,
+  :root .cb-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    gap: 8px;
+    margin-left: -14px;
+    margin-right: -14px;
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  :root .ipage .chips::-webkit-scrollbar,
+  :root .fkinds::-webkit-scrollbar,
+  :root .cb-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  :root .ipage .chip,
+  :root .fkinds button,
+  :root .cb-tabs button {
+    flex: none;
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 14px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+  }
+  :root .fkinds,
+  :root .cb-tabs {
+    justify-content: flex-start;
+    align-items: center;
+  }
+  :root .ipage .btn,
+  :root .ipage .btn.sm,
+  :root .ipage a.btn {
+    min-height: 44px;
+    padding-left: 14px;
+    padding-right: 14px;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  :root .ipage .inp {
+    min-height: 48px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+  :root .ipage .mono-s {
+    font-size: 12px;
+  }
+
+  /* ===== Findings: one column of cards ===== */
+  :root .fbar {
+    padding: 10px 14px 10px;
+    overflow: hidden;
+  }
+  :root .fbar .fsep {
+    display: none;
+  }
+  :root .fgrid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+  :root .fcard {
+    contain-intrinsic-size: auto 560px;
+  }
+  :root .fcard-body {
+    padding: 12px 14px 14px;
+    gap: 5px;
+  }
+  :root .fcard-title {
+    font-size: 16px;
+    min-height: 0;
+  }
+  :root .fcard-meta {
+    font-size: 14px;
+  }
+  :root .fcard-promise {
+    display: block;
+    font-size: 12px;
+  }
+  :root .ipage .fcard-go {
+    min-height: 48px;
+    font-size: 15px;
+    margin-top: 8px;
+  }
+
+  /* ===== Cabinet ===== */
+  :root .cb-head {
+    align-items: stretch;
+  }
+  :root .cb-who {
+    font-size: 14px;
+  }
+  :root .cb-card {
+    padding: 12px 14px;
+  }
+  :root .cb-row,
+  :root a.cb-row,
+  :root button.cb-row {
+    min-height: 56px;
+    padding: 8px 4px;
+    font-size: 15px;
+  }
+  :root .cb-signin {
+    max-width: none;
+    padding: 16px 14px;
+  }
+  :root .cb-signin form {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+  :root .cb-signin .inp {
+    min-width: 0;
+    flex: none;
+  }
+  :root .cb-signin .btn {
+    min-height: 48px;
+    font-size: 15px;
+  }
+  :root .cb-signin a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  :root .cb-addnote {
+    flex-direction: column;
+  }
+}
+
+/* the magnifier for marks (ui/touch.ts): made only while a finger is on the picture, so a desktop never has it */
+.loupe {
+  position: fixed;
+  z-index: 200;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  border: 2px solid rgba(159, 243, 234, 0.85);
+  box-shadow:
+    0 10px 30px rgba(0, 0, 0, 0.6),
+    0 0 0 1px rgba(0, 0, 0, 0.6);
+  pointer-events: none;
+  display: none;
+}
+
+/* =====================================================================================================================
+   EVERY touch window (phones and tablets): a finger's size and a readable size, whatever the layout.
+   Controls are at least 44 px on their smaller side (rule 3.1); no text is under 11 px (rule 3.4).
+   ===================================================================================================================== */
+@media (max-width: 1279.98px) {
+  /* --- text that was 8–10.5 px --- */
+  :root .rail .tab,
+  :root .rail .tab span,
+  :root .psh,
+  :root .h2,
+  :root .sechead,
+  :root .tp-head b,
+  :root .tray-head b,
+  :root .cb-page h4,
+  :root .cb-inv-body h4,
+  :root .field > label,
+  :root .fld > span,
+  :root .cov-card .cov-facts dt,
+  :root .badge,
+  :root .tbadge,
+  :root .pill,
+  :root .px3-foot,
+  :root .px3-tag small,
+  :root .tl-labels span,
+  :root .vsq .fstatus,
+  :root .vsq .fstatus span,
+  :root .vsq.compact .fstatus,
+  :root .ft-mark span,
+  :root .markedit .me-hint,
+  :root .dchecks .chk,
+  :root .map-read,
+  :root .map-credit,
+  :root .cov-legend,
+  :root .cb-empty,
+  :root .cb-status {
+    font-size: 11px;
+  }
+  :root .mono-s {
+    font-size: max(11px, 1em * 0.86);
+  }
+  :root .bchip,
+  :root .bchip b,
+  :root .vsq .fbands .bchip,
+  :root .vsq.compact .fbands .bchip,
+  :root .vsq .fbands .mini,
+  :root .vsq.compact .fbands .mini {
+    font-size: 12px;
+  }
+
+  /* --- controls --- */
+  :root .btn,
+  :root .btn.sm,
+  :root a.btn {
+    min-height: var(--hit);
+  }
+  :root .mini,
+  :root .btn.mini,
+  :root .vsq .fbands .mini,
+  :root .vsq.compact .fbands .mini {
+    height: var(--hit);
+    min-height: var(--hit);
+    min-width: var(--hit);
+    justify-content: center;
+  }
+  :root .seg button,
+  :root .seg.sm button,
+  :root .lab .seg button,
+  :root .dgroup .seg button,
+  :root .tbar .seg.scale button,
+  :root .map-ui .seg button,
+  :root .map-ui .seg.sm button {
+    min-height: var(--hit);
+  }
+  :root .inp,
+  :root .flowtools .ft-row .inp,
+  :root .dgroup .dacts select,
+  :root .lab .stretch select.inp,
+  :root .tbar .spd {
+    min-height: var(--hit);
+  }
+  :root .chip,
+  :root .fkinds button,
+  :root .cb-tabs button,
+  :root .bchip,
+  :root .vsq .fbands .bchip,
+  :root .vsq.compact .fbands .bchip {
+    min-height: var(--hit);
+  }
+  :root .vsq .fbands .bchip,
+  :root .vsq.compact .fbands .bchip {
+    min-width: var(--hit);
+    padding: 0 9px;
+    justify-content: center;
+  }
+  /* a switch and its word are one target: the whole row */
+  :root .sw,
+  :root .chk,
+  :root .dchecks .chk,
+  :root .checks .chk {
+    min-height: var(--hit);
+    height: auto;
+  }
+  :root .lnk,
+  :root .dgroup .dacts .lnk {
+    min-height: var(--hit);
+    display: inline-flex;
+    align-items: center;
+  }
+  :root .ft-mark {
+    min-height: var(--hit);
+  }
+  :root .flowtools .ft-marks {
+    max-height: 190px;
+  }
+  :root .tbar .play {
+    width: 48px;
+    height: 48px;
+  }
+  :root .sbar.tray,
+  :root .tray-head {
+    min-height: var(--hit);
+  }
+  :root .leadpanel-x,
+  :root .cov-card .cov-x {
+    width: var(--hit);
+    height: var(--hit);
+  }
+  :root .zoomctl button {
+    width: var(--hit);
+    height: var(--hit);
+  }
+  :root .zoomctl .zs,
+  :root .zoomctl .zs input {
+    width: var(--hit);
+  }
+  :root .map-ui.map-bar .fld .inp.coord,
+  :root .map-ui.map-bar .fld .fovsel {
+    height: var(--hit);
+  }
+  :root .catalog .row .gobtns .btn.ico,
+  :root .catalog .row .gobtns a.btn {
+    min-width: var(--hit);
+    height: var(--hit);
+  }
+  :root .vsq .factions select {
+    min-height: 36px;
+  }
+  :root .vsq .factions .fovsel {
+    position: relative;
+  }
+  /* the field-size picker: 36 px of glass, 44 px for the finger */
+  :root .vsq .factions .fovsel::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    pointer-events: none;
+  }
+  /* what the desktop tells in a tooltip has no hover here; cut text wraps instead (rule 3.7) */
+  :root .checks .chk span {
+    white-space: normal;
+    overflow: visible;
+  }
+}
+
+/* =====================================================================================================================
+   TABLET (600–1279 px wide, at least 480 px high): the rail on the left, the desktop's shell
+   ===================================================================================================================== */
+@media (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
+  :root body {
+    overflow: hidden;
+  }
+  :root #app {
+    height: 100dvh;
+  }
+  :root .app {
+    flex-direction: row;
+    height: 100%;
+    min-height: 0;
+    padding: max(8px, var(--sa-t)) max(8px, var(--sa-r)) max(8px, var(--sa-b)) max(8px, var(--sa-l));
+    gap: 8px;
+  }
+  :root .rail {
+    flex-direction: column;
+    justify-content: flex-start;
+    width: 76px;
+    height: auto;
+    padding: 12px 6px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    scrollbar-width: none;
+  }
+  :root .rail .brand {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+  }
+  :root .rail .tabs {
+    flex: none;
+    flex-direction: column;
+    justify-content: flex-start;
+    gap: 4px;
+    width: 100%;
+    margin-top: 6px;
+  }
+  :root .rail .tab {
+    flex: none;
+    min-height: 56px;
+    padding: 8px 0 6px;
+    gap: 4px;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  :root .rail .tab svg {
+    width: 24px;
+    height: 24px;
+  }
+  :root main {
+    min-height: 0;
+  }
+  :root .screen,
+  :root .lab {
+    position: absolute;
+    inset: 0;
+  }
+  :root .screen {
+    flex-direction: row;
+  }
+  :root .screen:has(.ipage) {
+    display: block;
+    overflow-y: auto;
+  }
+  :root .ipage {
+    padding: 8px 10px 40px;
+  }
+  :root .globe-wrap {
+    min-height: 0;
+  }
+  /* Findings: two columns of cards to 839 px, three from 840 px */
+  :root .fgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  /* the tour's card clears the rail */
+  :root .tour {
+    left: 100px;
+  }
+}
+@media (min-width: 840px) and (max-width: 1279.98px) and (min-height: 480px) {
+  :root .fgrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+/* ----- tablet with ONE pane (to 839 px wide, or upright): the lab's picture on top, its panel a sheet under the playback ----- */
+@media (min-width: 600px) and (max-width: 839.98px) and (min-height: 480px), (min-width: 840px) and (max-width: 1279.98px) and (orientation: portrait) {
+  :root .lab {
+    flex-direction: column;
+  }
+  :root .lab .vwrap {
+    flex: 0 1 auto;
+    min-height: 0;
+    padding-bottom: calc(var(--sheet-peek, 80px) + 10px);
+    border: 0;
+  }
+  :root .lab .vstage {
+    flex: 0 1 calc(100vw - 124px);
+    min-height: 260px;
+    align-items: flex-start;
+    justify-content: center;
+  }
+  :root .lab .panel {
+    --sheet: 1;
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 30;
+    width: auto;
+    height: var(--sheet-h, 80px);
+    max-height: calc(100dvh - 96px);
+    transform: translateY(var(--sheet-drag, 0px));
+    transition: height 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+    border-radius: 18px 18px 0 0;
+    border-top: 1px solid var(--edge-hi);
+    background: linear-gradient(160deg, #14262f, #070f15);
+    box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.55);
+    overflow: hidden;
+  }
+  :root .lab .panel > * {
+    flex-shrink: 0;
+  }
+  :root .lab .panel > .pbody {
+    flex: 1 1 0;
+    min-height: 0;
+  }
+  :root .lab .panel[data-dragging] {
+    transition: none;
+  }
+  :root .lab .panel[data-settling] {
+    transition: transform 0.26s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  :root .lab .panel .sheet-grip {
+    display: flex;
+  }
+  :root .lab .pbody {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  :root .lab .pbody.pobj {
+    min-height: 0;
+  }
+  :root .taskpanel .btn {
+    min-height: 48px;
+  }
+}
+
+/* ----- tablets, both layouts: details ----- */
+@media (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
+  /* the status line stands above the band chips (they are 44 px high here) */
+  :root .lab .vsq .fstatus,
+  :root .lab .vsq.compact .fstatus,
+  :root .lab .vsq:not(.compact) .fstatus {
+    bottom: 64px;
+  }
+  /* the Mark tool on the picture, under the field-size picker */
+  :root .vsq .float.fmark {
+    display: inline-flex;
+    right: 10px;
+    top: 62px;
+    left: auto;
+    bottom: auto;
+    min-width: 72px;
+    height: 44px;
+    padding: 0 14px;
+    justify-content: center;
+    border-radius: 12px;
+    font: 600 14px var(--font);
+    color: var(--ink);
+    cursor: pointer;
+  }
+  :root .vsq .float.fmark.on {
+    color: #06211f;
+    background: var(--accent);
+    border-color: var(--accent-l);
+  }
+  :root .vsq .float.fmark:disabled {
+    opacity: 0.45;
+  }
+  /* RA and Dec are typed in 16 px text: one under the other where the panel is narrow */
+  :root .lab .coords {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  /* a square's card: a card at the right, under the bar of controls, never across the globe */
+  :root .cov-card {
+    left: auto;
+    right: 16px;
+    top: 124px;
+    bottom: auto;
+    width: 340px;
+    max-width: calc(100% - 32px);
+    padding: 8px 14px 14px;
+  }
+  :root .cov-card .cov-btns .btn {
+    min-height: 48px;
+  }
+  /* the editor of a mark keeps clear of the Mark button and the chips */
+  :root .markedit .inp,
+  :root .markedit .me-levels button,
+  :root .markedit .me-row button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+@media (min-width: 600px) and (max-width: 839.98px) and (min-height: 480px), (min-width: 840px) and (max-width: 1279.98px) and (orientation: portrait) {
+  /* one pane: there is room for RA and Dec side by side */
+  :root .lab .coords {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* =====================================================================================================================
+   PHONE, upright: the first review round (17 Nov)
+   ===================================================================================================================== */
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px) {
+  /* ----- globe: one short line above the bar, a round "Show area", the catalogue's button in the row of chips ----- */
+  :root .map-bl {
+    left: 10px;
+    right: 70px;
+    bottom: 10px;
+    max-width: none;
+    gap: 0;
+    flex-direction: row;
+    align-items: center;
+  }
+  :root .map-bl .map-read {
+    max-width: 100%;
+    min-height: 32px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 0 8px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 12px;
+    border-radius: 16px;
+  }
+  :root .map-bl .map-dates {
+    display: none;
+  }
+  /* with the Coverage layer on, the line is the count of squares; the key to the colours opens by a tap on it */
+  :root .map-bl:has(.cov-legend) .map-read:not(.cov-legend) {
+    display: none;
+  }
+  :root .map-bl .cov-legend {
+    cursor: pointer;
+    min-height: 44px;
+    border-radius: 22px;
+  }
+  :root .map-bl .cov-legend .cov-key,
+  :root .map-bl .cov-legend .cov-do {
+    display: none;
+  }
+  :root .map-bl .cov-legend::after {
+    content: 'i';
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin-left: 2px;
+    border-radius: 50%;
+    border: 1px solid var(--edge-hi);
+    display: grid;
+    place-items: center;
+    font: 600 12px var(--font);
+    color: var(--accent-l);
+  }
+  :root .map-bl .cov-legend.open {
+    flex-wrap: wrap;
+    white-space: normal;
+    padding: 8px 12px;
+    gap: 6px 12px;
+    border-radius: 14px;
+  }
+  :root .map-bl .cov-legend.open .cov-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+  }
+  :root .map-bl .cov-legend.open [data-testid='cov-count'] {
+    flex-basis: 100%;
+  }
+  :root .map-bl .cov-legend.open::after {
+    content: '×';
+    position: absolute;
+    right: 8px;
+    top: 8px;
+    border: 0;
+    font-size: 16px;
+  }
+  :root .map-bl .cov-legend.open {
+    position: relative;
+    padding-right: 34px;
+  }
+  /* "Show area": a round 48 px button with its icon; its name stays for screen readers */
+  :root .map-open {
+    right: 10px;
+    bottom: 8px;
+    width: 48px;
+    height: 48px;
+    min-height: 48px;
+    padding: 0;
+    border-radius: 50%;
+    justify-content: center;
+    font-size: 0;
+    gap: 0;
+  }
+  :root .map-open svg {
+    width: 22px;
+    height: 22px;
+  }
+  :root .zoomctl {
+    bottom: 68px;
+  }
+  /* the catalogue: its button is the first thing of the row of chips (top left), not a tab on the edge under the thumb */
+  :root .cat-drawer {
+    top: 0;
+    width: 100%;
+    z-index: 26;
+  }
+  :root .cat-drawer .cat-handle {
+    left: calc(-100% + 12px);
+    top: 8px;
+    transform: none;
+    width: auto;
+    height: 46px;
+    min-width: 0;
+    min-height: 0;
+    padding: 0 13px;
+    flex-direction: row;
+    gap: 0;
+    border-radius: 12px;
+    border: 1px solid var(--edge);
+    box-shadow: none;
+  }
+  :root .cat-drawer .cat-handle .cat-arrow {
+    display: none;
+  }
+  :root .cat-drawer .cat-handle .cat-word {
+    writing-mode: horizontal-tb;
+    transform: none;
+    font: 600 14px var(--font);
+    letter-spacing: 0;
+    text-transform: none;
+  }
+  /* open: the same button closes it, at the panel's top right */
+  :root .cat-drawer.open .cat-handle {
+    left: auto;
+    right: 10px;
+    top: 10px;
+    z-index: 2;
+    background: rgba(8, 18, 24, 0.9);
+  }
+  :root .cat-drawer.open .cat-handle .cat-word {
+    font-size: 0;
+  }
+  :root .cat-drawer.open .cat-handle .cat-word::after {
+    content: 'Close';
+    font: 600 14px var(--font);
+  }
+  :root .cat-drawer.open .catalog .cat-top {
+    padding-right: 86px;
+  }
+  :root .map-ui.map-bar {
+    padding-left: 122px;
+  }
+
+}
+@media (max-width: 599.98px) and (min-height: 480px) {
+  /* ----- lab: the rows that slide sideways show that there is more (a fade at the right edge) ----- */
+  :root .vsq .fbands,
+  :root .vsq.compact .fbands,
+  :root .tbar,
+  :root .map-ui.map-bar,
+  :root .fbar,
+  :root .cb-tabs,
+  :root .ipage .chips {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 30px), rgba(0, 0, 0, 0.25));
+    mask-image: linear-gradient(to right, #000 calc(100% - 30px), rgba(0, 0, 0, 0.25));
+  }
+  /* the passes end before the fade */
+  :root .tbar .tl-mid > * {
+    width: calc(100vw - 112px);
+  }
+  /* "Mark" reads as a button: a lit edge, its sign, full contrast */
+  :root .vsq .float.fmark {
+    height: 46px;
+    padding: 0 14px 0 12px;
+    gap: 7px;
+    font-size: 15px;
+    color: var(--accent-l);
+    background: rgba(6, 24, 28, 0.9);
+    border: 1.5px solid var(--accent);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.6),
+      0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+  :root .vsq .float.fmark::before {
+    content: '';
+    width: 16px;
+    height: 16px;
+    background:
+      linear-gradient(currentColor, currentColor) 50% 0 / 2px 5px no-repeat,
+      linear-gradient(currentColor, currentColor) 50% 100% / 2px 5px no-repeat,
+      linear-gradient(currentColor, currentColor) 0 50% / 5px 2px no-repeat,
+      linear-gradient(currentColor, currentColor) 100% 50% / 5px 2px no-repeat;
+  }
+
+  /* ----- Findings: one short status line, every filter in ONE row that slides sideways ----- */
+  :root .ipage:has(.fbar) .pg-h .hint {
+    display: none;
+  }
+  :root .fbar {
+    display: grid;
+    grid-template-rows: 44px auto;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    align-items: center;
+    gap: 6px 8px;
+    padding: 10px 14px 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+  :root .fbar::-webkit-scrollbar {
+    display: none;
+  }
+  :root .fbar .fkinds {
+    grid-row: 1;
+    margin: 0;
+    padding: 0;
+    overflow: visible;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  :root .fbar .leadcount {
+    grid-row: 2;
+    grid-column: 1 / span 3;
+    justify-self: start;
+    position: sticky;
+    left: 0;
+    max-width: calc(100vw - 62px);
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  :root .fbar .leadcount a {
+    display: inline;
+    min-height: 0;
+  }
+}
+
+/* the lab's sheet at rest shows the head of its panel; the tray of scans (the panel's foot) comes with the sheet pulled up */
+@media (max-width: 1279.98px) {
+  :root .lab .panel[data-detent='peek'] .sbar.tray {
+    display: none;
+  }
+}
+
+/* ----- every touch window: the pages (Planet X, Index, Method, About, Leaderboard, landing) ----- */
+@media (max-width: 1279.98px) {
+  :root .ipage button,
+  :root .px3-ov button,
+  :root .px3-panel button,
+  :root .px-seg button,
+  :root .px-chip,
+  :root .mtoc select,
+  :root .ipage select {
+    min-height: var(--hit);
+    min-width: var(--hit);
+  }
+  :root .mtoc select {
+    min-height: 48px;
+  }
+  /* a link that stands alone on its line is a 44 px row; a link inside a sentence stays as it is (rule 3.3) */
+  :root .ipage a.go,
+  :root .px3-panel a.go,
+  :root .px3-tag.link,
+  :root .ipage .lnk,
+  :root .ipage [data-testid='to-leaders'],
+  :root .ipage p > a:only-child,
+  :root .fpage-back {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+  }
+  :root .lp-btn,
+  :root .lp-btn.lp-btn-sm {
+    min-height: var(--hit);
+  }
+  :root .lp-brand {
+    min-height: var(--hit);
+  }
+  :root [data-testid='landing-source'],
+  :root [data-testid='landing-more'] a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+  }
+}
+@media (max-width: 599.98px) and (min-height: 480px) {
+  /* Planet X: the model's canvas keeps its height, the page scrolls beside it by its margins */
+  :root .px3-tag.link {
+    min-height: 0;
+  }
+  :root .about-grid,
+  :root .mv2-main {
+    font-size: 16px;
+  }
+}
+
+/* ----- every touch window: Index and Planet X details ----- */
+@media (max-width: 1279.98px) {
+  :root .ix-seg button {
+    min-height: var(--hit);
+    min-width: var(--hit);
+  }
+  /* a label on the Planet X model that opens something: its words stay where they are, the finger gets 44 px */
+  :root .px3-tag.link {
+    display: block;
+    min-height: 0;
+    padding: 15px 8px;
+    margin: -15px -8px;
+  }
+}
+
+/* =====================================================================================================================
+   PHONE ON ITS SIDE (a window lower than 480 px): a narrow rail on the left, the picture left, the controls right.
+   Two panes are not practical in so low a window (rule 1.3): the lab's picture takes the height, everything else is ONE column.
+   ===================================================================================================================== */
+@media (max-height: 479.98px) and (max-width: 1279.98px) {
+  :root {
+    --rail: 68px;
+  }
+  :root body {
+    overflow: hidden;
+  }
+  :root #app {
+    height: 100dvh;
+  }
+  :root .app {
+    flex-direction: row;
+    height: 100%;
+    min-height: 0;
+    padding: 0 var(--sa-r) 0 var(--sa-l);
+    gap: 0;
+  }
+  :root .rail {
+    position: relative;
+    z-index: 60;
+    flex-direction: column;
+    justify-content: center;
+    width: var(--rail);
+    height: auto;
+    padding: 2px 4px;
+    gap: 0;
+    border-radius: 0;
+    border-width: 0 1px 0 0;
+    overflow: visible;
+    background: rgba(6, 14, 19, 0.92);
+  }
+  :root .rail .brand {
+    display: none;
+  }
+  :root .rail .tabs {
+    flex: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 2px;
+    width: 100%;
+    margin: 0;
+  }
+  :root .rail .tab {
+    position: relative;
+    flex: none;
+    min-width: 0;
+    min-height: 48px;
+    padding: 5px 0 3px;
+    gap: 2px;
+    letter-spacing: 0;
+    white-space: nowrap;
+    border-radius: 10px;
+  }
+  :root .rail .tab svg {
+    width: 22px;
+    height: 22px;
+  }
+  :root .rail .tab[data-testid='nav-planetx'],
+  :root .rail .tab[data-testid='nav-index'],
+  :root .rail .tab[data-testid='nav-method'],
+  :root .rail .tab[data-testid='nav-about'] {
+    display: none;
+  }
+  :root .rail .tab-more {
+    display: flex;
+    order: 1;
+    background: none;
+    color: var(--muted);
+    text-transform: uppercase;
+    font: 600 11px var(--font);
+  }
+  :root .rail .tab-more.on {
+    color: var(--accent-l);
+    background: rgba(95, 227, 214, 0.12);
+    border-color: rgba(95, 227, 214, 0.4);
+  }
+  :root .rail .tab[data-testid='nav-me'] {
+    order: 2;
+  }
+  /* the More sheet: a panel beside the rail */
+  :root .more-layer {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    width: 100vw;
+    height: 100dvh;
+    display: flex;
+    align-items: stretch;
+    background: rgba(2, 6, 9, 0.55);
+  }
+  :root .more-sheet {
+    width: 300px;
+    padding: 4px 10px;
+    overflow-y: auto;
+    border-right: 1px solid var(--edge);
+    background: linear-gradient(160deg, #14262f, #070f15);
+    box-shadow: 14px 0 44px rgba(0, 0, 0, 0.5);
+  }
+  :root .more-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 44px;
+    padding-left: 6px;
+    font-size: 16px;
+  }
+  :root .more-x {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--muted);
+  }
+  :root .more-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 48px;
+    padding: 0 10px;
+    border-radius: 12px;
+    color: var(--ink);
+    font-size: 16px;
+  }
+  :root .more-row.on {
+    color: var(--accent-l);
+    background: rgba(95, 227, 214, 0.1);
+  }
+  :root main {
+    min-height: 0;
+  }
+  :root .screen,
+  :root .lab {
+    position: absolute;
+    inset: 0;
+    gap: 0;
+  }
+  :root .screen {
+    flex-direction: row;
+  }
+  :root .screen:has(.ipage) {
+    display: block;
+    overflow-y: auto;
+  }
+  :root .ipage {
+    padding: 8px 14px 24px;
+  }
+  :root .tour {
+    left: calc(var(--rail) + var(--sa-l) + 12px);
+    bottom: 10px;
+    max-height: calc(100dvh - 20px);
+    overflow-y: auto;
+  }
+
+  /* ----- globe: the phone's rules above; here only what the low window changes ----- */
+  :root .screen .globe-wrap {
+    position: absolute;
+    inset: 0;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+  :root .globe-wrap::after {
+    display: none;
+  }
+  :root .cov-card {
+    left: auto;
+    right: 66px;
+    top: 62px;
+    bottom: auto;
+    width: 300px;
+    max-height: calc(100dvh - 72px);
+    overflow-y: auto;
+    padding: 2px 14px 12px;
+    border-radius: 16px;
+    border-width: 1px;
+  }
+  :root .cov-card .cov-facts {
+    margin-bottom: 8px;
+    gap: 2px 14px;
+  }
+
+  /* ----- lab: the picture is a square of the window's height on the left; playback and the panel are the column on the right ----- */
+  :root .lab {
+    flex-direction: row;
+    border: 0;
+    border-radius: 0;
+    --pic: min(100dvh, 52vw);
+    --col: calc(100vw - var(--rail) - var(--sa-l) - var(--sa-r) - var(--pic));
+  }
+  :root .lab .vwrap {
+    flex: none;
+    width: var(--pic);
+    height: 100%;
+    padding: 0;
+    gap: 0;
+    border: 0;
+  }
+  :root .lab .vstage {
+    flex: 1;
+    min-height: 0;
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+  :root .vsq {
+    margin-bottom: 0;
+  }
+  :root .vsq .ftitle {
+    left: 8px;
+    top: 8px;
+    max-width: calc(100% - 150px);
+    min-height: 36px;
+  }
+  :root .vsq .factions {
+    right: 8px;
+    top: 8px;
+  }
+  :root .vsq .refbox,
+  :root .vsq .refbox canvas {
+    width: 80px;
+  }
+  :root .vsq .refbox canvas {
+    height: 80px;
+  }
+  /* band chips: one row over the bottom of the picture that slides sideways; the status line above it */
+  :root .vsq .fbands,
+  :root .vsq.compact .fbands {
+    left: 0;
+    right: 0;
+    top: auto;
+    bottom: 4px;
+    transform: none;
+    width: auto;
+    max-width: none;
+    padding: 0 6px;
+    gap: 5px;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    border: 0;
+    background: none;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  :root .vsq .fbands::-webkit-scrollbar {
+    display: none;
+  }
+  :root .vsq .fbands .bchip,
+  :root .vsq.compact .fbands .bchip {
+    flex: none;
+    background: rgba(6, 12, 18, 0.72);
+  }
+  :root .vsq .fbands .bchip em,
+  :root .vsq .fbands .bchip .dot {
+    display: none;
+  }
+  :root .vsq .fbands .mini {
+    flex: none;
+  }
+  :root .lab .vsq .fstatus,
+  :root .lab .vsq.compact .fstatus {
+    left: 8px;
+    bottom: 54px;
+    max-width: calc(100% - 100px);
+    font-size: 11px;
+    white-space: normal;
+  }
+  :root .vsq .float.fmark {
+    display: inline-flex;
+    right: 8px;
+    top: 56px;
+    left: auto;
+    bottom: auto;
+    height: 44px;
+    padding: 0 14px 0 12px;
+    gap: 7px;
+    justify-content: center;
+    border-radius: 12px;
+    font: 600 15px var(--font);
+    color: var(--accent-l);
+    background: rgba(6, 24, 28, 0.9);
+    border: 1.5px solid var(--accent);
+    cursor: pointer;
+  }
+  :root .vsq .float.fmark.on {
+    color: #06211f;
+    background: var(--accent);
+  }
+  :root .vsq .float.fmark:disabled {
+    opacity: 0.45;
+  }
+  /* playback: at the top of the right column (it belongs to the picture's box in the page, so it is placed from there) */
+  :root .lab .tbar {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    width: var(--col);
+    z-index: 2;
+    display: grid;
+    grid-template-rows: 48px 44px;
+    grid-auto-flow: column;
+    grid-auto-columns: max-content;
+    align-items: center;
+    gap: 4px 8px;
+    height: auto;
+    padding: 4px 8px;
+    border-radius: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    background: #0a161d;
+    border-bottom: 1px solid var(--edge);
+  }
+  :root .lab .tbar::-webkit-scrollbar {
+    display: none;
+  }
+  :root .lab .tbar > * {
+    grid-row: 2;
+    order: 0;
+  }
+  :root .lab .tbar .play {
+    grid-row: 1;
+    grid-column: 1;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+  }
+  :root .lab .tbar .tl-mid {
+    grid-row: 1;
+    grid-column: 1;
+    position: sticky;
+    left: 68px;
+    width: 0;
+    min-width: 0;
+    margin-left: 60px;
+    flex: none;
+    overflow: visible;
+  }
+  :root .lab .tbar .tl-mid > * {
+    width: calc(var(--col) - 112px);
+  }
+  :root .lab .tbar .seg button {
+    padding: 0 12px;
+    font-size: 14px;
+  }
+  :root .lab .panel {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    height: 100%;
+    padding-top: 108px;
+    border-left: 1px solid var(--edge);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    display: block;
+  }
+  :root .lab .panel > .pbody {
+    overflow: visible;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  :root .lab .pbody.pobj {
+    min-height: 0;
+  }
+  :root .lab .coords {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+  :root .taskpanel .btn {
+    min-height: 48px;
+  }
+  /* the editor of a mark: in the right column, never over the picture */
+  :root .vsq .float.markedit {
+    position: fixed;
+    left: var(--pic) !important;
+    top: 0 !important;
+    right: 0;
+    bottom: 0;
+    width: auto !important;
+    z-index: 40;
+    padding: 12px 14px;
+    gap: 8px;
+    overflow-y: auto;
+    border-radius: 0;
+    border-width: 0 0 0 1px;
+    background: linear-gradient(160deg, #14262f, #070f15);
+  }
+  :root .markedit .inp,
+  :root .markedit .me-levels button,
+  :root .markedit .me-row button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* ----- pages ----- */
+  :root .fgrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  :root .ipage .chips,
+  :root .fkinds,
+  :root .cb-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+    justify-content: flex-start;
+  }
+  :root .fkinds button,
+  :root .cb-tabs button,
+  :root .ipage .chip {
+    flex: none;
+    white-space: nowrap;
+    padding: 0 14px;
+    font-size: 14px;
+    display: inline-flex;
+    align-items: center;
+  }
+  :root .ipage:has(.fbar) .pg-h .hint {
+    display: none;
   }
 }

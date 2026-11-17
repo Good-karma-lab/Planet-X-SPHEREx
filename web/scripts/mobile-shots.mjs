@@ -7,6 +7,7 @@
 import { chromium, webkit } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { SIZES } from './mobile-sizes.mjs';
 
 const arg = (k, d) => {
   const i = process.argv.indexOf(`--${k}`);
@@ -17,18 +18,8 @@ const OUT = arg('out', 'test-results/mobile');
 const ENGINE = arg('engine', 'chromium');
 const ONLY = arg('only', '').split(',').filter(Boolean);
 const GEOM = process.argv.includes('--geom');
+const AB = process.argv.includes('--ab');
 
-export const SIZES = {
-  p375: { width: 375, height: 812, dsf: 3, mobile: true },
-  p390: { width: 390, height: 844, dsf: 3, mobile: true },
-  l812: { width: 812, height: 375, dsf: 3, mobile: true },
-  l844: { width: 844, height: 390, dsf: 3, mobile: true },
-  t768: { width: 768, height: 1024, dsf: 2, mobile: true },
-  t820: { width: 820, height: 1180, dsf: 2, mobile: true },
-  t1024: { width: 1024, height: 768, dsf: 2, mobile: true },
-  t1180: { width: 1180, height: 820, dsf: 2, mobile: true },
-  d1512: { width: 1512, height: 860, dsf: 2, mobile: false },
-};
 const sizes = arg('sizes', 'p375,p390,l812,l844,t768,t820,t1024,t1180').split(',');
 
 const LAB = '#/lab?ra=331.09645&dec=-56.80059&fov=5';
@@ -65,9 +56,13 @@ const measure = () => {
     // a link inside a sentence is exempt (WCAG 2.5.8, inline)
     if (e.tagName === 'A' && getComputedStyle(e).display === 'inline' && e.parentElement && e.parentElement.textContent.trim().length > e.textContent.trim().length + 20) continue;
     targets++;
-    if (r.width < 43.5 || r.height < 43.5) small.push({ what: name(e), w: Math.round(r.width), h: Math.round(r.height) });
+    // a switch inside its label is pressed through the label: the label's box is the target
+    const lab = e.tagName === 'INPUT' && (e.type === 'checkbox' || e.type === 'radio') ? e.closest('label') : null;
+    const box = lab ? lab.getBoundingClientRect() : r;
+    if (box.width < 43.5 || box.height < 43.5) small.push({ what: name(lab || e), w: Math.round(box.width), h: Math.round(box.height) });
   }
   const tiny = new Map();
+  const tinyWhere = new Map();
   const cut = [];
   const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n; n = walk.nextNode()) {
@@ -77,6 +72,11 @@ const measure = () => {
     if (!r) continue;
     const fs = parseFloat(getComputedStyle(n.parentElement).fontSize);
     if (fs < 12) tiny.set(fs, (tiny.get(fs) || 0) + 1);
+    if (fs < 11) {
+      const e = n.parentElement;
+      const c = `${e.parentElement && typeof e.parentElement.className === 'string' ? '.' + e.parentElement.className.trim().split(/\s+/).join('.') + ' > ' : ''}${e.tagName.toLowerCase()}${typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\s+/).join('.') : ''}`;
+      tinyWhere.set(c, fs);
+    }
   }
   for (const e of document.querySelectorAll('button, a[href], input, select, [role=tab], .panel, [role=dialog]')) {
     const r = e.getBoundingClientRect();
@@ -92,6 +92,7 @@ const measure = () => {
     small_targets: small.length,
     smallest: small.sort((a, b) => Math.min(a.w, a.h) - Math.min(b.w, b.h)).slice(0, 12),
     tiny_text: [...tiny.entries()].sort((a, b) => a[0] - b[0]).map(([px, n]) => `${px}px ×${n}`),
+    under_11px: [...tinyWhere.entries()].slice(0, 30).map(([c, px]) => `${c} ${px}`),
     cut_by_window: [...new Set(cut)].slice(0, 10),
   };
 };
@@ -111,6 +112,42 @@ const geometry = () => {
     });
   }
   return out;
+};
+
+/**
+ * The responsive layer switched off and on inside one instant of one page: the box and the look of every element are taken with
+ * the layer's rules, then without them (its style sheet disabled; the parts it adds for touch windows hidden as its own rule hides
+ * them), with no time between the two for data or animation to change anything. Returns what differs: nothing, on a desktop.
+ */
+const layerAB = () => {
+  const keys = ['display', 'position', 'fontSize', 'fontWeight', 'fontFamily', 'lineHeight', 'letterSpacing', 'color', 'backgroundColor', 'backgroundImage', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth', 'borderTopColor', 'borderRadius', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'marginTop', 'marginRight', 'marginBottom', 'marginLeft', 'opacity', 'transform', 'zIndex', 'boxShadow', 'overflowX', 'overflowY', 'visibility', 'textTransform', 'gap', 'touchAction', 'minHeight', 'minWidth', 'height', 'width', 'flex', 'order', 'filter', 'overscrollBehavior'];
+  const sheets = [...document.styleSheets].filter((sh) => {
+    try {
+      return [...sh.cssRules].some((r) => r.cssText.includes('.sheet-grip'));
+    } catch {
+      return false;
+    }
+  });
+  const ours = [...document.querySelectorAll('.tab-more, .sheet-grip, .touch-only')];
+  const els = [...document.body.querySelectorAll('*')].filter((e) => !ours.some((o) => o === e || o.contains(e)) && !(e.closest('svg') && e.tagName !== 'svg'));
+  const take = () =>
+    els.map((e) => {
+      const r = e.getBoundingClientRect();
+      const st = getComputedStyle(e);
+      return `${[r.left, r.top, r.width, r.height].map((v) => Math.round(v * 100) / 100)}|${keys.map((k) => st[k]).join('|')}`;
+    });
+  const on = take();
+  const shown = ours.filter((e) => getComputedStyle(e).display !== 'none').map((e) => e.className);
+  sheets.forEach((sh) => (sh.disabled = true));
+  ours.forEach((e) => e.style.setProperty('display', 'none', 'important'));
+  const off = take();
+  sheets.forEach((sh) => (sh.disabled = false));
+  ours.forEach((e) => e.style.removeProperty('display'));
+  const diff = [];
+  on.forEach((v, i) => {
+    if (v !== off[i]) diff.push(`${els[i].tagName.toLowerCase()}.${typeof els[i].className === 'string' ? els[i].className : ''}`);
+  });
+  return { sheets: sheets.length, elements: els.length, differ: diff.length, examples: diff.slice(0, 6), touch_only_displayed: shown };
 };
 
 async function run(sizeKey) {
@@ -142,6 +179,7 @@ async function run(sizeKey) {
       await page.waitForTimeout(350);
       await page.screenshot({ path: join(dir, `${name}.png`), fullPage: full });
       report[name] = await page.evaluate(measure);
+      if (AB && !full) report[name].layer_ab = await page.evaluate(layerAB);
       if (GEOM && !full) writeFileSync(join(dir, `${name}.geom.json`), JSON.stringify(await page.evaluate(geometry)));
     };
     const go = async (hash) => {
@@ -230,7 +268,7 @@ async function run(sizeKey) {
       await shot('11-finding-open-full', true);
     });
 
-    for (const [i, s] of [['12', 'planetx'], ['13', 'index'], ['14', 'method'], ['15', 'about']]) {
+    for (const [i, s] of [['12', 'planetx'], ['13', 'index'], ['14', 'method'], ['15', 'about'], ['20', 'leaders']]) {
       await step(s, async () => {
         await go(`#/${s}`);
         await page.waitForTimeout(4000);
@@ -287,7 +325,7 @@ async function run(sizeKey) {
   writeFileSync(join(OUT, `${sizeKey}${ONLY.length ? '-' + ONLY.join('-') : ''}.json`), JSON.stringify(report, null, 1));
   const bad = Object.entries(report)
     .filter(([k, v]) => typeof v === 'object' && !k.endsWith('-full') && v.window)
-    .map(([k, v]) => `${k}: hscroll ${v.hscroll}, small ${v.small_targets}/${v.targets}${v.cut_by_window.length ? `, cut ${v.cut_by_window.length}` : ''}`);
+    .map(([k, v]) => `${k}: hscroll ${v.hscroll}, small ${v.small_targets}/${v.targets}${v.cut_by_window.length ? `, cut ${v.cut_by_window.length}` : ''}${v.layer_ab ? `, layer on/off: ${v.layer_ab.differ} of ${v.layer_ab.elements} elements differ${v.layer_ab.touch_only_displayed.length ? `, touch-only displayed: ${v.layer_ab.touch_only_displayed}` : ''}${v.layer_ab.sheets ? '' : ' (LAYER NOT FOUND)'}` : ''}`);
   console.log(`${sizeKey} (${ENGINE})\n  ${bad.join('\n  ')}`);
 }
 
