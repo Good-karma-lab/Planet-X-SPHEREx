@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS acc_credits (
 MAX_MARKS = 5000
 MAX_HISTORY = 500
 MAX_INVESTIGATIONS = 500
+MAX_ITEMS = 100  # objects in one investigation
 #: the statuses of a finding (docs: product spec §3)
 STATUSES = ("new", "in_review", "submitted", "known", "artefact", "candidate", "confirmed")
 
@@ -162,6 +163,9 @@ class AccountsDB:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._conn().executescript(SCHEMA)
+        if "extra" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_investigations)")}:
+            # what the lab adds to an investigation: the objects gathered (`items`), the ruler's result, the old-survey match
+            self._conn().execute("ALTER TABLE acc_investigations ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'")
         if "mjd" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_marks)")}:
             # added on 16 Nov 2026: the date of the frame a mark was put on (the checks tell fast movers from slow ones by it)
             self._conn().execute("ALTER TABLE acc_marks ADD COLUMN mjd REAL")
@@ -358,6 +362,7 @@ class AccountsDB:
             "id": r["id"], "title": r["title"], "finding_id": r["finding_id"], "mark_ids": json.loads(r["mark_ids"]),
             "notes": json.loads(r["notes"]), "frames": json.loads(r["frames"]), "checks_job": r["checks_job"],
             "submitted": r["submitted"], "declared": iso(r["declared"]), "created": iso(r["created"]), "updated": iso(r["updated"]),
+            "items": json.loads(r["extra"] or "{}").get("items", []),
         }  # fmt: skip
 
     def declare(self, user_id: str, inv_id: str, checks_job: str) -> None:
@@ -412,6 +417,45 @@ class AccountsDB:
         if sets:
             q = "UPDATE acc_investigations SET " + ", ".join(f"{k}=?" for k, _ in sets) + ", updated=? WHERE id=? AND user_id=?"
             self._conn().execute(q, (*[v for _, v in sets], time.time(), inv_id, user_id))
+        return self.investigation(user_id, inv_id)
+
+    def add_item(self, user_id: str, inv_id: str, item: dict[str, Any]) -> dict[str, Any] | None:
+        """One more object gathered in the lab: kept in the investigation with its marks, ruler result and catalogue match.
+        Its marks join the investigation's marks (the checks run on them); the same object sent again (same item id) is replaced."""
+        c = self._conn()
+        r = c.execute("SELECT extra, mark_ids, finding_id FROM acc_investigations WHERE id=? AND user_id=?", (inv_id, user_id)).fetchone()
+        if r is None:
+            return None
+        extra = json.loads(r["extra"] or "{}")
+        items = [x for x in extra.get("items", []) if x.get("id") != item["id"]]
+        if len(items) >= MAX_ITEMS:
+            raise LimitReachedError
+        extra["items"] = [*items, item]
+        marks = list(dict.fromkeys([*json.loads(r["mark_ids"]), *item.get("mark_ids", [])]))
+        c.execute(
+            "UPDATE acc_investigations SET extra=?, mark_ids=?, finding_id=COALESCE(finding_id, ?), updated=? WHERE id=? AND user_id=?",
+            (json.dumps(extra, ensure_ascii=False), json.dumps(marks), item.get("finding_id"), time.time(), inv_id, user_id),
+        )
+        return self.investigation(user_id, inv_id)
+
+    def remove_item(self, user_id: str, inv_id: str, item_id: str) -> dict[str, Any] | None:
+        """Take an object out of the investigation, with the marks that came only with it."""
+        c = self._conn()
+        r = c.execute("SELECT extra, mark_ids FROM acc_investigations WHERE id=? AND user_id=?", (inv_id, user_id)).fetchone()
+        if r is None:
+            return None
+        extra = json.loads(r["extra"] or "{}")
+        gone = [x for x in extra.get("items", []) if x.get("id") == item_id]
+        if not gone:
+            return None
+        extra["items"] = [x for x in extra.get("items", []) if x.get("id") != item_id]
+        kept = {m for x in extra["items"] for m in x.get("mark_ids", [])}
+        drop = {m for x in gone for m in x.get("mark_ids", [])} - kept
+        marks = [m for m in json.loads(r["mark_ids"]) if m not in drop]
+        c.execute(
+            "UPDATE acc_investigations SET extra=?, mark_ids=?, updated=? WHERE id=? AND user_id=?",
+            (json.dumps(extra, ensure_ascii=False), json.dumps(marks), time.time(), inv_id, user_id),
+        )
         return self.investigation(user_id, inv_id)
 
     def delete_investigation(self, user_id: str, inv_id: str) -> bool:
@@ -490,7 +534,9 @@ class AccountsDB:
     def submit(
         self, user_id: str, inv: dict[str, Any], checks_job: str, place: dict[str, Any], checks: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        """Record the finding under the user's name (once per investigation) and tell the user."""
+        """Record the finding under the user's name (once per investigation) and tell the user. Safe when two requests of
+        the same user settle the same submit at once: the second finds the row and says nothing twice. A machine finding that
+        somebody already submitted keeps its first submitter; this user is credited on it as well."""
         have = self.submission_of(inv["id"])
         if have is not None:
             return have
@@ -498,17 +544,25 @@ class AccountsDB:
         fid = inv["finding_id"] or f"user:{secrets.token_hex(6)}"
         now = time.time()
         c.execute(
-            "INSERT INTO acc_submissions(finding_id,user_id,investigation_id,checks_job,title,field_key,ra,dec,checks,created,updated)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO acc_submissions(finding_id,user_id,investigation_id,checks_job,title,field_key,ra,dec,checks,created,"
+            "updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (fid, user_id, inv["id"], checks_job, inv["title"], place.get("field_key"), place.get("ra"), place.get("dec"), json.dumps(checks),
              now, now),
         )  # fmt: skip
-        c.execute("UPDATE acc_investigations SET submitted=?, checks_job=?, updated=? WHERE id=?", (fid, checks_job, now, inv["id"]))
-        self.credit(fid, user_id, "submitted")
-        self.notify(user_id, "submitted", f"Your finding “{inv['title']}” is submitted and waits for the verdict.", fid)
-        sub = self.submission_of(inv["id"])
-        assert sub is not None
-        return sub
+        # the row of this investigation (written now, or by the request that was a moment earlier), else the finding's own row
+        r = c.execute("SELECT * FROM acc_submissions WHERE investigation_id=?", (inv["id"],)).fetchone()
+        if r is None:
+            r = c.execute("SELECT * FROM acc_submissions WHERE finding_id=?", (fid,)).fetchone()
+        assert r is not None
+        fid = r["finding_id"]
+        marked = c.execute(
+            "UPDATE acc_investigations SET submitted=?, checks_job=?, updated=? WHERE id=? AND submitted IS NULL",
+            (fid, checks_job, now, inv["id"]),
+        )
+        if marked.rowcount == 1:  # this call is the one that submitted it
+            self.credit(fid, user_id, "submitted")
+            self.notify(user_id, "submitted", f"Your finding “{inv['title']}” is submitted and waits for the verdict.", fid)
+        return self._sub(r)
 
     def credit(self, finding_id: str, user_id: str, role: str, result: str | None = None) -> None:
         """role: `marked` (first to mark it), `checked` (closed its task), `submitted`. The first record of a role by a user stays."""

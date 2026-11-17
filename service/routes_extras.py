@@ -296,7 +296,7 @@ def build_router(extras: Extras) -> APIRouter:
             return hit
         buf = store.read_part("film", key, "film.sxp")
         if buf is None:
-            raise HTTPException(404, "the film is not ready or unknown")
+            raise HTTPException(404, "the time-lapse is not ready or unknown")
 
         def work() -> dict[str, Any]:
             z, t_h, step = film_motion(buf)

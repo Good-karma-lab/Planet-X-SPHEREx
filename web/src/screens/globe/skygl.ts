@@ -12,8 +12,19 @@ const TILE = 512;
 const LAYERS = 96;
 const WIN = 32;
 const STEP = 8;
-/** how far apart (in texels, times s − 1) the two reads along RA are that make a HEALPix texel's footprint round; 0.9 by measurement (lag-1 autocorrelation along Dec = along RA at |Dec| 45–85°) */
-const ROUND = 0.9;
+/** how far to either side along RA (in texels, times s − 1) the two reads are that make a HEALPix texel's footprint round; 0.9 by measurement (the lag-1
+ *  autocorrelation of the star map along Dec then equals the one along RA at |Dec| 45–85°) */
+export const ROUND = 0.9;
+/**
+ * The offset of those two reads at a place, texels, from |z| = |sin Dec|. A HEALPix texel is a rhombus on the sky, longer towards the pole than along RA by
+ * s = 8 / (3π(1 − z²)) in the equatorial belt and 8 / (π(1 + |z|)) in the polar caps: 0.85 at the equator, 1.53 at |Dec| 42°, 1.27 at the poles. A star field
+ * whose faint stars are one texel each is drawn as dashes that all point at the pole; widening the read along RA makes the footprint as wide as it is long.
+ * Zero where s ≤ 1 (|Dec| below 23°). The shader computes the same.
+ */
+export function footprintOffset(za: number): number {
+  const s = za <= 2 / 3 ? 8 / (3 * Math.PI * (1 - za * za)) : 8 / (Math.PI * (1 + za));
+  return Math.max(0, Math.min(0.5, ROUND * (s - 1)));
+}
 
 const VERT = `#version 300 es
 void main() { gl_Position = vec4(float((gl_VertexID & 1) * 4 - 1), float((gl_VertexID & 2) * 2 - 1), 0.0, 1.0); }`;
@@ -375,7 +386,8 @@ export class GlSky {
     gl.uniform1i(u['uMoll']!, job.map ? 1 : 0);
     gl.uniform3f(u['uMap']!, job.map?.x ?? 0, job.map?.y ?? 0, job.map?.w ?? 1);
     gl.uniform1i(u['uChannels']!, K);
-    gl.uniform1f(u['uRound']!, (globalThis as { __skyRound?: number }).__skyRound ?? ROUND);
+    // three surveys, one per colour, are read as the CPU loop reads them: one read each
+    gl.uniform1f(u['uRound']!, K === 1 ? ROUND : 0);
     gl.uniform3f(u['uC']!, job.c[0]!, job.c[1]!, job.c[2]!);
     gl.uniform3f(u['uE']!, job.e[0]!, job.e[1]!, job.e[2]!);
     gl.uniform3f(u['uN']!, job.n[0]!, job.n[1]!, job.n[2]!);

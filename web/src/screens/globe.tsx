@@ -123,7 +123,7 @@ const PATH_PM = 50;
 
 /** Demo fields: places where the tool shows something worth seeing, with the view they open in. */
 const DEMOS: { n: string; what: string; ra: number; dec: number; fov: number; film?: number }[] = [
-  { n: '3I/ATLAS', what: 'interstellar comet · film of 14 Dec 2025', ra: 166.8274, dec: 5.2787, fov: 60, film: 61023.6 },
+  { n: '3I/ATLAS', what: 'interstellar comet · time-lapse of 14 Dec 2025', ra: 166.8274, dec: 5.2787, fov: 60, film: 61023.6 },
   {
     n: 'Asteroids near the ecliptic',
     what: 'film of the 14–20 Dec 2025 pass · known bodies ringed',
@@ -885,6 +885,8 @@ export function Globe() {
           setSel(near);
           const [ra, dec] = epochPlace(near);
           aim.set({ ra, dec }, 'map');
+          // with the Coverage layer on, a click on a target's pin also opens the card of the square it stands in
+          if (live.current.covOn) setCellId(pickCell(coverageNow(), ra, dec, cellPx()));
         } else {
           const s = unproject(px, py);
           if (s && live.current.covOn) {

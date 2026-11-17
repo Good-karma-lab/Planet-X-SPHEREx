@@ -8,7 +8,7 @@
 import { D2R } from '../../lib/sky';
 import { EQUI_NOTHING, EquiSampler, equiFrame, equiOf } from '../../lib/equi';
 import { FROM_NOTHING, HIPS, bakedOf, facePt, orderFor, Sampler, tiles, type FacePt } from '../../lib/hips';
-import { GlSky } from './skygl';
+import { GlSky, footprintOffset } from './skygl';
 
 export interface SkyView {
   ra: number;
@@ -149,8 +149,9 @@ export const STAR_MAP_TO_VISIBLE = 12000;
 /** the black point (of 255) some baked layers need on top of what the manifest says: the faint colour of the empty sky of 2MASS */
 const EXTRA_BLACK: Record<string, number> = { '2mass': 16 };
 
-/** The GPU painter is asked for by gl=1 in the address (gl=0 takes it back); the choice holds until the page is loaded again. */
-let glAsked = false;
+/** The GPU painter paints the sky wherever the browser has WebGL2; gl=0 in the address leaves it to the CPU loop (gl=1 takes it back). The choice holds until
+ *  the page is loaded again. A view the GPU painter cannot paint is painted by the CPU loop. */
+let glAsked = true;
 export function glWanted(): boolean {
   // the picture check switches the painter on one page, without a reload
   const forced = (globalThis as { __skyGl?: boolean }).__skyGl;
@@ -279,6 +280,9 @@ class SkyPainter {
   private gX = new Float64Array(0);
   private gY = new Float64Array(0);
   private zone = 0;
+  /** |sin Dec| of the place `place` answered last (in the frame of the tiles) */
+  private za = 0;
+  private gZ = new Float64Array(0);
 
   /** The exact sky place of a picture pixel as a face point (in the frame of the layer's tiles); false when the pixel is off the globe or the map. */
   private place(v: SkyView, b: ReturnType<typeof basis>, gal: boolean, s: number, sw: number, sh: number, i: number, j: number, f: FacePt): boolean {
@@ -321,6 +325,7 @@ class SkyPainter {
     facePt(ra, zc, f);
     // the two zones of a HEALPix face (equatorial belt, polar cap) are two different maps that meet with a kink
     this.zone = Math.abs(zc) > 2 / 3 ? 1 : 0;
+    this.za = Math.abs(zc);
     return true;
   }
 
@@ -373,6 +378,7 @@ class SkyPainter {
       this.gFace = new Int8Array(nG * 3);
       this.gX = new Float64Array(nG * 3);
       this.gY = new Float64Array(nG * 3);
+      this.gZ = new Float64Array(nG);
     }
     const gF = this.gFace;
     const gX = this.gX;
@@ -390,6 +396,7 @@ class SkyPainter {
           gF[k] = ok ? f.face + this.zone * 16 : -1;
           gX[k] = f.x;
           gY[k] = f.y;
+          if (r === 2) this.gZ[g] = this.za;
         }
       }
       for (let g = 0; g + 1 < nG; g++) {
@@ -415,6 +422,8 @@ class SkyPainter {
           Math.abs((y00 + y10 + y01 + y11) / 4 - gY[2 * nG + g]!) < tol;
         if (smooth) {
           const face = fa & 15;
+          // the two reads that make the texel's footprint round (see footprintOffset): one offset for the block, from the place of its centre
+          const off = footprintOffset(this.gZ[g]!);
           for (let jj = 0; jj < jn; jj++) {
             const a = jj / BL;
             const xl = x00 + (x01 - x00) * a;
@@ -423,7 +432,7 @@ class SkyPainter {
             const dy = (y10 + (y11 - y10) * a - yl) / BL;
             const q = ((j0 + jj) * sw + i0) * 4;
             p.total += cnt;
-            if (one) p.painted += sm.run(face, xl, yl, dx, dy, cnt, o, q, blackBaked, gainBaked, blackLive, gainLive);
+            if (one) p.painted += sm.run(face, xl, yl, dx, dy, cnt, o, q, blackBaked, gainBaked, blackLive, gainLive, off);
             else {
               for (let i = 0; i < cnt; i++) {
                 f.face = face;
@@ -439,7 +448,7 @@ class SkyPainter {
               if (!this.place(v, b, gal, s, sw, sh, i0 + i, j0 + jj, f)) continue;
               p.total++;
               const q = ((j0 + jj) * sw + i0 + i) * 4;
-              if (one) p.painted += sm.run(f.face, f.x, f.y, 0, 0, 1, o, q, blackBaked, gainBaked, blackLive, gainLive);
+              if (one) p.painted += sm.run(f.face, f.x, f.y, 0, 0, 1, o, q, blackBaked, gainBaked, blackLive, gainLive, footprintOffset(this.za));
               else if (this.three(p, f, q)) p.painted++;
             }
           }

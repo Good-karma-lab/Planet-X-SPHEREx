@@ -116,7 +116,7 @@ The diffraction spikes and rings of a bright star turn with the roll angle betwe
 - A saturated zone is a connected region where the saturated share (see Saturation, white frame and colour) exceeds 0.5. A zone of at least half a detector pixel is one source, placed at the centre of the zone weighted by the saturated share, however wide its flat top.
 - A peak of the smoothed stack within 2 detector pixels of such a zone is not a source of its own.
 - Every other source must stand 8 median absolute deviations above a local background, the median in blocks of 60″ smoothed back to the full size (the search between passes).
-- In a film of one pass, a static blob of equivalent radius of at least 150″ is treated as a halo, and its mask is grown by 0.4 times its radius.
+- In a time-lapse of one pass, a static blob of equivalent radius of at least 150″ is treated as a halo, and its mask is grown by 0.4 times its radius.
 
 A hard radius mask around bright stars would fail, because ε Indi B lies in the halo of ε Indi A at 1°; these rules look at the shape of the light, not at a distance.
 

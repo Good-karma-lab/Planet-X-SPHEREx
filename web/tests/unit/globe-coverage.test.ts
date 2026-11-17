@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   TOTAL,
   barText,
-  blockSide,
   cellAt,
   cellBox,
   cellCentre,
@@ -13,6 +12,7 @@ import {
   kindOf,
   loadCell,
   loadCoverage,
+  modeOf,
   parseId,
   pickCell,
   setScheme,
@@ -130,23 +130,30 @@ describe('drawing at every zoom', () => {
     project: (ra, dec) => [500 - (((ra - ra0 + 540) % 360) - 180) * scale, 400 - (dec - dec0) * scale, true],
     ra: ra0, dec: dec0, radius, cellPx: scale / 3, W: 1000, H: 800, flat: false, selected: '284-0805', font: 'sans-serif',
   });
-  it('picks real squares when they are 22 px or more, blocks below that', () => {
-    expect(blockSide(22)).toBe(1);
-    expect(blockSide(8)).toBe(2);
-    expect(blockSide(3)).toBe(4);
-    expect(blockSide(0.6)).toBe(32);
+  it('draws marks below 6 px, true squares from 6 px, the lattice from 22 px', () => {
+    expect(modeOf(2)).toBe('marks');
+    expect(modeOf(5.9)).toBe('marks');
+    expect(modeOf(6)).toBe('squares');
+    expect(modeOf(21)).toBe('squares');
+    expect(modeOf(22)).toBe('lattice');
   });
-  it('draws every square in sight when zoomed in, only what is not new when zoomed out', async () => {
+  it('draws every square in sight when zoomed in, one mark or one outline per square that is not new when zoomed out', async () => {
     fakeApi({ '/api/grid/coverage': { cells: [{ id: '284-0805', state: 'searched', finds: 14, viewers: 0 }, { id: '284-0806', state: 'searched', finds: 0, viewers: 0 }, { id: '100-0100', state: 'searched', finds: 0, viewers: 0 }] } });
     const c = (await loadCoverage(true))!;
     // 75 px per degree: a square is 25 px, the picture about 13° × 11°
     const near = drawCoverage(ctx, c, view(75, 269.5, 4.8, 9));
     expect(near).toBeGreaterThan(1000);
     expect(near).toBeLessThan(1700);
-    // 6 px per degree: a square is 2 px; the two neighbours are one block, the far square is out of sight
-    expect(drawCoverage(ctx, c, view(6, 269.5, 4.8, 90))).toBe(1);
-    // a click on the block opens its square with finds; zoomed in, the square under the click
-    expect(pickCell(c, 269.9, 4.7, 2)).toBe('284-0805');
+    // 6 px per degree: a square is 2 px; the two neighbours are two marks (never one block), the far square is out of sight
+    expect(drawCoverage(ctx, c, view(6, 269.5, 4.8, 90))).toBe(2);
+    // 30 px per degree: a square is 10 px; the two squares at their true outlines, no lattice
+    expect(drawCoverage(ctx, c, view(30, 269.5, 4.8, 25))).toBe(2);
+    // the whole sky: three marks
+    expect(drawCoverage(ctx, c, { ...view(3, 180, 0, 180), flat: true })).toBe(3);
+    // a click near a mark opens its square (the nearer of the two); far from any mark, and zoomed in, the square under the click
+    expect(pickCell(c, 269.52, 4.8, 2)).toBe('284-0805');
+    expect(pickCell(c, 269.9, 4.7, 2)).toBe('284-0806');
+    expect(pickCell(c, 200, 40, 2)).toBe(pickCell(null, 200, 40, 2));
     expect(pickCell(c, 269.9, 4.7, 25)).toBe('284-0806');
     expect(pickCell(null, 269.9, 4.7, 2)).toBe('284-0806');
   });

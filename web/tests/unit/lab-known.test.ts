@@ -41,7 +41,7 @@ const FAKE = {
 describe('known objects of a lab field', () => {
   it('asks with MJD dates and the field size', () => {
     const u = knownUrl(269.44629, 4.76792, 5, [60926.066, 61137.5871]);
-    expect(u).toBe('/api/known?ra=269.44629&dec=4.76792&size_arcmin=5&epochs=60926.0660%2C61137.5871');
+    expect(u).toBe('/api/known?ra=269.44629&dec=4.76792&size_arcmin=5&epochs=60926.0660%2C61137.5871&compact=1');
   });
 
   it('keeps the rows of the contract, drops wrong ones, turns dates into years', () => {
@@ -83,18 +83,21 @@ describe('known objects of a lab field', () => {
     const k = parseKnown(FAKE);
     expect(knownStatus({ state: 'ok', ...k })).toBe('JPL did not answer');
     expect(knownStatus({ state: 'ok', ...k, answered: { gaia: true, simbad: true, jpl: true } })).toBe('');
-    expect(knownStatus({ state: 'ok', ...k, answered: { gaia: false, simbad: true, jpl: false } })).toBe('Gaia and JPL did not answer');
-    expect(knownStatus({ ...KNOWN_OFF, state: 'failed' })).toBe('Gaia, SIMBAD and JPL did not answer');
+    expect(knownStatus({ state: 'ok', ...k, answered: { gaia: false, simbad: true, jpl: false } })).toBe('Gaia, JPL did not answer');
+    expect(knownStatus({ ...KNOWN_OFF, state: 'failed' })).toBe('Gaia, SIMBAD, JPL did not answer');
     expect(knownStatus(KNOWN_OFF)).toBe('');
   });
 
   it('counts what the picture shows, and waits for a catalogue the service is still asking', () => {
     const k = parseKnown({ ...FAKE, status: { ...FAKE.status, jpl: { state: 'pending' } } });
     expect(k.pending).toEqual(['jpl']);
-    expect(knownStatus({ state: 'ok', ...k }, { known: 212, noMatch: 7 })).toBe('known 212 · unknown 7 · JPL: waiting');
+    expect(knownStatus({ state: 'ok', ...k }, { known: 212, noMatch: 7 })).toBe('known 212 · unknown 7 · asking JPL…');
     // a deeper catalogue that did not answer: the sources are without a match so far, not unknown
     const half = parseKnown({ ...FAKE, status: { match: { gaia: { state: 'ok' }, catwise: { state: 'unavailable' }, allwise: { state: 'ok' }, twomass: { state: 'ok' } } } });
-    expect(knownStatus({ state: 'ok', ...half }, { known: 3, noMatch: 2 })).toBe('known 3 · no match 2 · CatWISE did not answer · JPL did not answer');
+    expect(knownStatus({ state: 'ok', ...half }, { known: 3, noMatch: 2 })).toBe('known 3 · no match 2 · JPL, CatWISE did not answer');
+    // a partial answer: what has arrived is counted, the rest is being asked
+    const part = parseKnown({ ...FAKE, answered: { gaia: true, simbad: false, jpl: false }, status: { simbad: { state: 'pending' }, jpl: { state: 'pending' }, match: { gaia: { state: 'ok' }, catwise: { state: 'pending' }, allwise: { state: 'ok' }, twomass: { state: 'pending' } } } });
+    expect(knownStatus({ state: 'ok', ...part }, { known: 40, noMatch: 5 })).toBe('known 40 · no match 5 · asking SIMBAD, JPL, CatWISE, 2MASS…');
   });
 
   it('rings only catalogue objects with a detected source, and points at sources with no match', () => {

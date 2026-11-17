@@ -302,3 +302,10 @@
 .lp-pnow.flip { transform: translate(-100%, -50%); text-align: right; }
 /* a phone: the card beside the ring wraps inside the picture instead of running past its left edge */
 @media (max-width: 560px) { .lp-pnow.flip { white-space: normal; max-width: 40%; } }
+/* the latest discovery under the hero's links (shown only when there is one) */
+.lp-disc { display: inline-flex; align-items: center; gap: 12px; margin-top: 22px; padding: 10px 14px 10px 10px; max-width: 460px; border: 1px solid rgba(95, 227, 214, 0.45); border-radius: 14px; background: rgba(6, 12, 16, 0.6); color: var(--lp-text); text-decoration: none; }
+.lp-disc:hover { border-color: var(--lp-accent); }
+.lp-disc-pic { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex: none; background: #000; }
+.lp-disc-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; color: var(--lp-muted); }
+.lp-disc-text b { color: var(--lp-text); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-disc-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lp-accent); }

@@ -16,6 +16,17 @@ describe('sources of a pass picture', () => {
     ]);
     expect(p[0]!.snr).toBeCloseTo(290, 0);
   });
+  it('marks a peak that stands in a diffuse glow (the halo of a bright star, even one outside the frame)', () => {
+    const n = 60;
+    const v = new Float32Array(n * n).fill(1);
+    // a glow over the right third of the picture, 2 above the background (20σ), with a bump on it; and a clean source on dark sky
+    for (let y = 0; y < n; y++) for (let x = 40; x < n; x++) v[y * n + x] = 3;
+    v[30 * n + 50] = 9;
+    v[30 * n + 15] = 9;
+    const p = peaksOf(v, n, 1, 0.1);
+    expect(p.find((q) => q.x === 50.5)?.glow).toBe(true);
+    expect(p.find((q) => q.x === 15.5)?.glow).toBeUndefined();
+  });
   it('finds the nearest point within a radius', () => {
     const b = new Buckets([{ x: 5, y: 5 }, { x: 9, y: 5 }, { x: 50, y: 50 }], 4);
     expect(b.near(8, 5, 2)).toEqual({ x: 9, y: 5 });

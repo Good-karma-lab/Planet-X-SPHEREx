@@ -64,13 +64,15 @@ class MarkIn(BaseModel):
 
 
 class DoneIn(BaseModel):
-    result: str = Field(max_length=20)
+    result: str = Field("", max_length=20)  # not needed with `path`
     mark_ids: list[str] = Field(default_factory=list, max_length=500)
     # what the lab says about the look (the score: a square counts with at least 60 s and every pass shown)
     seconds: float | None = Field(None, ge=0, le=86400)
     passes_shown: int | None = Field(None, ge=0, le=10000)
     passes_total: int | None = Field(None, ge=0, le=10000)
     local_hour: int | None = Field(None, ge=0, le=23)
+    # red source / anomaly: the answers along the task's question tree, one per step (the server turns them into the class)
+    path: list[str] | None = Field(None, max_length=12)
 
 
 class HistoryIn(BaseModel):
@@ -115,6 +117,38 @@ class InvestigationPatch(BaseModel):
     checks_job: str | None = Field(None, max_length=80)
     ruler: dict[str, Any] | None = None  # {rate, catalogue_rate, object}: a motion measured with the lab's ruler
     old_survey: dict[str, Any] | None = None  # {survey, ra, dec}: the same object found in an old survey
+
+
+class Ruler(BaseModel):
+    rate: float = Field(ge=0, le=1e7)  # ″/yr measured
+    catalogue_rate: float | None = Field(None, ge=0, le=1e7)  # ″/yr of the catalogue, when the object is in one
+    pa: float | None = Field(None, ge=0, le=360)  # the direction of the motion, degrees east of north
+    shift: float | None = Field(None, ge=0, le=1e6)  # ″ between the two places measured
+    object: str | None = Field(None, max_length=120)
+
+
+class Catalogue(BaseModel):
+    source: str = Field(max_length=20)  # gaia | simbad | jpl
+    name: str = Field(max_length=120)
+    sep: float | None = Field(None, ge=0, le=3600)  # ″ from the object
+    type: str | None = Field(None, max_length=60)
+
+
+class ItemIn(BaseModel):
+    """An object the lab adds to an investigation. The lab only gathers; notes and the submit live in the investigation."""
+
+    id: str | None = Field(None, pattern=ID)  # made by the lab to send the same object again (it then replaces the earlier one)
+    title: str | None = Field(None, min_length=1, max_length=120)  # the title of a NEW investigation (POST …/investigations/new/items)
+    label: str = Field("", max_length=120)
+    ra: float = Field(ge=0, le=360)
+    dec: float = Field(ge=-90, le=90)
+    field_key: str | None = Field(None, max_length=80)
+    finding_id: str | None = Field(None, max_length=80)
+    mark_ids: list[str] = Field(default_factory=list, max_length=200)
+    ruler: Ruler | None = None
+    catalogue: Catalogue | None = None
+    ref: str | None = Field(None, max_length=600)  # the lab's address of this view
+    thumb: str | None = Field(None, max_length=MAX_THUMB)
 
 
 class DeclareIn(BaseModel):
@@ -271,6 +305,11 @@ def make_me_router(st: Any) -> APIRouter:
         if found is None or found[1] not in (None, u["id"]):
             raise HTTPException(404, "no such task")
         task = found[0]
+        if body.path is not None and task["kind"] in agreement.TREES:
+            try:  # plain questions, not classes: the path of answers decides the class
+                body.result = agreement.class_of(task["kind"], body.path)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from None
         if task["kind"] in agreement.KINDS:
             allowed: tuple[str, ...] = tuple(x for x, _ in agreement.ANSWERS[task["kind"]])
         else:
@@ -293,7 +332,10 @@ def make_me_router(st: Any) -> APIRouter:
             look = body.model_dump(include={"seconds", "passes_shown", "passes_total", "local_hour"})
             marks = [m for m in acc.db.marks(u["id"]) if m["id"] in set(body.mark_ids)]
             points = sc.square_done(u["id"], task, look, marks)
-        return {"task": task, "points": points, "achievements": sc.award(u["id"])}
+        out: dict[str, Any] = {"task": task, "points": points, "achievements": sc.award(u["id"])}
+        if body.path is not None and task["kind"] in agreement.TREES:
+            out["class"] = {"id": body.result, "label": agreement.label_of(task["kind"], body.result)}  # what the path led to
+        return out
 
     # -------------------------------------------------------------------------------------------------------------------- history
 
@@ -406,6 +448,40 @@ def make_me_router(st: Any) -> APIRouter:
         acc.db.declare(u["id"], inv_id, body.checks_job)
         auto.settle(st, acc.db, u["id"], mine(acc, u, inv_id))
         return with_checks(mine(acc, u, inv_id))
+
+    @router.post("/api/me/investigations/{inv_id}/items")
+    def add_item(inv_id: str, body: ItemIn, request: Request) -> Any:
+        """The lab adds an object to an investigation: `inv_id` is an investigation of the user, or `new` (made with `title`)."""
+        acc, u = me(request)
+        item = body.model_dump(exclude={"title"}, exclude_none=True)
+        item["id"] = item.get("id") or uuid.uuid4().hex
+        item["at"] = _now()
+        if item.get("ref") and not REF.match(item["ref"]):
+            raise HTTPException(422, "ref is a place inside this app (it starts with #/)")
+        if item.get("thumb") and not str(item["thumb"]).startswith("data:image/"):
+            raise HTTPException(422, "thumb is a small picture as a data URL")
+        try:
+            if inv_id == "new":
+                title = body.title or body.label or f"Object at RA {body.ra:.4f}° Dec {body.dec:+.4f}°"
+                inv_id = acc.db.add_investigation(u["id"], {"title": title, "finding_id": body.finding_id})["id"]
+            elif mine(acc, u, inv_id)["submitted"]:
+                raise HTTPException(409, "this investigation is submitted: nothing more is added to it")
+            inv = acc.db.add_item(u["id"], inv_id, item)
+        except LimitReachedError:
+            raise HTTPException(409, "too many investigations, or too many objects in this one") from None
+        if inv is None:
+            raise HTTPException(404, "no such investigation")
+        return with_checks(inv)
+
+    @router.delete("/api/me/investigations/{inv_id}/items/{item_id}")
+    def remove_item(inv_id: str, item_id: str, request: Request) -> Any:
+        acc, u = me(request)
+        if mine(acc, u, inv_id)["submitted"]:
+            raise HTTPException(409, "this investigation is submitted")
+        inv = acc.db.remove_item(u["id"], inv_id, item_id)
+        if inv is None:
+            raise HTTPException(404, "no such object in this investigation")
+        return with_checks(inv)
 
     @router.post("/api/me/investigations/{inv_id}/frames")
     def add_frame(inv_id: str, body: Frame, request: Request) -> Any:

@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from fastapi import FastAPI, HTTPException, Request
 
 from service.accounts.db import AccountsDB
-from service.accounts.mail import LogSender, MailSender
+from service.accounts.mail import LogSender, MailSender, sender_from_env
 from service.ratelimit import Buckets, client_id
 from service.storage import product_db_path
 
@@ -33,7 +33,7 @@ class Accounts:
     def __init__(self, st: Any) -> None:
         self.st = st
         self.db = AccountsDB(product_db_path(st.cfg.store_dir))
-        self.mail: MailSender = LogSender()
+        self.mail: MailSender = sender_from_env()  # Resend with SKY_RESEND_API_KEY, else the API log
         self.http_transport: Any = None  # tests put a fake Google here
         # sign-in: 5 links per 10 minutes per client and 3 per address; 20 link openings per 10 minutes per client
         self.links_by_client = Buckets(capacity=5, per_second=5 / 600)
@@ -47,6 +47,12 @@ class Accounts:
     def dev(self) -> bool:
         """Dev mode shows the sign-in link on the page. Never set it on a public server."""
         return os.environ.get("SKY_AUTH_DEV", "0") == "1"
+
+    @property
+    def email(self) -> bool:
+        """E-mail sign-in is open: a sender that really sends mail is set, or dev mode shows the link on the page. With neither
+        the site says "Sign-in opens soon" and takes no address."""
+        return self.dev or not isinstance(self.mail, LogSender)
 
     @property
     def google(self) -> tuple[str, str] | None:

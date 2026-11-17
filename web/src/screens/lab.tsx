@@ -1,4 +1,4 @@
-import { taskOfParams } from './lab/task';
+import { isSquareTask } from './lab/rules';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
@@ -44,6 +44,7 @@ import { useDistantPlan } from './search/distant';
 import { FPX_AUTO } from '../lib/flags';
 import { useAsteroidSearch } from './asteroids';
 import { useLabFlow, type LabFlow } from './lab/flow';
+import { alsoLine, CandList, unexplainedCount, useJplState, type FindRow } from './lab/candidates';
 import { SheetGrip } from '../ui/Sheet';
 
 const SIZES = [2, 5, 10, 20, 60];
@@ -427,7 +428,7 @@ export function Lab({ route }: { route: Route }) {
         : [1, 2, 3, 4, 5, 6];
   // a task ("Mark everything that moves and has no ring"): Known objects on, red sources and anomalies off, unless the address says
   const inTask = !!p['task'];
-  const squareTask = inTask && taskOfParams(p)?.kind === 'cell';
+  const squareTask = isSquareTask(p);
   const opts: Opts = {
     reference: p['ref'] === '1',
     archive: p['arch'] === '1',
@@ -610,7 +611,11 @@ export function Lab({ route }: { route: Route }) {
   const [trackSel, setTrackSel] = useState(-1);
   const [note, setNote] = useState('');
   const [wallWait, setWallWait] = useState(false);
-  const [trayOpen, setTrayOpen] = useState(() => typeof innerWidth === 'number' && innerWidth > 860 && innerHeight > 860);
+  const [trayOpen, setTrayOpen] = useState(true);
+  // the find picked in the Candidates list: it alone is bright on the picture until the picture is clicked
+  const [candSel, setCandSel] = useState<string | null>(null);
+  const candSelRef = useRef<string | null>(null);
+  candSelRef.current = candSel;
   const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
   const dwarfsRef = useRef<DwarfView | null>(null);
   dwarfsRef.current = dwarfs;
@@ -658,7 +663,8 @@ export function Lab({ route }: { route: Route }) {
     void distRef.start(null);
   }, [fpx, meta, distRef.available, distRef.ds.state, ra, dec, fov]);
   // a link from Findings (find=<id>): the find sits at the field's centre; once the field is open it is selected and its ring pulses on the picture
-  const findId = p['find'] ?? '';
+  // in a task the find is the task's object (the cabinet's and the lab's own task links name it `finding`)
+  const findId = p['find'] ?? (p['task'] ? (p['finding'] ?? '') : '');
   const findShown = useRef('');
   useEffect(() => {
     const key = `${findId}|${ra},${dec},${fov}`;
@@ -872,8 +878,9 @@ export function Lab({ route }: { route: Route }) {
       onError: (t) => setPhase(`failed: ${t}`),
       onMeta: (m) => {
         setMeta(m);
-        // the test target in the field is selected from the start (Object and Spectrum tabs show it); a click selects another source
-        if (!selRef.current) {
+        // the test target in the field is selected from the start (Object and Spectrum tabs show it); a click selects another source.
+        // Not in a square task: a square has no object of its own (lab/rules.ts)
+        if (!selRef.current && !squareTaskRef.current) {
           const half = (m.grid.n * m.grid.step_arcsec) / 2 / 3600;
           const o = targets.current.find((t) => {
             const [tra, tdec] = atEpoch(t.ra, t.dec, t.pmra ?? 0, t.pmdec ?? 0, 2025.9);
@@ -1500,7 +1507,10 @@ export function Lab({ route }: { route: Route }) {
           };
       }
       const all = selMark ? [...marks, selMark] : marks;
+      const focus = !!flowRef.current?.focus || candSelRef.current !== null;
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+      // no name is put on the 2′ inset (a label pushed to the picture's left edge used to land on it)
+      if (inset) placed.push({ x0: inset.x - 6, y0: inset.y - 6, x1: inset.x + inset.w + 6, y1: inset.y + inset.h + 6 });
       let labelled = 0;
       const ring = (x: number, y: number, mk: Mark, rr: number, ticks: boolean) => {
         // a target: a thin crosshair, four 1 px arms with a gap at the centre (no ring over the star); anything else: a thin 1 px ring
@@ -1730,13 +1740,25 @@ export function Lab({ route }: { route: Route }) {
           const x = box.x + u * box.w;
           const y = box.y + v * box.h;
           if (x < box.x - 30 || y < box.y - 30 || x > box.x + box.w + 30 || y > box.y + box.h + 30) continue;
+          // a task about one object: that object alone is bright; every other mark is a quiet outline without a name or a path
+          const quiet = focus && !mk.selected;
           if (wall) {
             // every tile of a wall carries the same rings as the picture (movers, red sources, anomalies, known bodies, the selected one), without names
             if (mk.ghost) continue;
-            ring(x, y, mk, Math.max(5, Math.min(10, box.w / 26)), mk.kind === 'target');
+            if (quiet) ctx.globalAlpha = 0.35;
+            ring(x, y, mk, Math.max(5, Math.min(10, box.w / 26)), mk.kind === 'target' && !quiet);
+            ctx.globalAlpha = 1;
             continue;
           }
           if (underInset(x, y)) continue;
+          if (quiet) {
+            if (!mk.ghost) {
+              ctx.globalAlpha = 0.35;
+              ring(x, y, mk, Math.min(mk.rr, 9), false);
+              ctx.globalAlpha = 1;
+            }
+            continue;
+          }
           if (!mk.ghost) {
             ring(x, y, mk, mk.rr, mk.kind === 'target');
             // a ring is a thing no name is put on
@@ -1750,6 +1772,7 @@ export function Lab({ route }: { route: Route }) {
             const x = box.x + u * box.w;
             const y = box.y + v * box.h;
             if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y) || mk.ghost) continue;
+            if (focus && !mk.selected) continue;
             // a crowded field: names for the first dozen marks (targets, movers, known bodies first), rings only for the rest
             if (++labelled > 14 && (mk.kind === 'anomaly' || mk.kind === 'red') && !mk.selected) continue;
             // a phone: names for the first six marks only (the selected one and the test target always)
@@ -1786,6 +1809,7 @@ export function Lab({ route }: { route: Route }) {
         fovArc,
         placed,
         hidden: underInset,
+        focus,
         picture:
           fpic && fnoise && fpic.n === grid.n
             ? { pass: shownPass, n: fpic.n, rgb: fpic.rgb, bg: fnoise.bg, sigma: fnoise.sigma, step: grid.step_arcsec }
@@ -2017,15 +2041,30 @@ export function Lab({ route }: { route: Route }) {
     const years = 2025.9 - 2000;
     const dec0 = t.dec_2025_9 - (t.v_north * years) / 3600;
     const ra0 = t.ra_2025_9 - (t.v_east * years) / 3600 / Math.cos((t.dec_2025_9 * Math.PI) / 180);
-    setSel({
-      ra: (ra0 + 360) % 360,
-      dec: dec0,
-      name: name || undefined,
-      pmra: t.v_east * 1000,
-      pmdec: t.v_north * 1000,
-      pmKind: 'measured',
-      pmErr: speedErr(t) * 1000,
-    });
+    // a mover the catalogues know (the same /api/known answer as the picture's rings) is selected as that catalogue object: its
+    // J2000 place and its catalogue motion, so the card never says "no catalogue gave it" about a star the picture calls known
+    const known = flowRef.current?.catalogueAt(t.ra_2025_9, t.dec_2025_9, 2025.9) ?? null;
+    if (known && known.pmra != null && known.pmdec != null) {
+      const cd = Math.cos((t.dec_2025_9 * Math.PI) / 180);
+      const p0 = known.positions[0]!;
+      const back = 2000 - p0.epoch;
+      setSel({
+        ra: (p0.ra + (known.pmra * back) / 3.6e6 / cd + 360) % 360,
+        dec: p0.dec + (known.pmdec * back) / 3.6e6,
+        name: name || known.simbad || known.name || undefined,
+        pmra: known.pmra,
+        pmdec: known.pmdec,
+      });
+    } else
+      setSel({
+        ra: (ra0 + 360) % 360,
+        dec: dec0,
+        name: name || undefined,
+        pmra: t.v_east * 1000,
+        pmdec: t.v_north * 1000,
+        pmKind: 'measured',
+        pmErr: speedErr(t) * 1000,
+      });
     setTab('obj');
   };
 
@@ -2291,6 +2330,17 @@ export function Lab({ route }: { route: Route }) {
     single: film !== null || view === 'picture',
     side,
     known: opts.known,
+    blinkable: film === null && time === 'loop',
+    sel,
+    tracks: mv?.result?.tracks ?? [],
+    anomalies: an?.result?.anomalies ?? [],
+    set,
+    setTab,
+    pickAnomaly: (n) => pickAnomaly(n),
+    pickTrack: (i) => {
+      const t = mv?.result?.tracks[i];
+      if (t) pickTrack(t, trackNamesRef.current[i] ?? '');
+    },
     fieldKey: clientRef.current?.key ?? null,
     params: p,
     open: (q) => {
@@ -2315,6 +2365,10 @@ export function Lab({ route }: { route: Route }) {
     },
   });
   flowRef.current = flow;
+  // for the Candidates list: whether JPL answered for the asteroid tracks of the pass, and the SIMBAD names of the red sources
+  // (a named one is known)
+  const jplState = useJplState(ast.filmKey);
+  useIdentNames((redv?.result?.red ?? []).map((x) => ({ ra_2025_9: x.ra, dec_2025_9: x.dec }) as unknown as Track));
 
   if (!valid) {
     return (
@@ -2782,8 +2836,9 @@ export function Lab({ route }: { route: Route }) {
     onChange: ((v: boolean) => void) | null,
     why = 'not available in this view',
     whyShort = '',
+    busy = false,
   ) => (
-    <label class={`sw ${onChange ? '' : 'dis'}`} title={onChange ? title : `${title} (${why})`}>
+    <label class={`sw ${onChange ? '' : 'dis'}${busy ? ' busy' : ''}`} title={onChange ? title : `${title} (${why})`}>
       <input
         type="checkbox"
         id={id}
@@ -2998,12 +3053,141 @@ export function Lab({ route }: { route: Route }) {
             : null,
     ],
   ];
-  const foundCount =
-    (mvr?.tracks.length ?? 0) +
-    pairs.length +
-    (redv?.result?.red.length ?? 0) +
-    (an?.result?.anomalies.length ?? 0) +
-    (ast.tracks?.length ?? 0);
+  // ---- the finds of the field as one list (Candidates tab): unexplained first; known ones never count
+  const yearNow = passMeta ? 2000 + (passMeta.mjd_mid - 51544.5) / 365.25 : 2025.9;
+  const uvNow = (pra: number, pdec: number): [number, number] | null => {
+    const g = meta?.grid;
+    if (!g) return null;
+    const fa = g.n * g.step_arcsec;
+    const u = 0.5 - ((((pra - g.ra0 + 540) % 360) - 180) * Math.cos((g.dec0 * Math.PI) / 180) * 3600) / fa;
+    const v = 0.5 - ((pdec - g.dec0) * 3600) / fa;
+    return u >= 0 && v >= 0 && u <= 1 && v <= 1 ? [u, v] : null;
+  };
+  const placeWord = (pra: number, pdec: number) => `${formatRA(pra)} ${formatDec(pdec)}`;
+  /** a place's SIMBAD name as already asked: a name, null (none), or undefined (being asked) */
+  const identOf = (pra: number, pdec: number): string | null | undefined => {
+    const k = `${pra.toFixed(5)},${pdec.toFixed(5)}`;
+    return identCache.has(k) ? identCache.get(k) : undefined;
+  };
+  const rowPick = (key: string, f: () => void) => () => {
+    setCandSel(key);
+    f();
+  };
+  const findRows: FindRow[] = [
+    ...(mvr?.tracks ?? []).map((t, i): FindRow => {
+      const nm = trackNames[i] || t.name || '';
+      const named = !!nm && !nm.startsWith('Gaia DR3');
+      const yrs = yearNow - 2025.9;
+      const dnow = t.dec_2025_9 + (t.v_north * yrs) / 3600;
+      return {
+        key: `mover:${i}`,
+        name: nm || placeWord(t.ra_2025_9, t.dec_2025_9),
+        line: `moves ${rateText(t)} toward ${t.pa.toFixed(0)}° · ${t.passes.length} passes`,
+        status: t.check === 'same' || named ? 'known' : t.check === 'pending' ? 'checking' : 'unexplained',
+        uv: uvNow(t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((dnow * Math.PI) / 180), dnow),
+        pick: rowPick(`mover:${i}`, () => pickTrack(t, trackNames[i] ?? '')),
+      };
+    }),
+    ...[
+      ...(dwarfs?.result?.candidates ?? []).map((c) => ({ c, known: false })),
+      ...(dwarfs?.result?.known ?? []).map((c) => ({ c, known: true })),
+    ].map(({ c, known }, i): FindRow => {
+      const pra = c.ra_j2000 ?? c.ra ?? ra;
+      const pdec = c.dec_j2000 ?? c.dec ?? dec;
+      const now = c.ra_j2000 != null ? atEpoch(pra, pdec, c.pmra ?? 0, c.pmdec ?? 0, yearNow) : ([pra, pdec] as [number, number]);
+      return {
+        key: `bd:${i}`,
+        name: c.simbad?.name ?? placeWord(now[0], now[1]),
+        line: `red and moving${c.pm != null ? ` ${(c.pm / 1000).toFixed(1)}″/yr` : ''}: a brown dwarf ${known ? 'of the catalogues' : 'candidate'}`,
+        status: known ? 'known' : 'unexplained',
+        uv: uvNow(now[0], now[1]),
+        pick: rowPick(`bd:${i}`, () => {
+          setSelAn(null);
+          setSel({
+            ra: pra,
+            dec: pdec,
+            pmra: c.ra_j2000 != null ? c.pmra : undefined,
+            pmdec: c.ra_j2000 != null ? c.pmdec : undefined,
+            name: c.simbad?.name ?? (known ? 'Known red mover' : `Brown dwarf candidate ${i + 1}`),
+          });
+          setTab('obj');
+        }),
+      };
+    }),
+    ...pairs.map((pr, i): FindRow => {
+      const [c0, c1] = pr.components;
+      return {
+        key: `pair:${i}`,
+        name: placeWord((c0.ra + c1.ra) / 2, (c0.dec + c1.dec) / 2),
+        line: `two sources ${pr.separation_arcsec.toFixed(1)}″ apart whose brightness changes between the passes`,
+        status: 'unexplained',
+        uv: uvNow((c0.ra + c1.ra) / 2, (c0.dec + c1.dec) / 2),
+        pick: rowPick(`pair:${i}`, () => openPair(i)),
+      };
+    }),
+    ...(redv?.result?.red ?? []).map((x, k): FindRow => {
+      const tr = trackOfRed(x);
+      const id = identOf(x.ra, x.dec);
+      const times = redv?.result?.median_colour ? `${x.lower_limit ? 'over ' : ''}${(x.colour / redv.result.median_colour).toFixed(1)}× redder than the field's stars` : 'red';
+      return {
+        key: `red:${k}`,
+        name: id || placeWord(x.ra, x.dec),
+        line: `${times}${tr ? ` · moves ${rateText(tr)}` : ''}`,
+        status: id ? 'known' : id === undefined ? 'checking' : 'unexplained',
+        uv: uvNow(x.ra, x.dec),
+        pick: rowPick(`red:${k}`, () => pickRed(k)),
+      };
+    }),
+    ...(an?.result?.anomalies ?? []).map((a): FindRow => {
+      const now = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, yearNow);
+      const nm = a.identified?.simbad?.name;
+      return {
+        key: `anomaly:${a.n}`,
+        name: nm ?? (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : placeWord(now[0], now[1])),
+        line: `spectrum unlike the field's stars: ${driverWords(a)[0] ?? `score ${a.score.toFixed(1)}`}`,
+        status: nm ? 'known' : 'unexplained',
+        uv: uvNow(now[0], now[1]),
+        pick: rowPick(`anomaly:${a.n}`, () => pickAnomaly(a.n)),
+      };
+    }),
+    ...(ast.state === 'done' ? (ast.tracks ?? []) : []).slice(0, 8).map(
+      (t, i): FindRow => ({
+        key: `ast:${i}`,
+        name: t.known ? t.known.name : `Track of ${astMjd ? season(astMjd) : 'one pass'}`,
+        line: `crosses the field at ${t.rate.toFixed(1)}″/h · ${t.n} visits of one pass`,
+        // without JPL's answer a track is not a lead: it may be a known asteroid nobody could name
+        status: t.known ? 'known' : jplState === 'unavailable' ? 'jpl' : jplState === 'asking' ? 'checking' : 'unexplained',
+        uv: null,
+        pick: rowPick(`ast:${i}`, () => {
+          selectTrack(i);
+          if (film === null) toDays();
+          setFrame(t.pts[0]?.f ?? 0);
+          setPlaying(false);
+        }),
+      }),
+    ),
+    ...(FPX_AUTO && !fpx ? fpxLeads : []).map(
+      (l, i): FindRow => ({
+        key: `px:${i}`,
+        name: placeWord(l.ra, l.dec),
+        line: `Find Planet X peak · S/N ${l.sn} · ${l.d} au · photometry ${l.phot != null ? `${l.phot}σ` : 'n/a'}`,
+        status: 'unexplained',
+        uv: uvNow(l.ra, l.dec),
+        pick: rowPick(`px:${i}`, l.open),
+      }),
+    ),
+  ];
+  const stateOf = (done: boolean, n: number, failed = false) => (failed ? 'failed' : !done ? 'running' : n ? 'found' : 'nothing') as 'failed' | 'running' | 'found' | 'nothing';
+  const searchStates = [
+    { name: 'movers', state: stateOf(mv?.state === 'done', mvr?.tracks.length ?? 0, mv?.state === 'failed') },
+    { name: 'pairs', state: stateOf(mv?.state === 'done', pairs.length, mv?.state === 'failed') },
+    { name: 'brown dwarfs', state: stateOf(dwarfs?.state === 'done', (dwarfs?.result?.candidates.length ?? 0) + (dwarfs?.result?.known.length ?? 0)) },
+    { name: 'red sources', state: stateOf(redv?.state === 'done', redv?.result?.red.length ?? 0, redv?.state === 'failed') },
+    { name: 'anomalies', state: stateOf(an?.state === 'done', an?.result?.anomalies.length ?? 0, an?.state === 'failed') },
+    { name: 'asteroids', state: stateOf(ast.state === 'done' || ast.state === 'none', ast.tracks?.length ?? 0, ast.state === 'failed') },
+    ...(FPX_AUTO && !fpx ? [{ name: 'Planet X', state: stateOf(fpxAllOver, fpxLeads.length) }] : []),
+  ];
+  const foundCount = unexplainedCount(findRows);
 
   return (
     <div class="screen">
@@ -3029,6 +3213,7 @@ export function Lab({ route }: { route: Route }) {
                   return;
                 }
                 if ((e.target as HTMLElement).closest('.float')) return;
+                setCandSel(null); // a click on the picture: every ring is on show again
                 {
                   // a mark put or opened, a ruler point: the click is the flow's, not a pick
                   const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
@@ -3199,6 +3384,7 @@ export function Lab({ route }: { route: Route }) {
                           ? daysShort
                           : dateLabel)}
                 {!note && flow.status && <span data-testid="flow-status"> · {flow.status}</span>}
+                {flow.chip}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
                     <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter
@@ -3304,6 +3490,7 @@ export function Lab({ route }: { route: Route }) {
                 </button>
               ))}
             </div>
+            {flow.blinkPick}
             <div class="tl-mid">
               {film === null && archStep !== null ? (
                 <>
@@ -3591,7 +3778,10 @@ export function Lab({ route }: { route: Route }) {
                     'Known objects',
                     'Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame, at its place on the date shown. What moves and has no ring is unknown',
                     opts.known,
-                    (v) => set({ known: v ? '1' : null }),
+                    (v) => set({ known: v ? '1' : inTask ? '0' : null }),
+                    undefined,
+                    '',
+                    flow.knownBusy,
                   )}
                   {sw(
                     'maskChk',
@@ -3722,11 +3912,11 @@ export function Lab({ route }: { route: Route }) {
                   'Months scale only',
                 )}
               </section>
-              {flow.tools}
             </div>
           )}
           {tab === 'obj' && (
-            <div class="pbody pobj">
+            <div class={`pbody pobj${flow.markOpen ? ' mark-open' : ''}`}>
+              {flow.card}
               {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                 <>
                   {(() => {
@@ -3881,7 +4071,13 @@ export function Lab({ route }: { route: Route }) {
                   onBack={() => setPairSel(null)}
                 />
               )}
-              <div class="psh">Candidates in this field</div>
+              <CandList
+                rows={findRows}
+                also={alsoLine(searchStates)}
+                selected={candSel}
+                picture={() => canvas.current}
+                details={
+                  <>
               <section class="psec fsec">
                 <div class="fsh">Movers between passes</div>
                 <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
@@ -4163,8 +4359,6 @@ export function Lab({ route }: { route: Route }) {
                   ))}
                 {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
               </section>
-            </div>
-          )}
           <div class={`sbar ${trayOpen ? '' : 'tray'}`} data-testid="scans">
             <button
               class="tray-head"
@@ -4300,6 +4494,11 @@ export function Lab({ route }: { route: Route }) {
               </div>
             )}
           </div>
+                  </>
+                }
+              />
+            </div>
+          )}
         </aside>
       </div>
     </div>
