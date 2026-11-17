@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from service import accounts
+from service.accounts import agreement
 from service.accounts import score as scoring
 from service.accounts import submit as auto
 from service.accounts.db import LimitReachedError, iso
@@ -36,7 +37,7 @@ from service.accounts.db import LimitReachedError, iso
 ID = r"^[A-Za-z0-9_\-:.]{6,64}$"
 REF = re.compile(r"^#/[^\s<>\"']{0,600}$")  # a place inside this app
 CELL_RESULTS = ("nothing", "marks")
-FINDING_RESULTS = ("moves", "artefact", "known")
+FINDING_RESULTS = ("moves", "artefact", "known", "cant_tell")  # "Can't tell" closes the task; it is never wrong and never paid
 MAX_NOTES, MAX_FRAMES, MAX_THUMB = 200, 60, 200_000
 
 
@@ -166,6 +167,7 @@ def make_me_router(st: Any) -> APIRouter:
         auto.settle_user(st, acc.db, u["id"])  # a declared submit finishes here too, should the checks' own signal be missed
         sc = score_of(acc)
         sc.settle(u["id"])  # answers whose finding got its final stage since
+        agreement.get(st, acc.db).settle_moves(u["id"])
         sc.award(u["id"])
         for inv in acc.db.investigations(u["id"]):
             body = None if inv["submitted"] or inv["declared"] else checks_of(inv["checks_job"])
@@ -265,7 +267,10 @@ def make_me_router(st: Any) -> APIRouter:
         if found is None or found[1] not in (None, u["id"]):
             raise HTTPException(404, "no such task")
         task = found[0]
-        allowed = CELL_RESULTS if task["kind"] == "cell" else FINDING_RESULTS
+        if task["kind"] in agreement.KINDS:
+            allowed: tuple[str, ...] = tuple(x for x, _ in agreement.ANSWERS[task["kind"]])
+        else:
+            allowed = CELL_RESULTS if task["kind"] == "cell" else FINDING_RESULTS
         if body.result not in allowed:
             raise HTTPException(422, f"result is one of {', '.join(allowed)}")
         already = task["state"] == "done"
@@ -274,8 +279,11 @@ def make_me_router(st: Any) -> APIRouter:
         sc = score_of(acc)
         if already:
             points = 0  # a task closed twice counts once
+        elif task["kind"] in agreement.KINDS and task["finding_id"]:
+            points = agreement.get(st, acc.db).answer(u["id"], task["kind"], task["finding_id"], body.result, task)
         elif task["kind"] == "finding" and task["finding_id"]:
-            acc.db.credit(task["finding_id"], u["id"], "checked", body.result)
+            if body.result != "cant_tell":
+                acc.db.credit(task["finding_id"], u["id"], "checked", body.result)
             points = sc.answered(u["id"], task["finding_id"], body.result)
         else:
             look = body.model_dump(include={"seconds", "passes_shown", "passes_total", "local_hour"})
