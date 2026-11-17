@@ -513,7 +513,16 @@ export function Lab({ route }: { route: Route }) {
   const overlay = useRef<HTMLCanvasElement>(null);
   const clientRef = useRef<FieldClient | null>(null);
   const [side, setSide] = useState(400);
-  const [tab, setTab] = useState<Tab>('ctl');
+  // one column instead of tabs (spec §5f): a call that used to open a tab scrolls to its section; the spectrum opens as a wide sheet
+  const [specOpen, setSpecOpen] = useState(false);
+  useEffect(() => setSpecOpen(false), [ra, dec, fov]);
+  const colRef = useRef<HTMLDivElement>(null);
+  const setTab = (t: Tab) => {
+    if (t === 'spec') return setSpecOpen(true);
+    const id = t === 'obj' ? 'sec-obj' : t === 'cand' ? 'sec-look' : 'sec-show';
+    // after the render that shows the section
+    setTimeout(() => colRef.current?.querySelector(`#${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
+  };
   const [sel, setSel] = useState<Source | null>(null);
   const pictures = useRef(new Map<number, { n: number; rgb: Uint16Array }>());
   const detsData = useRef(new Map<number, { n: number; dets: Uint16Array }>());
@@ -1890,9 +1899,9 @@ export function Lab({ route }: { route: Route }) {
     // the band pictures are fetched soon after the field opens, so choosing bands shows them at once
     const t = meta ? setTimeout(() => c.want('bands_'), 2500) : 0;
     if (opts.artifacts) c.want('flags_');
-    if (tab === 'obj') c.want('dets_');
+    if (sel) c.want('dets_');
     return () => clearTimeout(t);
-  }, [view, time, fov, meta, bands.length, opts.artifacts, tab]);
+  }, [view, time, fov, meta, bands.length, opts.artifacts, !!sel]);
 
   // the Days scale: the visits of the pass shown (the film), drawn by the lab's renderer; no reload of the field
   useEffect(() => {
@@ -3220,6 +3229,8 @@ export function Lab({ route }: { route: Route }) {
   ];
   const foundCount = unexplainedCount(findRows);
 
+  // something is selected: a source, an anomaly, a pair, or an open mark (the Selected object section exists only then)
+  const hasSelection = !!sel || selAn !== null || pairSel !== null || flow.markOpen;
   // the picture's status line: a note, a wait, the date of what is shown (the flow's own words follow it)
   const mainStatus: string =
     note ||
@@ -3383,7 +3394,17 @@ export function Lab({ route }: { route: Route }) {
               )}
               {film !== null && !filmData && <div class="vwait">{filmNote || 'asking for the visits of the pass…'}</div>}
               {distShow && dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
-              <div class="float ftitle" data-testid="field-title">
+              <div
+                class="float ftitle"
+                data-testid="field-title"
+                role="button"
+                tabIndex={0}
+                title="Place: type another RA and Dec"
+                onClick={() => {
+                  colRef.current?.querySelector('#sec-place')?.scrollIntoView({ block: 'end', behavior: 'smooth' });
+                  setTimeout(() => (document.getElementById('raIn') as HTMLInputElement | null)?.focus(), 350);
+                }}
+              >
                 <b>{fieldName}</b>
                 <span>
                   {formatRA(ra)} {formatDec(dec)}
@@ -3701,29 +3722,814 @@ export function Lab({ route }: { route: Route }) {
         </div>
         <aside class="panel">
           {/* phones and upright tablets: the panel is a bottom sheet pulled up by this grabber (not displayed on a desktop) */}
-          <SheetGrip peek=".taskpanel, :scope:not(:has(.taskpanel)) > .panel-head" under=".lab .tbar" label="Lab panel" />
+          <SheetGrip peek=".taskpanel, .sqlook, :scope:not(:has(.taskpanel, .sqlook)) > .pcol > section:first-child > .psh" under=".lab .tbar" label="Lab panel" />
           {flow.taskPanel}
           {square.button}
-          <div class="panel-head">
-            <div class="seg sm" role="group" aria-label="Panel">
-              {(
-                [
-                  ['ctl', 'Controls'],
-                  ['obj', 'Object'],
-                  ['spec', 'Spectrum'],
-                  ['cand', 'Candidates'],
-                ] as const
-              ).map(([k, n]) => (
-                <button key={k} class={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)} data-testid={`tab-${k}`}>
-                  {n}
-                  {k === 'cand' && foundCount > 0 && <span class="tbadge">{foundCount}</span>}
-                </button>
-              ))}
+          <div class="pbody pcol" ref={colRef}>
+            <section class="psec" id="sec-look" data-testid="sec-look">
+              <div class="psh">
+                To look at{foundCount > 0 && <span class="tbadge" data-testid="look-count">{foundCount}</span>}
+              </div>
+                {pairSel !== null && pairs[pairSel] && (
+                  <PairCard
+                    pair={pairs[pairSel]!}
+                    mjds={pairMjds}
+                    chance={(mv as unknown as { chance_pairs?: ChancePairs } | null)?.chance_pairs ?? null}
+                    onSpectrum={(pra, pdec) => {
+                      setSelAn(null);
+                      setSel({ ra: pra, dec: pdec });
+                      setTab('spec');
+                    }}
+                    onBack={() => setPairSel(null)}
+                  />
+                )}
+                <CandList
+                  rows={findRows}
+                  also={alsoLine(searchStates)}
+                  selected={candSel}
+                  picture={() => canvas.current}
+                  field={{ ra, dec, fov }}
+                  onTask={(kind, findId, r) =>
+                    // the task of this very source: its find at its own place in the field on show (the lab selects it there)
+                    set({
+                      task: kind,
+                      finding: findId,
+                      find: findId,
+                      find_ra: (r.ra ?? ra).toFixed(5),
+                      find_dec: (r.dec ?? dec).toFixed(5),
+                      kind: null,
+                      cell: null,
+                    })
+                  }
+                  details={
+                    <>
+                <section class="psec fsec">
+                  <div class="fsh">Movers between passes</div>
+                  <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
+                  {(mv?.result?.tracks ?? [])
+                    .filter((t) => t.mjd.length >= 2)
+                    .map((t, i) => (
+                      <div class="adesrow" key={i}>
+                        <button
+                          class="mini"
+                          onClick={() => void downloadAdes(t, i)}
+                          title="The positions of this mover in every pass as an MPC ADES report (nothing is sent; the file says what is missing before it could be)"
+                        >
+                          MPC ADES · {trackNames[i] || `track ${i + 1}`}
+                        </button>
+                      </div>
+                    ))}
+                  {adesNote && <div class="ssum">{adesNote}</div>}
+                </section>
+                <section class="psec fsec">
+                  <div class="fsh">Brown dwarf candidates</div>
+                  <div class="ssum">
+                    {!dwarfs
+                      ? 'waiting for the field'
+                      : dwarfs.state !== 'done'
+                        ? 'checking the red sources that move against Gaia and SIMBAD…'
+                        : (() => {
+                            // the service's own counts, so every view says the same: candidates are what the catalogues do not explain
+                            const c = dwarfs.result?.counts;
+                            const cand = c?.candidates ?? dwarfs.result?.candidates.length ?? 0;
+                            const knownBd = c?.known_brown_dwarfs ?? 0;
+                            const moving = c?.moving_red;
+                            return `${cand} candidate${cand === 1 ? '' : 's'} the catalogues do not explain · ${knownBd} known brown dwarf${knownBd === 1 ? '' : 's'} recovered${moving != null ? ` · ${moving} red source${moving === 1 ? '' : 's'} moving` : ''}`;
+                          })()}
+                  </div>
+                  {[
+                    ...(dwarfs?.result?.candidates ?? []).map((c) => ({ c, known: false })),
+                    ...(dwarfs?.result?.known ?? []).map((c) => ({ c, known: true })),
+                  ].map(({ c, known }, i) => (
+                    <button
+                      key={i}
+                      class="anrow"
+                      onClick={() => {
+                        setSelAn(null);
+                        setSel({
+                          ra: c.ra_j2000 ?? c.ra ?? ra,
+                          dec: c.dec_j2000 ?? c.dec ?? dec,
+                          pmra: c.ra_j2000 != null ? c.pmra : undefined,
+                          pmdec: c.ra_j2000 != null ? c.pmdec : undefined,
+                          name: c.simbad?.name ?? (known ? 'Known red mover' : `Brown dwarf candidate ${i + 1}`),
+                        });
+                        setTab('obj');
+                      }}
+                      title="Select it: its card, portrait and spectrum"
+                    >
+                      <b>{known ? 'Known' : `Candidate ${i + 1}`}</b>
+                      <span class="t">
+                        {c.simbad?.name ?? 'not in SIMBAD'}
+                        {c.pm != null ? ` · ${(c.pm / 1000).toFixed(1)}″/yr` : ''}
+                        {c.colour != null ? ` · colour ${c.colour.toFixed(2)}` : ''}
+                      </span>
+                      <span class="faint">{c.status ?? (known ? 'known' : 'candidate')}</span>
+                    </button>
+                  ))}
+                </section>
+                <section class="psec fsec">
+                  <div class="fsh">Pairs that change in place</div>
+                  {!pairs.length && (
+                    <div class="ssum">{mv?.state === 'done' ? 'none in this field' : 'waiting for the search between passes'}</div>
+                  )}
+                  {pairs.length > 0 && pairs.map((pr, i) => <PairButton key={i} pair={pr} on={pairSel === i} onClick={() => openPair(i)} />)}
+                </section>
+                <section class="psec fsec">
+                  <div class="fsh">Red sources</div>
+                  {redv?.state === 'done' && !redv.result?.red.length && <div class="ssum">none far redder than the field's stars</div>}
+                  {redv?.result?.red.map((x, k) => (
+                    <button
+                      key={k}
+                      class="anrow"
+                      onClick={() => pickRed(k)}
+                      title="Select this source: its spectrum is measured in every exposure"
+                    >
+                      <b>Red source {k + 1}</b>
+                      <span class="t">
+                        {redv.result!.median_colour
+                          ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
+                          : ''}
+                        {(() => {
+                          const tr = trackOfRed(x);
+                          if (tr) return ` · moves ${rateText(tr)} (the mover track)`;
+                          return x.moves && x.pmra != null
+                            ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr (red-band measurement)`
+                            : '';
+                        })()}
+                      </span>
+                      <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
+                    </button>
+                  ))}
+                </section>
+                <section class="psec fsec">
+                  <div class="fsh">Spectral anomalies</div>
+                  {an?.result && (
+                    <div class="ssum">
+                      {an.result.reason ||
+                        `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)}`}
+                    </div>
+                  )}
+                  {an?.result?.anomalies.map((a) => (
+                    <button key={a.n} class="anrow" onClick={() => pickAnomaly(a.n)} title={driverWords(a).join('; ')}>
+                      <b>Anomaly {a.n}</b>
+                      <span class="t">
+                        {a.identified?.simbad?.name ??
+                          (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')}
+                      </span>
+                      <span class="faint">score {a.score.toFixed(1)}</span>
+                    </button>
+                  ))}
+                </section>
+                <section class="psec fsec">
+                  <div class="fsh">Asteroids{astMjd ? ` · pass of ${season(astMjd)}` : ''}</div>
+                  <div class="ssum">
+                    {ast.state === 'done'
+                      ? `${ast.tracks?.length ?? 0} track${ast.tracks?.length === 1 ? '' : 's'} · drawn on the picture in Days`
+                      : ast.text || 'waiting for the field'}
+                  </div>
+                  {ast.state === 'done' &&
+                    (ast.tracks ?? []).slice(0, 8).map((t, i) => (
+                      <button
+                        key={i}
+                        class="mvrow"
+                        onClick={() => {
+                          selectTrack(i);
+                          if (film === null) toDays();
+                          setFrame(t.pts[0]?.f ?? 0);
+                          setPlaying(false);
+                        }}
+                        title="Show this track in the Days scale (its first visit)"
+                      >
+                        <b>{t.known ? t.known.name : `Track ${i + 1}`}</b>
+                        <span>
+                          {t.rate.toFixed(1)}″/h · {t.n} visits
+                        </span>
+                        <span class="faint">{t.known ? 'known' : t.verified ? 'verified' : 'lead'}</span>
+                      </button>
+                    ))}
+                  {film !== null && filmBodies && (
+                    <>
+                      <div
+                        class="sline"
+                        title="Known asteroids and comets JPL predicts in this field during the pass; seen = the visit shows something at the predicted place"
+                      >
+                        <b>Known bodies</b>
+                        <span class="sval wide">
+                          {filmBodies.state === 'running'
+                            ? 'asking JPL…'
+                            : filmBodies.state === 'unavailable'
+                              ? 'JPL not reachable'
+                              : `${filmBodies.bodies.length} predicted · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen`}
+                        </span>
+                      </div>
+                      {filmBodies.bodies.some((b) => b.name.includes('3I/ATLAS')) && <NeossatCard />}
+                      {[...filmBodies.bodies]
+                        .sort((a, b) => (b.stackZ ?? 0) - (a.stackZ ?? 0) || (a.v ?? 99) - (b.v ?? 99))
+                        .slice(0, 6)
+                        .map((b) => (
+                          <div key={b.name} class="mvrow body" style={{ cursor: 'default' }}>
+                            <b>
+                              {b.name} · V {b.v?.toFixed(1) ?? '—'}
+                            </b>
+                            <span class="faint">
+                              seen {b.seen.length} of {b.expected.length} visits
+                              {b.stackZ != null && b.stackN
+                                ? ` · along its track z ${b.stackZ.toFixed(1)} (chance ${b.controlZ?.toFixed(1)})`
+                                : ''}
+                              {b.planes != null ? ` · in ${b.planes} detector images` : ''}
+                            </span>
+                            <span class="bodylinks">
+                              <a
+                                target="_blank"
+                                rel="noopener"
+                                href={`https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}`}
+                              >
+                                JPL
+                              </a>
+                              <a target="_blank" rel="noopener" href={ssoisUrl(b.name, filmMjd)}>
+                                SSOIS
+                              </a>
+                            </span>
+                          </div>
+                        ))}
+                    </>
+                  )}
+                </section>
+                <section class="psec fsec" id="px-section">
+                  <div class="fsh">Planet X · bodies beyond Neptune</div>
+                  {dist.ds.state === 'ok' && (
+                    <label class="ds-chk">
+                      <input type="checkbox" checked={distShow} onChange={(e) => setDistShow((e.target as HTMLInputElement).checked)} /> Show
+                      the distance search on the picture (instead of the sky)
+                    </label>
+                  )}
+                  {FPX_AUTO && !fpx && (
+                    <div class="fpxleads" data-testid="fpx-leads">
+                      <div class="mono-s">
+                        {fpxLeads.length
+                          ? `${fpxLeads.length} Find Planet X ${fpxLeads.length === 1 ? 'lead' : 'leads'} in this field (peaks the photometry confirms, one per object across the searches and the deep sums) · a lead, not a discovery`
+                          : fpxAllOver
+                            ? 'No Find Planet X lead in this field'
+                            : 'Find Planet X is still running on this field'}
+                      </div>
+                      {fpxLeads.map((l, i) => (
+                        <button key={i} class="btn sm leadbtn" onClick={l.open}>
+                          <b>Peak {i + 1}</b> · S/N {l.sn} · {l.d} au{l.range ? ` (${l.range})` : ''} · photometry{' '}
+                          {l.phot != null ? `${l.phot}σ` : 'n/a'} · {l.label}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {FPX_AUTO && !fpx ? (
+                    [
+                      [distRef, '30–300 au · D1–D3'],
+                      [distB, '30–300 au · D4'],
+                      [distC, '250–2000 au · D1–D3'],
+                      [distD, '250–2000 au · D4'],
+                    ].map(([d, label]) =>
+                      (d as typeof distRef).ds.state === 'idle' ? null : (
+                        <div key={label as string}>
+                          <div class="mono-s">{label as string}</div>
+                          <DistantPanel
+                            d={d as typeof distRef}
+                            currentPass={shown?.pass ?? 0}
+                            passLabel={passMeta ? season(passMeta.mjd_mid) : undefined}
+                            auto
+                            onPick={onPeak}
+                          />
+                        </div>
+                      ),
+                    )
+                  ) : (
+                    <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
+                  )}
+                  {passes.length >= 3 &&
+                    (FPX_AUTO && !fpx ? (
+                      <>
+                        <DeepSumPanel
+                          ra={ra}
+                          dec={dec}
+                          fov={fov}
+                          passes={passes.map((q) => q.mjd_mid)}
+                          autoRun={[60, 110]}
+                          autoHold={fpxHold || fpxStopped || !fpxAllOver}
+                          onState={(x) => {
+                            setDeepSt((o) => (o[0] === x.state ? o : [x.state, o[1]]));
+                            setDeepFr((o) => (o[0] === x.frac ? o : [x.frac, o[1]]));
+                            setDeepCands((o) => (o[0] === x.candidates ? o : [x.candidates, o[1]]));
+                          }}
+                        />
+                        <DeepSumPanel
+                          ra={ra}
+                          dec={dec}
+                          fov={fov}
+                          passes={passes.map((q) => q.mjd_mid)}
+                          autoRun={[250, 800]}
+                          autoHold={fpxHold || fpxStopped || !fpxAllOver || !['done', 'none', 'error'].includes(deepSt[0])}
+                          onState={(x) => {
+                            setDeepSt((o) => (o[1] === x.state ? o : [o[0], x.state]));
+                            setDeepFr((o) => (o[1] === x.frac ? o : [o[0], x.frac]));
+                            setDeepCands((o) => (o[1] === x.candidates ? o : [o[0], x.candidates]));
+                          }}
+                        />
+                      </>
+                    ) : (
+                      <DeepSumPanel
+                        ra={ra}
+                        dec={dec}
+                        fov={fov}
+                        passes={passes.map((q) => q.mjd_mid)}
+                        autoPlan={fpx && (fpxRange.dmin ?? 0) >= 200 ? [fpxRange.dmin!, fpxRange.dmax ?? 2000] : undefined}
+                      />
+                    ))}
+                  {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
+                </section>
+            <div class={`sbar ${trayOpen ? '' : 'tray'}`} data-testid="scans">
+              <button
+                class="tray-head"
+                onClick={() => setTrayOpen((o) => !o)}
+                aria-expanded={trayOpen}
+                title={trayOpen ? 'Fold the scans' : 'Show every scan'}
+              >
+                <b>Scans</b>
+                <span class="chev">{trayOpen ? '▾' : '▴'}</span>
+              </button>
+              {trayOpen ? (
+                <div onClick={() => setTab('cand')} title="Open the candidates of this field">
+                  {srow(
+                    'Movers',
+                    !mv ? 0 : mv.state === 'done' ? 1 : mv.state === 'failed' ? 0 : null,
+                    !mv
+                      ? 'waiting'
+                      : mv.state === 'done'
+                        ? `${mvr?.tracks.length ?? 0} found`
+                        : mv.state === 'failed'
+                          ? 'failed'
+                          : 'searching',
+                    'Between passes: sources that move in a straight line over the passes (3–120 ″/yr), checked against Gaia DR3',
+                    'search-movers',
+                  )}
+                  {srow(
+                    'Pairs',
+                    !mv ? 0 : mv.state === 'done' ? 1 : null,
+                    !mv || mv.state !== 'done' ? 'waiting' : pairs.length ? `${pairs.length} found` : 'none',
+                    'Two sources close together whose brightness changes in place between passes, against chance pairs',
+                    'search-pairs',
+                  )}
+                  {srow(
+                    'Red sources',
+                    !redv ? 0 : redv.state === 'done' ? 1 : redv.state === 'failed' ? 0 : null,
+                    !redv
+                      ? 'waiting'
+                      : redv.state === 'done'
+                        ? `${redv.result!.red.length} found`
+                        : redv.state === 'failed'
+                          ? 'failed'
+                          : 'measuring',
+                    'Red sources: bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (cold brown dwarfs and the like)',
+                    'search-red',
+                  )}
+                  {srow(
+                    'Spectral anomalies',
+                    anFrac,
+                    !an
+                      ? 'waiting'
+                      : an.state === 'done'
+                        ? an.result?.reason
+                          ? 'too few spectra'
+                          : `${an.result?.anomalies.length ?? 0} found`
+                        : an.state === 'running'
+                          ? `${pct(anFrac) ?? 0} %`
+                          : an.state === 'failed'
+                            ? 'failed'
+                            : 'waiting',
+                    an?.result?.reason ||
+                      (an?.result
+                        ? `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)} (median ${an.result.median?.toFixed(2)})`
+                        : 'Every source of the field measured in every exposure; spectra unlike the field’s ordinary star'),
+                    'search-anomalies',
+                  )}
+                  {srow(
+                    `Asteroids${astMjd ? ` · pass of ${season(astMjd)}` : ''}`,
+                    ast.state === 'done' ? 1 : ast.state === 'none' || ast.state === 'failed' || ast.state === 'idle' ? 0 : ast.frac,
+                    ast.state === 'done'
+                      ? `${ast.tracks?.length ?? 0} found`
+                      : ast.state === 'none'
+                        ? 'too few visits'
+                        : ast.state === 'failed'
+                          ? 'failed'
+                          : ast.state === 'idle'
+                            ? 'waiting'
+                            : pct(ast.frac) !== null
+                              ? `${pct(ast.frac)} %`
+                              : 'running',
+                    ast.text ||
+                      'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
+                    'search-asteroids',
+                  )}
+                  {srow(
+                    'Brown dwarfs',
+                    !dwarfs ? 0 : dwarfs.state === 'done' ? 1 : dwarfs.state === 'failed' ? 0 : null,
+                    !dwarfs
+                      ? 'waiting'
+                      : dwarfs.state === 'done'
+                        ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0} found${dwarfs.result?.counts?.known_brown_dwarfs ? ` · +${dwarfs.result.counts.known_brown_dwarfs} known` : ''}`
+                        : dwarfs.state === 'failed'
+                          ? 'failed'
+                          : 'checking',
+                    'Red sources that move between the passes and that the catalogues do not explain',
+                    'search-browndwarfs',
+                  )}
+                  <div
+                    class="sline sline-px"
+                    data-testid="search-px"
+                    title="Find Planet X: the visits of a pass added along trial distances and own motions (30–300 au)"
+                  >
+                    <b>Find Planet X</b>
+                    <span class={`sprog ${pxState.frac === null ? 'busy' : ''}`}>
+                      <i style={{ width: `${pxState.frac === null ? 30 : Math.max(2, pxState.frac * 100)}%` }} />
+                    </span>
+                    <span class="sval">{pxState.text}</span>
+                    <span class="sacts">
+                      {!FPX_AUTO && dist.ds.state === 'idle' && dist.available === true && (
+                        <button class="btn sm mini" onClick={(e) => goPx(e, false)}>
+                          Start
+                        </button>
+                      )}
+                      {!FPX_AUTO && passes.length >= 3 && pxPlan && (
+                        <button
+                          class="btn sm mini"
+                          onClick={(e) => goPx(e, true)}
+                          title="The deep sum of all passes: its plan and time are shown before it starts"
+                        >
+                          Deep sum
+                        </button>
+                      )}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div class="tray-sum" onClick={() => setTrayOpen(true)}>
+                  {scanItems.map(([n, v]) => (
+                    <span class="it" key={n}>
+                      <i class={v === null || v.endsWith('%') ? 'busy' : ''} />
+                      {n} <span class="v">{v ?? '…'}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-          {tab === 'ctl' && (
-            <div class="pbody">
-              <section class="psec">
+                    </>
+                  }
+                />
+
+            </section>
+            {hasSelection && (
+              <section class="psec" id="sec-obj" data-testid="sec-obj">
+                <div class="psh">Selected object</div>
+                <div class={`pobj${flow.markOpen ? ' mark-open' : ''}`}>
+                  {!flow.markOpen && (sel || selAn !== null) && (
+                    <div class="sel-head" data-testid="sel-head">
+                      <b>{selAn !== null ? `Anomaly ${selAn}` : (sel?.name ?? (sel ? `${formatRA(sel.ra)} ${formatDec(sel.dec)}` : ''))}</b>
+                      {sel && (
+                        <button class="mini" onClick={() => setSpecOpen(true)} title="Its spectrum, measured in every exposure" data-testid="open-spectrum">
+                          Open spectrum
+                        </button>
+                      )}
+                    </div>
+                  )}
+                  {flow.card}
+                  <details class="obj-more" data-testid="obj-more">
+                    <summary>More about it</summary>
+                    {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
+                      <>
+                        {(() => {
+                          // what it is and why it is an anomaly, first
+                          const a = an.result.anomalies.find((x) => x.n === selAn)!;
+                          const name = a.identified?.simbad?.name
+                            ? `${a.identified.simbad.name}${a.identified.simbad.type ? ` · ${a.identified.simbad.type}` : ''}`
+                            : a.identified?.gaia?.state === 'ok'
+                              ? `Gaia DR3 ${a.identified.gaia.source_id}`
+                              : 'not in SIMBAD or Gaia';
+                          return (
+                            <div class="why-card" data-testid="anomaly-why">
+                              <b>
+                                Anomaly {a.n} · {name}
+                              </b>
+                              <span>
+                                score {a.score.toFixed(1)} against the field's bar {an.result.threshold?.toFixed(1) ?? '—'} (median{' '}
+                                {an.result.median?.toFixed(2) ?? '—'})
+                              </span>
+                            </div>
+                          );
+                        })()}
+                        {portraitOf(
+                          an.result.anomalies.find((a) => a.n === selAn)!,
+                          `Anomaly ${selAn}`,
+                        )}
+                        <Passport a={an.result.anomalies.find((a) => a.n === selAn)!} f={an.result} />
+                        <ContextRows
+                          ra={an.result.anomalies.find((a) => a.n === selAn)!.ra}
+                          dec={an.result.anomalies.find((a) => a.n === selAn)!.dec}
+                          pmra={an.result.anomalies.find((a) => a.n === selAn)!.pmra}
+                          pmdec={an.result.anomalies.find((a) => a.n === selAn)!.pmdec}
+                        />
+                      </>
+                    ) : (
+                      <>
+                        {sel && objCard && objCard.key === cardKey(sel.ra, sel.dec) && (
+                          <div class="why-card" data-testid="object-card">
+                            <b>{objCard.title}</b>
+                            {objCard.rows.map(([k, v]) => (
+                              <span key={k}>
+                                <span class="faint">{k}: </span>
+                                {v}
+                              </span>
+                            ))}
+                            {objCard.links && (
+                              <span class="xlinks">
+                                {objCard.links.map((l) => (
+                                  <a key={l.label} target="_blank" rel="noopener" href={l.href}>
+                                    {l.label}
+                                  </a>
+                                ))}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                        {sel &&
+                          sel.name === 'Find Planet X lead' &&
+                          (() => {
+                            // the lead's own stamp: the pass's visits shifted along its orbit and added (the body shows only so), with its numbers
+                            let best: { ds: Extract<DistantState, { state: 'ok' }>; c: DistantCandidate } | null = null;
+                            let bd = 1e9;
+                            for (const run of fpxRuns) {
+                              const dsr = run.ds;
+                              if (dsr.state !== 'ok') continue;
+                              for (const c of dsr.r.candidates) {
+                                const sep = Math.hypot((c.ra - sel.ra) * Math.cos((sel.dec * Math.PI) / 180), c.dec - sel.dec) * 3600;
+                                if (sep < bd) {
+                                  bd = sep;
+                                  best = { ds: dsr, c };
+                                }
+                              }
+                            }
+                            return best && bd < 60 ? <LeadPassport ds={best.ds} c={best.c} ra0={ra} dec0={dec} /> : null;
+                          })()}
+                        {sel &&
+                          portraitOf(
+                            sel,
+                            sel.name ?? 'selected source',
+                            <>
+                              <ObjectGuess src={sel} />
+                              {seenText(sel) && <div class="obj-seen">{seenText(sel)}</div>}
+                            </>,
+                          )}
+                        <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
+                        {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
+                        {sel && (
+                          <ContextRows
+                            ra={sel.ra}
+                            dec={sel.dec}
+                            epoch={sel.pmra || sel.pmdec ? 2000 : 2025.9}
+                            pmra={sel.pmra ?? 0}
+                            pmdec={sel.pmdec ?? 0}
+                          />
+                        )}
+                        {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}
+                        {sel && (
+                          <div class="xlinks">
+                            <span class="faint">Look it up:</span>
+                            <a
+                              target="_blank"
+                              rel="noopener"
+                              href={`https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}&Radius=10&Radius.unit=arcsec`}
+                            >
+                              SIMBAD
+                            </a>
+                            <a
+                              target="_blank"
+                              rel="noopener"
+                              href={`https://vizier.cds.unistra.fr/viz-bin/VizieR-4?-c=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}&-c.rs=10`}
+                            >
+                              VizieR
+                            </a>
+                            <a
+                              target="_blank"
+                              rel="noopener"
+                              href={`https://www.legacysurvey.org/viewer?ra=${sel.ra.toFixed(5)}&dec=${sel.dec.toFixed(5)}&layer=ls-dr10&zoom=15`}
+                            >
+                              Legacy Survey
+                            </a>
+                            <a
+                              target="_blank"
+                              rel="noopener"
+                              href={`https://irsa.ipac.caltech.edu/applications/finderchart/?locstr=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}`}
+                            >
+                              IRSA finder chart
+                            </a>
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                  </details>
+                </div>
+              </section>
+            )}
+            <section class="psec" id="sec-show" data-testid="sec-show">
+              <div class="psh">On the picture</div>
+              <div class="swgrid">
+                    {sw(
+                      'knownChk',
+                      'Known objects',
+                      'Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame, at its place on the date shown. What moves and has no ring is unknown',
+                      opts.known,
+                      (v) => set({ known: v ? '1' : inTask ? '0' : null }),
+                      undefined,
+                      '',
+                      flow.knownBusy,
+                    )}
+                    {sw(
+                      'movChk',
+                      'Machine finds',
+                      'Machine finds: a ring on every mover, track, brown dwarf and Planet X peak the searches found (between passes in Months, inside the pass in Days)',
+                      opts.movers && (film === null || (ft.state === 'ok' && ft.tracks.length > 0)),
+                      film === null || (ft.state === 'ok' && ft.tracks.length > 0) ? (v) => set({ movers: v ? null : '0' }) : null,
+                      ft.state === 'ok'
+                        ? 'the asteroid search found no track in this pass'
+                        : 'the asteroid search of this pass has not finished yet',
+                    )}
+                    {sw(
+                      'redChk',
+                      'Red sources',
+                      'Red sources: a ring and the name on every source that is bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (the brown dwarf candidates are among them)',
+                      opts.red && !!redv?.result?.red.length,
+                      redv?.result?.red.length ? (v) => set({ red: v ? null : '0' }) : null,
+                      redv?.result
+                        ? 'the red-source search found none in this field'
+                        : 'the red-source search of this field has not finished yet',
+                    )}
+                    {sw(
+                      'anoChk',
+                      'Anomalies',
+                      'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
+                      opts.anomalies && !!an?.result?.anomalies.length,
+                      an?.result?.anomalies.length ? (v) => set({ ano: v ? null : '0' }) : null,
+                      an?.result
+                        ? 'the anomaly search found no anomaly in this field'
+                        : 'the anomaly search of this field has not finished yet',
+                    )}
+                    {sw(
+                      'trailChk',
+                      'Paths',
+                      'Trajectory: the path of the test target (or of a found mover) over the passes, a dot at each pass date',
+                      opts.trajectory,
+                      (v) => set({ traj: v ? null : '0' }),
+                    )}
+                  {sw(
+                    'archChk',
+                    'Old surveys',
+                    'Old surveys: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
+                    opts.archive,
+                    film !== null ? null : (v) => set({ arch: v ? '1' : null }),
+                    'Months scale only',
+                  )}
+              </div>
+            </section>
+            <section class="psec" id="sec-view" data-testid="sec-view">
+              <div class="psh">View</div>
+              <div class="seg sm vseg" role="group" aria-label="View">
+                {VIEWS.map((v) => (
+                  <button
+                    key={v.id}
+                    class={v.id === view && film === null ? 'on' : ''}
+                    aria-pressed={v.id === view && film === null}
+                    title={v.tip}
+                    onClick={() => set({ view: v.id === 'picture' ? null : v.id, film: null })}
+                    data-testid={`view-${v.id}`}
+                  >
+                    {VIEW_WORD[v.id] ?? v.name}
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section class="psec" id="sec-tune" data-testid="sec-tune">
+              <div class="psh">Picture look</div>
+                  <div class="seg sm" role="group" aria-label="Blend">
+                    <button
+                      class={opts.mono ? '' : 'on'}
+                      onClick={() => set({ blend: null })}
+                      title="Each band keeps its colour; bands are screen-blended"
+                    >
+                      Colour blend
+                    </button>
+                    <button
+                      class={opts.mono ? 'on' : ''}
+                      onClick={() => set({ blend: 'mono' })}
+                      title="Sum the bands into one grayscale image"
+                    >
+                      Mono sum
+                    </button>
+                  </div>
+                  <div class="stretch">
+                    <span>Stretch</span>
+                    <input
+                      type="range"
+                      min={-3}
+                      max={1.5}
+                      step={0.05}
+                      value={Math.log(stretch)}
+                      aria-label="Stretch"
+                      onInput={(e) => setStretch(Math.exp(Number((e.target as HTMLInputElement).value)))}
+                      onDblClick={() => setStretch(0.4)}
+                      title="Softness of the display law: left shows faint light, right keeps bright stars apart (double-click resets)"
+                    />
+                    <span class="mono-s">lin {stretch.toFixed(2)}</span>
+                    <select
+                      class="inp"
+                      value={opts.trim}
+                      onChange={(e) =>
+                        set({ trim: (e.target as HTMLSelectElement).value === 'fixed' ? null : (e.target as HTMLSelectElement).value })
+                      }
+                      title="Trim of the bright end: a fixed white point, or the field's own 99.9th / 99.5th percentile"
+                    >
+                      <option value="fixed">Trim fixed</option>
+                      <option value="p999">Trim 99.9 %</option>
+                      <option value="p995">Trim 99.5 %</option>
+                      <option value="adaptive">Trim adaptive</option>
+                    </select>
+                  </div>
+              <div class="swgrid">
+                    {sw(
+                      'boostChk',
+                      'Brighten',
+                      'Brighten: a lower white point, so faint sources stand out (bright stars saturate)',
+                      opts.boost,
+                      (v) => set({ boost: v ? '1' : null }),
+                    )}
+                    {sw(
+                      'sharpChk',
+                      'Sharpen',
+                      'Sharpen: faint stars crisper on screen; boost only, the same gain in every channel (colours never change), never near saturated cores',
+                      opts.sharp,
+                      (v) => set({ sharp: v ? null : '0' }),
+                    )}
+                    {sw(
+                      'satChk',
+                      'White cores',
+                      'Saturated cores white: pixels saturated in most exposures are drawn white, never as missing data',
+                      opts.sat,
+                      film !== null ? null : (v) => set({ sat: v ? null : '0' }),
+                      'the visits of the Days scale carry no saturation layer: their cores are always drawn white',
+                    )}
+                    {sw(
+                      'refChk',
+                      'Reference',
+                      'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
+                      opts.reference,
+                      (v) => set({ ref: v ? '1' : null }),
+                    )}
+                    {sw(
+                      'morphChk',
+                      'Interpolate',
+                      'Interpolate: cross-fade between passes (or visits) instead of stepping (seen while playing)',
+                      opts.morph,
+                      (v) => set({ morph: v ? '1' : null }),
+                    )}
+                    {sw(
+                      'motionChk',
+                      'Motion only',
+                      'Motion only: the visit’s motion map instead of its sky (static sources masked, changes above 4σ in amber)',
+                      opts.motion && film !== null,
+                      film !== null && filmData ? (v) => set({ mot: v ? '1' : null }) : null,
+                      'Days scale only',
+                    )}
+                    {sw(
+                      'ringsChk',
+                      'Speed rings',
+                      'Speed rings: how far a body of 1, 3, 10, 30, 100 or 300 ″/yr moves between the first and the last pass (″/h between the first and last visit in Days), centred on the selected source',
+                      opts.rings,
+                      (v) => set({ rings: v ? '1' : null }),
+                    )}
+                    {sw(
+                      'maskChk',
+                      'Artifacts',
+                      'Artifacts: red where the SPHEREx pipeline flagged the pixel in many exposures of the season shown',
+                      opts.artifacts,
+                      wallView ? null : (v) => set({ art: v ? '1' : null }),
+                      'shown on the Picture and in Days, not on the walls',
+                    )}
+                    {sw(
+                      'ringChk',
+                      'Target marker',
+                      'Marker: a ring and the name of the test target, of the selected source and of the known asteroids, at their place on the date shown',
+                      opts.marker,
+                      (v) => set({ marker: v ? null : '0' }),
+                    )}
+              </div>
+            </section>
+              <section class="psec" id="sec-place" data-testid="sec-place">
                 <div class="psh">Place</div>
                 <div class="coords">
                   <div class="field">
@@ -3752,804 +4558,21 @@ export function Lab({ route }: { route: Route }) {
                   </div>
                 </div>
               </section>
-              <section class="psec">
-                <div class="psh">View</div>
-                <div class="vsquares" role="group" aria-label="View">
-                  {VIEWS.map((v) => (
-                    <button
-                      key={v.id}
-                      class={`vsquare ${v.id === view && film === null ? 'on' : ''}`}
-                      title={v.tip}
-                      onClick={() => set({ view: v.id === 'picture' ? null : v.id, film: null })}
-                      data-testid={`view-${v.id}`}
-                    >
-                      <span class="vi" dangerouslySetInnerHTML={{ __html: v.icon }} />
-                      <span>{VIEW_WORD[v.id] ?? v.name}</span>
-                    </button>
-                  ))}
-                </div>
-              </section>
-              <section class="psec">
-                <div class="psh">Display</div>
-                <div class="psub">Objects</div>
-                <div class="swgrid">
-                  {sw(
-                    'ringChk',
-                    'Target marker',
-                    'Marker: a ring and the name of the test target, of the selected source and of the known asteroids, at their place on the date shown',
-                    opts.marker,
-                    (v) => set({ marker: v ? null : '0' }),
-                  )}
-                  {sw(
-                    'movChk',
-                    'Movers',
-                    'Mover rings: a ring and a path for every track a search found (between passes in Months, inside the pass in Days)',
-                    opts.movers && (film === null || (ft.state === 'ok' && ft.tracks.length > 0)),
-                    film === null || (ft.state === 'ok' && ft.tracks.length > 0) ? (v) => set({ movers: v ? null : '0' }) : null,
-                    ft.state === 'ok'
-                      ? 'the asteroid search found no track in this pass'
-                      : 'the asteroid search of this pass has not finished yet',
-                  )}
-                  {sw(
-                    'redChk',
-                    'Red sources',
-                    'Red sources: a ring and the name on every source that is bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (the brown dwarf candidates are among them)',
-                    opts.red && !!redv?.result?.red.length,
-                    redv?.result?.red.length ? (v) => set({ red: v ? null : '0' }) : null,
-                    redv?.result
-                      ? 'the red-source search found none in this field'
-                      : 'the red-source search of this field has not finished yet',
-                  )}
-                  {sw(
-                    'anoChk',
-                    'Anomalies',
-                    'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
-                    opts.anomalies && !!an?.result?.anomalies.length,
-                    an?.result?.anomalies.length ? (v) => set({ ano: v ? null : '0' }) : null,
-                    an?.result
-                      ? 'the anomaly search found no anomaly in this field'
-                      : 'the anomaly search of this field has not finished yet',
-                  )}
-                  {sw(
-                    'knownChk',
-                    'Known objects',
-                    'Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame, at its place on the date shown. What moves and has no ring is unknown',
-                    opts.known,
-                    (v) => set({ known: v ? '1' : inTask ? '0' : null }),
-                    undefined,
-                    '',
-                    flow.knownBusy,
-                  )}
-                  {sw(
-                    'maskChk',
-                    'Artifacts',
-                    'Artifacts: red where the SPHEREx pipeline flagged the pixel in many exposures of the season shown',
-                    opts.artifacts,
-                    wallView ? null : (v) => set({ art: v ? '1' : null }),
-                    'shown on the Picture and in Days, not on the walls',
-                  )}
-                </div>
-                <div class="psub">Paths</div>
-                <div class="swgrid">
-                  {sw(
-                    'trailChk',
-                    'Trajectory',
-                    'Trajectory: the path of the test target (or of a found mover) over the passes, a dot at each pass date',
-                    opts.trajectory,
-                    (v) => set({ traj: v ? null : '0' }),
-                  )}
-                  {sw(
-                    'ringsChk',
-                    'Speed rings',
-                    'Speed rings: how far a body of 1, 3, 10, 30, 100 or 300 ″/yr moves between the first and the last pass (″/h between the first and last visit in Days), centred on the selected source',
-                    opts.rings,
-                    (v) => set({ rings: v ? '1' : null }),
-                  )}
-                </div>
-                <div class="psub">Picture</div>
-                <div class="swgrid">
-                  {sw(
-                    'boostChk',
-                    'Brighten',
-                    'Brighten: a lower white point, so faint sources stand out (bright stars saturate)',
-                    opts.boost,
-                    (v) => set({ boost: v ? '1' : null }),
-                  )}
-                  {sw(
-                    'sharpChk',
-                    'Sharpen',
-                    'Sharpen: faint stars crisper on screen; boost only, the same gain in every channel (colours never change), never near saturated cores',
-                    opts.sharp,
-                    (v) => set({ sharp: v ? null : '0' }),
-                  )}
-                  {sw(
-                    'satChk',
-                    'White cores',
-                    'Saturated cores white: pixels saturated in most exposures are drawn white, never as missing data',
-                    opts.sat,
-                    film !== null ? null : (v) => set({ sat: v ? null : '0' }),
-                    'the visits of the Days scale carry no saturation layer: their cores are always drawn white',
-                  )}
-                  {sw(
-                    'refChk',
-                    'Reference',
-                    'Reference: the DSS2 red picture of the same place (1985–1999) in the corner, the test target ringed where it was then',
-                    opts.reference,
-                    (v) => set({ ref: v ? '1' : null }),
-                  )}
-                </div>
-                <div class="psub">Playback</div>
-                <div class="swgrid">
-                  {sw(
-                    'morphChk',
-                    'Interpolate',
-                    'Interpolate: cross-fade between passes (or visits) instead of stepping (seen while playing)',
-                    opts.morph,
-                    (v) => set({ morph: v ? '1' : null }),
-                  )}
-                  {sw(
-                    'motionChk',
-                    'Motion only',
-                    'Motion only: the visit’s motion map instead of its sky (static sources masked, changes above 4σ in amber)',
-                    opts.motion && film !== null,
-                    film !== null && filmData ? (v) => set({ mot: v ? '1' : null }) : null,
-                    'Days scale only',
-                  )}
-                </div>
-                <div class="seg sm" role="group" aria-label="Blend">
-                  <button
-                    class={opts.mono ? '' : 'on'}
-                    onClick={() => set({ blend: null })}
-                    title="Each band keeps its colour; bands are screen-blended"
-                  >
-                    Colour blend
-                  </button>
-                  <button
-                    class={opts.mono ? 'on' : ''}
-                    onClick={() => set({ blend: 'mono' })}
-                    title="Sum the bands into one grayscale image"
-                  >
-                    Mono sum
-                  </button>
-                </div>
-                <div class="stretch">
-                  <span>Stretch</span>
-                  <input
-                    type="range"
-                    min={-3}
-                    max={1.5}
-                    step={0.05}
-                    value={Math.log(stretch)}
-                    aria-label="Stretch"
-                    onInput={(e) => setStretch(Math.exp(Number((e.target as HTMLInputElement).value)))}
-                    onDblClick={() => setStretch(0.4)}
-                    title="Softness of the display law: left shows faint light, right keeps bright stars apart (double-click resets)"
-                  />
-                  <span class="mono-s">lin {stretch.toFixed(2)}</span>
-                  <select
-                    class="inp"
-                    value={opts.trim}
-                    onChange={(e) =>
-                      set({ trim: (e.target as HTMLSelectElement).value === 'fixed' ? null : (e.target as HTMLSelectElement).value })
-                    }
-                    title="Trim of the bright end: a fixed white point, or the field's own 99.9th / 99.5th percentile"
-                  >
-                    <option value="fixed">Trim fixed</option>
-                    <option value="p999">Trim 99.9 %</option>
-                    <option value="p995">Trim 99.5 %</option>
-                    <option value="adaptive">Trim adaptive</option>
-                  </select>
-                </div>
-                {sw(
-                  'archChk',
-                  `Old surveys · ${ARCHIVE.length} · 1985–2010`,
-                  'Old surveys: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
-                  opts.archive,
-                  film !== null ? null : (v) => set({ arch: v ? '1' : null }),
-                  'Months scale only',
-                )}
-              </section>
+          </div>
+        </aside>
+        {specOpen && sel && (
+          <div class="specsheet" role="dialog" aria-label="Spectrum" data-testid="spec-sheet">
+            <div class="ss-head">
+              <b>Spectrum · {sel.name ?? `${formatRA(sel.ra)} ${formatDec(sel.dec)}`}</b>
+              <button class="mini" aria-label="Close the spectrum" onClick={() => setSpecOpen(false)} data-testid="spec-close">
+                ×
+              </button>
             </div>
-          )}
-          {tab === 'obj' && (
-            <div class={`pbody pobj${flow.markOpen ? ' mark-open' : ''}`}>
-              {flow.card}
-              {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
-                <>
-                  {(() => {
-                    // what it is and why it is an anomaly, first
-                    const a = an.result.anomalies.find((x) => x.n === selAn)!;
-                    const name = a.identified?.simbad?.name
-                      ? `${a.identified.simbad.name}${a.identified.simbad.type ? ` · ${a.identified.simbad.type}` : ''}`
-                      : a.identified?.gaia?.state === 'ok'
-                        ? `Gaia DR3 ${a.identified.gaia.source_id}`
-                        : 'not in SIMBAD or Gaia';
-                    return (
-                      <div class="why-card" data-testid="anomaly-why">
-                        <b>
-                          Anomaly {a.n} · {name}
-                        </b>
-                        <span>
-                          score {a.score.toFixed(1)} against the field's bar {an.result.threshold?.toFixed(1) ?? '—'} (median{' '}
-                          {an.result.median?.toFixed(2) ?? '—'})
-                        </span>
-                      </div>
-                    );
-                  })()}
-                  {portraitOf(
-                    an.result.anomalies.find((a) => a.n === selAn)!,
-                    `Anomaly ${selAn}`,
-                  )}
-                  <Passport a={an.result.anomalies.find((a) => a.n === selAn)!} f={an.result} />
-                  <ContextRows
-                    ra={an.result.anomalies.find((a) => a.n === selAn)!.ra}
-                    dec={an.result.anomalies.find((a) => a.n === selAn)!.dec}
-                    pmra={an.result.anomalies.find((a) => a.n === selAn)!.pmra}
-                    pmdec={an.result.anomalies.find((a) => a.n === selAn)!.pmdec}
-                  />
-                </>
-              ) : (
-                <>
-                  {sel && objCard && objCard.key === cardKey(sel.ra, sel.dec) && (
-                    <div class="why-card" data-testid="object-card">
-                      <b>{objCard.title}</b>
-                      {objCard.rows.map(([k, v]) => (
-                        <span key={k}>
-                          <span class="faint">{k}: </span>
-                          {v}
-                        </span>
-                      ))}
-                      {objCard.links && (
-                        <span class="xlinks">
-                          {objCard.links.map((l) => (
-                            <a key={l.label} target="_blank" rel="noopener" href={l.href}>
-                              {l.label}
-                            </a>
-                          ))}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  {sel &&
-                    sel.name === 'Find Planet X lead' &&
-                    (() => {
-                      // the lead's own stamp: the pass's visits shifted along its orbit and added (the body shows only so), with its numbers
-                      let best: { ds: Extract<DistantState, { state: 'ok' }>; c: DistantCandidate } | null = null;
-                      let bd = 1e9;
-                      for (const run of fpxRuns) {
-                        const dsr = run.ds;
-                        if (dsr.state !== 'ok') continue;
-                        for (const c of dsr.r.candidates) {
-                          const sep = Math.hypot((c.ra - sel.ra) * Math.cos((sel.dec * Math.PI) / 180), c.dec - sel.dec) * 3600;
-                          if (sep < bd) {
-                            bd = sep;
-                            best = { ds: dsr, c };
-                          }
-                        }
-                      }
-                      return best && bd < 60 ? <LeadPassport ds={best.ds} c={best.c} ra0={ra} dec0={dec} /> : null;
-                    })()}
-                  {sel &&
-                    portraitOf(
-                      sel,
-                      sel.name ?? 'selected source',
-                      <>
-                        <ObjectGuess src={sel} />
-                        {seenText(sel) && <div class="obj-seen">{seenText(sel)}</div>}
-                      </>,
-                    )}
-                  <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
-                  {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
-                  {sel && (
-                    <ContextRows
-                      ra={sel.ra}
-                      dec={sel.dec}
-                      epoch={sel.pmra || sel.pmdec ? 2000 : 2025.9}
-                      pmra={sel.pmra ?? 0}
-                      pmdec={sel.pmdec ?? 0}
-                    />
-                  )}
-                  {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}
-                  {sel && (
-                    <div class="xlinks">
-                      <span class="faint">Look it up:</span>
-                      <a
-                        target="_blank"
-                        rel="noopener"
-                        href={`https://simbad.cds.unistra.fr/simbad/sim-coo?Coord=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}&Radius=10&Radius.unit=arcsec`}
-                      >
-                        SIMBAD
-                      </a>
-                      <a
-                        target="_blank"
-                        rel="noopener"
-                        href={`https://vizier.cds.unistra.fr/viz-bin/VizieR-4?-c=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}&-c.rs=10`}
-                      >
-                        VizieR
-                      </a>
-                      <a
-                        target="_blank"
-                        rel="noopener"
-                        href={`https://www.legacysurvey.org/viewer?ra=${sel.ra.toFixed(5)}&dec=${sel.dec.toFixed(5)}&layer=ls-dr10&zoom=15`}
-                      >
-                        Legacy Survey
-                      </a>
-                      <a
-                        target="_blank"
-                        rel="noopener"
-                        href={`https://irsa.ipac.caltech.edu/applications/finderchart/?locstr=${sel.ra.toFixed(5)}+${sel.dec.toFixed(5)}`}
-                      >
-                        IRSA finder chart
-                      </a>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-          {tab === 'spec' && (
-            <div class="pbody">
+            <div class="ss-body">
               <SpectrumTab src={sel} />
             </div>
-          )}
-          {(tab === 'cand' || (FPX_AUTO && !fpx)) && (
-            // with Find Planet X on its own the body stays mounted (hidden) so its deep sums keep running when another tab is shown
-            <div class="pbody" style={tab === 'cand' ? undefined : { display: 'none' }}>
-              {pairSel !== null && pairs[pairSel] && (
-                <PairCard
-                  pair={pairs[pairSel]!}
-                  mjds={pairMjds}
-                  chance={(mv as unknown as { chance_pairs?: ChancePairs } | null)?.chance_pairs ?? null}
-                  onSpectrum={(pra, pdec) => {
-                    setSelAn(null);
-                    setSel({ ra: pra, dec: pdec });
-                    setTab('spec');
-                  }}
-                  onBack={() => setPairSel(null)}
-                />
-              )}
-              <CandList
-                rows={findRows}
-                also={alsoLine(searchStates)}
-                selected={candSel}
-                picture={() => canvas.current}
-                field={{ ra, dec, fov }}
-                onTask={(kind, findId, r) =>
-                  // the task of this very source: its find at its own place in the field on show (the lab selects it there)
-                  set({
-                    task: kind,
-                    finding: findId,
-                    find: findId,
-                    find_ra: (r.ra ?? ra).toFixed(5),
-                    find_dec: (r.dec ?? dec).toFixed(5),
-                    kind: null,
-                    cell: null,
-                  })
-                }
-                details={
-                  <>
-              <section class="psec fsec">
-                <div class="fsh">Movers between passes</div>
-                <MoversRows bare mv={mv} names={trackNames} onPick={pickTrack} />
-                {(mv?.result?.tracks ?? [])
-                  .filter((t) => t.mjd.length >= 2)
-                  .map((t, i) => (
-                    <div class="adesrow" key={i}>
-                      <button
-                        class="mini"
-                        onClick={() => void downloadAdes(t, i)}
-                        title="The positions of this mover in every pass as an MPC ADES report (nothing is sent; the file says what is missing before it could be)"
-                      >
-                        MPC ADES · {trackNames[i] || `track ${i + 1}`}
-                      </button>
-                    </div>
-                  ))}
-                {adesNote && <div class="ssum">{adesNote}</div>}
-              </section>
-              <section class="psec fsec">
-                <div class="fsh">Brown dwarf candidates</div>
-                <div class="ssum">
-                  {!dwarfs
-                    ? 'waiting for the field'
-                    : dwarfs.state !== 'done'
-                      ? 'checking the red sources that move against Gaia and SIMBAD…'
-                      : (() => {
-                          // the service's own counts, so every view says the same: candidates are what the catalogues do not explain
-                          const c = dwarfs.result?.counts;
-                          const cand = c?.candidates ?? dwarfs.result?.candidates.length ?? 0;
-                          const knownBd = c?.known_brown_dwarfs ?? 0;
-                          const moving = c?.moving_red;
-                          return `${cand} candidate${cand === 1 ? '' : 's'} the catalogues do not explain · ${knownBd} known brown dwarf${knownBd === 1 ? '' : 's'} recovered${moving != null ? ` · ${moving} red source${moving === 1 ? '' : 's'} moving` : ''}`;
-                        })()}
-                </div>
-                {[
-                  ...(dwarfs?.result?.candidates ?? []).map((c) => ({ c, known: false })),
-                  ...(dwarfs?.result?.known ?? []).map((c) => ({ c, known: true })),
-                ].map(({ c, known }, i) => (
-                  <button
-                    key={i}
-                    class="anrow"
-                    onClick={() => {
-                      setSelAn(null);
-                      setSel({
-                        ra: c.ra_j2000 ?? c.ra ?? ra,
-                        dec: c.dec_j2000 ?? c.dec ?? dec,
-                        pmra: c.ra_j2000 != null ? c.pmra : undefined,
-                        pmdec: c.ra_j2000 != null ? c.pmdec : undefined,
-                        name: c.simbad?.name ?? (known ? 'Known red mover' : `Brown dwarf candidate ${i + 1}`),
-                      });
-                      setTab('obj');
-                    }}
-                    title="Select it: its card, portrait and spectrum"
-                  >
-                    <b>{known ? 'Known' : `Candidate ${i + 1}`}</b>
-                    <span class="t">
-                      {c.simbad?.name ?? 'not in SIMBAD'}
-                      {c.pm != null ? ` · ${(c.pm / 1000).toFixed(1)}″/yr` : ''}
-                      {c.colour != null ? ` · colour ${c.colour.toFixed(2)}` : ''}
-                    </span>
-                    <span class="faint">{c.status ?? (known ? 'known' : 'candidate')}</span>
-                  </button>
-                ))}
-              </section>
-              <section class="psec fsec">
-                <div class="fsh">Pairs that change in place</div>
-                {!pairs.length && (
-                  <div class="ssum">{mv?.state === 'done' ? 'none in this field' : 'waiting for the search between passes'}</div>
-                )}
-                {pairs.length > 0 && pairs.map((pr, i) => <PairButton key={i} pair={pr} on={pairSel === i} onClick={() => openPair(i)} />)}
-              </section>
-              <section class="psec fsec">
-                <div class="fsh">Red sources</div>
-                {redv?.state === 'done' && !redv.result?.red.length && <div class="ssum">none far redder than the field's stars</div>}
-                {redv?.result?.red.map((x, k) => (
-                  <button
-                    key={k}
-                    class="anrow"
-                    onClick={() => pickRed(k)}
-                    title="Select this source: its spectrum is measured in every exposure"
-                  >
-                    <b>Red source {k + 1}</b>
-                    <span class="t">
-                      {redv.result!.median_colour
-                        ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
-                        : ''}
-                      {(() => {
-                        const tr = trackOfRed(x);
-                        if (tr) return ` · moves ${rateText(tr)} (the mover track)`;
-                        return x.moves && x.pmra != null
-                          ? ` · moves ${(Math.hypot(x.pmra, x.pmdec ?? 0) / 1000).toFixed(1)}″/yr (red-band measurement)`
-                          : '';
-                      })()}
-                    </span>
-                    <span class="faint">S/N {x.snr_long.toFixed(0)}</span>
-                  </button>
-                ))}
-              </section>
-              <section class="psec fsec">
-                <div class="fsh">Spectral anomalies</div>
-                {an?.result && (
-                  <div class="ssum">
-                    {an.result.reason ||
-                      `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)}`}
-                  </div>
-                )}
-                {an?.result?.anomalies.map((a) => (
-                  <button key={a.n} class="anrow" onClick={() => pickAnomaly(a.n)} title={driverWords(a).join('; ')}>
-                    <b>Anomaly {a.n}</b>
-                    <span class="t">
-                      {a.identified?.simbad?.name ??
-                        (a.identified?.gaia?.state === 'ok' ? `Gaia DR3 ${a.identified.gaia.source_id}` : 'not in SIMBAD or Gaia')}
-                    </span>
-                    <span class="faint">score {a.score.toFixed(1)}</span>
-                  </button>
-                ))}
-              </section>
-              <section class="psec fsec">
-                <div class="fsh">Asteroids{astMjd ? ` · pass of ${season(astMjd)}` : ''}</div>
-                <div class="ssum">
-                  {ast.state === 'done'
-                    ? `${ast.tracks?.length ?? 0} track${ast.tracks?.length === 1 ? '' : 's'} · drawn on the picture in Days`
-                    : ast.text || 'waiting for the field'}
-                </div>
-                {ast.state === 'done' &&
-                  (ast.tracks ?? []).slice(0, 8).map((t, i) => (
-                    <button
-                      key={i}
-                      class="mvrow"
-                      onClick={() => {
-                        selectTrack(i);
-                        if (film === null) toDays();
-                        setFrame(t.pts[0]?.f ?? 0);
-                        setPlaying(false);
-                      }}
-                      title="Show this track in the Days scale (its first visit)"
-                    >
-                      <b>{t.known ? t.known.name : `Track ${i + 1}`}</b>
-                      <span>
-                        {t.rate.toFixed(1)}″/h · {t.n} visits
-                      </span>
-                      <span class="faint">{t.known ? 'known' : t.verified ? 'verified' : 'lead'}</span>
-                    </button>
-                  ))}
-                {film !== null && filmBodies && (
-                  <>
-                    <div
-                      class="sline"
-                      title="Known asteroids and comets JPL predicts in this field during the pass; seen = the visit shows something at the predicted place"
-                    >
-                      <b>Known bodies</b>
-                      <span class="sval wide">
-                        {filmBodies.state === 'running'
-                          ? 'asking JPL…'
-                          : filmBodies.state === 'unavailable'
-                            ? 'JPL not reachable'
-                            : `${filmBodies.bodies.length} predicted · ${filmBodies.bodies.filter((b) => b.seen.length).length} seen`}
-                      </span>
-                    </div>
-                    {filmBodies.bodies.some((b) => b.name.includes('3I/ATLAS')) && <NeossatCard />}
-                    {[...filmBodies.bodies]
-                      .sort((a, b) => (b.stackZ ?? 0) - (a.stackZ ?? 0) || (a.v ?? 99) - (b.v ?? 99))
-                      .slice(0, 6)
-                      .map((b) => (
-                        <div key={b.name} class="mvrow body" style={{ cursor: 'default' }}>
-                          <b>
-                            {b.name} · V {b.v?.toFixed(1) ?? '—'}
-                          </b>
-                          <span class="faint">
-                            seen {b.seen.length} of {b.expected.length} visits
-                            {b.stackZ != null && b.stackN
-                              ? ` · along its track z ${b.stackZ.toFixed(1)} (chance ${b.controlZ?.toFixed(1)})`
-                              : ''}
-                            {b.planes != null ? ` · in ${b.planes} detector images` : ''}
-                          </span>
-                          <span class="bodylinks">
-                            <a
-                              target="_blank"
-                              rel="noopener"
-                              href={`https://ssd.jpl.nasa.gov/tools/sbdb_lookup.html#/?sstr=${encodeURIComponent(sbdbName(b.name))}`}
-                            >
-                              JPL
-                            </a>
-                            <a target="_blank" rel="noopener" href={ssoisUrl(b.name, filmMjd)}>
-                              SSOIS
-                            </a>
-                          </span>
-                        </div>
-                      ))}
-                  </>
-                )}
-              </section>
-              <section class="psec fsec" id="px-section">
-                <div class="fsh">Planet X · bodies beyond Neptune</div>
-                {dist.ds.state === 'ok' && (
-                  <label class="ds-chk">
-                    <input type="checkbox" checked={distShow} onChange={(e) => setDistShow((e.target as HTMLInputElement).checked)} /> Show
-                    the distance search on the picture (instead of the sky)
-                  </label>
-                )}
-                {FPX_AUTO && !fpx && (
-                  <div class="fpxleads" data-testid="fpx-leads">
-                    <div class="mono-s">
-                      {fpxLeads.length
-                        ? `${fpxLeads.length} Find Planet X ${fpxLeads.length === 1 ? 'lead' : 'leads'} in this field (peaks the photometry confirms, one per object across the searches and the deep sums) · a lead, not a discovery`
-                        : fpxAllOver
-                          ? 'No Find Planet X lead in this field'
-                          : 'Find Planet X is still running on this field'}
-                    </div>
-                    {fpxLeads.map((l, i) => (
-                      <button key={i} class="btn sm leadbtn" onClick={l.open}>
-                        <b>Peak {i + 1}</b> · S/N {l.sn} · {l.d} au{l.range ? ` (${l.range})` : ''} · photometry{' '}
-                        {l.phot != null ? `${l.phot}σ` : 'n/a'} · {l.label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-                {FPX_AUTO && !fpx ? (
-                  [
-                    [distRef, '30–300 au · D1–D3'],
-                    [distB, '30–300 au · D4'],
-                    [distC, '250–2000 au · D1–D3'],
-                    [distD, '250–2000 au · D4'],
-                  ].map(([d, label]) =>
-                    (d as typeof distRef).ds.state === 'idle' ? null : (
-                      <div key={label as string}>
-                        <div class="mono-s">{label as string}</div>
-                        <DistantPanel
-                          d={d as typeof distRef}
-                          currentPass={shown?.pass ?? 0}
-                          passLabel={passMeta ? season(passMeta.mjd_mid) : undefined}
-                          auto
-                          onPick={onPeak}
-                        />
-                      </div>
-                    ),
-                  )
-                ) : (
-                  <DistantPanel d={dist} currentPass={shown?.pass ?? 0} passLabel={passMeta ? season(passMeta.mjd_mid) : undefined} />
-                )}
-                {passes.length >= 3 &&
-                  (FPX_AUTO && !fpx ? (
-                    <>
-                      <DeepSumPanel
-                        ra={ra}
-                        dec={dec}
-                        fov={fov}
-                        passes={passes.map((q) => q.mjd_mid)}
-                        autoRun={[60, 110]}
-                        autoHold={fpxHold || fpxStopped || !fpxAllOver}
-                        onState={(x) => {
-                          setDeepSt((o) => (o[0] === x.state ? o : [x.state, o[1]]));
-                          setDeepFr((o) => (o[0] === x.frac ? o : [x.frac, o[1]]));
-                          setDeepCands((o) => (o[0] === x.candidates ? o : [x.candidates, o[1]]));
-                        }}
-                      />
-                      <DeepSumPanel
-                        ra={ra}
-                        dec={dec}
-                        fov={fov}
-                        passes={passes.map((q) => q.mjd_mid)}
-                        autoRun={[250, 800]}
-                        autoHold={fpxHold || fpxStopped || !fpxAllOver || !['done', 'none', 'error'].includes(deepSt[0])}
-                        onState={(x) => {
-                          setDeepSt((o) => (o[1] === x.state ? o : [o[0], x.state]));
-                          setDeepFr((o) => (o[1] === x.frac ? o : [o[0], x.frac]));
-                          setDeepCands((o) => (o[1] === x.candidates ? o : [o[0], x.candidates]));
-                        }}
-                      />
-                    </>
-                  ) : (
-                    <DeepSumPanel
-                      ra={ra}
-                      dec={dec}
-                      fov={fov}
-                      passes={passes.map((q) => q.mjd_mid)}
-                      autoPlan={fpx && (fpxRange.dmin ?? 0) >= 200 ? [fpxRange.dmin!, fpxRange.dmax ?? 2000] : undefined}
-                    />
-                  ))}
-                {Object.keys(dist.keys).length >= 2 && <LinkPanel keys={Object.values(dist.keys)} />}
-              </section>
-          <div class={`sbar ${trayOpen ? '' : 'tray'}`} data-testid="scans">
-            <button
-              class="tray-head"
-              onClick={() => setTrayOpen((o) => !o)}
-              aria-expanded={trayOpen}
-              title={trayOpen ? 'Fold the scans' : 'Show every scan'}
-            >
-              <b>Scans</b>
-              <span class="chev">{trayOpen ? '▾' : '▴'}</span>
-            </button>
-            {trayOpen ? (
-              <div onClick={() => setTab('cand')} title="Open the candidates of this field">
-                {srow(
-                  'Movers',
-                  !mv ? 0 : mv.state === 'done' ? 1 : mv.state === 'failed' ? 0 : null,
-                  !mv
-                    ? 'waiting'
-                    : mv.state === 'done'
-                      ? `${mvr?.tracks.length ?? 0} found`
-                      : mv.state === 'failed'
-                        ? 'failed'
-                        : 'searching',
-                  'Between passes: sources that move in a straight line over the passes (3–120 ″/yr), checked against Gaia DR3',
-                  'search-movers',
-                )}
-                {srow(
-                  'Pairs',
-                  !mv ? 0 : mv.state === 'done' ? 1 : null,
-                  !mv || mv.state !== 'done' ? 'waiting' : pairs.length ? `${pairs.length} found` : 'none',
-                  'Two sources close together whose brightness changes in place between passes, against chance pairs',
-                  'search-pairs',
-                )}
-                {srow(
-                  'Red sources',
-                  !redv ? 0 : redv.state === 'done' ? 1 : redv.state === 'failed' ? 0 : null,
-                  !redv
-                    ? 'waiting'
-                    : redv.state === 'done'
-                      ? `${redv.result!.red.length} found`
-                      : redv.state === 'failed'
-                        ? 'failed'
-                        : 'measuring',
-                  'Red sources: bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (cold brown dwarfs and the like)',
-                  'search-red',
-                )}
-                {srow(
-                  'Spectral anomalies',
-                  anFrac,
-                  !an
-                    ? 'waiting'
-                    : an.state === 'done'
-                      ? an.result?.reason
-                        ? 'too few spectra'
-                        : `${an.result?.anomalies.length ?? 0} found`
-                      : an.state === 'running'
-                        ? `${pct(anFrac) ?? 0} %`
-                        : an.state === 'failed'
-                          ? 'failed'
-                          : 'waiting',
-                  an?.result?.reason ||
-                    (an?.result
-                      ? `${an.result.anomalies.length} of ${an.result.with_spectrum} spectra above ${an.result.threshold?.toFixed(2)} (median ${an.result.median?.toFixed(2)})`
-                      : 'Every source of the field measured in every exposure; spectra unlike the field’s ordinary star'),
-                  'search-anomalies',
-                )}
-                {srow(
-                  `Asteroids${astMjd ? ` · pass of ${season(astMjd)}` : ''}`,
-                  ast.state === 'done' ? 1 : ast.state === 'none' || ast.state === 'failed' || ast.state === 'idle' ? 0 : ast.frac,
-                  ast.state === 'done'
-                    ? `${ast.tracks?.length ?? 0} found`
-                    : ast.state === 'none'
-                      ? 'too few visits'
-                      : ast.state === 'failed'
-                        ? 'failed'
-                        : ast.state === 'idle'
-                          ? 'waiting'
-                          : pct(ast.frac) !== null
-                            ? `${pct(ast.frac)} %`
-                            : 'running',
-                  ast.text ||
-                    'Inside the pass shown: unknown movers hopping from visit to visit (straight tracks through the candidates of every visit, against chance)',
-                  'search-asteroids',
-                )}
-                {srow(
-                  'Brown dwarfs',
-                  !dwarfs ? 0 : dwarfs.state === 'done' ? 1 : dwarfs.state === 'failed' ? 0 : null,
-                  !dwarfs
-                    ? 'waiting'
-                    : dwarfs.state === 'done'
-                      ? `${dwarfs.result?.counts?.candidates ?? dwarfs.result?.candidates.length ?? 0} found${dwarfs.result?.counts?.known_brown_dwarfs ? ` · +${dwarfs.result.counts.known_brown_dwarfs} known` : ''}`
-                      : dwarfs.state === 'failed'
-                        ? 'failed'
-                        : 'checking',
-                  'Red sources that move between the passes and that the catalogues do not explain',
-                  'search-browndwarfs',
-                )}
-                <div
-                  class="sline sline-px"
-                  data-testid="search-px"
-                  title="Find Planet X: the visits of a pass added along trial distances and own motions (30–300 au)"
-                >
-                  <b>Find Planet X</b>
-                  <span class={`sprog ${pxState.frac === null ? 'busy' : ''}`}>
-                    <i style={{ width: `${pxState.frac === null ? 30 : Math.max(2, pxState.frac * 100)}%` }} />
-                  </span>
-                  <span class="sval">{pxState.text}</span>
-                  <span class="sacts">
-                    {!FPX_AUTO && dist.ds.state === 'idle' && dist.available === true && (
-                      <button class="btn sm mini" onClick={(e) => goPx(e, false)}>
-                        Start
-                      </button>
-                    )}
-                    {!FPX_AUTO && passes.length >= 3 && pxPlan && (
-                      <button
-                        class="btn sm mini"
-                        onClick={(e) => goPx(e, true)}
-                        title="The deep sum of all passes: its plan and time are shown before it starts"
-                      >
-                        Deep sum
-                      </button>
-                    )}
-                  </span>
-                </div>
-              </div>
-            ) : (
-              <div class="tray-sum" onClick={() => setTrayOpen(true)}>
-                {scanItems.map(([n, v]) => (
-                  <span class="it" key={n}>
-                    <i class={v === null || v.endsWith('%') ? 'busy' : ''} />
-                    {n} <span class="v">{v ?? '…'}</span>
-                  </span>
-                ))}
-              </div>
-            )}
           </div>
-                  </>
-                }
-              />
-            </div>
-          )}
-        </aside>
+        )}
       </div>
     </div>
   );

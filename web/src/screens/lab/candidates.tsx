@@ -55,6 +55,8 @@ export function alsoLine(searches: { name: string; state: 'nothing' | 'running' 
 }
 
 const STILL = 44;
+/** rows of the list on show before "All N" */
+export const TOP_ROWS = 4;
 
 /** A small still of a find: the pixels of the lab's picture around its place, taken when the row appears and every few seconds. */
 function Still({ uv, picture }: { uv: [number, number] | null; picture: () => HTMLCanvasElement | null }) {
@@ -187,6 +189,9 @@ export function CandList({
   const list = orderRows(rows.filter((r) => !r.group));
   const folded = orderRows(rows.filter((r) => r.group));
   const [openGroup, setOpenGroup] = useState(false);
+  // the top rows are on show; "All N" opens the rest (the column below keeps its place)
+  const [all, setAll] = useState(false);
+  const shown = all ? list : list.slice(0, TOP_ROWS);
   const finds = useFieldFinds(openGroup && folded.length > 0, field.ra, field.dec, field.fov);
   const row = (r: FindRow) => {
     const fid = r.group ? findOfRow(r, finds) : null;
@@ -215,7 +220,12 @@ export function CandList({
   };
   return (
     <div class="candlist" data-testid="cand-list">
-      {list.map(row)}
+      {shown.map(row)}
+      {list.length > TOP_ROWS && (
+        <button class="mini cr-all" onClick={() => setAll((v) => !v)} data-testid="cand-all">
+          {all ? 'Fewer' : `All ${list.length}`}
+        </button>
+      )}
       {!list.length && <div class="cr-none">No mover, track, brown dwarf, pair or Planet X peak in this field so far</div>}
       {folded.length > 0 && (
         <details class="cr-group" open={openGroup} onToggle={(e) => setOpenGroup((e.target as HTMLDetailsElement).open)} data-testid="cand-group">
