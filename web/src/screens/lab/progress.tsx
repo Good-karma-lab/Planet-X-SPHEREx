@@ -72,8 +72,9 @@ export function useRetry(failed: boolean, retry: () => void, key: string): { nex
 
 /** The words after a failed search: who did not answer, and when the next try is. */
 export function failWord(s: SearchInfo): string {
-  const who = s.ours ? 'server error' : 'no answer';
-  return s.retry?.nextIn != null ? `${who} · retry ${s.retry.nextIn} s` : who;
+  // a catalogue outside that is slow is asked again on its own: said as the normal wait it is, not as a failure
+  if (!s.ours) return s.retry?.nextIn != null ? `slow · asking again in ${s.retry.nextIn} s` : 'no answer';
+  return s.retry?.nextIn != null ? `server error · retry ${s.retry.nextIn} s` : 'server error';
 }
 
 /** One small mark after a switch or in the row: a turning ring while it runs (with its share), the count when done, the failure
@@ -89,7 +90,7 @@ export function SearchMark({ s }: { s: SearchInfo | null | undefined }) {
     );
   if (s.state === 'failed')
     return (
-      <span class="sm-fail" data-testid={`search-${s.name}`} title={s.ours ? 'Our server did not answer; it is asked again by itself' : 'The archive did not answer; it is asked again by itself'}>
+      <span class={s.ours || s.retry?.nextIn == null ? 'sm-fail' : 'sm-slow'} data-testid={`search-${s.name}`} title={s.ours ? 'Our server did not answer; it is asked again by itself' : 'The archive did not answer; it is asked again by itself'}>
         {failWord(s)}
         {s.retry && (
           <>

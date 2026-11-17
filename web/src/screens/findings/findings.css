@@ -127,3 +127,24 @@
 a.fcard-title { color: var(--ink); text-decoration: none; display: block; }
 a.fcard-title:hover { color: var(--accent); }
 .fcard-people { color: var(--muted); }
+/* the picture of a find's report: the time-lapse its card shows; without any picture, one status line in its place */
+.fdpic { width: 240px; flex: none; border: 1px solid var(--edge-soft); border-radius: 8px; overflow: hidden; background: #02070a; }
+.fclip-none { margin: 0; flex-basis: 100%; }
+@media (max-width: 600px) { .fdpic { width: 100%; } }
+/* ---- the list before its numbers: every chip and line keeps its final size, so nothing moves when the reply comes */
+.fkinds button:disabled { opacity: 0.45; cursor: default; }
+.fkinds button span { font-variant-numeric: tabular-nums; }
+.fbar .leadcount { flex-wrap: nowrap; min-width: 0; }
+.fbar .leadcount > a { flex: none; }
+.lc-line { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fskel { pointer-events: none; }
+.fskel .fclip { background: linear-gradient(110deg, #02070a 30%, #07141a 50%, #02070a 70%) 0 0 / 300% 100%; animation: fskel 1.6s linear infinite; }
+.fskel .fcard-body { min-height: var(--fskel-body, 170px); }
+@keyframes fskel { from { background-position: 100% 0; } to { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce) { .fskel .fclip { animation: none; } }
+.fgrid { --fskel-body: 197px; }
+@media (max-width: 600px) { .fgrid { --fskel-body: 223px; } }
+/* the Findings page's "searched so far" line comes from its own request: one line of a fixed height, and its place is kept while it is on its way */
+.pg-h + .searched-counter { box-sizing: border-box; height: 38px; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+.pg-h + .fbar { margin-top: 52px; }
+@media (max-width: 420px) { .pg-h + .searched-counter { gap: 6px 14px; } }

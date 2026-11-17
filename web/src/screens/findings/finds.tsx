@@ -5,7 +5,7 @@ import { formatDec, formatRA } from '../../lib/sky';
 import { parseSxp, halfToFloat } from '../../lib/sxp';
 import { ATLAS_LEAD, LeadPanel } from './leads';
 import { api, useUser } from '../../lib/account';
-import { FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
+import { Clip, FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
 import { peopleLine, usePeople } from './people';
 
 export interface Ident {
@@ -44,6 +44,8 @@ export interface Find {
   lightcurve: { label: string; mjd: number | null; flux: number | null; err: number | null }[];
   versions: Record<string, string | null>;
   identity?: { name: string; catalogue: string; type: string | null; basis: string };
+  /** the time-lapse of the find, as its card has it (absent in an older reply) */
+  clip?: CardFind['clip'];
 }
 interface Reply {
   total: number;
@@ -278,6 +280,8 @@ function Blink({ f }: { f: Find }) {
     cv.height = im.height;
     cv.getContext('2d')!.putImageData(im, 0, 0);
   }, [i, st.ok]);
+  // no picture at all: one status line, not an empty square
+  if (!st.ok && st.msg !== 'loading…') return <p class="mono-s fclip-none">{st.msg}</p>;
   return (
     <div class="fblink">
       <div class="fthumb" style="width:240px;height:240px;position:relative">
@@ -294,6 +298,25 @@ function Blink({ f }: { f: Find }) {
       </div>
     </div>
   );
+}
+
+/** The picture of the report: the same time-lapse its card shows; a find without one shows the 2′ blink of the passes, when its field is known. */
+function Picture({ f }: { f: Find }) {
+  if (f.clip?.url) {
+    const card = {
+      ...(f as unknown as CardFind),
+      name: knownName(f) || f.identity?.name || null,
+      field: (f.data.field_params as CardFind['field']) ?? null,
+      group: (f.data.group as string) ?? null,
+      passes: null,
+    };
+    return (
+      <div class="fdpic">
+        <Clip f={card} collapse />
+      </div>
+    );
+  }
+  return <Blink f={f} />;
 }
 
 // ---- small charts from the stored rows ----
@@ -430,7 +453,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
       </div>
       <p class="fverdict">{f.verdict}</p>
       <div class="fmedia">
-        <Blink f={f} />
+        <Picture f={f} />
         <div class="fnums">
           {nums.map(([k, v]) => (
             <div key={k}>
@@ -531,6 +554,8 @@ interface CardReply {
 type KindSel = 'submitted' | 'promising' | 'mover' | 'browndwarf' | 'peak' | 'film' | 'pair' | 'red' | 'anomaly';
 type StageSel = 'any' | 'mine' | 'noted' | 'waiting' | 'new' | 'in_review' | 'submitted' | 'candidate' | 'confirmed' | 'known';
 const PAGE = 48;
+/** empty card frames while the first page of a list is on its way */
+const SKELETONS = 6;
 const PROMISING = ['mover', 'browndwarf', 'peak', 'film', 'pair'];
 
 /** The cards of one filter, a page at a time: the next page is asked for when the end of the list comes on screen. */
@@ -671,14 +696,31 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   // the numbers on the status buttons are of the whole list, so they are shown only where they are what the button gives
   const stageTotal = (s: StageSel) =>
     !h || s === 'any' || s === 'mine' || s === 'noted' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0);
+  // until the first reply every number is a dash of its own place: the chips keep their size and nothing moves when the numbers come
+  const NONE = '—';
   const stageCount = (s: StageSel) =>
-    s === 'mine' ? mine.length : h && s === 'noted' ? h.noted : h && s === 'waiting' && kind === 'promising' ? h.waiting_promising : null;
-  const chip = (k: KindSel, label: string) =>
-    (cnt(k) ?? 1) > 0 || k === 'promising' || k === kind ? (
-      <button key={k} class={kind === k ? 'on' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}>
-        {label} <span>{cnt(k) ?? ''}</span>
+    s === 'mine'
+      ? mine.length
+      : s === 'noted'
+        ? (h?.noted ?? NONE)
+        : s === 'waiting' && kind === 'promising'
+          ? (h?.waiting_promising ?? NONE)
+          : null;
+  // a kind with no finds stays in its place, greyed, so the row is the same before and after the numbers
+  const chip = (k: KindSel, label: string) => {
+    const n = cnt(k);
+    return (
+      <button
+        key={k}
+        class={kind === k ? 'on' : ''}
+        aria-pressed={kind === k}
+        disabled={n === 0 && k !== kind}
+        onClick={() => setKind(k)}
+      >
+        {label} <span>{n ?? NONE}</span>
       </button>
-    ) : null;
+    );
+  };
   return (
     <>
       <section class="card glass fbar">
@@ -696,7 +738,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
           {stages
             .filter(
               (s) =>
-                (s === 'mine' ? !!user : s === 'noted' ? (h?.noted ?? 0) > 0 || stage === 'noted' : false) ||
+                (s === 'mine' ? !!user : s === 'noted') ||
                 s === 'any' ||
                 s === 'waiting' ||
                 s === 'new' ||
@@ -705,7 +747,13 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
                 stageTotal(s) > 0,
             )
             .map((s) => (
-              <button key={s} class={stage === s ? 'on' : ''} aria-pressed={stage === s} onClick={() => setStage(s)}>
+              <button
+                key={s}
+                class={stage === s ? 'on' : ''}
+                aria-pressed={stage === s}
+                disabled={s === 'noted' && h?.noted === 0 && stage !== 'noted'}
+                onClick={() => setStage(s)}
+              >
                 {s === 'any'
                   ? 'Any status'
                   : s === 'mine'
@@ -719,25 +767,34 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
               </button>
             ))}
         </div>
-        {h && kind !== 'submitted' && stage !== 'mine' && (
+        {kind !== 'submitted' && stage !== 'mine' && (
           <div class="fkinds fstat" role="group" aria-label="Visible in the picture">
             <button class={!unseen ? 'on' : ''} aria-pressed={!unseen} onClick={() => setUnseen(false)}>
-              Visible in the picture <span>{h.visibility.in_view.visible}</span>
-              {h.visibility.in_view.not_measured > 0 && <span class="wait"> · {h.visibility.in_view.not_measured} being measured</span>}
+              Visible in the picture <span>{h?.visibility.in_view.visible ?? NONE}</span>
+              {h && h.visibility.in_view.not_measured > 0 && <span class="wait"> · {h.visibility.in_view.not_measured} being measured</span>}
             </button>
             <button class={unseen ? 'on' : ''} aria-pressed={unseen} onClick={() => setUnseen(true)}>
-              Not visible in the picture <span>{h.visibility.in_view.not_visible}</span>
+              Not visible in the picture <span>{h?.visibility.in_view.not_visible ?? NONE}</span>
             </button>
           </div>
         )}
         <p class="hint leadcount">
           <a href="#/leaders">Leaderboard</a>
-          {kind === 'submitted'
-            ? `${cards.finds.length} findings submitted by people`
-            : h
-              ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery`
-              : 'reading the findings…'}
-          {h && h.identification.pending > 0 && ` · identifying: ${h.identification.pending} catalogue answers to come`}
+          {(() => {
+            const line = `${
+              kind === 'submitted'
+                ? `${cards.finds.length} findings submitted by people`
+                : h
+                  ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery`
+                  : 'reading the findings…'
+            }${h && h.identification.pending > 0 ? ` · identifying: ${h.identification.pending} catalogue answers to come` : ''}`;
+            // one line at every width (the whole of it on hover): the panel keeps its height when the numbers change
+            return (
+              <span class="lc-line" title={line}>
+                {line}
+              </span>
+            );
+          })()}
         </p>
       </section>
       <div class="fgrid-wrap">
@@ -752,6 +809,15 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
               people={peopleLine(peopleSaid[f.id])}
             />
           ))}
+          {/* the first page on its way: empty frames of the cards' size hold the place of the list */}
+          {cards.loading &&
+            cards.finds.length === 0 &&
+            Array.from({ length: SKELETONS }, (_, i) => (
+              <li key={`sk${i}`} class="fcard glass fskel" aria-hidden="true">
+                <div class="fclip">{i === 0 && <span class="mono-s">reading the findings…</span>}</div>
+                <div class="fcard-body" />
+              </li>
+            ))}
           {kind === 'promising' && (stage === 'any' || stage === 'known') && cards.done && (
             <li class={`fcard glass${atlas ? ' on' : ''}`}>
               <button class="fcard-pic" onClick={() => setLeadId(ATLAS_LEAD.id)} aria-label={`Open the report: ${ATLAS_LEAD.title}`}>
@@ -778,7 +844,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
       </div>
       {cards.failed && <p class="mono-s">the findings did not load; the page asks again when the filter is changed</p>}
       {!cards.loading && cards.done && cards.finds.length === 0 && !cards.failed && <p class="mono-s">no finds match these filters</p>}
-      {cards.loading && <p class="mono-s">reading the findings…</p>}
+      {cards.loading && cards.finds.length > 0 && <p class="mono-s">reading the findings…</p>}
       {atlas ? (
         <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={false} />
       ) : leadId && sel ? (

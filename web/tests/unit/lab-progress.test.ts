@@ -8,7 +8,7 @@ describe('a search that did not answer is asked again by itself', () => {
   });
   it('says who did not answer and when the next try is', () => {
     const outside: SearchInfo = { name: 'known objects', state: 'failed', retry: { nextIn: 25, tryNow: () => {} } };
-    expect(failWord(outside)).toBe('no answer · retry 25 s');
+    expect(failWord(outside)).toBe('slow · asking again in 25 s');
     expect(failWord({ ...outside, ours: true })).toBe('server error · retry 25 s');
     expect(failWord({ ...outside, retry: { nextIn: null, tryNow: () => {} } })).toBe('no answer');
   });

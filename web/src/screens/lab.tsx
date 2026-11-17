@@ -1,7 +1,7 @@
 import { isSquareTask } from './lab/rules';
 import { LoadOverlay, loadStep } from './lab/loading';
 import { HereSquare, useSquareLook } from './lab/square';
-import { FindStatus } from './lab/passport';
+import { FindStatus, rateWord, useFindRecord } from './lab/passport';
 import { SearchMark, SearchRow, searchingLine, useRetry, type SearchInfo } from './lab/progress';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -53,6 +53,10 @@ import { CandList, unexplainedCount, useJplState, type FindRow } from './lab/can
 import { SheetGrip } from '../ui/Sheet';
 
 const SIZES = [2, 5, 10, 20, 60];
+/** a find opened in a wide field: the zoom shows this much around it (arcminutes across), large */
+const AROUND_ARCMIN = 5;
+/** the zoom's side in CSS px: 2′ small; around a find, large */
+const insetSide = (w: number, around: boolean) => Math.round(around ? Math.min(420, w * 0.44) : Math.min(220, w * 0.26));
 type View = 'picture' | 'bands' | 'det';
 type Time = 'loop' | 'diff' | 'sum';
 type Tab = 'ctl' | 'cand' | 'obj' | 'spec';
@@ -709,11 +713,7 @@ export function Lab({ route }: { route: Route }) {
   // in a task the find is the task's object (the cabinet's and the lab's own task links name it `finding`)
   const findId = p['find'] ?? (p['task'] ? (p['finding'] ?? '') : '');
   const findShown = useRef('');
-  useEffect(() => {
-    const key = `${findId}|${ra},${dec},${fov}`;
-    // the meta must be this field's (right after a move the old field's is still in the state)
-    if (!findId || !meta || findShown.current === key || state.current.meta !== meta) return;
-    findShown.current = key;
+  const selectFind = () => {
     const kind = findId.split(':')[0] ?? '';
     const name =
       {
@@ -732,8 +732,30 @@ export function Lab({ route }: { route: Route }) {
     const fdec = Number(p['find_dec']);
     const own = p['find_ra'] != null && p['find_dec'] != null && Number.isFinite(fra) && Number.isFinite(fdec);
     // a film find is a moving body: no variable-star verdict for it
-    setSel({ ra: own ? fra : ra, dec: own ? fdec : dec, name, finding: findId, ...(kind === 'film' ? { moving: { V: null, visits: [] } } : {}) });
+    setSel({
+      ra: own ? fra : ra,
+      dec: own ? fdec : dec,
+      name,
+      finding: findId,
+      ...(kind === 'film' ? { moving: { V: null, visits: [] } } : {}),
+    });
+  };
+  useEffect(() => {
+    const key = `${findId}|${ra},${dec},${fov}`;
+    // the meta must be this field's (right after a move the old field's is still in the state)
+    if (!findId || !meta || findShown.current === key || state.current.meta !== meta) return;
+    findShown.current = key;
+    selectFind();
   }, [findId, meta, ra, dec, fov, p['find_ra'], p['find_dec']]);
+  // the find opened from Findings, as Findings has it: the first row of "To look at" (a time-lapse track is on no other list)
+  const openFind = useFindRecord(p['find'] && !inTask && p['find'].startsWith('film:') ? p['find'] : '');
+  // a find opened from Findings in a wide field: the picture says what is around the find (10′), the rest of the field dimmed, with
+  // no rings or names there; "Whole field" shows everything again
+  const aroundAsk = !!p['find'] && !inTask && fov >= 20;
+  const [aroundOff, setAroundOff] = useState('');
+  const aroundOn = aroundAsk && aroundOff !== `${findId}|${ra},${dec},${fov}`;
+  const aroundRef = useRef<string | null>(null);
+  aroundRef.current = aroundOn ? findId : null;
   // when the selected source changed: its ring pulses for a few seconds, so that a click in a list shows where on the picture the thing is
   const selAtRef = useRef(0);
   useEffect(() => {
@@ -1025,7 +1047,7 @@ export function Lab({ route }: { route: Route }) {
         const cx = 0.5 - ((((o[0] - m.grid.ra0 + 540) % 360) - 180) * cosd * 3600) / fovArc;
         const cy = 0.5 - ((o[1] - m.grid.dec0) * 3600) / fovArc;
         if (cx < 0 || cy < 0 || cx > 1 || cy > 1) return null;
-        return { cx, cy, s: 120 / fovArc };
+        return { cx, cy, s: (aroundRef.current ? AROUND_ARCMIN * 60 : 120) / fovArc };
       };
       if (days) {
         if (F && r.filmVisits) {
@@ -1051,7 +1073,7 @@ export function Lab({ route }: { route: Route }) {
           rects.push({ x: 0, y: 0, w, h });
           const z = zoomOn();
           if (z) {
-            const S = Math.round(Math.min(220, w * 0.26));
+            const S = insetSide(w, !!aroundRef.current);
             inset = { x: 10, y: 52, w: S, h: S, zoom: z };
             r.panel({ ...base, ...inset }, k, k2, t);
           }
@@ -1136,7 +1158,7 @@ export function Lab({ route }: { route: Route }) {
             if (!st.bands.length) panels = []; // no band chosen: nothing to draw (black)
             const z = st.bands.length ? zoomOn() : null;
             if (z) {
-              const S = Math.round(Math.min(220, w * 0.26));
+              const S = insetSide(w, !!aroundRef.current);
               inset = { x: 10, y: 52, w: S, h: S, zoom: z };
               panels.push({ ...panels[0]!, ...inset });
             }
@@ -1543,8 +1565,13 @@ export function Lab({ route }: { route: Route }) {
       const refPlace = (q: { ra: number; dec: number; pmra?: number; pmdec?: number }): [number, number] =>
         q.pmra || q.pmdec ? (atEpoch(q.ra, q.dec, q.pmra ?? 0, q.pmdec ?? 0, refYear) as [number, number]) : [q.ra, q.dec];
       let selMark: Mark | null = null;
-      if (sl) {
-        const [sra, sdec] = sl.pmra || sl.pmdec ? atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, year) : [sl.ra, sl.dec];
+      const slAt: [number, number] | null = sl
+        ? sl.pmra || sl.pmdec
+          ? (atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, year) as [number, number])
+          : [sl.ra, sl.dec]
+        : null;
+      if (sl && slAt) {
+        const [sra, sdec] = slAt;
         // a task about this object: its own bright ring, never folded into a known star's thin one nearby
         const k = flowRef.current?.focus ? null : near(sra, sdec, 8);
         if (k) k.selected = true;
@@ -1567,6 +1594,15 @@ export function Lab({ route }: { route: Route }) {
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
       // no name is put on the 2′ inset (a label pushed to the picture's left edge used to land on it)
       if (inset) placed.push({ x0: inset.x - 6, y0: inset.y - 6, x1: inset.x + inset.w + 6, y1: inset.y + inset.h + 6 });
+      // nor under the controls floating over the picture (the title, the field size, Mark and Ruler, the zoom's switch)
+      const ovEl = overlay.current;
+      if (ovEl && !days && st.view === 'picture') {
+        const o = ovEl.getBoundingClientRect();
+        ovEl.closest('.vsq')?.querySelectorAll<HTMLElement>('.ftitle, .factions, .toolstrip, .faround').forEach((el) => {
+          const r = el.getBoundingClientRect();
+          if (r.width) placed.push({ x0: r.left - o.left - 4, y0: r.top - o.top - 4, x1: r.right - o.left + 4, y1: r.bottom - o.top + 4 });
+        });
+      }
       let labelled = 0;
       const ring = (x: number, y: number, mk: Mark, rr: number, ticks: boolean) => {
         // a target: a thin crosshair, four 1 px arms with a gap at the centre (no ring over the star); anything else: a thin 1 px ring
@@ -1787,6 +1823,16 @@ export function Lab({ route }: { route: Route }) {
         (!!inset && x > inset.x - 4 && y > inset.y - 4 && x < inset.x + inset.w + 4 && y < inset.y + inset.h + 4) ||
         (!wall && y < 46) ||
         (!wall && y > hcss - 46); // nor under the title row floating over the top of the picture, nor in the band of the chips and the date at its bottom
+      // around the find: the zoom's 5′ square on the picture; the rest of the field dimmed, without rings or names
+      const box0 = rects[0];
+      let around: { x0: number; y0: number; x1: number; y1: number } | null = null;
+      if (!wall && box0 && inset && aroundRef.current && sl?.finding === aroundRef.current) {
+        const cx = box0.x + inset.zoom.cx * box0.w;
+        const cy = box0.y + inset.zoom.cy * box0.h;
+        const hw = (inset.zoom.s * box0.w) / 2;
+        around = { x0: cx - hw, y0: cy - hw, x1: cx + hw, y1: cy + hw };
+      }
+      const outside = (x: number, y: number) => !!around && (x < around.x0 || y < around.y0 || x > around.x1 || y > around.y1);
       ctx.save();
       for (const box of rects) {
         if (wall) {
@@ -1799,13 +1845,31 @@ export function Lab({ route }: { route: Route }) {
         ctx.beginPath();
         ctx.rect(box.x, box.y, box.w, box.h);
         ctx.clip();
+        if (around) {
+          // the field outside the zoom's square dimmed (the zoom itself left as it is), a thin dashed square where the zoom looks
+          ctx.save();
+          const a = around;
+          const dim = new Path2D();
+          dim.rect(box.x, box.y, box.w, box.h);
+          dim.rect(a.x0, a.y0, a.x1 - a.x0, a.y1 - a.y0);
+          if (inset) dim.rect(inset.x, inset.y, inset.w, inset.h);
+          ctx.fillStyle = 'rgba(2, 7, 10, 0.72)';
+          ctx.fill(dim, 'evenodd');
+          ctx.beginPath();
+          ctx.rect(a.x0 + 0.5, a.y0 + 0.5, a.x1 - a.x0 - 1, a.y1 - a.y0 - 1);
+          ctx.setLineDash([4, 5]);
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = 'rgba(255, 208, 138, 0.7)';
+          ctx.stroke();
+          ctx.restore();
+        }
         for (const mk of all) {
           const [u, v] = uvOf(mk.ra, mk.dec);
           const x = box.x + u * box.w;
           const y = box.y + v * box.h;
           if (x < box.x - 30 || y < box.y - 30 || x > box.x + box.w + 30 || y > box.y + box.h + 30) continue;
           // a task about one object: that object alone is bright; every other mark is a quiet outline without a name or a path
-          const quiet = focus && !mk.selected;
+          const quiet = (focus || outside(x, y)) && !mk.selected;
           if (wall) {
             // every tile of a wall carries the same rings as the picture (movers, red sources, anomalies, known bodies, the selected one), without names
             if (mk.ghost) continue;
@@ -1836,7 +1900,7 @@ export function Lab({ route }: { route: Route }) {
             const x = box.x + u * box.w;
             const y = box.y + v * box.h;
             if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y) || mk.ghost) continue;
-            if (focus && !mk.selected) continue;
+            if ((focus || outside(x, y)) && !mk.selected) continue;
             // a crowded field: names for the first dozen marks (targets, movers, known bodies first), rings only for the rest
             if (++labelled > 14 && (mk.kind === 'anomaly' || mk.kind === 'red') && !mk.selected) continue;
             // a phone: names for the first six marks only (the selected one and the test target always)
@@ -1856,7 +1920,7 @@ export function Lab({ route }: { route: Route }) {
           ctx.beginPath();
           ctx.rect(inset.x, inset.y, inset.w, inset.h);
           ctx.clip();
-          ring(x, y, { ...mk, selected: false }, Math.min(inset.w * 0.2, mk.rr / inset.zoom.s), false);
+          ring(x, y, { ...mk, selected: false }, Math.min(inset.w * (around ? 0.07 : 0.2), mk.rr / inset.zoom.s), false);
           ctx.restore();
         }
       }
@@ -1872,8 +1936,9 @@ export function Lab({ route }: { route: Route }) {
         year,
         fovArc,
         placed,
-        hidden: underInset,
+        hidden: (x, y) => underInset(x, y) || outside(x, y),
         focus,
+        zoom: around && inset ? { rect: inset, cx: inset.zoom.cx, cy: inset.zoom.cy, s: inset.zoom.s } : null,
         picture:
           fpic && fnoise && fpic.n === grid.n
             ? { pass: shownPass, n: fpic.n, rgb: fpic.rgb, bg: fnoise.bg, sigma: fnoise.sigma, step: grid.step_arcsec }
@@ -2259,7 +2324,7 @@ export function Lab({ route }: { route: Route }) {
       archive.current = null;
     };
   }, [fieldKey]);
-  // the test targets on an archive picture: where they were at the survey's epoch
+  // the test targets on an archive picture, and the selected object (a task's candidate): where they were at the survey's epoch
   const drawTargets = (ctx: CanvasRenderingContext2D, size: number, epoch: number, ring: number, withPath = false) => {
     if (!meta) return;
     const scale = size / meta.grid.n;
@@ -2269,7 +2334,10 @@ export function Lab({ route }: { route: Route }) {
         scale,
       (meta.grid.n / 2 - ((dec0 - meta.grid.dec0) * 3600) / meta.grid.step_arcsec) * scale,
     ];
-    for (const o of targets.current) {
+    const s0 = selRef.current;
+    const selToo =
+      s0 && !targets.current.some((o) => Math.hypot((o.ra - s0.ra) * Math.cos((o.dec * Math.PI) / 180), o.dec - s0.dec) * 3600 < 5);
+    for (const o of selToo ? [...targets.current, s0] : targets.current) {
       const [x, y] = xy(...atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, epoch));
       if (x < -ring || y < -ring || x > size + ring || y > size + ring) continue;
       if (withPath && ((o.pmra ?? 0) || (o.pmdec ?? 0))) {
@@ -2307,12 +2375,14 @@ export function Lab({ route }: { route: Route }) {
         }
         ctx.restore();
       }
-      ctx.lineWidth = 2.2;
-      ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+      // in CSS px: the canvas of the big archive frame has the screen's pixels
+      const lw = Math.max(1, size / Math.max(1, side));
+      ctx.lineWidth = 3.4 * lw;
+      ctx.strokeStyle = 'rgba(0,0,0,0.55)';
       ctx.beginPath();
       ctx.arc(x, y, ring, 0, 2 * Math.PI);
       ctx.stroke();
-      ctx.lineWidth = 1;
+      ctx.lineWidth = 1.6 * lw;
       ctx.strokeStyle = '#ffb454';
       ctx.stroke();
     }
@@ -2335,7 +2405,7 @@ export function Lab({ route }: { route: Route }) {
       ctx.drawImage(a.canvases.get(s.id)!, 0, 0, px, px);
       drawTargets(ctx, px, s.epoch, 18 * (px / side), opts.trajectory);
     }
-  }, [archTick, archStep, opts.reference, opts.trajectory, side, meta]);
+  }, [archTick, archStep, opts.reference, opts.trajectory, side, meta, sel]);
   // archive frames blinked before the SPHEREx seasons: archive 1..k, then season 1..N, again
   useEffect(() => {
     if (!opts.archive || !meta || film !== null) {
@@ -3206,6 +3276,25 @@ export function Lab({ route }: { route: Route }) {
     f();
   };
   const findRowsAll: FindRow[] = [
+    ...(openFind && openFind !== 'failed'
+      ? [
+          ((f): FindRow => {
+            const fra = Number(p['find_ra'] ?? ra);
+            const fdec = Number(p['find_dec'] ?? dec);
+            return {
+              key: `find:${f.id}`,
+              name: `Moving object · ${rateWord(f) || 'one pass'}`,
+              line: ['from Findings', f.snr != null ? `S/N ${f.snr.toFixed(1)}` : '', 'moves within one pass'].filter(Boolean).join(' · '),
+              status: f.status === 'unexplained' ? 'unexplained' : f.status === 'known' ? 'known' : 'checking',
+              uv: uvNow(fra, fdec),
+              pick: rowPick(`find:${f.id}`, () => {
+                selectFind();
+                setAroundOff('');
+              }),
+            };
+          })(openFind),
+        ]
+      : []),
     ...(mvr?.tracks ?? []).map((t, i): FindRow => {
       const nm = trackNames[i] || t.name || '';
       const named = !!nm && !nm.startsWith('Gaia DR3');
@@ -3536,7 +3625,27 @@ export function Lab({ route }: { route: Route }) {
                   style={{ left: `${insetBox.x}px`, top: `${insetBox.y}px`, width: `${insetBox.w}px`, height: `${insetBox.h}px` }}
                   title="2′ around the selected object (the test target until you click a source), from the same frames as the picture"
                 >
-                  <span>2′ zoom</span>
+                  <span>{aroundOn ? `${AROUND_ARCMIN}′ around the find` : '2′ zoom'}</span>
+                </div>
+              )}
+              {aroundAsk && view === 'picture' && film === null && insetBox && !(archStep !== null && archStep < ARCHIVE.length) && (
+                <div
+                  class="float faround"
+                  role="group"
+                  aria-label="What the picture shows"
+                  style={{ left: `${insetBox.x}px`, top: `${insetBox.y + insetBox.h + 8}px` }}
+                >
+                  <button type="button" class={aroundOn ? 'on' : ''} aria-pressed={aroundOn} onClick={() => setAroundOff('')}>
+                    Around the find
+                  </button>
+                  <button
+                    type="button"
+                    class={aroundOn ? '' : 'on'}
+                    aria-pressed={!aroundOn}
+                    onClick={() => setAroundOff(`${findId}|${ra},${dec},${fov}`)}
+                  >
+                    Whole field
+                  </button>
                 </div>
               )}
               {view === 'picture' && opts.reference && !(archStep !== null && archStep < ARCHIVE.length) && (
@@ -3590,6 +3699,17 @@ export function Lab({ route }: { route: Route }) {
                   </select>
                 </label>
               </div>
+              {time === 'diff' && film === null && view === 'picture' && (
+                // what Difference draws, as a key on the picture (the status line is often too long to show it)
+                <div
+                  class="float fdkey"
+                  data-testid="diff-key"
+                  style={{ top: `${insetBox ? insetBox.y + insetBox.h + (aroundAsk ? 44 : 8) : 52}px` }}
+                  title="A star that moved leaves a pair: bright where it is now, dark where it was"
+                >
+                  <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter · side by side: it moved
+                </div>
+              )}
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
                 {mainStatus}
                 {!note && flow.status && (
@@ -3605,11 +3725,6 @@ export function Lab({ route }: { route: Route }) {
                   </span>
                 )}
                 {flow.chip}
-                {time === 'diff' && film === null && (
-                  <span class="dkey">
-                    <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter
-                  </span>
-                )}
               </div>
               <div class="float fbands" role="group" aria-label={view === 'det' ? 'Detectors' : 'Spectral bands'}>
                 {view === 'det'
@@ -3947,6 +4062,7 @@ export function Lab({ route }: { route: Route }) {
                 )}
                 <CandList
                   rows={findRows}
+                  busy={searches.some((q) => q.state === 'running')}
                   also=""
                   selected={candSel}
                   picture={() => canvas.current}

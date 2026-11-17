@@ -195,7 +195,8 @@ const reasons = new Map<string, string>();
 type ClipState = 'idle' | 'asking' | 'building' | 'ready' | 'none';
 
 /** The looping time-lapse clip of a find. Off screen it holds no picture at all, so a thousand cards cost nothing. */
-export function Clip({ f }: { f: CardFind }) {
+/** `collapse`: when there is no picture at all, one status line instead of an empty square (the report of a find). */
+export function Clip({ f, collapse = false }: { f: CardFind; collapse?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const url = f.clip?.url ?? null;
@@ -256,6 +257,7 @@ export function Clip({ f }: { f: CardFind }) {
     };
   }, [near, url, f.clip?.state]);
   const why = (url && reasons.get(url)) || f.clip?.reason || 'no SPHEREx field covers this place yet';
+  if (collapse && state === 'none' && !f.clip?.still) return <p class="mono-s fclip-none">no time-lapse: {why}</p>;
   return (
     <div class="fclip" ref={box}>
       {state === 'ready' && near && url && (
