@@ -380,7 +380,7 @@ def test_visible_needs_the_ring_to_stand_out_from_its_own_neighbourhood() -> Non
     ys, xs = rng.integers(0, 81, 400), rng.integers(0, 81, 400)
     crowded[ys, xs] += 12.0  # a crowded field: bright specks everywhere, the ring holds one like its neighbours
     crowded[40, 40] = 12.0
-    sn, beaten, measured = stands_out(crowded, 40, 40, 3, speckled=True)
-    assert measured == 16 and not is_visible(sn, beaten, measured)
+    sn, beaten, measured, contrast = stands_out(crowded, 40, 40, 3, speckled=True)
+    assert measured >= 12 and not is_visible(sn, beaten, measured, contrast)
     crowded[40, 40] = 60.0  # the same field with a source far above its neighbourhood: visible
     assert is_visible(*stands_out(crowded, 40, 40, 3, speckled=True))

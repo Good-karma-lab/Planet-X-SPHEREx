@@ -42,7 +42,7 @@ from service.products.store import Store
 from service.products.sxp import decode
 from service.storage import atomic_write_bytes
 
-VERSION = "c7"  # c7: "visible" is local (the ring against its own neighbourhood: an annulus and 16 control rings)
+VERSION = "c9"  # c9: "visible" is local (the annulus, control rings tiling the picture, and the contrast of an added picture)
 WINDOW_ARCMIN = 3.0  # the side of the clip on the sky
 SIZE = 320  # the side of the clip in pixels
 FRAME_MS = 1000  # one pass on screen
@@ -402,6 +402,7 @@ def render(
     motion = motion_of(find) if with_ring else None
     seen_sn = 0.0
     seen_ctl: tuple[int, int] = (0, 0)
+    seen_con = 0.0
     ring_r = max(1.5, MEASURE_ARCSEC / grid.step_arcsec)
     for p in passes:
         if max_frames is not None and len(frames) >= max_frames:
@@ -432,14 +433,14 @@ def render(
         if ring is not None:
             white = np.nanmean(c_rgb[:, margin:-margin, margin:-margin], axis=0) if np.isfinite(c_rgb).any() else None
             if white is not None:
-                sn_l, beat, nctl = stands_out(
+                sn_l, beat, nctl, contrast = stands_out(
                     np.where((c_sat[margin:-margin, margin:-margin] > 127) & ~np.isfinite(white), np.nanmax(white), white),
                     ring[0],
                     ring[1],
                     ring_r,
                 )
                 if sn_l > seen_sn:
-                    seen_sn, seen_ctl = sn_l, (beat, nctl)
+                    seen_sn, seen_ctl, seen_con = sn_l, (beat, nctl), contrast
         label = date_label(float(p["mjd0"]), float(p["mjd1"]))
         mot = motion if ring else None
         frames.append(draw_frame(pic, ring, RING_ARCSEC / grid.step_arcsec, label, f"{window_arcmin:g} arcmin", size, mot, labels))
@@ -466,6 +467,8 @@ def render(
         "bytes": len(data),
         "visible_sn": round(seen_sn, 1),
         "visible_controls": list(seen_ctl),
+        "visible_contrast": round(seen_con, 2),
+        # a pass picture: the annulus and the control rings (a brighter star elsewhere in the picture does not hide a find)
         "visible": is_visible(seen_sn, *seen_ctl),
         "render_s": round(time.time() - t0, 3),
         "made": time.time(),
@@ -532,14 +535,17 @@ def ring_sn(img: F, cx: float, cy: float, radius: float, speckled: bool = False)
 # "visible" is decided against the ring's own neighbourhood, not the whole picture: in a crowded field the global noise is small next to
 # the stars and residuals around the ring, and a ring that holds what every place around it holds is not an object one can see.
 LOCAL_IN, LOCAL_OUT = 2.0, 5.0  # the annulus, in ring radii: its median and scatter are the local floor and noise
-CONTROL_AT, CONTROLS = (3.5, 7.0), 8  # control rings of the same radius on two circles around the ring (radii away), this many on each
-CONTROL_BEAT = 1  # the ring's peak must be above every control ring's peak but this many
+CONTROL_GAP = 2.5  # control rings of the same radius tile the whole picture, at least this many radii from the ring
+CONTROL_SHARE = 0.95  # the ring's peak must be above the peaks of this share of them (the picture's own places, crowded or quiet)
+CONTROL_MIN = 12  # with fewer control rings than this, the S/N against the annulus alone decides
+CONTRAST_MIN = 1.5  # an added picture (a track's or a peak's sum): the ring's peak above the floor at least 1.5 times the brightest
+# control ring's (measured on the first Findings screen: clean tracks 1.59-7.97, crowded RW Aurigae residuals 1.0-1.43)
 
 
-def stands_out(img: F, cx: float, cy: float, radius: float, speckled: bool = False) -> tuple[float, int, int]:
+def stands_out(img: F, cx: float, cy: float, radius: float, speckled: bool = False) -> tuple[float, int, int, float]:
     """(local S/N, control rings beaten, control rings measured) of the brightest pixel inside the ring: S/N against the median and the
-    1.4826 x MAD scatter of an annulus around the ring (its standard deviation when `speckled`), and how many of up to 16 rings of the
-    same radius placed around it (8 at 3.5 radii, 8 at 7 radii) have a lower peak. (0, 0, 0) when there is too little picture to say."""
+    1.4826 x MAD scatter of an annulus around the ring (its standard deviation when `speckled`), and how many control rings of the
+    same radius, tiling the whole picture beyond CONTROL_GAP radii, have a lower peak. (0, 0, 0) when there is too little picture to say."""
     h, w = img.shape
     yy, xx = np.mgrid[0:h, 0:w]
     d2 = (xx - cx) ** 2 + (yy - cy) ** 2
@@ -547,7 +553,7 @@ def stands_out(img: F, cx: float, cy: float, radius: float, speckled: bool = Fal
     inside = (d2 <= radius * radius) & ok
     ann = (d2 >= (LOCAL_IN * radius) ** 2) & (d2 <= (LOCAL_OUT * radius) ** 2) & ok
     if not inside.any() or int(ann.sum()) < 30:
-        return 0.0, 0, 0
+        return 0.0, 0, 0, 0.0
     vals = img[ann]
     med = float(np.median(vals))
     sig = 1.4826 * float(np.median(np.abs(vals - med)))
@@ -556,26 +562,37 @@ def stands_out(img: F, cx: float, cy: float, radius: float, speckled: bool = Fal
     peak = float(img[inside].max())
     sn = (peak - med) / sig if sig > 0 else 0.0
     beaten = measured = 0
-    for k in range(CONTROLS * len(CONTROL_AT)):
-        at = CONTROL_AT[k // CONTROLS]
-        a = 2.0 * math.pi * (k % CONTROLS + 0.5 * (k // CONTROLS)) / CONTROLS
-        qx, qy = cx + at * radius * math.cos(a), cy + at * radius * math.sin(a)
-        if not (radius <= qx <= w - 1 - radius and radius <= qy <= h - 1 - radius):
-            continue
-        q = ((xx - qx) ** 2 + (yy - qy) ** 2 <= radius * radius) & ok
-        if int(q.sum()) < max(3, int(inside.sum()) // 2):
-            continue
-        measured += 1
-        beaten += int(peak > float(img[q].max()))
-    return float(sn), beaten, measured
+    peaks: list[float] = []
+    pitch = 2.0 * radius + 1.0
+    need = max(3, int(inside.sum()) // 2)
+    for qy in np.arange(radius, h - radius, pitch):
+        for qx in np.arange(radius, w - radius, pitch):
+            if (qx - cx) ** 2 + (qy - cy) ** 2 < (CONTROL_GAP * radius) ** 2:
+                continue
+            y0, y1 = int(max(0, qy - radius)), int(min(h, qy + radius + 1))
+            x0, x1 = int(max(0, qx - radius)), int(min(w, qx + radius + 1))
+            sub = img[y0:y1, x0:x1]
+            q = ((xx[y0:y1, x0:x1] - qx) ** 2 + (yy[y0:y1, x0:x1] - qy) ** 2 <= radius * radius) & np.isfinite(sub)
+            if int(q.sum()) < need:
+                continue
+            measured += 1
+            peaks.append(float(sub[q].max()))
+            beaten += int(peak > peaks[-1])
+    # contrast: how far the ring's peak stands above the floor, against how far the brightest places of the picture do (the 95th
+    # control ring)
+    q95 = float(max(peaks)) if peaks else med
+    contrast = (peak - med) / (q95 - med) if q95 > med else (99.0 if peak > med else 0.0)
+    return float(sn), beaten, measured, float(min(contrast, 99.0))
 
 
-def is_visible(sn: float, beaten: int, measured: int) -> bool:
-    """The ring holds something one can see: VISIBLE_SN above its own annulus, and brighter than the control rings around it (all but
-    CONTROL_BEAT of them; with fewer than four control rings the S/N alone decides)."""
+def is_visible(sn: float, beaten: int, measured: int, contrast: float = 99.0) -> bool:
+    """The ring holds something one can see: VISIBLE_SN above its own annulus, and brighter than CONTROL_SHARE of the control rings
+    that tile the picture (with fewer than CONTROL_MIN of them the S/N alone decides)."""
     if sn < VISIBLE_SN:
         return False
-    return measured < 4 or beaten >= measured - CONTROL_BEAT
+    if measured < CONTROL_MIN:
+        return True
+    return beaten >= CONTROL_SHARE * measured and contrast >= CONTRAST_MIN
 
 
 def track_places(find: dict[str, Any], frames_meta: list[dict[str, Any]]) -> dict[int, tuple[float, float]]:
@@ -642,9 +659,9 @@ def render_track(find: dict[str, Any], store: Store, key: str, meta: dict[str, A
     pics, sns, ctls = [], [], []
     for acc, cnt in ((along, n_along), (still, n_still)):
         sn = np.where(cnt > 0, acc / np.sqrt(np.maximum(cnt, 1)), np.nan)
-        sn_l, beat, nctl = stands_out(sn, c, c, max(1.5, MEASURE_ARCSEC / step), speckled=True)
+        sn_l, beat, nctl, contrast = stands_out(sn, c, c, max(1.5, MEASURE_ARCSEC / step), speckled=True)
         sns.append(sn_l)
-        ctls.append((beat, nctl))
+        ctls.append((beat, nctl, contrast))
         grey = np.clip((np.nan_to_num(sn, nan=0.0) - TRACK_SN_DARK) / (TRACK_SN_FULL - TRACK_SN_DARK), 0.0, 1.0) ** 0.8
         pics.append(np.repeat(grey[..., None], 3, axis=-1))
     d0, d1 = _mjd_date(float(frames_meta[used[0]]["mjd"])), _mjd_date(float(frames_meta[used[-1]]["mjd"]))
@@ -682,7 +699,8 @@ def render_track(find: dict[str, Any], store: Store, key: str, meta: dict[str, A
         # visible as a MOVER: something in the ring along the motion, and clearly more than the same visits give added in place
         # (light that is as strong without the motion stands still: a star's residual, not a body)
         # (and it stands out from its own neighbourhood in the added picture: a crowded field's residuals do not count)
-        "visible_controls": list(ctls[0]),
+        "visible_controls": list(ctls[0][:2]),
+        "visible_contrast": round(ctls[0][2], 2),
         "visible": bool(is_visible(sns[0], *ctls[0]) and sns[0] - sns[1] >= TRACK_MIN_GAIN),
         "bytes": len(data),
         "render_s": round(time.time() - t0, 3),
@@ -810,7 +828,7 @@ def render_peak(
     cut = _window(best, x0, y0, w, 0)[::-1]  # row 0 to the north
     sn_here = float(_window(best, round(cx) - 2, round(cy) - 2, 5, 0).max()) * PEAK_SN_FULL / 255.0
     sn_map = cut.astype(np.float64) * PEAK_SN_FULL / 255.0
-    sn_l, beat, nctl = stands_out(sn_map, cx - x0, (w - 1) - (cy - y0), max(1.5, MEASURE_ARCSEC / step))
+    sn_l, beat, nctl, contrast = stands_out(sn_map, cx - x0, (w - 1) - (cy - y0), max(1.5, MEASURE_ARCSEC / step))
     grey = np.clip((sn_map - PEAK_SN_DARK) / (PEAK_SN_FULL - PEAK_SN_DARK), 0.0, 1.0) ** 0.8  # noise (under 3 sigma) dark, 12 sigma white
     pic = np.repeat(grey[..., None], 3, axis=-1)
     ring = (cx - x0, (w - 1) - (cy - y0))
@@ -833,8 +851,9 @@ def render_peak(
             "sum_sn_at_place": round(sn_here, 1),
             "visible_sn": round(sn_l, 1),
             "visible_controls": [beat, nctl],
+            "visible_contrast": round(contrast, 2),
             # the sum's own S/N at the place, and the place stands out from the sum around it (a grey wash of 3σ everywhere does not)
-            "visible": bool(sn_here >= VISIBLE_SN and is_visible(sn_l, beat, nctl)),
+            "visible": bool(sn_here >= VISIBLE_SN and is_visible(sn_l, beat, nctl, contrast)),
             "frames": [{"label": "sum along the orbit"}, passes[k]],
             "frame_ms": PEAK_FRAME_MS,
             "bytes": len(out),
