@@ -60,13 +60,14 @@ def test_db_and_routes(tmp_path: Path) -> None:
     assert n == 1
     cid = grid.cell_at(50, 8).id
     app = FastAPI()
-    app.include_router(make_grid_router(SimpleNamespace(index=None), db))
+    who = {"user": None}  # the signed-in user the accounts module would name (None: a guest)
+    app.include_router(make_grid_router(SimpleNamespace(index=None, current_user=lambda request: who["user"]), db))
     c = TestClient(app)
     meta = c.get("/api/grid/meta").json()
     assert meta["scheme"] == grid.SCHEME and meta["counts"]["searched"] == 1 and meta["counts"]["with_finds"] == 1
     cov = c.get("/api/grid/coverage").json()["cells"]
     assert [{k: v for k, v in x.items() if k not in ("ra", "dec")} for x in cov] == [
-        {"id": cid, "state": "searched", "finds": 2, "viewers": 0}
+        {"id": cid, "state": "searched", "finds": 2, "viewers": 0, "quarters": 0}
     ]
     assert abs(cov[0]["dec"] - grid.by_id(cid).dec) < 1e-6
     withc = c.get("/api/grid/coverage", params={"corners": 1}).json()["cells"]
@@ -76,14 +77,44 @@ def test_db_and_routes(tmp_path: Path) -> None:
     assert cells[0]["id"] == cid and cells[0]["state"] == "searched" and len(cells[0]["corners"]) == 4
     one = c.get(f"/api/grid/cell/{cid}").json()
     assert one["field_key"] == "k" and one["bar"]["partial"] is True and one["open"]["fov"] == 20
-    assert c.post(f"/api/grid/cell/{cid}/viewed", json={"result": "nothing"}).json() == {"viewers": 1}
-    assert c.post(f"/api/grid/cell/{cid}/viewed", json={"result": "marks"}).json() == {"viewers": 1}  # same viewer (cookie)
-    c2 = TestClient(app)
-    assert c2.post(f"/api/grid/cell/{cid}/viewed", json={}).json() == {"viewers": 2}
+    assert [q["q"] for q in one["quarters"]] == ["NW", "NE", "SW", "SE"] and one["quarters"][0]["fov"] == 10
+    nw = one["quarters"][0]
+    assert nw["dec"] > one["dec"] and nw["ra"] < one["ra"]  # north is larger Dec, west smaller RA
+    # a guest's look is never counted; a signed-in look needs the quarter and the person's own confirm
+    assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "NW", "confirm": True}).status_code == 401
+    who["user"] = {"id": "u1"}
+    assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "NW"}).status_code == 422  # no confirm
+    assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "XX", "confirm": True}).status_code == 422
+    r = c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "NW", "confirm": True, "result": "nothing"}).json()
+    assert r == {"viewers": 1, "quarter": "NW", "quarters": 1}
+    for q in ("NE", "SW"):
+        c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": q, "confirm": True})
+    assert c.get("/api/grid/meta").json()["counts"]["viewed"] == 0  # three quarters: not yet viewed by people
+    who["user"] = {"id": "u2"}
+    assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "SE", "confirm": True}).json()["quarters"] == 4
+    assert c.get("/api/grid/meta").json()["counts"]["viewed"] == 1 and c.get(f"/api/grid/cell/{cid}").json()["viewers"] == 2
+    assert {x["id"]: x["quarters"] for x in c.get("/api/grid/coverage").json()["cells"]}[cid] == 4
     assert c.get("/api/grid/cell/999-0000").status_code == 404
     other = grid.cell_at(120, -30).id
-    c.post(f"/api/grid/cell/{other}/viewed", json={})
-    assert {x["id"]: x["state"] for x in c.get("/api/grid/coverage").json()["cells"]}[other] == "new"
+    c.post(f"/api/grid/cell/{other}/viewed", json={"quarter": "NE", "confirm": True})
+    cov2 = {x["id"]: x for x in c.get("/api/grid/coverage").json()["cells"]}
+    assert cov2[other]["state"] == "new" and cov2[other]["quarters"] == 1
+
+
+def test_old_views_migrate_and_anonymous_ones_do_not_count(tmp_path: Path) -> None:
+    import sqlite3
+
+    path = tmp_path / "product.sqlite"
+    with sqlite3.connect(path) as c:
+        c.executescript(
+            "CREATE TABLE grid_views (cell_id TEXT NOT NULL, viewer TEXT NOT NULL, result TEXT, at REAL NOT NULL,"
+            " PRIMARY KEY (cell_id, viewer));"
+            "INSERT INTO grid_views VALUES ('294-0148','user:a','nothing',1.0), ('294-0148','anon:x',NULL,2.0);"
+        )
+    db = GridDB(path)
+    assert db.viewers(["294-0148"]) == {"294-0148": 1}  # the anonymous cookie is not a viewer
+    assert db.quarters_viewed(["294-0148"])["294-0148"] == {"NW": 1, "NE": 1, "SW": 1, "SE": 1}  # a whole-square view of before
+    assert db.counts()["viewed"] == 1
 
 
 def test_watchdog_kills_a_tree_over_the_cap(tmp_path: Path) -> None:
