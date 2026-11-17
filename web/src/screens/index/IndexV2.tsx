@@ -42,8 +42,20 @@ const REL = [
   { key: '1', label: 'QR3', color: '#ffb454' },
 ];
 const RAMPS = {
-  teal: [[7, 26, 34], [14, 74, 82], [31, 143, 138], [95, 227, 214], [232, 255, 251]],
-  amber: [[30, 18, 6], [90, 54, 16], [170, 104, 36], [255, 180, 84], [255, 236, 200]],
+  teal: [
+    [7, 26, 34],
+    [14, 74, 82],
+    [31, 143, 138],
+    [95, 227, 214],
+    [232, 255, 251],
+  ],
+  amber: [
+    [30, 18, 6],
+    [90, 54, 16],
+    [170, 104, 36],
+    [255, 180, 84],
+    [255, 236, 200],
+  ],
 };
 const eta = (s?: number | null) => (s == null ? '—' : s >= 3600 ? `${(s / 3600).toFixed(1)} h` : `${Math.max(1, Math.round(s / 60))} min`);
 
@@ -100,14 +112,26 @@ const invMoll = (g: Geo, px: number, py: number): [number, number] | null => {
   return [(((lon / D2R) % 360) + 360) % 360, dec / D2R];
 };
 const fwdMoll = (g: Geo, ra: number, dec: number): [number, number] => {
-  const lon = (-((((ra + 180) % 360) + 360) % 360 - 180) * Math.PI) / 180;
+  const lon = (-(((((ra + 180) % 360) + 360) % 360) - 180) * Math.PI) / 180;
   const phi = dec * D2R;
   let th = phi;
   for (let k = 0; k < 12; k++) th -= (2 * th + Math.sin(2 * th) - Math.PI * Math.sin(phi)) / (2 + 2 * Math.cos(2 * th) || 1e-9);
   return [g.cx + g.rx * (lon / Math.PI) * Math.cos(th), g.cy - g.ry * Math.sin(th)];
 };
 
-function SkyMap({ cov, rel, glow, onHover, onPick }: { cov: Cov; rel: string; glow: boolean; onHover: (h: Hov | null) => void; onPick: (ra: number, dec: number) => void }) {
+function SkyMap({
+  cov,
+  rel,
+  glow,
+  onHover,
+  onPick,
+}: {
+  cov: Cov;
+  rel: string;
+  glow: boolean;
+  onHover: (h: Hov | null) => void;
+  onPick: (ra: number, dec: number) => void;
+}) {
   const ref = useRef<HTMLCanvasElement>(null);
   const geo = useRef<Geo | null>(null);
   const [tick, setTick] = useState(0);
@@ -145,7 +169,10 @@ function SkyMap({ cov, rel, glow, onHover, onPick }: { cov: Cov; rel: string; gl
       const t = s - i;
       return ramp[i]!.map((c, k) => Math.round(c + (ramp[i + 1]![k]! - c) * t));
     };
-    const vals = Object.keys(cells).map(val).filter((v) => v > 0).sort((a, b) => a - b);
+    const vals = Object.keys(cells)
+      .map(val)
+      .filter((v) => v > 0)
+      .sort((a, b) => a - b);
     const lo = Math.log(vals[0] ?? 1);
     const hi = Math.log(vals[vals.length - 1] ?? 2);
     ctx.fillStyle = '#000';
@@ -197,7 +224,11 @@ function SkyMap({ cov, rel, glow, onHover, onPick }: { cov: Cov; rel: string; gl
       const L = l * D2R;
       return [Math.atan2(Math.sin(L) * Math.cos(E), Math.cos(L)) / D2R, Math.asin(Math.sin(L) * Math.sin(E)) / D2R];
     }, 'rgba(255,180,84,.85)');
-    const M = [[-0.0548755604, 0.4941094279, -0.867666149], [-0.8734370902, -0.44482963, -0.1980763734], [-0.4838350155, 0.7469822445, 0.4559837762]] as const;
+    const M = [
+      [-0.0548755604, 0.4941094279, -0.867666149],
+      [-0.8734370902, -0.44482963, -0.1980763734],
+      [-0.4838350155, 0.7469822445, 0.4559837762],
+    ] as const;
     line((l) => {
       const L = l * D2R;
       const gx = Math.cos(L);
@@ -252,16 +283,25 @@ export function IndexV2({ health }: { health: unknown }) {
   const [rel, setRel] = useState('all');
   const [hov, setHov] = useState<Hov | null>(null);
   const tot = [0, 0];
-  if (cov) for (const v of Object.values(cov.cells)) { tot[0]! += v[0] ?? 0; tot[1]! += v[1] ?? 0; }
+  if (cov)
+    for (const v of Object.values(cov.cells)) {
+      tot[0]! += v[0] ?? 0;
+      tot[1]! += v[1] ?? 0;
+    }
   const cells = cov ? Object.keys(cov.cells).length : 0;
   const allCells = cov ? 12 * 4 ** cov.order : 768;
-  const all = cov ? Object.values(cov.cells).map((v) => v.reduce((a, b) => a + b, 0)).sort((a, b) => a - b) : [];
+  const all = cov
+    ? Object.values(cov.cells)
+        .map((v) => v.reduce((a, b) => a + b, 0))
+        .sort((a, b) => a - b)
+    : [];
   const glow = running && !!cov?.cells_new;
   const W = h?.warm;
   const S = h?.s3;
   const mb = (S?.bytes ?? 0) / 1048576;
   const pct = ing?.total ? Math.min(100, ((ing.done ?? 0) / ing.total) * 100) : 0;
-  const open = (ra: number, dec: number) => (location.hash = formatHash({ screen: 'lab', params: { ra: ra.toFixed(5), dec: dec.toFixed(5), fov: '20' } }));
+  const open = (ra: number, dec: number) =>
+    (location.hash = formatHash({ screen: 'lab', params: { ra: ra.toFixed(5), dec: dec.toFixed(5), fov: '10' } }));
   return (
     <div class="ix">
       <header class="ix-top">
@@ -365,12 +405,19 @@ export function IndexV2({ health }: { health: unknown }) {
                 <div>
                   <b>Up to date</b>
                   <small>
-                    {h?.index?.reconciled_at ? `last check against IRSA ${dt(h.index.reconciled_at)}` : `index built ${dt(h?.index?.bootstrap_at)} from IRSA TAP`}
+                    {h?.index?.reconciled_at
+                      ? `last check against IRSA ${dt(h.index.reconciled_at)}`
+                      : `index built ${dt(h?.index?.bootstrap_at)} from IRSA TAP`}
                   </small>
                 </div>
               </div>
             )}
-            {!running && <p class="ix-cn">The index is compared with IRSA's tables; when IRSA publishes new SPHEREx files they are read in here, and this card shows the progress.</p>}
+            {!running && (
+              <p class="ix-cn">
+                The index is compared with IRSA's tables; when IRSA publishes new SPHEREx files they are read in here, and this card shows
+                the progress.
+              </p>
+            )}
           </div>
           <div class="ix-card">
             <h2>

@@ -184,16 +184,6 @@
 @media (max-width: 560px) { .vsq .loadov { left: 0; right: 0; top: 0; bottom: 0; transform: none; aspect-ratio: auto; border-radius: 0; } }
 
 /* the sign-in popup of a guest's click that needs an account */
-.signin-back { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(2, 6, 10, 0.55); }
-.signin { width: min(420px, calc(100vw - 32px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 18px 18px 14px; border-radius: 16px; background: rgba(10, 20, 27, 0.97); border: 1px solid var(--edge); box-shadow: var(--shadow); color: var(--ink); text-align: left; }
-.signin .si-title { font: 650 16px var(--font); }
-.signin .si-why { margin: 0; font-size: 12.5px; line-height: 1.45; color: rgba(214, 231, 237, 0.85); }
-.signin .si-row { display: flex; gap: 8px; }
-.signin .si-row .inp { flex: 1; min-width: 0; height: 32px; font-size: 13px; padding: 0 10px; }
-.signin .si-google { justify-content: center; text-decoration: none; }
-.signin .si-line { margin: 0; min-height: 16px; font: 500 11.5px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
-.signin .si-later { align-self: flex-end; }
-@media (max-width: 560px) { .signin .si-row { flex-direction: column; } }
 
 /* the state of a search after its switch and in the row at the top of Candidates (lab/progress.tsx) */
 .sw .sm-run, .sw .sm-done, .sw .sm-fail { margin-left: 7px; font: 500 10.5px var(--mono); color: var(--muted); white-space: nowrap; }

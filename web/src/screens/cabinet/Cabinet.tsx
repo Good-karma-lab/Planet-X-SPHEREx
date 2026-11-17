@@ -2,8 +2,9 @@
 // panel for a guest. Everything shown is read from the account API (lib/account.ts).
 
 import { useCallback, useEffect, useState } from 'preact/hooks';
-import { api, describeHash, nextTask, refreshUnread, signInByEmail, taskHash, useUser, googleSignInUrl, type AccountMark, type Task, type User } from '../../lib/account';
+import { api, describeHash, nextTask, refreshUnread, taskHash, useUser, type AccountMark, type Task, type User } from '../../lib/account';
 import { InvestigationPage } from './Investigation';
+import { SignInCard } from '../../ui/SignInCard';
 import { Pic } from './pic';
 import { Badge, ScorePanel, badgeSrc, type MyScore } from './Score';
 import { AccountMenu, Bell, type Notice } from './Corner';
@@ -129,70 +130,12 @@ function useMine(user: User | null, view: string, inv: string): { mine: Mine | n
   return { mine, error, reload: useCallback(() => setN((x) => x + 1), []) };
 }
 
-/** The status line of a sign-in link that was used before or is too old (the server sends the browser to #/me?signin=expired). */
-const EXPIRED = 'This link was already used or has expired · send a new one';
-
-function SignIn({ expired, google, email: emailOpen }: { expired: string | undefined; google: string | null; email: boolean }) {
-  const [email, setEmail] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [sent, setSent] = useState<{ to: string; minutes: number; dev_link?: string } | null>(null);
-  const [error, setError] = useState(expired === 'expired' ? EXPIRED : expired === 'google' ? 'Google sign-in did not finish · try again' : '');
-  const send = (e: Event) => {
-    e.preventDefault();
-    if (busy || !email.trim()) return;
-    setBusy(true);
-    setError('');
-    signInByEmail(email.trim(), '#/me')
-      .then((r) => setSent({ to: email.trim(), ...r }))
-      .catch((x: Error) => setError(x.message))
-      .finally(() => setBusy(false));
-  };
-  if (!emailOpen && !google)
-    // no mail sender and no Google keys on this server yet: one status line, no form that would take an address in vain
-    return (
-      <div class="card glass cb-signin" data-testid="signin">
-        <h3>Sign in</h3>
-        <p class="cb-status" role="status" data-testid="signin-soon">
-          Sign-in opens soon · your marks are kept in this browser
-        </p>
-        {expired === 'expired' && (
-          <p class="cb-status bad" role="status" data-testid="signin-status">
-            {EXPIRED}
-          </p>
-        )}
-      </div>
-    );
+/** The guest's Cabinet: the site's one sign-in card in the middle of the page. */
+function SignIn({ expired }: { expired: string | undefined }) {
+  const error = expired === 'expired' ? 'This link was already used or has expired · send a new one' : expired === 'google' ? 'Google sign-in did not finish · try again' : '';
   return (
-    <div class="card glass cb-signin" data-testid="signin">
-      <h3>Sign in</h3>
-      <p class="hint">Sign in to keep your marks, squares and findings under your name.{emailOpen ? ' No password: we send a link to your e-mail.' : ''}</p>
-      {emailOpen && (
-        <form onSubmit={send}>
-          <input class="inp" type="email" name="email" autocomplete="email" required placeholder="you@example.org" aria-label="E-mail address" value={email} onInput={(e) => setEmail((e.target as HTMLInputElement).value)} />
-          <button class="btn primary" type="submit" disabled={busy}>
-            {busy ? 'Sending…' : 'Send me a sign-in link'}
-          </button>
-        </form>
-      )}
-      <p class={`cb-status ${error ? 'bad' : sent ? 'good' : ''}`} role="status" data-testid="signin-status">
-        {error || (sent ? `Link sent to ${sent.to}. It works once, for ${sent.minutes} minutes.` : '')}
-      </p>
-      {sent?.dev_link && (
-        <p class="cb-status">
-          Dev mode:{' '}
-          <a href={sent.dev_link} data-testid="dev-link">
-            open the sign-in link
-          </a>
-        </p>
-      )}
-      {google && (
-        <div class="cb-or">
-          <span class="mono-s">or</span>
-          <a class="btn" href={google} data-testid="google">
-            Continue with Google
-          </a>
-        </div>
-      )}
+    <div class="sx-page">
+      <SignInCard next="#/me" reason="To keep your squares, marks and findings" error={error} />
     </div>
   );
 }
@@ -505,7 +448,7 @@ function WorkPanel({ mine, work, run }: { mine: Mine; work: Work; run: (p: Promi
 }
 
 export function Cabinet({ route }: { route: Route }) {
-  const { user, ready, auth } = useUser();
+  const { user, ready } = useUser();
   const [status, setStatus] = useState('');
   const p = route.params;
   // older addresses (#/me?tab=…) still land on the right place
@@ -544,7 +487,7 @@ export function Cabinet({ route }: { route: Route }) {
         {!ready ? (
           <div class="mono-s">Loading…</div>
         ) : !user ? (
-          <SignIn expired={p['signin']} google={auth.google ? googleSignInUrl('#/me') : null} email={auth.email} />
+          <SignIn expired={p['signin']} />
         ) : !mine ? null : view === 'badges' ? (
           <div class="card glass cb-card" data-testid="panel-score">
             <a class="btn sm cb-back" href="#/me">
