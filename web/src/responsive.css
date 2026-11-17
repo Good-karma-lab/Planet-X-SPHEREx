@@ -2298,3 +2298,56 @@
     display: none;
   }
 }
+
+/* ----- every touch window: sliders and edge handles to a finger's size; header links of the landing ----- */
+@media (max-width: 1279.98px) {
+  :root .tbar .tl-mid input[type='range'] {
+    height: var(--hit);
+    margin-top: -13px;
+    margin-bottom: -13px;
+  }
+  :root .lab .stretch input[type='range'] {
+    height: var(--hit);
+  }
+  :root .lp-nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+  }
+}
+@media (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
+  :root .cat-drawer .cat-handle {
+    left: -44px;
+    width: 44px;
+  }
+}
+@media (max-width: 1279.98px) {
+  /* Method's contents beside the text: every part and sub-part is a row a finger can take */
+  :root .mv2-toc a {
+    display: flex;
+    align-items: center;
+    min-height: var(--hit);
+  }
+}
+
+/* ----- every touch window: pickers. Safari keeps a native picker at its own small height whatever min-height says, so here a
+   picker is drawn by us: 44 px high, with its own arrow ----- */
+@media (max-width: 1279.98px) {
+  :root select {
+    -webkit-appearance: none;
+    appearance: none;
+    height: var(--hit);
+    min-height: var(--hit);
+    padding-right: 28px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%23a0b9c2' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1.5 1.5L6 6l4.5-4.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+  }
+  :root .mtoc select {
+    height: 48px;
+  }
+  :root .lp-nav a {
+    min-width: var(--hit);
+    justify-content: center;
+  }
+}
