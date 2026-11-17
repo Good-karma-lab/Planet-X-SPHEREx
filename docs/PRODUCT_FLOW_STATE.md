@@ -202,6 +202,13 @@ SKY_CLIPS=/var/lib/sky/clips
 - **Release blocker:** if it isn't in by acceptance, the release waits for it. A public "send me a link" that only writes to a
   log would lose people's mails silently.
 
+### Later jobs (not in this release)
+
+- **The brown-dwarf queue has no reader.** `GET /api/tasks/brown-dwarf-queue`, `agreement.get(...).brown_dwarf_queue()`, lists the
+  red sources people call cold brown dwarfs. Nothing feeds them to the brown-dwarf search yet. Its place is a pass of the brown-dwarf
+  search on those points, and a Findings filter.
+- **The sweep:** the area and the machine are the user's decision (see the options above).
+
 ### d. Production test list (run right after step 4)
 
 Each test is done in a real browser (Chrome, and the globe also in Firefox) and by curl. Results go to docs/qa as a dated note.
@@ -216,7 +223,8 @@ Each test is done in a real browser (Chrome, and the globe also in Firefox) and 
    - Barnard's Star 5′ opens warm in under 1 s; the time-lapse plays.
    - A new cold field builds (quick picture in about 20 s).
    - Known objects rings appear, with no "no match" on known stars. WISE 0855 5′ and Barnard 20′ show "no match" about 0.
-5. **Findings:** the cards show clips (`/api/findings/{id}/clip.webp` answers image/webp), promising first.
+5. **Findings:** a classified find has one quiet "People say: …, N of M" line on its card and its page, from /api/tasks/results.
+   The cards show clips (`/api/findings/{id}/clip.webp` answers image/webp), promising first.
    - `#/findings/<id>` opens the finding's own page. The "Leaderboard" link opens `#/leaders`.
 6. **Cabinet:**
    - Without sign-in: the panel says "Sign-in opens soon", the e-mail field is not there, and POST /api/auth/email gives 503.

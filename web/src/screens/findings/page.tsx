@@ -1,16 +1,32 @@
 import { useEffect, useState } from 'preact/hooks';
+import { peopleLine, usePeople } from './people';
 import { formatDec, formatRA } from '../../lib/sky';
 import { checkHref, KIND_ONE, STAGE_LABEL, takeTask, type CardFind } from './cards';
 import { titleOf, type Find } from './finds';
 import './findings.css';
 
 /** A find with the fields of the product flow (`GET /api/v1/findings/{id}`). */
-type FullFind = Find & Pick<CardFind, 'stage' | 'promise' | 'viewers' | 'clip'> & {
-  credit: CardFind['credit'] & { people?: { name: string; role: string; result?: string | null; at?: string }[] };
-};
+type FullFind = Find &
+  Pick<CardFind, 'stage' | 'promise' | 'viewers' | 'clip'> & {
+    credit: CardFind['credit'] & { people?: { name: string; role: string; result?: string | null; at?: string }[] };
+  };
 
-const STAGE_BADGE: Record<string, string> = { new: 'orange', in_review: 'blue', submitted: 'purple', known: 'green', artefact: '', candidate: 'yellow', confirmed: 'green' };
-const RESULT: Record<string, string> = { moves: 'it moves', artefact: 'artefact', known: 'known object', nothing: 'nothing here', marks: 'marks left' };
+const STAGE_BADGE: Record<string, string> = {
+  new: 'orange',
+  in_review: 'blue',
+  submitted: 'purple',
+  known: 'green',
+  artefact: '',
+  candidate: 'yellow',
+  confirmed: 'green',
+};
+const RESULT: Record<string, string> = {
+  moves: 'it moves',
+  artefact: 'artefact',
+  known: 'known object',
+  nothing: 'nothing here',
+  marks: 'marks left',
+};
 const ROLE: Record<string, string> = { checked: 'checked', marked: 'marked first', submitted: 'submitted' };
 
 /**
@@ -22,6 +38,7 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
   const [state, setState] = useState<'loading' | 'ok' | 'none' | 'failed'>('loading');
   const [clip, setClip] = useState<'wait' | 'ready' | 'none'>('wait');
   const [why, setWhy] = useState('');
+  const peopleSay = peopleLine(usePeople([id])[id]);
   useEffect(() => {
     let stop = false;
     setState('loading');
@@ -80,7 +97,13 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
         </a>
       </div>
     );
-  const card = { ...(f as unknown as CardFind), name: f.identity?.name ?? null, field: (f.data.field_params as CardFind['field']) ?? null, group: (f.data.group as string) ?? null, passes: null };
+  const card = {
+    ...(f as unknown as CardFind),
+    name: f.identity?.name ?? null,
+    field: (f.data.field_params as CardFind['field']) ?? null,
+    group: (f.data.group as string) ?? null,
+    passes: null,
+  };
   const people = f.credit.people ?? [];
   const looks = Object.entries(f.credit.looks ?? {});
   const nums: [string, string][] = [
@@ -103,12 +126,19 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
       <div class="mono-s">
         {KIND_ONE[f.kind] ?? f.kind} · {f.place} · {f.id}
       </div>
+      {peopleSay && <div class="mono-s fcard-people">{peopleSay}</div>}
       <div class="fpage-grid">
         <div class="fpage-clip glass">
-          {clip === 'ready' && f.clip && <img src={f.clip.url} alt={`Time-lapse of ${titleOf(f)}: one frame per SPHEREx pass, the object ringed`} />}
-          {clip !== 'ready' && f.clip?.still && <img class="fstill" src={f.clip.still} alt="" onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />}
+          {clip === 'ready' && f.clip && (
+            <img src={f.clip.url} alt={`Time-lapse of ${titleOf(f)}: one frame per SPHEREx pass, the object ringed`} />
+          )}
+          {clip !== 'ready' && f.clip?.still && (
+            <img class="fstill" src={f.clip.still} alt="" onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')} />
+          )}
           {clip === 'wait' && <span class="mono-s">building the time-lapse…</span>}
-          {clip === 'none' && <span class="mono-s">no time-lapse: {why || f.clip?.reason || 'no SPHEREx field covers this place yet'}</span>}
+          {clip === 'none' && (
+            <span class="mono-s">no time-lapse: {why || f.clip?.reason || 'no SPHEREx field covers this place yet'}</span>
+          )}
         </div>
         <div class="fpage-side">
           <p class="fverdict">{f.verdict}</p>
@@ -126,7 +156,13 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
               Found by {f.credit.found_by}
               {f.credit.first_marked_by ? ` · marked first by ${f.credit.first_marked_by}` : ''}
             </p>
-            <p class={f.viewers || f.stage !== 'new' ? '' : 'st-un'}>{f.viewers ? `${f.viewers} ${f.viewers === 1 ? 'look' : 'looks'} in the lab${f.credit.checked_by.length ? ` · checked by ${f.credit.checked_by.join(', ')}` : ''}` : f.stage === 'new' ? 'waiting for a look' : 'no looks yet'}</p>
+            <p class={f.viewers || f.stage !== 'new' ? '' : 'st-un'}>
+              {f.viewers
+                ? `${f.viewers} ${f.viewers === 1 ? 'look' : 'looks'} in the lab${f.credit.checked_by.length ? ` · checked by ${f.credit.checked_by.join(', ')}` : ''}`
+                : f.stage === 'new'
+                  ? 'waiting for a look'
+                  : 'no looks yet'}
+            </p>
           </section>
           <div class="chips">
             <a
@@ -179,7 +215,15 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
             {f.idents.map((i) => (
               <tr key={i.catalogue} class={`c-${i.state}`}>
                 <td>{i.label}</td>
-                <td>{i.state === 'ok' ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}` : i.state === 'none' ? 'nothing there' : i.state === 'unavailable' ? 'did not answer' : 'not asked yet'}</td>
+                <td>
+                  {i.state === 'ok'
+                    ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}`
+                    : i.state === 'none'
+                      ? 'nothing there'
+                      : i.state === 'unavailable'
+                        ? 'did not answer'
+                        : 'not asked yet'}
+                </td>
                 <td>{i.state === 'ok' && i.sep != null ? `${i.sep.toFixed(1)}″` : ''}</td>
               </tr>
             ))}

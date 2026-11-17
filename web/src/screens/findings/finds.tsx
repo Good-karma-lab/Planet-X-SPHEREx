@@ -5,6 +5,7 @@ import { parseSxp, halfToFloat } from '../../lib/sxp';
 import { ATLAS_LEAD, LeadPanel } from './leads';
 import { api, useUser } from '../../lib/account';
 import { FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
+import { peopleLine, usePeople } from './people';
 
 export interface Ident {
   catalogue: string;
@@ -42,11 +43,25 @@ interface Reply {
   total: number;
   counts: Record<string, { all: number; unexplained: number; unchecked: number; known: number; leads?: number }>;
   labels: Record<string, string>;
-  identification: { pending: number; unavailable: number; unavailable_decisive?: number; unavailable_extras?: number; catalogues: string[] };
+  identification: {
+    pending: number;
+    unavailable: number;
+    unavailable_decisive?: number;
+    unavailable_extras?: number;
+    catalogues: string[];
+  };
   finds: Find[];
 }
 
-const KIND_SHORT: Record<string, string> = { mover: 'Movers', browndwarf: 'Brown dwarfs', red: 'Red sources', anomaly: 'Spectral anomalies', pair: 'Pairs changing', film: 'Time-lapse tracks', peak: 'Planet X peaks' };
+const KIND_SHORT: Record<string, string> = {
+  mover: 'Movers',
+  browndwarf: 'Brown dwarfs',
+  red: 'Red sources',
+  anomaly: 'Spectral anomalies',
+  pair: 'Pairs changing',
+  film: 'Time-lapse tracks',
+  peak: 'Planet X peaks',
+};
 const um = (v: number) => v.toFixed(2).replace(/0$/, '');
 const mjdDate = (m: number | null) => (m == null ? '' : new Date((m - 40587) * 864e5).toISOString().slice(0, 10));
 
@@ -60,7 +75,9 @@ export function useFinds(): Reply | null {
         .then((d: Reply | null) => {
           if (stop || !d) return;
           // a Planet X peak the service calls a residual (not a lead: ok false) reads as a residual, not as 'not yet checked'
-          for (const f of d.finds) if (f.kind === 'peak' && (f.data as { peak?: { ok?: boolean } })?.peak?.ok === false && f.status !== 'known') f.status = 'residual';
+          for (const f of d.finds)
+            if (f.kind === 'peak' && (f.data as { peak?: { ok?: boolean } })?.peak?.ok === false && f.status !== 'known')
+              f.status = 'residual';
           setR(d);
         })
         .catch(() => {});
@@ -74,7 +91,30 @@ export function useFinds(): Reply | null {
   return r;
 }
 
-const GREEK: Record<string, string> = { alf: 'α', bet: 'β', gam: 'γ', del: 'δ', eps: 'ε', zet: 'ζ', eta: 'η', tet: 'θ', iot: 'ι', kap: 'κ', lam: 'λ', mu: 'μ', nu: 'ν', ksi: 'ξ', pi: 'π', rho: 'ρ', sig: 'σ', tau: 'τ', phi: 'φ', chi: 'χ', psi: 'ψ', ome: 'ω' };
+const GREEK: Record<string, string> = {
+  alf: 'α',
+  bet: 'β',
+  gam: 'γ',
+  del: 'δ',
+  eps: 'ε',
+  zet: 'ζ',
+  eta: 'η',
+  tet: 'θ',
+  iot: 'ι',
+  kap: 'κ',
+  lam: 'λ',
+  mu: 'μ',
+  nu: 'ν',
+  ksi: 'ξ',
+  pi: 'π',
+  rho: 'ρ',
+  sig: 'σ',
+  tau: 'τ',
+  phi: 'φ',
+  chi: 'χ',
+  psi: 'ψ',
+  ome: 'ω',
+};
 const CONST: Record<string, string> = { Ind: 'Indi', Dra: 'Draconis', Aur: 'Aurigae', Cen: 'Centauri', Eri: 'Eridani', Oph: 'Ophiuchi' };
 /** A SIMBAD name read by people: no leading mark, Greek letters as letters, the constellation in full where it is common. */
 export const cleanName = (n: string) =>
@@ -95,7 +135,9 @@ export function titleOf(f: Find): string {
   switch (f.kind) {
     case 'mover': {
       const nm = knownName(f);
-      return nm ? `${nm} · ${(f.rate ?? 0).toFixed(2)}″/yr` : `${(f.rate ?? 0).toFixed(2)}″/yr mover${f.status === 'known' ? ' (a known star)' : ''}`;
+      return nm
+        ? `${nm} · ${(f.rate ?? 0).toFixed(2)}″/yr`
+        : `${(f.rate ?? 0).toFixed(2)}″/yr mover${f.status === 'known' ? ' (a known star)' : ''}`;
     }
     case 'browndwarf':
       return `${d.group === 'known' ? 'Known brown dwarf' : d.group === 'slow' ? 'Slow red mover' : 'Brown dwarf candidate'} · ${(f.rate ?? 0).toFixed(1)}″/yr`;
@@ -111,7 +153,11 @@ export function titleOf(f: Find): string {
       return `${(f.rate ?? 0).toFixed(1)}″/h object moving in a pass${d.less_certain ? ' (less certain)' : ''}`;
     default: {
       const jpl = f.idents.find((i) => i.catalogue === 'sbident' && i.state === 'ok' && i.name);
-      return jpl ? `${String(jpl.name).replace(/^\d+ /, '').replace(/ \(.*\)$/, '')} · ${(d.peak?.d ?? 0).toFixed(1)} au (a known body)` : `Planet X peak · ${(d.peak?.d ?? 0).toFixed(0)} au`;
+      return jpl
+        ? `${String(jpl.name)
+            .replace(/^\d+ /, '')
+            .replace(/ \(.*\)$/, '')} · ${(d.peak?.d ?? 0).toFixed(1)} au (a known body)`
+        : `Planet X peak · ${(d.peak?.d ?? 0).toFixed(0)} au`;
     }
   }
 }
@@ -169,7 +215,9 @@ function Blink({ f }: { f: Find }) {
       return;
     }
     void (async () => {
-      const m = await fetch(`/api/v1/fields?ra=${fp.ra}&dec=${fp.dec}&fov=${fp.fov}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const m = await fetch(`/api/v1/fields?ra=${fp.ra}&dec=${fp.dec}&fov=${fp.fov}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
       const g = m?.meta?.grid;
       const passes: { index: number; mjd_mid: number }[] = m?.meta?.passes ?? [];
       if (!g || !passes.length || stop) return setSt({ ok: false, labels: [], msg: 'picture not available' });
@@ -228,17 +276,31 @@ function Blink({ f }: { f: Find }) {
   return (
     <div class="fblink">
       <div class="fthumb" style="width:240px;height:240px;position:relative">
-        <canvas ref={ref} style={{ display: st.ok ? 'block' : 'none', imageRendering: 'auto' }} aria-label="The 2′ around the find in each pass" />
+        <canvas
+          ref={ref}
+          style={{ display: st.ok ? 'block' : 'none', imageRendering: 'auto' }}
+          aria-label="The 2′ around the find in each pass"
+        />
         {!st.ok && <span class="mono-s">{st.msg}</span>}
         {st.ok && <span class="fring" aria-hidden="true" />}
       </div>
-      <div class="mono-s">{st.ok ? `2′ · pass ${(i % st.labels.length) + 1} of ${st.labels.length} · ${st.labels[i % st.labels.length]}` : ''}</div>
+      <div class="mono-s">
+        {st.ok ? `2′ · pass ${(i % st.labels.length) + 1} of ${st.labels.length} · ${st.labels[i % st.labels.length]}` : ''}
+      </div>
     </div>
   );
 }
 
 // ---- small charts from the stored rows ----
-function Chart({ pts, title, xlab }: { pts: { x: number; y: number; e?: number | null; m?: number | null }[]; title: string; xlab: string }) {
+function Chart({
+  pts,
+  title,
+  xlab,
+}: {
+  pts: { x: number; y: number; e?: number | null; m?: number | null }[];
+  title: string;
+  xlab: string;
+}) {
   if (!pts.length) return null;
   const W = 420;
   const H = 150;
@@ -258,10 +320,18 @@ function Chart({ pts, title, xlab }: { pts: { x: number; y: number; e?: number |
       <figcaption class="mono-s">{title}</figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title}>
         <line x1={px} y1={Y(y0)} x2={W - 8} y2={Y(y0)} stroke="var(--edge)" />
-        <text x={px} y={H - 1} class="ft">{x0.toFixed(2)}</text>
-        <text x={W - 8} y={H - 1} class="ft" text-anchor="end">{x1.toFixed(2)} {xlab}</text>
-        <text x={px - 4} y={py + 4} class="ft" text-anchor="end">{y1.toPrecision(2)}</text>
-        {mod.length > 1 && <polyline fill="none" stroke="var(--amber)" stroke-width="1.4" points={mod.map((p) => `${X(p.x)},${Y(p.m!)}`).join(' ')} />}
+        <text x={px} y={H - 1} class="ft">
+          {x0.toFixed(2)}
+        </text>
+        <text x={W - 8} y={H - 1} class="ft" text-anchor="end">
+          {x1.toFixed(2)} {xlab}
+        </text>
+        <text x={px - 4} y={py + 4} class="ft" text-anchor="end">
+          {y1.toPrecision(2)}
+        </text>
+        {mod.length > 1 && (
+          <polyline fill="none" stroke="var(--amber)" stroke-width="1.4" points={mod.map((p) => `${X(p.x)},${Y(p.m!)}`).join(' ')} />
+        )}
         {pts.map((p, i) => (
           <g key={i}>
             {p.e ? <line x1={X(p.x)} x2={X(p.x)} y1={Y(p.y - p.e)} y2={Y(p.y + p.e)} stroke="var(--accent)" opacity="0.6" /> : null}
@@ -285,20 +355,58 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
   const lab = formatHash({
     screen: 'lab',
     params: fp
-      ? { ra: fp.ra.toFixed(5), dec: fp.dec.toFixed(5), fov: String(fp.fov), find: f.id, find_ra: f.ra.toFixed(5), find_dec: f.dec.toFixed(5) }
+      ? {
+          ra: fp.ra.toFixed(5),
+          dec: fp.dec.toFixed(5),
+          fov: String(fp.fov),
+          find: f.id,
+          find_ra: f.ra.toFixed(5),
+          find_dec: f.dec.toFixed(5),
+        }
       : { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id },
   });
-  const json = () => encodeURIComponent(JSON.stringify({ ...f, note: 'a lead, not a discovery', exported: new Date().toISOString() }, null, 2));
-  const spec = f.spectrum.filter((s) => s.lam != null && s.flux != null).map((s) => ({ x: ((s.lam as number) + (s.lam_hi ?? (s.lam as number))) / 2, y: s.flux as number, e: s.err, m: s.model }));
+  const json = () =>
+    encodeURIComponent(JSON.stringify({ ...f, note: 'a lead, not a discovery', exported: new Date().toISOString() }, null, 2));
+  const spec = f.spectrum
+    .filter((s) => s.lam != null && s.flux != null)
+    .map((s) => ({ x: ((s.lam as number) + (s.lam_hi ?? (s.lam as number))) / 2, y: s.flux as number, e: s.err, m: s.model }));
   const curves = [...new Set(f.lightcurve.map((p) => p.label))];
   const nums: [string, string][] = [
-    ...(f.rate != null ? ([['Rate', `${f.rate.toFixed(2)}${f.data.rate_err ? ` ± ${Number(f.data.rate_err).toFixed(2)}` : ''} ${f.kind === 'film' ? '″/h' : '″/yr'}${f.data.best_detection ? ` · best of ${f.data.detections.length}` : ''}`]] as [string, string][]) : []),
+    ...(f.rate != null
+      ? ([
+          [
+            'Rate',
+            `${f.rate.toFixed(2)}${f.data.rate_err ? ` ± ${Number(f.data.rate_err).toFixed(2)}` : ''} ${f.kind === 'film' ? '″/h' : '″/yr'}${f.data.best_detection ? ` · best of ${f.data.detections.length}` : ''}`,
+          ],
+        ] as [string, string][])
+      : []),
     ...(f.snr != null ? ([['S/N', f.snr.toFixed(1)]] as [string, string][]) : []),
     ...(f.score != null ? ([['Score', f.score.toFixed(2)]] as [string, string][]) : []),
-    ...(f.chance != null ? ([['Chance', f.kind === 'film' ? `controls: ${f.chance.toFixed(2)} per search at ${f.data.track?.n} visits` : `${f.chance.toFixed(2)} per field`]] as [string, string][]) : []),
+    ...(f.chance != null
+      ? ([
+          [
+            'Chance',
+            f.kind === 'film'
+              ? `controls: ${f.chance.toFixed(2)} per search at ${f.data.track?.n} visits`
+              : `${f.chance.toFixed(2)} per field`,
+          ],
+        ] as [string, string][])
+      : []),
     [f.kind === 'peak' ? "Place at the search's reference date" : 'Place', `${formatRA(f.ra)} ${formatDec(f.dec)}`],
     ['Field', `${f.place} · ${f.fov}′`],
-    ...(((f.data.detections?.length ?? 0) > 1) ? ([['Detections', f.data.detections.map((d: any) => `${d.fov}′${d.rate != null ? ` ${Number(d.rate).toFixed(2)}${d.rate_err ? ` ± ${Number(d.rate_err).toFixed(2)}` : ''}` : ''}${d.sigma != null ? ` (${Number(d.sigma).toFixed(1)}σ)` : ''}`).join(' · ')]] as [string, string][]) : []),
+    ...((f.data.detections?.length ?? 0) > 1
+      ? ([
+          [
+            'Detections',
+            f.data.detections
+              .map(
+                (d: any) =>
+                  `${d.fov}′${d.rate != null ? ` ${Number(d.rate).toFixed(2)}${d.rate_err ? ` ± ${Number(d.rate_err).toFixed(2)}` : ''}` : ''}${d.sigma != null ? ` (${Number(d.sigma).toFixed(1)}σ)` : ''}`,
+              )
+              .join(' · '),
+          ],
+        ] as [string, string][])
+      : []),
   ];
   return (
     <aside class={`leadpanel glass fdetail${inline ? ' inline' : ''}`} role={inline ? 'region' : 'dialog'} aria-label="Find report">
@@ -309,7 +417,10 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
       )}
       <h3 class="lp-title">{titleOf(f)}</h3>
       <div class="mono-s">
-        {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} · <b class={f.status === 'known' ? 'st-known' : f.status === 'unchecked' || f.status === 'residual' ? 'st-wait' : 'st-un'}>{f.status === 'unchecked' ? 'not yet checked' : f.status}</b>
+        {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} ·{' '}
+        <b class={f.status === 'known' ? 'st-known' : f.status === 'unchecked' || f.status === 'residual' ? 'st-wait' : 'st-un'}>
+          {f.status === 'unchecked' ? 'not yet checked' : f.status}
+        </b>
       </div>
       <p class="fverdict">{f.verdict}</p>
       <div class="fmedia">
@@ -325,7 +436,14 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
       </div>
       {spec.length > 0 && <Chart pts={spec} title="Spectrum (binned flux, model in amber)" xlab="µm" />}
       {curves.map((c) => (
-        <Chart key={c} pts={f.lightcurve.filter((p) => p.label === c && p.flux != null).map((p, i) => ({ x: p.mjd ?? i, y: p.flux as number, e: p.err }))} title={`Light curve · ${c}`} xlab={f.lightcurve.some((p) => p.mjd != null) ? 'MJD' : 'pass'} />
+        <Chart
+          key={c}
+          pts={f.lightcurve
+            .filter((p) => p.label === c && p.flux != null)
+            .map((p, i) => ({ x: p.mjd ?? i, y: p.flux as number, e: p.err }))}
+          title={`Light curve · ${c}`}
+          xlab={f.lightcurve.some((p) => p.mjd != null) ? 'MJD' : 'pass'}
+        />
       ))}
       {f.positions.length > 0 && (
         <table class="ftab">
@@ -349,7 +467,15 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
             <tr key={i.catalogue} class={`c-${i.state}`}>
               <td>{i.label}</td>
               <td title={i.name ?? ''}>
-                {i.state === 'ok' ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}${i.catalogue === 'sbident' && i.detail.visits_matched ? ` · at ${i.detail.visits_matched} of ${i.detail.visits_checked} visits` : ''}${i.note ? ` · ${i.note}` : ''}` : i.state === 'none' ? (i.catalogue === 'halo' ? 'no bright star within 60″' : 'nothing within 6″') : i.state === 'unavailable' ? 'did not answer' : 'not asked yet'}
+                {i.state === 'ok'
+                  ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}${i.catalogue === 'sbident' && i.detail.visits_matched ? ` · at ${i.detail.visits_matched} of ${i.detail.visits_checked} visits` : ''}${i.note ? ` · ${i.note}` : ''}`
+                  : i.state === 'none'
+                    ? i.catalogue === 'halo'
+                      ? 'no bright star within 60″'
+                      : 'nothing within 6″'
+                    : i.state === 'unavailable'
+                      ? 'did not answer'
+                      : 'not asked yet'}
               </td>
               <td>{i.state === 'ok' && i.sep != null ? `${i.sep.toFixed(1)}″` : ''}</td>
             </tr>
@@ -360,11 +486,19 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
         <a class="btn sm primary" href={lab}>
           Open in the lab
         </a>
-        <a class="btn sm" download={`find-${f.id.replace(/[^a-z0-9]+/gi, '_')}.json`} href={`data:application/json;charset=utf-8,${json()}`}>
+        <a
+          class="btn sm"
+          download={`find-${f.id.replace(/[^a-z0-9]+/gi, '_')}.json`}
+          href={`data:application/json;charset=utf-8,${json()}`}
+        >
           Download JSON
         </a>
       </div>
-      <div class="mono-s fver">{Object.entries(f.versions).map(([k, v]) => `${k} ${v}`).join(' · ')}</div>
+      <div class="mono-s fver">
+        {Object.entries(f.versions)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(' · ')}
+      </div>
     </aside>
   );
 }
@@ -379,7 +513,10 @@ interface CardReply {
   promising: number;
   promising_kinds: string[];
   noted: number;
-  visibility: { by_kind: Record<string, { visible: number; not_visible: number; not_measured: number }>; in_view: { visible: number; not_visible: number; not_measured: number } };
+  visibility: {
+    by_kind: Record<string, { visible: number; not_visible: number; not_measured: number }>;
+    in_view: { visible: number; not_visible: number; not_measured: number };
+  };
   identification: { pending: number; unavailable_decisive?: number };
   finds: CardFind[];
 }
@@ -390,7 +527,14 @@ const PROMISING = ['mover', 'browndwarf', 'peak', 'film', 'pair'];
 
 /** The cards of one filter, a page at a time: the next page is asked for when the end of the list comes on screen. */
 function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolean) {
-  const [state, setState] = useState<{ key: string; head: CardReply | null; finds: CardFind[]; done: boolean; loading: boolean; failed: boolean }>({ key: '', head: null, finds: [], done: false, loading: false, failed: false });
+  const [state, setState] = useState<{
+    key: string;
+    head: CardReply | null;
+    finds: CardFind[];
+    done: boolean;
+    loading: boolean;
+    failed: boolean;
+  }>({ key: '', head: null, finds: [], done: false, loading: false, failed: false });
   const key = `${kind}|${stage}|${stage === 'mine' ? mine.length : 0}|${unseen}`;
   const busy = useRef(false);
   const load = (reset: boolean) => {
@@ -480,6 +624,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   }, [user?.id]);
   const [unseen, setUnseen] = useState(false);
   const cards = useCards(kind, stage, mine, unseen);
+  const peopleSaid = usePeople(cards.finds.map((f) => f.id));
   const sel = useFind(leadId);
   // findings submitted by people: the button is there only when the service has accounts and somebody has submitted one
   const [people, setPeople] = useState(0);
@@ -516,8 +661,10 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   ];
   const stages: StageSel[] = ['any', 'mine', 'waiting', 'noted', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
   // the numbers on the status buttons are of the whole list, so they are shown only where they are what the button gives
-  const stageTotal = (s: StageSel) => (!h || s === 'any' || s === 'mine' || s === 'noted' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0));
-  const stageCount = (s: StageSel) => (s === 'mine' ? mine.length : h && s === 'noted' ? h.noted : h && s === 'waiting' && kind === 'promising' ? h.waiting_promising : null);
+  const stageTotal = (s: StageSel) =>
+    !h || s === 'any' || s === 'mine' || s === 'noted' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0);
+  const stageCount = (s: StageSel) =>
+    s === 'mine' ? mine.length : h && s === 'noted' ? h.noted : h && s === 'waiting' && kind === 'promising' ? h.waiting_promising : null;
   const chip = (k: KindSel, label: string) =>
     (cnt(k) ?? 1) > 0 || k === 'promising' || k === kind ? (
       <button key={k} class={kind === k ? 'on' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}>
@@ -539,10 +686,28 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
         </div>
         <div class="fkinds fstat" role="group" aria-label="Status">
           {stages
-            .filter((s) => (s === 'mine' ? !!user : s === 'noted' ? (h?.noted ?? 0) > 0 || stage === 'noted' : false) || s === 'any' || s === 'waiting' || s === 'new' || s === 'known' || s === stage || stageTotal(s) > 0)
+            .filter(
+              (s) =>
+                (s === 'mine' ? !!user : s === 'noted' ? (h?.noted ?? 0) > 0 || stage === 'noted' : false) ||
+                s === 'any' ||
+                s === 'waiting' ||
+                s === 'new' ||
+                s === 'known' ||
+                s === stage ||
+                stageTotal(s) > 0,
+            )
             .map((s) => (
               <button key={s} class={stage === s ? 'on' : ''} aria-pressed={stage === s} onClick={() => setStage(s)}>
-                {s === 'any' ? 'Any status' : s === 'mine' ? 'Viewed by me' : s === 'noted' ? 'Looks like an artefact (machine note)' : s === 'waiting' ? 'Waiting for a look' : STAGE_LABEL[s]} {stageCount(s) != null && <span>{stageCount(s)}</span>}
+                {s === 'any'
+                  ? 'Any status'
+                  : s === 'mine'
+                    ? 'Viewed by me'
+                    : s === 'noted'
+                      ? 'Looks like an artefact (machine note)'
+                      : s === 'waiting'
+                        ? 'Waiting for a look'
+                        : STAGE_LABEL[s]}{' '}
+                {stageCount(s) != null && <span>{stageCount(s)}</span>}
               </button>
             ))}
         </div>
@@ -558,20 +723,35 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
         )}
         <p class="hint leadcount">
           <a href="#/leaders">Leaderboard</a>
-          {kind === 'submitted' ? `${cards.finds.length} findings submitted by people` : h ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery` : 'reading the findings…'}
+          {kind === 'submitted'
+            ? `${cards.finds.length} findings submitted by people`
+            : h
+              ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery`
+              : 'reading the findings…'}
           {h && h.identification.pending > 0 && ` · identifying: ${h.identification.pending} catalogue answers to come`}
         </p>
       </section>
       <div class="fgrid-wrap">
         <ol class="fgrid" aria-busy={cards.loading}>
           {cards.finds.map((f) => (
-            <FindCard key={f.id} f={f} current={leadId === f.id} onOpen={setLeadId} mine={mine.includes(f.id)} />
+            <FindCard
+              key={f.id}
+              f={f}
+              current={leadId === f.id}
+              onOpen={setLeadId}
+              mine={mine.includes(f.id)}
+              people={peopleLine(peopleSaid[f.id])}
+            />
           ))}
           {kind === 'promising' && (stage === 'any' || stage === 'known') && cards.done && (
             <li class={`fcard glass${atlas ? ' on' : ''}`}>
               <button class="fcard-pic" onClick={() => setLeadId(ATLAS_LEAD.id)} aria-label={`Open the report: ${ATLAS_LEAD.title}`}>
                 <div class="fclip">
-                  <img src="/neossat/3i-2025-12-14.png" alt="Comet 3I/ATLAS in a NEOSSat frame, ringed at the place JPL predicts" loading="lazy" />
+                  <img
+                    src="/neossat/3i-2025-12-14.png"
+                    alt="Comet 3I/ATLAS in a NEOSSat frame, ringed at the place JPL predicts"
+                    loading="lazy"
+                  />
                 </div>
                 <span class="badge green fcard-stage">Known</span>
               </button>
@@ -590,7 +770,11 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
       {cards.failed && <p class="mono-s">the findings did not load; the page asks again when the filter is changed</p>}
       {!cards.loading && cards.done && cards.finds.length === 0 && !cards.failed && <p class="mono-s">no finds match these filters</p>}
       {cards.loading && <p class="mono-s">reading the findings…</p>}
-      {atlas ? <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={false} /> : leadId && sel ? <Detail f={sel} onClose={() => setLeadId(null)} inline={false} /> : null}
+      {atlas ? (
+        <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={false} />
+      ) : leadId && sel ? (
+        <Detail f={sel} onClose={() => setLeadId(null)} inline={false} />
+      ) : null}
     </>
   );
 }
