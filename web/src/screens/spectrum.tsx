@@ -395,7 +395,8 @@ function ExposurePlayer({
   );
 }
 
-export function SpectrumTab({ src }: { src: Source | null }) {
+export function SpectrumTab({ src, inPassport = false }: { src: Source | null; inPassport?: boolean }) {
+  // inPassport: the Object tab's portrait already says what it is; the chart's own line keeps only the measuring
   // Clear drops the spectrum until another source is picked (a new pick is a new object, even at the same place)
   const [cleared, setCleared] = useState<Source | null>(null);
   const shown = src && src !== cleared ? src : null;
@@ -475,8 +476,8 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           : view.state === 'running'
             ? `Measuring: ${view.measured} of ${view.total} exposures that cover this place · ${usable} used`
             : view.state === 'done'
-              ? // a saturated star: the amber line below says it once
-                saturated
+              ? // a saturated star: the amber line below says it once; in the passport the portrait says what it is
+                saturated || inPassport
                 ? ''
                 : guess.head
               : `Failed: ${view.error}`}
@@ -721,7 +722,7 @@ export function ObjectTab({ src, onSpectrum, held, compact = false }: { src: Sou
           </span>
         </div>
       )}
-      <div class="orow">
+      <div class="orow" hidden={compact}>
         <span class="faint">SIMBAD</span>
         <span>
           {id === 'asking'
@@ -737,7 +738,7 @@ export function ObjectTab({ src, onSpectrum, held, compact = false }: { src: Sou
                   : 'not reachable'}
         </span>
       </div>
-      <div class="orow">
+      <div class="orow" hidden={compact}>
         <span class="faint">Gaia DR3</span>
         <span>
           {id === 'asking'

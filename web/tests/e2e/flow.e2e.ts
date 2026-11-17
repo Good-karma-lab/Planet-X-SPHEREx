@@ -53,11 +53,17 @@ test('2. Findings: "Check this finding" opens the lab with the task', async () =
 
 const LOADED = /^[A-Z][a-z]{2} ’\d\d/; // the lab's status line is the date of the pass on show once the field is drawn
 
-test('3. the lab shows the task panel "Is this a real object?" for that finding', async () => {
+test('3. the lab shows the task panel for that finding: the first question of its series, with its answers', async () => {
+  // lab v2 (spec §5e): one question at a time from the series of the finding's kind (a track: "Does one dot step along the arrow?",
+  // a slow mover: "Does the dot in the ring shift…", …); the Task tab opens with the task
   await expect(page.getByTestId('task-panel')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('task-panel')).toContainText('Check a machine finding');
-  await expect(page.getByTestId('task-panel')).toContainText('Is this a real object?');
-  for (const b of ['task-moves', 'task-artefact', 'task-known']) await expect(page.getByTestId(b)).toBeVisible();
+  await expect(page.getByTestId('ptab-task')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('task-ask')).toHaveText(/\?$/);
+  const answers = page.getByTestId('task-tree').locator('[data-testid^="task-answer-"]');
+  expect(await answers.count()).toBeGreaterThanOrEqual(2);
+  await expect(page.getByTestId('task-answer-not_sure')).toBeVisible();
+  await expect(page.getByTestId('task-line')).toContainText(/Question 1 of \d/);
+  await expect(page.getByTestId('task-missed')).toBeVisible();
   await shot('3-task-panel');
 });
 
