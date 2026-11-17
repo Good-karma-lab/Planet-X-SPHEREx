@@ -18,6 +18,9 @@ const URL = arg('url', 'http://localhost:5187');
 const OUT = arg('out', 'test-results/mobile-flow');
 const sizeKey = arg('size', 'p390');
 const ENGINE = arg('engine', 'chromium');
+// --at ra,dec: the square to take (the globe is opened on it). Without it the square under the middle of the globe is taken,
+// and its field may have to be built from nothing (minutes).
+const AT = arg('at', '');
 const S = SIZES[sizeKey];
 const LOADED = /^[A-Z][a-z]{2} ’\d\d/;
 const dir = join(OUT, `${sizeKey}-${ENGINE}`);
@@ -139,8 +142,14 @@ try {
     const t = page.getByTestId('cov-toggle');
     if ((await t.getAttribute('aria-pressed')) !== 'true') await t.tap();
     await page.waitForTimeout(1500);
+    if (AT) {
+      const [ra, dec] = AT.split(',');
+      await page.goto(`${URL}/#/explore?cov=1&ra=${ra}&dec=${dec}&fov=20`);
+      await page.getByTestId('sky').waitFor();
+      await page.waitForTimeout(4000);
+    }
     const b = await box(page.getByTestId('sky'));
-    await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height * 0.4);
+    await page.touchscreen.tap(b.x + b.width / 2, b.y + b.height * (AT ? 0.5 : 0.4));
     await page.getByTestId('cov-card').waitFor({ timeout: 10000 });
     await page.waitForTimeout(500);
     await shot('03-square-card');
@@ -173,15 +182,16 @@ try {
     const mark = page.getByTestId('touch-mark');
     if ((await mark.getAttribute('aria-pressed')) !== 'true') await mark.tap();
     const p = await box(page.getByTestId('picture'));
-    const from = [p.x + p.width * 0.35, p.y + p.height * 0.6];
-    const to = [p.x + p.width * 0.55, p.y + p.height * 0.45];
+    const from = [p.x + p.width * 0.35, p.y + p.height * 0.5];
+    const to = [p.x + p.width * 0.55, p.y + p.height * 0.38];
     let glass = null;
     await slide(from, to, 12, async () => {
-      glass = await page.locator('canvas.loupe').boundingBox();
+      glass = await page.locator('canvas.loupe').boundingBox({ timeout: 3000 }).catch(() => null);
       await shot('05-magnifier');
     });
     if (!glass) throw new Error('no magnifier while the finger was down');
-    if (glass.y + glass.height > to[1] - 10) throw new Error('the magnifier is not above the finger');
+    // above the finger, or beside it near the top of the window: never over the point itself
+    if (to[0] > glass.x - 8 && to[0] < glass.x + glass.width + 8 && to[1] > glass.y - 8 && to[1] < glass.y + glass.height + 8) throw new Error('the magnifier covers the point under the finger');
     await page.getByTestId('mark-editor').waitFor({ timeout: 8000 });
     await page.waitForTimeout(400);
     await shot('06-mark-editor');
