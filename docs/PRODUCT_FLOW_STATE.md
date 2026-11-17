@@ -134,7 +134,8 @@ ssh -i ~/.ssh/oci_spherex_ed25519 ubuntu@158.179.217.127 'set -e; d=/var/lib/sky
 cd /Users/aostapenko/Work/Planet-X-SPHEREx && git checkout main && git merge --no-ff product-flow && make lint test && git push origin main
 ```
 
-**3. Environment on the VM.** Append to `/etc/sky/env`, see b below. Restart only through push.sh.
+**3. Environment on the VM.** Append to `/etc/sky/env`, see b below, including the Resend key copied without echo (section c).
+Restart only through push.sh.
 
 **4. Deploy.**
 
@@ -165,9 +166,9 @@ cd /Users/aostapenko/Work/Planet-X-SPHEREx && ./deploy/push.sh ubuntu@158.179.21
 SKY_PUBLIC_URL=https://www.spherex.space
 SKY_PRODUCT_DB=/var/lib/sky/product.sqlite
 SKY_CLIPS=/var/lib/sky/clips
-# only when the user gives them (sign-in opens by itself):
-# SKY_RESEND_API_KEY=...   SKY_MAIL_FROM="SPHEREx Space <signin@spherex.space>"
-# SKY_GOOGLE_CLIENT_ID=... SKY_GOOGLE_CLIENT_SECRET=...
+SKY_RESEND_API_KEY=<from ~/.config/spherex/resend_send.key, copied without echo: section c>
+SKY_MAIL_FROM="SPHEREx Space <noreply@mail.spherex.space>"
+# Google sign-in only if the user gives keys later: SKY_GOOGLE_CLIENT_ID=... SKY_GOOGLE_CLIENT_SECRET=...
 ```
 
 - **Never** `SKY_AUTH_DEV`: it shows the sign-in link on the page.
@@ -195,7 +196,11 @@ SKY_CLIPS=/var/lib/sky/clips
   - Secrets: `SKY_GOOGLE_CLIENT_ID` and `SKY_GOOGLE_CLIENT_SECRET`. With them set, the Google button shows by itself.
 - The user will be asked for the provider and the keys.
 
-**Decision until then: "Sign-in opens soon".**
+**Decision for the release: e-mail sign-in is OPEN** (Resend verified mail.spherex.space on 17 Nov: DKIM and SPF; a test mail with the
+sending-only key was delivered). The "Sign-in opens soon" mode stays as the fallback. It turns itself on whenever the key is
+missing, for example if the key is ever removed from /etc/sky/env.
+
+**The fallback, "Sign-in opens soon":**
 - The Cabinet tab stays. The sign-in panel says "Sign-in opens soon. Until then your marks and tasks are kept in this browser."
 - The e-mail field and the Google button are hidden. `POST /api/auth/email` refuses with 503 "sign-in opens soon".
 - Everything a guest can do works: take a square, mark, close a task, see Findings, the leaderboard and the globe.
@@ -213,9 +218,8 @@ SKY_CLIPS=/var/lib/sky/clips
   `SKY_MAIL_FROM="SPHEREx Space <noreply@mail.spherex.space>"`.
 - A sending-only key, limited to that domain, is on the release Mac at `~/.config/spherex/resend_send.key` (mode 600).
   - Never print it, commit it, or let it reach a log or the repository.
-- **Gate:** the domain is not verified yet. The user adds three DNS records at GoDaddy (`star-test/design-review/resend_dns_records.md`).
-  - Until Resend reports the domain verified, the key is NOT set on the VM, and production stays in "Sign-in opens soon".
-- **Once verified,** copy the key without echoing it: the file is read on the Mac and fed to the VM through the ssh standard input,
+- **Verified:** Resend reports the domain verified (DKIM and SPF), and a test mail was delivered. The key IS set on the VM at release.
+- **At step 3 of the deploy,** copy the key without echoing it: the file is read on the Mac and fed to the VM through the ssh standard input,
   never on a command line:
 
   ```bash
@@ -252,10 +256,14 @@ Each test is done in a real browser (Chrome, and the globe also in Firefox) and 
 5. **Findings:** a classified find has one quiet "People say: …, N of M" line on its card and its page, from /api/tasks/results.
    The cards show clips (`/api/findings/{id}/clip.webp` answers image/webp), promising first.
    - `#/findings/<id>` opens the finding's own page. The "Leaderboard" link opens `#/leaders`.
-6. **Cabinet:**
-   - Without sign-in: the panel says "Sign-in opens soon", the e-mail field is not there, and POST /api/auth/email gives 503.
-   - When a sender is set: one real sign-in by e-mail (the link arrives and logs in), a mark saved and seen again after a reload,
-     sign-out.
+6. **Cabinet and a real sign-in through a mailbox** (the supervisor asks the user for the address to use):
+   - `/api/me` says `auth.email: true`, `dev: false`. The sign-in panel shows the e-mail field, and no link appears on the page.
+   - Enter the address → "check your mail". The mail from `noreply@mail.spherex.space` arrives in that mailbox (not in spam), and
+     its link goes to `https://www.spherex.space/api/auth/callback?...`.
+   - The link signs in, and the Cabinet shows the user. A second click on the same link is refused (single use).
+   - A mark is saved and seen again after a reload. Sign-out works.
+   - The Resend dashboard shows the mail as delivered.
+   - If the mail does not arrive: remove SKY_RESEND_API_KEY, restart, and the site falls back to "Sign-in opens soon".
 7. **Leaderboard:** `#/leaders` loads; `/api/leaders` answers. No e-mail appears anywhere in its JSON.
 8. **Share links:** for each kind (a profile `/u/...`, a finding story, a discovery), fetch the share URL as a crawler:
    `curl -A "facebookexternalhit/1.1"` and `-A "Twitterbot"`.
