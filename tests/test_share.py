@@ -116,14 +116,20 @@ def test_sharing_an_achievement_makes_the_link_the_tags_and_the_picture(site: tu
     ):
         assert tag in page.text
     assert "example.org" not in page.text
-    crawler = guest.get("/s/achievement/ann.named?c=x", headers={"user-agent": "facebookexternalhit/1.1"})
-    assert crawler.status_code == 200
+    # social crawlers do not run the app: they read the tags from this page, and are counted as previews, not visits
+    for agent in ("facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)", "Twitterbot/1.0"):
+        crawler = guest.get("/s/achievement/ann.named?c=x", headers={"user-agent": agent})
+        assert crawler.status_code == 200 and crawler.headers["content-type"].startswith("text/html")
+        for need in ('property="og:title"', 'property="og:description"', 'property="og:image"', 'property="og:url"', 'name="twitter:card"',
+                     'name="twitter:image"', 'content="1200"', 'content="630"'):  # fmt: skip
+            assert need in crawler.text, (agent, need)
+        assert 'og:image" content="http://localhost/s/achievement/ann.named/image.png"' in crawler.text
     from PIL import Image
 
     png = guest.get("/s/achievement/ann.named/image.png")
     assert png.headers["content-type"] == "image/png" and Image.open(io.BytesIO(png.content)).size == (1200, 630)
     counts = guest.get("/api/share/counts").json()["counts"]
-    assert counts == [{"kind": "achievement", "ref": "ann.named", "channel": "x", "shares": 1, "visits": 1, "previews": 1}]
+    assert counts == [{"kind": "achievement", "ref": "ann.named", "channel": "x", "shares": 1, "visits": 1, "previews": 2}]
     assert set(counts[0]) == {"kind", "ref", "channel", "shares", "visits", "previews"}  # nothing about who
 
 
