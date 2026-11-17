@@ -587,3 +587,113 @@ def test_the_lab_adds_objects_to_a_new_or_an_existing_investigation(site: tuple[
     st.checks_status = lambda job: {"job": job, "state": "done", "can_submit": True, "checks": []}  # type: ignore[attr-defined]
     assert c.post(f"/api/me/investigations/{iid}/submit", json={"checks_job": "j"}).json()["state"] == "submitted"
     assert c.post(f"/api/me/investigations/{iid}/items", json=item).status_code == 409
+
+
+def test_smtp_sender_upgrades_to_tls_logs_in_and_sends(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import smtplib
+
+    from service.accounts import mail as mailmod
+    from service.accounts.mail import MailFailedError, SmtpSender, sender_from_env
+
+    for k in (
+        "SKY_RESEND_API_KEY",
+        "SKY_SMTP_HOST",
+        "SKY_SMTP_PORT",
+        "SKY_SMTP_USER",
+        "SKY_SMTP_PASSWORD",
+        "SKY_MAIL_FROM",
+        "SKY_AUTH_DEV",
+    ):
+        monkeypatch.delenv(k, raising=False)
+    calls: list[Any] = []
+
+    class FakeSMTP:
+        starttls_offered = True
+        refuse = False
+
+        def __init__(self, host: str, port: int, timeout: float = 0, context: Any = None) -> None:
+            calls.append(("connect", type(self).__name__, host, port))
+
+        def __enter__(self) -> FakeSMTP:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            calls.append(("quit",))
+
+        def ehlo(self) -> None:
+            calls.append(("ehlo",))
+
+        def has_extn(self, name: str) -> bool:
+            return self.starttls_offered
+
+        def starttls(self, context: Any = None) -> None:
+            calls.append(("starttls",))
+
+        def login(self, user: str, password: str) -> None:
+            calls.append(("login", user, password))
+
+        def send_message(self, msg: Any) -> None:
+            if self.refuse:
+                raise smtplib.SMTPRecipientsRefused({})
+            calls.append(
+                (
+                    "send",
+                    msg["From"],
+                    msg["To"],
+                    msg["Subject"],
+                    msg.get_body(("plain",)).get_content(),
+                    msg.get_body(("html",)).get_content(),
+                )
+            )
+
+    class FakeSMTPSSL(FakeSMTP):
+        pass
+
+    monkeypatch.setattr(mailmod.smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(mailmod.smtplib, "SMTP_SSL", FakeSMTPSSL)
+    monkeypatch.setenv("SKY_SMTP_HOST", "smtp.email.eu-frankfurt-1.oci.oraclecloud.com")
+    monkeypatch.setenv("SKY_SMTP_USER", "ocid1.user.oc1..x@ocid1.tenancy.oc1..y.zz.com")
+    monkeypatch.setenv("SKY_SMTP_PASSWORD", "smtp-secret")
+    monkeypatch.setenv("SKY_MAIL_FROM", "SPHEREx Space <signin@spherex.space>")
+    sender = sender_from_env()
+    assert isinstance(sender, SmtpSender) and sender.port == 587
+    link = "https://www.spherex.space/api/auth/callback?token=abc&x=1"
+    sender.send_link("ann@example.org", link, 15)
+    assert [c[0] for c in calls] == ["connect", "ehlo", "starttls", "ehlo", "login", "send", "quit"]  # TLS before the login
+    assert calls[0] == ("connect", "FakeSMTP", "smtp.email.eu-frankfurt-1.oci.oraclecloud.com", 587) and calls[4][1:] == (
+        "ocid1.user.oc1..x@ocid1.tenancy.oc1..y.zz.com",
+        "smtp-secret",
+    )
+    sent = calls[5]
+    assert sent[1:4] == ("SPHEREx Space <signin@spherex.space>", "ann@example.org", "Your sign-in link for SPHEREx Space")
+    assert link in sent[4] and "token=abc&amp;x=1" in sent[5]
+    # port 465 speaks TLS from the start; a server without a login takes mail with no login
+    calls.clear()
+    monkeypatch.setenv("SKY_SMTP_PORT", "465")
+    monkeypatch.delenv("SKY_SMTP_USER")
+    sender_from_env().send_link("ann@example.org", link, 15)
+    assert [c[0] for c in calls] == ["connect", "send", "quit"] and calls[0][1] == "FakeSMTPSSL"
+    # no STARTTLS offered: the password is never sent in the clear; a refusal is said, and nothing secret is logged
+    calls.clear()
+    FakeSMTP.starttls_offered = False
+    plain = SmtpSender("mail.example.org", 587, "user", "smtp-secret")
+    with caplog.at_level("WARNING"), pytest.raises(MailFailedError):
+        plain.send_link("ann@example.org", link, 15)
+    assert not any(c[0] in ("login", "send") for c in calls)
+    FakeSMTP.starttls_offered, FakeSMTP.refuse = True, True
+    with caplog.at_level("WARNING"), pytest.raises(MailFailedError):
+        plain.send_link("ann@example.org", link, 15)
+    assert "smtp-secret" not in caplog.text and "ann@example.org" not in caplog.text and "token=abc" not in caplog.text
+    # with an SMTP host set the service opens e-mail sign-in; Resend wins when both are set
+    monkeypatch.setenv("SKY_PRODUCT_DB", str(tmp_path / "product.sqlite"))
+    FakeSMTP.refuse = False
+    st = _State(tmp_path)
+    app = FastAPI()
+    register_accounts(app, st)
+    c = _client(app)
+    assert c.get("/api/me").json()["auth"]["email"] is True
+    assert c.post("/api/auth/email", json={"email": "ann@example.org"}).json() == {"sent": True, "minutes": 15}
+    monkeypatch.setenv("SKY_RESEND_API_KEY", "re_x")
+    assert type(sender_from_env()).__name__ == "ResendSender"
