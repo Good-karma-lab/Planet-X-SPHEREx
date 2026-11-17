@@ -107,3 +107,21 @@
 .candlist .cr-details > summary { cursor: pointer; font: 600 10.5px var(--font); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 4px 0; }
 .candlist .cr-details .sbar { max-height: none; overflow: visible; background: none; border-top: 1px solid var(--edge-soft); padding: 8px 0 0; margin-top: 8px; cursor: default; }
 .candlist .cr-details .sbar .tray-head { display: none; }
+
+/* a tree of plain questions: the answers one under another, each with its example pictures; the views keep one height per task */
+.taskpanel .tp-tree { display: flex; flex-direction: column; gap: 5px; }
+.taskpanel .tp-ans { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; text-align: left; white-space: normal; }
+.taskpanel .tp-ans span { flex: 1; min-width: 0; }
+.taskpanel .tp-ex { width: 44px; height: 44px; flex: none; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.16); object-fit: cover; background: #000; }
+.taskpanel .tp-back { align-self: flex-start; }
+.tv.tv-fixed { min-height: 196px; }
+.tv .tv-trio { display: flex; flex-direction: column; gap: 1px; }
+.tv .tv-cap { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--ink); }
+.tv .tv-cap i { width: 14px; height: 2px; border-radius: 1px; flex: none; }
+.tv .tv-cap em { font-style: normal; color: var(--muted); }
+.tv .tv-detmap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.tv .tv-det { position: relative; aspect-ratio: 1.6; border-radius: 6px; border: 1px solid var(--edge-soft); background: rgba(0, 0, 0, 0.3); }
+.tv .tv-det.on { background: rgba(255, 255, 255, 0.04); }
+.tv .tv-det i { position: absolute; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; }
+.tv .tv-det span { position: absolute; left: 5px; bottom: 3px; font: 500 10px var(--mono); color: var(--muted); }
+.tv .tv-det.on span { color: var(--ink); }

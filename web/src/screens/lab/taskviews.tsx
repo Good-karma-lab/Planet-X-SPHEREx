@@ -4,7 +4,6 @@
 import { useEffect, useMemo, useRef } from 'preact/hooks';
 import { useSpectrum, type Anomaly, type Source } from '../spectrum';
 import { binSpectrum, LAM_HI, LAM_LO, type Bin } from '../spectrum/bins';
-import { CatalogueCheck, useCatalogue } from '../spectrum/catalogue';
 import type { SpecPoint } from '../spectrum/types';
 
 /** The reference objects of the classes a red source may belong to: real objects, their spectra measured by the same service.
@@ -48,6 +47,8 @@ interface PlotProps {
   /** single exposures to draw (the points inside the marked ranges) */
   points?: SpecPoint[];
   testid?: string;
+  /** CSS px (132 by default) */
+  height?: number;
 }
 
 /** The scale that brings a reference onto the object: the median ratio over the bins both detect (null when they share fewer than 3). */
@@ -73,13 +74,13 @@ export function pointsIn(points: SpecPoint[], ranges: { lo: number; hi: number }
 const PLOT_H = 132;
 
 /** A small spectrum: flux against wavelength (0.75–5 µm, log), the object's bins with their errors, and what is laid over them. */
-function SpecPlot({ bins, curves = [], ranges = [], points = [], testid }: PlotProps) {
+function SpecPlot({ bins, curves = [], ranges = [], points = [], testid, height = PLOT_H }: PlotProps) {
   const cv = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const c = cv.current;
     if (!c) return;
     const W = c.clientWidth || 320;
-    const H = PLOT_H;
+    const H = height;
     const dpr = typeof devicePixelRatio === 'number' ? devicePixelRatio : 1;
     c.width = Math.round(W * dpr);
     c.height = Math.round(H * dpr);
@@ -182,7 +183,7 @@ function SpecPlot({ bins, curves = [], ranges = [], points = [], testid }: PlotP
       }
     }
   });
-  return <canvas ref={cv} class="tv-plot" style={{ height: `${PLOT_H}px` }} role="img" aria-label="Spectrum" data-testid={testid} />;
+  return <canvas ref={cv} class="tv-plot" style={{ height: `${height}px` }} role="img" aria-label="Spectrum" data-testid={testid} />;
 }
 
 /** One status line under a plot: how far the object's spectrum is. */
@@ -193,45 +194,83 @@ function specLine(view: { state?: string; measured?: number; total?: number } | 
   return `Spectrum: ${n} points`;
 }
 
-/** "Why is it red?": the source's spectrum under the spectra of real objects of each class, and its 2MASS and WISE fluxes. */
-export function RedView({ src }: { src: Source | null }) {
+/** The two example spectra of the question "which shape is closer?": real objects, measured by the same service. */
+const EX_A = REFERENCES[0]!; // ε Indi B: deep dips
+const EX_B = REFERENCES[1]!; // RW Aurigae: a smooth rise to the red
+
+/** A red source, one step of its questions at a time: the picture and the Blink answer the first three; the fourth shows its
+ *  spectrum next to the two examples. The spectra are asked for when the task opens, so they are there by the fourth question. */
+export function RedView({ src, show, passes }: { src: Source | null; show: string | null; passes: number }) {
   const own = useSpectrum(src);
-  const r0 = useSpectrum(src ? REFERENCES[0]!.src : null);
-  const r1 = useSpectrum(src ? REFERENCES[1]!.src : null);
-  const r2 = useSpectrum(src ? REFERENCES[2]!.src : null);
-  const refs = [r0, r1, r2];
+  const ra = useSpectrum(src ? EX_A.src : null);
+  const rb = useSpectrum(src ? EX_B.src : null);
   const bins = useMemo(() => binSpectrum(own.points), [own.points]);
-  const curves = refs.map((r, k) => ({ bins: binSpectrum(r.points), colour: REFERENCES[k]!.colour }));
-  const cat = useCatalogue(src, own.view?.state === 'done');
+  const binsA = useMemo(() => binSpectrum(ra.points), [ra.points]);
+  const binsB = useMemo(() => binSpectrum(rb.points), [rb.points]);
   const usable = own.points.filter((p) => p.ok).length;
+  const state = (v: typeof own, n: number) => (v.error ? 'no spectrum' : v.view?.state === 'done' ? (n ? '' : 'no spectrum') : 'measuring…');
   return (
-    <div class="tv" data-testid="task-red">
-      <SpecPlot bins={bins} curves={curves} testid="task-spectrum" />
-      <div class="tv-legend">
-        {REFERENCES.map((r, k) => {
-          const got = scaleTo(bins, curves[k]!.bins) != null;
-          const st = refs[k]!.view?.state;
-          return (
-            <span key={r.result} class={got ? '' : 'off'}>
-              <i style={{ background: r.colour }} />
-              {r.label}
-              {got ? '' : st === 'done' || refs[k]!.error ? ' · no spectrum' : ' · measuring…'}
-            </span>
-          );
-        })}
-      </div>
+    <div class="tv tv-fixed" data-testid="task-red">
+      {show === 'spectrum' ? (
+        <>
+          {(
+            [
+              ['This source', bins, '#ffffff', state(own, usable)],
+              [`A · ${EX_A.src.name}`, binsA, EX_A.colour, state(ra, ra.points.length)],
+              [`B · ${EX_B.src.name}, a dusty star`, binsB, EX_B.colour, state(rb, rb.points.length)],
+            ] as const
+          ).map(([name, b, colour, st], k) => (
+            <div class="tv-trio" key={k}>
+              <div class="tv-cap">
+                <i style={{ background: colour }} />
+                {name}
+                {st ? <em> · {st}</em> : null}
+              </div>
+              <SpecPlot bins={b} height={44} testid={k === 0 ? 'task-spectrum' : undefined} />
+            </div>
+          ))}
+        </>
+      ) : (
+        <div class="tv-line">
+          {show === 'passes' ? `Blink: ${passes} passes play, one after another` : 'On the picture: the ringed source, and its 2′ zoom'}
+        </div>
+      )}
       <div class="tv-line" data-testid="task-spectrum-line">
         {specLine(own.view, usable, own.error)}
-      </div>
-      <div class="tv-cat">
-        <CatalogueCheck a={cat} ready={own.view?.state === 'done' && usable > 0} />
       </div>
     </div>
   );
 }
 
-/** "Is this feature real?": the spectrum with the anomalous bins marked, the single exposures of those bins, and the detectors they fell on. */
-export function AnomalyView({ src, anomaly }: { src: Source | null; anomaly: Anomaly | null }) {
+/** The six detectors as squares, a dot for every exposure of the odd bins where the source fell on it (when the service says where). */
+function DetectorMap({ points, perDet }: { points: SpecPoint[]; perDet: number[] }) {
+  const placed = points.filter((p) => Number.isFinite((p as SpecPoint & { x?: number }).x) && Number.isFinite((p as SpecPoint & { y?: number }).y));
+  return (
+    <>
+      <div class="tv-detmap" data-testid="task-detmap">
+        {perDet.map((n, k) => (
+          <div key={k} class={`tv-det${n ? ' on' : ''}`} style={{ borderColor: n ? detColour(k + 1) : undefined }}>
+            {placed
+              .filter((p) => p.det === k + 1)
+              .map((p, i) => {
+                const q = p as SpecPoint & { x: number; y: number };
+                return <i key={i} style={{ left: `${(q.x / DET_SIDE) * 100}%`, top: `${(q.y / DET_SIDE) * 100}%`, background: detColour(k + 1) }} />;
+              })}
+            <span>
+              D{k + 1} <b>{n}</b>
+            </span>
+          </div>
+        ))}
+      </div>
+      <div class="tv-line">{placed.length ? 'A dot: where the source fell on the detector in one exposure' : 'Exposures per detector · the service does not say where on the detector'}</div>
+    </>
+  );
+}
+/** the side of a SPHEREx detector, pixels */
+const DET_SIDE = 2040;
+
+/** A spectral anomaly, one step of its questions at a time: the single exposures of the odd bins, then where they fell on the detectors. */
+export function AnomalyView({ src, anomaly, show }: { src: Source | null; anomaly: Anomaly | null; show: string | null }) {
   const own = useSpectrum(src);
   const bins = useMemo(() => binSpectrum(own.points), [own.points]);
   const ranges = anomaly?.drivers.map((d) => ({ lo: d.lo, hi: d.hi })) ?? [];
@@ -239,21 +278,19 @@ export function AnomalyView({ src, anomaly }: { src: Source | null; anomaly: Ano
   const usable = own.points.filter((p) => p.ok).length;
   const nights = new Set(inside.map((p) => Math.floor(p.mjd))).size;
   return (
-    <div class="tv" data-testid="task-anomaly">
-      <SpecPlot bins={bins} ranges={ranges} points={inside} testid="task-spectrum" />
-      <div class="tv-dets" title="The detectors the exposures of the anomalous bins fell on: a feature of one detector edge is an artefact">
-        {perDet.map((n, k) => (
-          <span key={k} class={n ? 'on' : ''} style={{ borderColor: n ? detColour(k + 1) : undefined }}>
-            D{k + 1}
-            <b>{n}</b>
-          </span>
-        ))}
-      </div>
-      <div class="tv-line" data-testid="task-spectrum-line">
-        {anomaly
-          ? `${anomaly.drivers.map((d) => `${d.lo.toFixed(2)}–${d.hi.toFixed(2)} µm ${d.z >= 0 ? '+' : '−'}${Math.abs(d.z).toFixed(0)}σ`).join(' · ')} · ${inside.length} exposures on ${nights} night${nights === 1 ? '' : 's'}`
-          : 'No anomaly of the search at this place'}
-      </div>
+    <div class="tv tv-fixed" data-testid="task-anomaly">
+      {show === 'detector' ? (
+        <DetectorMap points={inside} perDet={perDet} />
+      ) : (
+        <>
+          <SpecPlot bins={bins} ranges={ranges} points={inside} testid="task-spectrum" />
+          <div class="tv-line" data-testid="task-spectrum-line">
+            {anomaly
+              ? `Odd bins ${anomaly.drivers.map((d) => `${d.lo.toFixed(2)}–${d.hi.toFixed(2)} µm`).join(', ')} · ${inside.length} exposures on ${nights} night${nights === 1 ? '' : 's'}`
+              : 'No anomaly of the search at this place'}
+          </div>
+        </>
+      )}
       <div class="tv-line">{specLine(own.view, usable, own.error)}</div>
     </div>
   );

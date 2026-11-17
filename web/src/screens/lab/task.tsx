@@ -40,6 +40,89 @@ export const TASKS: Record<TaskKind, { title: string; ask: string; answers: [str
   submit: { title: 'Bring a finding to submit', ask: 'Checks before submit', answers: [] },
 };
 
+/** One step of a question tree (plain questions, not classes: spec §5b): what the lab shows with it, and the answers; an answer
+ *  leads to the next step or ends the path with a class. */
+export interface TreeStep {
+  id: string;
+  question: string;
+  /** what the lab shows with the question: picture | passes | defects | spectrum | exposures | detector */
+  show: string;
+  answers: { id: string; label: string; next?: string; result?: string; examples?: string[] }[];
+}
+
+const NOT_SURE = { id: 'not_sure', label: 'Not sure', result: 'cant_tell' };
+/** The trees as the service sends them in the task (service/accounts/agreement.py TREES): kept here too for a task opened by its
+ *  id alone, whose body the lab does not have. The service decides the class from the path; the lab only walks the steps. */
+export const TREES: Partial<Record<TaskKind, TreeStep[]>> = {
+  red: [
+    {
+      id: 'shape',
+      question: 'Is it a sharp point like the stars around it?',
+      show: 'picture',
+      answers: [
+        { id: 'sharp', label: 'Sharp point', next: 'every_pass', examples: ['star_point'] },
+        { id: 'fuzzy', label: 'Fuzzy or stretched', result: 'galaxy', examples: ['known_galaxy'] },
+        NOT_SURE,
+      ],
+    },
+    {
+      id: 'every_pass',
+      question: 'Is it there in every pass?',
+      show: 'passes',
+      answers: [{ id: 'yes', label: 'Yes', next: 'defect' }, { id: 'some', label: 'Only in some', result: 'artefact', examples: ['cosmic_ray'] }, NOT_SURE],
+    },
+    {
+      id: 'defect',
+      question: 'Does it look like one of these defects?',
+      show: 'defects',
+      answers: [
+        { id: 'yes', label: 'Yes', result: 'artefact', examples: ['satellite_streak', 'picture_edge', 'bright_star_ghost'] },
+        { id: 'no', label: 'No', next: 'spectrum' },
+        NOT_SURE,
+      ],
+    },
+    {
+      id: 'spectrum',
+      question: 'Its spectrum next to two examples: which shape is closer?',
+      show: 'spectrum',
+      answers: [
+        { id: 'dips', label: 'A: deep dips, like ε Indi B', result: 'brown_dwarf', examples: ['eps_indi_b', 'wise_0855'] },
+        { id: 'smooth', label: 'B: a smooth rise to the red', result: 'dusty_star', examples: ['dusty_star'] },
+        NOT_SURE,
+      ],
+    },
+  ],
+  anomaly: [
+    {
+      id: 'exposures',
+      question: 'The odd point of the spectrum: is it in more than one exposure?',
+      show: 'exposures',
+      answers: [{ id: 'yes', label: 'Yes', next: 'detector' }, { id: 'one', label: 'Only one', result: 'cosmic_ray', examples: ['cosmic_ray'] }, NOT_SURE],
+    },
+    {
+      id: 'detector',
+      question: 'Where did those exposures fall on the detector?',
+      show: 'detector',
+      answers: [
+        { id: 'edge', label: 'Near an edge or a bright star', result: 'detector', examples: ['picture_edge', 'bright_star_ghost'] },
+        { id: 'open', label: 'In the open', result: 'real' },
+        NOT_SURE,
+      ],
+    },
+  ],
+};
+
+/** The step a path of answers has reached: the first step for an empty path; null when the path has ended or is not of the tree. */
+export function stepAt(tree: TreeStep[], path: string[]): TreeStep | null {
+  let step: TreeStep | null = tree[0] ?? null;
+  for (const answer of path) {
+    const a = step?.answers.find((x) => x.id === answer);
+    if (!a || !a.next) return null;
+    step = tree.find((x) => x.id === a.next) ?? null;
+  }
+  return step;
+}
+
 /** A task about one object: that object alone gets the bright ring and its label, the rest is dimmed (spec §5b). */
 export const focusKind = (k: TaskKind): boolean => k !== 'cell';
 
@@ -276,6 +359,8 @@ interface NextTask {
   dec: number | null;
   /** the field size the find was made in, arcminutes (when the service says it) */
   fov?: number | null;
+  /** red sources and anomalies: the tree of plain questions the lab asks */
+  tree?: TreeStep[];
 }
 
 async function takeTask(kind: Takeable, ref?: string | null): Promise<NextTask | null | 'failed'> {
@@ -316,8 +401,8 @@ export interface TaskArgs {
   /** the pass on show (null in Days) and how many passes the field has: a square is looked through when every pass was shown */
   pass: number | null;
   passesTotal: number;
-  /** what the lab shows for the task's question (the mover's blink and ruler, the red source's spectrum, the anomaly's bins) */
-  extra?: ComponentChildren;
+  /** what the lab shows for the task's question (the mover's blink and ruler), or for one step of a question tree (`show` of the step) */
+  view?: (show: string | null) => ComponentChildren;
   /** the other overlays are on show (off by default in a task about one object); and the switch for it */
   others: boolean;
   setOthers: (on: boolean) => void;
@@ -331,6 +416,9 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
   const [refs, setRefs] = useState<{ cell: string | null; finding: string | null }>({ cell: task?.cell_id ?? null, finding: task?.finding_id ?? null });
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState('');
+  // a tree of plain questions (red source, anomaly): the service's own when the task brought it, and the answers given so far
+  const [tree, setTree] = useState<TreeStep[] | null>(task ? (TREES[task.kind] ?? null) : null);
+  const [path, setPath] = useState<string[]>([]);
   const checks = useChecks();
   // how the task was looked at: seconds with the lab visible, and which passes were on show
   const look = useRef({ seconds: 0, passes: new Set<number>() });
@@ -349,6 +437,8 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     setId(task?.id ?? null);
     setRefs({ cell: task?.cell_id ?? null, finding: task?.finding_id ?? null });
     setLine('');
+    setTree(task ? (TREES[task.kind] ?? null) : null);
+    setPath([]);
     checks.reset();
     if (!task || task.kind === 'submit') return;
     let stop = false;
@@ -372,6 +462,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
       else {
         setId(t.id);
         setRefs({ cell: t.cell_id, finding: t.finding_id });
+        if (Array.isArray(t.tree) && t.tree.length) setTree(t.tree);
       }
     });
     return () => {
@@ -389,7 +480,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
   }, [wantChecks, a.fieldKey, key, marksKey]);
   if (!task) return null;
 
-  const close = async (result: string) => {
+  const close = async (result: string, answers?: string[]) => {
     if (busy) return;
     setBusy(true);
     setLine('saving…');
@@ -398,7 +489,8 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     // closing needs an account; a guest's answer still counts the square as viewed, and the next task opens
     if (id) {
       const r = await post(`/api/me/tasks/${encodeURIComponent(id)}/done`, {
-        result,
+        // a tree of questions: the path of answers goes, and the service says which class it leads to
+        ...(answers ? { path: answers } : { result }),
         mark_ids: markIds,
         seconds: look.current.seconds,
         passes_shown: look.current.passes.size,
@@ -410,8 +502,10 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
         points?: number;
         achievements?: { name?: string }[];
         agreement?: { answers?: number; needed?: number };
+        class?: { label?: string };
       };
       const items = [
+        ...(got.class?.label ? [`Your answers say: ${got.class.label}`] : []),
         ...(got.achievements ?? []).map((x) => `Achievement: ${x.name ?? ''}`),
         ...(typeof got.points === 'number' && got.points > 0 ? [`+${got.points} points`] : []),
         // red sources and anomalies settle by agreement: how many answers the find has so far
@@ -450,6 +544,12 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
   );
   const n = a.marksHere.length;
   const T = TASKS[task.kind];
+  // a tree of plain questions: one step at a time; an answer goes on to the next step or ends the task with the path
+  const step = tree ? stepAt(tree, path) : null;
+  const answer = (x: TreeStep['answers'][number]) => {
+    if (x.next) setPath([...path, x.id]);
+    else void close(x.result ?? 'cant_tell', [...path, x.id]);
+  };
   return (
     <div class={`taskpanel k-${task.kind}`} data-testid="task-panel">
       <div class="tp-head">
@@ -462,32 +562,85 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
           </label>
         )}
       </div>
-      <div class="tp-ask">{T.ask}</div>
+      <div class="tp-ask" data-testid="task-ask">
+        {step ? step.question : T.ask}
+      </div>
       {(task.kind === 'finding' || task.kind === 'submit') && <ChecksList view={checks.view} />}
-      {a.extra}
+      {a.view?.(step ? step.show : null)}
       <div class="tp-line" data-testid="task-line">
         {line ||
           (task.kind === 'cell'
             ? `${n} mark${n === 1 ? '' : 's'} in this square`
             : task.kind === 'finding' || task.kind === 'submit'
               ? checksStatus(checks.view) || (task.kind === 'finding' ? 'Checks wait for a mark on the object' : '')
-              : '')}
+              : step && tree
+                ? `Question ${path.length + 1} of at most ${tree.length}`
+                : '')}
       </div>
-      <div class={`tp-btns n${T.answers.length}`}>
-        {T.answers.map(([result, text, tip], k) => (
+      {step ? (
+        <div class="tp-tree" data-testid="task-tree">
+          {step.answers.map((x, k) => (
+            <button
+              key={x.id}
+              class={`btn sm tp-ans${k === 0 ? ' primary' : ''}${x.id === 'not_sure' ? ' quiet' : ''}`}
+              disabled={busy}
+              onClick={() => answer(x)}
+              data-testid={`task-answer-${x.id}`}
+            >
+              <span>{x.label}</span>
+              {(x.examples ?? []).map((name) => (
+                <img
+                  key={name}
+                  class="tp-ex"
+                  src={`/examples/${name}.webp`}
+                  alt=""
+                  title={EXAMPLE_WORD[name] ?? name}
+                  onError={(e) => ((e.target as HTMLImageElement).style.display = 'none')}
+                />
+              ))}
+            </button>
+          ))}
+          {/* always there, so the panel keeps its height from the first question on */}
           <button
-            key={result}
-            class={`btn sm${(task.kind === 'cell' ? result === 'marks' : k === 0) ? ' primary' : ''}${result === 'cant_tell' ? ' quiet' : ''}`}
-            disabled={busy || (task.kind === 'cell' && result === 'marks' && n === 0)}
-            title={tip}
-            onClick={() => void close(result)}
-            data-testid={`task-${result}`}
+            class="mini tp-back"
+            style={{ visibility: path.length > 0 ? 'visible' : 'hidden' }}
+            disabled={busy}
+            onClick={() => setPath(path.slice(0, -1))}
+            data-testid="task-back"
           >
-            {text}
+            Back
           </button>
-        ))}
-        {task.kind === 'submit' && btn('Check and submit', () => void declare(), !a.fieldKey || checks.view.state === 'running', true, 'task-check')}
-      </div>
+        </div>
+      ) : (
+        <div class={`tp-btns n${T.answers.length}`}>
+          {T.answers.map(([result, text, tip], k) => (
+            <button
+              key={result}
+              class={`btn sm${(task.kind === 'cell' ? result === 'marks' : k === 0) ? ' primary' : ''}${result === 'cant_tell' ? ' quiet' : ''}`}
+              disabled={busy || (task.kind === 'cell' && result === 'marks' && n === 0)}
+              title={tip}
+              onClick={() => void close(result)}
+              data-testid={`task-${result}`}
+            >
+              {text}
+            </button>
+          ))}
+          {task.kind === 'submit' && btn('Check and submit', () => void declare(), !a.fieldKey || checks.view.state === 'running', true, 'task-check')}
+        </div>
+      )}
     </div>
   );
 }
+
+/** What an example picture shows (its tooltip): each is a fixed picture made once from a real object of our own data. */
+export const EXAMPLE_WORD: Record<string, string> = {
+  star_point: 'A star: a sharp point',
+  known_galaxy: 'A known galaxy: fuzzy, stretched',
+  cosmic_ray: 'A cosmic ray: in one exposure only',
+  satellite_streak: 'A satellite streak',
+  picture_edge: 'The edge of the picture',
+  bright_star_ghost: 'A ring or spike of a bright star',
+  eps_indi_b: 'ε Indi B: deep dips',
+  wise_0855: 'WISE 0855−0714: deep dips',
+  dusty_star: 'A dusty star: a smooth rise to the red',
+};

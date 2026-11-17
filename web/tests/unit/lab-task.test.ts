@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHECK_IDS, checksStatus, declaredWord, parseChecks, taskOfParams, taskParams } from '../../src/screens/lab/task';
+import { CHECK_IDS, checksStatus, declaredWord, parseChecks, stepAt, taskOfParams, taskParams, TREES } from '../../src/screens/lab/task';
 
 describe('the lab task of an address', () => {
   it('is absent without a task parameter', () => {
@@ -63,5 +63,21 @@ describe('a declared submit', () => {
     expect(declaredWord({ id: 'i', state: 'blocked' })).toBe('Not submitted: a check failed');
     expect(declaredWord({ id: 'i', state: 'submitted', submitted: 'user:abc' })).toBe('Submitted: user:abc');
     expect(declaredWord(null, 401)).toBe('Sign in to submit');
+  });
+});
+
+describe('a tree of plain questions', () => {
+  it('walks a red source from the first question to the spectrum', () => {
+    const tree = TREES.red!;
+    expect(stepAt(tree, [])?.id).toBe('shape');
+    expect(stepAt(tree, ['sharp'])?.id).toBe('every_pass');
+    expect(stepAt(tree, ['sharp', 'yes', 'no'])?.id).toBe('spectrum');
+    // an answer that ends the path leaves no further step; nor does an answer the step does not have
+    expect(stepAt(tree, ['fuzzy'])).toBeNull();
+    expect(stepAt(tree, ['sharp', 'maybe'])).toBeNull();
+  });
+  it('ends every step with "Not sure", which is "Can’t tell"', () => {
+    for (const tree of [TREES.red!, TREES.anomaly!])
+      for (const s of tree) expect(s.answers[s.answers.length - 1]).toEqual({ id: 'not_sure', label: 'Not sure', result: 'cant_tell' });
   });
 });

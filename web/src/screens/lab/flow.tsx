@@ -580,21 +580,23 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   }, [taskKey, track, anomaly]);
   const labelOf = (i: number) => a.passes.find((q) => q.index === i)?.label ?? `pass ${i + 1}`;
   const taskSrc: Source | null = task && (task.kind === 'red' || task.kind === 'anomaly') && a.grid ? at : null;
-  const extra =
-    task?.kind === 'moves' ? (
-      <MoverView
-        blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'off' : 'waits for the search of the field'}
-        ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
-        search={track ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes` : 'no track at this place yet'}
-      />
-    ) : task?.kind === 'red' ? (
-      <RedView src={taskSrc} />
-    ) : task?.kind === 'anomaly' ? (
-      <AnomalyView src={taskSrc} anomaly={anomaly} />
-    ) : null;
+  // what the lab shows with the task's question, or with one step of a tree of questions (`show` of the step)
+  const view = (show: string | null): ComponentChildren => {
+    if (task?.kind === 'moves')
+      return (
+        <MoverView
+          blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'all passes' : 'waits for the search of the field'}
+          ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
+          search={track ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes` : 'no track at this place yet'}
+        />
+      );
+    if (task?.kind === 'red') return <RedView src={taskSrc} show={show} passes={a.passes.length} />;
+    if (task?.kind === 'anomaly') return <AnomalyView src={taskSrc} anomaly={anomaly} show={show} />;
+    return null;
+  };
   const others = a.params['others'] === '1';
   const taskPanel = useLabTask({
-    extra,
+    view,
     others,
     setOthers: (on) => a.set({ others: on ? '1' : null }),
     params: a.params,
