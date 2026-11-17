@@ -66,6 +66,8 @@ class MarkIn(BaseModel):
     note: str = Field("", max_length=2000)
     created: str | None = Field(None, max_length=40)
     mjd: float | None = Field(None, ge=48000.0, le=90000.0)  # the date of the frame the mark was put on (the lab sends it)
+    # the first mark of the same mover, when the lab knows a second tap is the same body on another pass (kept and returned only)
+    link: str | None = Field(None, pattern=ID)
 
 
 class TapIn(BaseModel):
