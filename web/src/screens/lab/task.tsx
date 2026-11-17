@@ -226,7 +226,7 @@ export interface NextTask {
   predicted?: { mjd?: number | null; path?: [number, number][] | null; ra?: number | null; dec?: number | null } | null;
 }
 
-async function takeTask(kind: Takeable, ref?: string | null): Promise<NextTask | null | 'failed'> {
+export async function takeTask(kind: Takeable, ref?: string | null): Promise<NextTask | null | 'failed'> {
   try {
     const q = new URLSearchParams({ kind });
     if (ref) q.set(kind === 'cell' ? 'cell_id' : 'finding_id', ref);
@@ -503,8 +503,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           class="tp-tree"
           data-testid="task-tree"
           // as tall as the longest step of this series (its answers and their example pictures), so no step jumps and none leaves a gap
-          // with "Mark something the machine missed" at its end, so a shorter step's spare room is under the button, not between
-          style={{ minHeight: `${44 + Math.max(...(steps ?? [step]).map((x) => x.answers.reduce((h, y) => h + ((EXAMPLES[`${seriesId}.${x.id}.${y.id}`] ?? []).length ? 52 : 38) + 6, 0)))}px` }}
+          // the card hugs its content: a step with fewer answers is shorter (the tab's list under it moves, the picture never does)
         >
           {step.answers.map((x, k) => (
             <button
@@ -575,3 +574,23 @@ export const EXAMPLE_WORD: Record<string, string> = {
   wise_0855: 'WISE 0855−0714: deep dips',
   dusty_star: 'A dusty star: a smooth rise to the red',
 };
+
+/** No task open: the one way to start one from the lab ("Give me a square": the next quarter of a square to look through). */
+export function GiveSquare() {
+  const [line, setLine] = useState('');
+  const go = async () => {
+    setLine('asking…');
+    const t = await takeTask('cell');
+    const to = t && t !== 'failed' ? taskParams(t) : null;
+    if (to) location.hash = `#/lab?${new URLSearchParams(to).toString()}`;
+    else setLine(t === 'failed' ? 'Tasks did not answer' : 'No square is waiting for a look');
+  };
+  return (
+    <section class="psec give-square" data-testid="give-square">
+      <button class="btn primary" onClick={() => void go()} data-testid="give-square-button">
+        Give me a square
+      </button>
+      {line && <span class="cb-status">{line}</span>}
+    </section>
+  );
+}

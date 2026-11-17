@@ -176,6 +176,17 @@ export function effectWord(e: MarkEffect | null): string {
   }
 }
 
+/** the first mark of the same mover: its `link`, or (the account does not keep `link`) the earliest "It moves" mark of the same field
+ *  with the same label; null for a mark that is its own head */
+export function headOf(m: Mark, all: Mark[]): Mark | null {
+  if (m.link) return all.find((q) => q.id === m.link) ?? null;
+  if (m.kind !== 'moves') return null;
+  const first = all
+    .filter((q) => q.kind === 'moves' && q.field_key === m.field_key && q.label === m.label && !q.link)
+    .sort((x, y) => x.created.localeCompare(y.created))[0];
+  return first && first.id !== m.id ? first : null;
+}
+
 /** a mark's colour: its kind's, else the level of before */
 const markColour = (m: Pick<Mark, 'kind' | 'level'>) => (m.kind ? KIND_COLOUR[m.kind] : LEVEL_COLOUR[m.level]);
 
@@ -192,8 +203,10 @@ export interface LabFlow {
   floats: ComponentChildren;
   /** in the playback bar, next to Blink: the two pass pickers of a Blink of two passes */
   blinkPick: ComponentChildren;
-  /** in the Object tab: the card of what is selected (a mark or a source) with its note and the two actions, and the field's marks */
+  /** the card of what is selected (a mark or a source) with its action */
   card: ComponentChildren;
+  /** the field's marks, one row per mark (Task tab) */
+  marksList: ComponentChildren;
   /** on the picture's status line: the investigation of the field, opening it in the Cabinet */
   chip: ComponentChildren;
   /** a mark's card is open: the Object tab is the mark's alone */
@@ -380,11 +393,26 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ctx.lineWidth = 1.8;
         ctx.strokeStyle = 'rgba(255,200,110,0.95)';
         ctx.stroke();
+        // every visit: a faint dot with its number (red when tapped as missing); the one on show is bright, with its ring below
+        ctx.font = '600 10px ui-monospace, SFMono-Regular, Menlo, monospace';
         xy.forEach(([x, y], k) => {
+          const miss = taskTrack.missing.includes(tt[k]!.i);
+          const cur = k === near && Math.abs(yr(tt[k]!.mjd) - env.year) < 0.25 / 365.25;
           ctx.beginPath();
-          ctx.arc(x, y, 2.6, 0, 2 * Math.PI);
-          ctx.fillStyle = taskTrack.missing.includes(tt[k]!.i) ? '#ff6b6b' : 'rgba(255,200,110,0.95)';
+          ctx.arc(x, y, cur ? 3.4 : 3, 0, 2 * Math.PI);
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+          ctx.stroke();
+          ctx.fillStyle = miss ? '#ff6b6b' : cur ? '#ffd08a' : 'rgba(255,200,110,0.55)';
           ctx.fill();
+          if (!cur) {
+            const t = String(tt[k]!.i + 1);
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#000';
+            ctx.strokeText(t, x - 13, y + 4);
+            ctx.fillStyle = miss ? '#ffb3b3' : 'rgba(255,214,150,0.8)';
+            ctx.fillText(t, x - 13, y + 4);
+          }
         });
         // a visit outside the picture: where the path leaves it, an arrow at the edge and its number (never cut silently)
         const inside = ([x, y]: readonly [number, number]) => x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
@@ -589,7 +617,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         const x = box.x + u * box.w;
         const y = box.y + v * box.h;
         const r = wall ? 4 : 6;
-        const head = m.link ? ms.find((q) => q.id === m.link) : null;
+        const head = headOf(m, ms);
         if (head) {
           // the same mover on another pass: a dot, a thin line to where it was first marked
           const [hu, hv] = uv(head.ra, head.dec);
@@ -713,9 +741,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // "tap it here": the click is the mover's place on this pass, even right beside its first mark
     if (hit && !(tool === 'mark' && tapHere)) {
       // a linked dot opens its mover's one mark
-      const id = (hit.link && marksRef.current.some((q) => q.id === hit.link) ? hit.link : hit.id)!;
+      const id = headOf(hit, marksRef.current)?.id ?? hit.id;
       setOpen(id === open ? null : id);
-      if (id !== open) a.setTab('obj'); // its card
+      if (id !== open) a.setTab('cand'); // its card, in the Task tab
       return true;
     }
     if (tool === 'mark') {
@@ -748,11 +776,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         setTapHere(null);
         setTool(null);
         setOpen(tapHere.id); // one mark: its card stays the first one's
-        a.setTab('obj');
+        a.setTab('cand');
         return true;
       }
       setOpen(m.id);
-      a.setTab('obj'); // its card
+      a.setTab('cand'); // its card, in the Task tab
       return true;
     }
     if (open) setOpen(null); // the click goes on to the lab: a source under it is selected
@@ -1024,9 +1052,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       setUp.current = stepKey;
       if (!a.params['film']) a.set({ film: (visits.reduce((x, y) => x + y, 0) / visits.length).toFixed(3), arch: null });
     } else if (show === 'blink2' || (!show && task.kind === 'moves')) {
+      // two passes are a Months view: out of Days at once (a track task before this one may have left it there)
+      if (a.params['film']) a.set({ film: null });
       if (!track || track.passes.length < 2) return;
       setUp.current = stepKey;
-      if (a.params['film']) a.set({ film: null });
       blinkTrack(track);
       a.pickTrack(trackIx);
     } else if (show === 'old_surveys' || show === 'old_new') {
@@ -1180,7 +1209,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
   }, [si.signedIn, !!a.sel, open]);
   const card =
-    cur || a.sel || marksHere.length ? (
+    cur || a.sel ? (
       <div class="objcard" data-testid="flow-card">
         {cur ? (
           <>
@@ -1199,7 +1228,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
                 class="mini"
                 title="Remove this mark"
                 onClick={() => {
-                  for (const q of marks) if (q.link === cur.id) removeMark(q.id);
+                  for (const q of marks) if (q.id !== cur.id && headOf(q, marks)?.id === cur.id) removeMark(q.id);
                   removeMark(cur.id);
                   setOpen(null);
                 }}
@@ -1280,14 +1309,19 @@ export function useLabFlow(a: FlowArgs): LabFlow {
             {actions}
           </>
         ) : null}
-        {marksHere.length > 0 && (
+      </div>
+    ) : null;
+
+  // the field's marks, one row per mark (a mover marked on more passes is one row): in the Task tab
+  const marksList =
+    marksHere.length > 0 ? (
           <div class="oc-marks" data-testid="marks-list">
             <div class="psub">Marks in this field</div>
             {marksHere
-              .filter((m) => !m.link || !marksHere.some((q) => q.id === m.link))
+              .filter((m) => !headOf(m, marks))
               .map((m) => {
                 // a mover marked on more passes is one row: "It moves · 2 passes"
-                const seen = 1 + marks.filter((q) => q.link === m.id).length;
+                const seen = 1 + marks.filter((q) => q.id !== m.id && headOf(q, marks)?.id === m.id).length;
                 return (
                   <button key={m.id} class={`ft-mark ${m.id === open ? 'on' : ''}`} onClick={() => setOpen(m.id === open ? null : m.id)}>
                     <i style={{ background: markColour(m) }} />
@@ -1297,8 +1331,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
                 );
               })}
           </div>
-        )}
-      </div>
     ) : null;
 
   // the investigation of the field is seen on the picture's status line: a chip that opens it in the Cabinet
@@ -1330,7 +1362,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
   }, [eff, tapHere?.id]);
   const status = [
-    tapHere ? `It moves · tap it here in ${tapHere.passLabel}` : open && eff && (eff.id === open || marks.some((m) => m.id === eff.id && m.link === open)) ? effectWord(eff) : '',
+    tapHere ? `It moves · tap it here in ${tapHere.passLabel}` : open && eff && (eff.id === open || marks.some((m) => m.id === eff.id && headOf(m, marks)?.id === open)) ? effectWord(eff) : '',
     a.square?.line ?? '',
     a.known ? knownStatus(known, counts, knownSilent ? knownRetry.nextIn : null) : '',
     tool === 'mark' && !tapHere ? 'Mark: click a place' : '',
@@ -1365,6 +1397,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         {si.popup}
       </>
     ),
+    marksList,
     chip,
     markOpen: !!cur,
     catalogueAt: (ra, dec, year) => catalogueAt(knownRef.current, ra, dec, year).object,

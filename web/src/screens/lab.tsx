@@ -1,6 +1,7 @@
 import { isSquareTask } from './lab/rules';
 import { LoadOverlay, loadStep } from './lab/loading';
 import { useSquareLook } from './lab/square';
+import { GiveSquare } from './lab/task';
 import { SearchMark, SearchRow, searchingLine, useRetry, type SearchInfo } from './lab/progress';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -522,17 +523,30 @@ export function Lab({ route }: { route: Route }) {
   const [specOpen, setSpecOpen] = useState(false);
   useEffect(() => setSpecOpen(false), [ra, dec, fov]);
   const colRef = useRef<HTMLDivElement>(null);
+  // the panel's three tabs: Task (what to do: the task, the marks, what the searches found), Object (the selected object's passport
+  // and spectrum), View (how the picture looks). A selection during a task does not take the person away from the task: the Object
+  // tab shows a dot until it is opened.
+  const [ptab, setPtabRaw] = useState<'task' | 'obj' | 'view'>('task');
+  const [objNew, setObjNew] = useState(false);
+  const setPtab = (t: 'task' | 'obj' | 'view') => {
+    setPtabRaw(t);
+    if (t === 'obj') setObjNew(false);
+    colRef.current?.scrollTo({ top: 0 });
+  };
+  // a task that opens (the next one included) is shown in its tab, whatever tab was open before
+  useEffect(() => {
+    if (p['task']) {
+      setPtabRaw('task');
+      setObjNew(false);
+    }
+  }, [p['task']]);
   const setTab = (t: Tab) => {
-    if (t === 'spec') return setSpecOpen(true);
-    if (t === 'ctl') return; // the controls are the column itself: nothing to scroll to
-    const id = t === 'obj' ? 'sec-obj' : 'sec-look';
-    // after the render that shows the section; only the panel's column scrolls (never the page), and the section starts whole
-    setTimeout(() => {
-      const col = colRef.current;
-      const el = col?.querySelector(`#${id}`) as HTMLElement | null;
-      if (!col || !el) return;
-      col.scrollTo({ top: Math.max(0, col.scrollTop + el.getBoundingClientRect().top - col.getBoundingClientRect().top), behavior: 'smooth' });
-    }, 60);
+    if (t === 'ctl') return;
+    if (t === 'cand') return setPtab('task');
+    if (t === 'obj' || t === 'spec') {
+      if (p['task'] && ptab !== 'obj') return setObjNew(true);
+      return setPtab('obj');
+    }
   };
   const [sel, setSel] = useState<Source | null>(null);
   const pictures = useRef(new Map<number, { n: number; rgb: Uint16Array }>());
@@ -3341,8 +3355,6 @@ export function Lab({ route }: { route: Route }) {
     );
   })();
 
-  // something is selected: a source, an anomaly, a pair, or an open mark (the Selected object section exists only then)
-  const hasSelection = !!sel || selAn !== null || pairSel !== null || flow.markOpen;
   // the picture's status line: a note, a wait, the date of what is shown (the flow's own words follow it)
   const mainStatus: string =
     note ||
@@ -3841,10 +3853,32 @@ export function Lab({ route }: { route: Route }) {
         <aside class="panel">
           {/* phones and upright tablets: the panel is a bottom sheet pulled up by this grabber (not displayed on a desktop) */}
           <SheetGrip peek=".taskpanel, .sqlook, :scope:not(:has(.taskpanel, .sqlook)) > .pcol > section:first-child > .psh" under=".lab .tbar" label="Lab panel" />
-          {flow.taskPanel}
-          {square.button}
+          <div class="ptabs" role="tablist" aria-label="Panel" data-testid="panel-tabs">
+            {(
+              [
+                ['task', inTask ? 'Task' : 'Find'],
+                ['obj', 'Object'],
+                ['view', 'View'],
+              ] as const
+            ).map(([k, name]) => (
+              <button key={k} role="tab" aria-selected={ptab === k} class={ptab === k ? 'on' : ''} onClick={() => setPtab(k)} data-testid={`ptab-${k}`}>
+                {name}
+                {k === 'task' && foundCount > 0 && <span class="ptab-n">{foundCount}</span>}
+                {k === 'obj' && objNew && <i class="ptab-dot" title="Something new is selected" />}
+              </button>
+            ))}
+          </div>
+          {ptab === 'task' && flow.taskPanel}
+          {ptab === 'task' && square.button}
           <div class="pbody pcol" ref={colRef}>
-            <section class="psec" id="sec-look" data-testid="sec-look">
+            {ptab === 'task' && !inTask && <GiveSquare />}
+            {ptab === 'task' && flow.markOpen && (
+              <section class="psec" id="sec-mark" data-testid="sec-mark">
+                <div class="psh">Mark</div>
+                {flow.card}
+              </section>
+            )}
+            <section class="psec" id="sec-look" data-testid="sec-look" hidden={ptab !== 'task'}>
               <div class="psh">
                 To look at{foundCount > 0 && <span class="tbadge" data-testid="look-count">{foundCount}</span>}
               </div>
@@ -4313,22 +4347,42 @@ export function Lab({ route }: { route: Route }) {
                 />
 
             </section>
-            {hasSelection && (
+            {ptab === 'task' && (flow.marksList || flow.peopleSearch.count) && (
+              <section class="psec" id="sec-marks" data-testid="sec-marks">
+                <div class="psh">Marks</div>
+                {flow.marksList}
+                {opts.people && flow.peopleSearch.state === 'done' && (
+                  <div class="people-line" data-testid="people-line">
+                    {Number(flow.peopleSearch.count ?? 0) > 0 ? `People's marks here: ${flow.peopleSearch.count} places` : "People's marks here: none yet"}
+                  </div>
+                )}
+              </section>
+            )}
+            {ptab === 'obj' && !(sel || selAn !== null || pairSel !== null) && (
+              <section class="psec" id="sec-obj-none">
+                <div class="obj-none">Click an object on the picture</div>
+              </section>
+            )}
+            {ptab === 'obj' && (sel || selAn !== null || pairSel !== null) && (
               <section class="psec" id="sec-obj" data-testid="sec-obj">
-                <div class="psh">Selected object</div>
-                <div class={`pobj${flow.markOpen ? ' mark-open' : ''}`}>
-                  {!flow.markOpen && (sel || selAn !== null) && (
+                <div class="pobj">
+                  {(sel || selAn !== null) && (
                     <div class="sel-head" data-testid="sel-head">
                       <b>{selAn !== null ? `Anomaly ${selAn}` : (sel?.name ?? (sel ? `${formatRA(sel.ra)} ${formatDec(sel.dec)}` : ''))}</b>
                       {sel && (
-                        <button class="mini" onClick={() => setSpecOpen(true)} title="Its spectrum, measured in every exposure" data-testid="open-spectrum">
-                          Open spectrum
+                        <button class="mini" onClick={() => setSpecOpen(true)} title="The spectrum, wide" data-testid="open-spectrum">
+                          Wide
                         </button>
                       )}
                     </div>
                   )}
-                  {flow.card}
-                  <details class="obj-more" data-testid="obj-more">
+                  {!flow.markOpen && flow.card}
+                  {sel && (
+                    <div class="obj-spec" data-testid="obj-spectrum">
+                      <SpectrumTab src={sel} />
+                    </div>
+                  )}
+                  <details class="obj-more" data-testid="obj-more" open>
                     <summary>More about it</summary>
                     {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                       <>
@@ -4468,7 +4522,7 @@ export function Lab({ route }: { route: Route }) {
                 </div>
               </section>
             )}
-            <section class="psec" id="sec-show" data-testid="sec-show">
+            <section class="psec" id="sec-show" data-testid="sec-show" hidden={ptab !== 'view'}>
               <div class="psh">On the picture</div>
               <div class="swlist">
                     {sw(
@@ -4549,7 +4603,7 @@ export function Lab({ route }: { route: Route }) {
                   )}
               </div>
             </section>
-            <section class="psec" id="sec-view" data-testid="sec-view">
+            <section class="psec" id="sec-view" data-testid="sec-view" hidden={ptab !== 'view'}>
               <div class="psh">View</div>
               <div class="seg sm vseg" role="group" aria-label="View">
                 {VIEWS.map((v) => (
@@ -4566,7 +4620,7 @@ export function Lab({ route }: { route: Route }) {
                 ))}
               </div>
             </section>
-            <section class="psec" id="sec-tune" data-testid="sec-tune">
+            <section class="psec" id="sec-tune" data-testid="sec-tune" hidden={ptab !== 'view'}>
               <div class="psh">Picture look</div>
                   <div class="seg sm" role="group" aria-label="Blend">
                     <button
@@ -4681,7 +4735,7 @@ export function Lab({ route }: { route: Route }) {
                     )}
               </div>
             </section>
-              <section class="psec" id="sec-place" data-testid="sec-place">
+              <section class="psec" id="sec-place" data-testid="sec-place" hidden={ptab !== 'view'}>
                 <div class="psh">Place</div>
                 <div class="coords">
                   <div class="field">
