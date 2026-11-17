@@ -135,6 +135,10 @@ class Spectra:
         path = self.dir / f"{key}.json"
         if path.is_file():
             d = json.loads(path.read_text())
+            if d["points"] and not all("key" in p for p in d["points"]):
+                # measured before the points carried their exposure's key (17 Nov 2026): people's flags cannot be applied to it,
+                # so it is measured again when it is next opened
+                return None
             run = Run(key, params, total=d["total"], points=d["points"], state="done")
             sp = self.dir / f"{key}.stamps.json"
             if sp.is_file():

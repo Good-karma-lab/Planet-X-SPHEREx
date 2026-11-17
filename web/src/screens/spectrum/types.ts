@@ -1,6 +1,8 @@
 export interface Source {
   ra: number;
   dec: number;
+  /** the service's id of the find this is (its spectrum leaves out what people left out for it) */
+  finding?: string;
   /** a catalogue object: its name and proper motion (mas/yr, J2000 place) */
   name?: string;
   pmra?: number;

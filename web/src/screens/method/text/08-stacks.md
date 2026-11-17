@@ -47,22 +47,22 @@ stack = NUM / DEN;  weight = DEN
 
 The kernel width depends on how many exposures the stack has:
 
-| Stack | Kernel σ | Why |
-|---|---|---|
-| 16 or more exposures | 0.35 detector pixel | the sharpest kernel without a lattice: white-frame FWHM of isolated stars 10.7″ → 9.2″ |
+| Stack                   | Kernel σ            | Why                                                                                                             |
+| ----------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------- |
+| 16 or more exposures    | 0.35 detector pixel | the sharpest kernel without a lattice: white-frame FWHM of isolated stars 10.7″ → 9.2″                          |
 | fewer than 16 exposures | 0.50 detector pixel | a narrower kernel leaves a lattice at the detector-pixel pitch in thin stacks, which would blink between passes |
 
 A named-band stack uses the same deposit, but a pixel goes into a band only when its own wavelength lies in one of the band's windows, and the kernel is chosen by the number of exposures that contribute to the band, counted over all detectors. The seven bands (windows are half-open, in µm):
 
-| Band | Windows |
-|---|---|
-| Starlight | 0.75–1.10 |
-| Water vapor (H₂O) | 1.30–1.50, 1.80–2.00, 2.55–2.90 |
-| Methane (CH₄) | 1.62–1.76, 3.20–3.50 |
-| Water ice | 2.90–3.20 |
-| Dust (PAH) | 3.20–3.40 |
-| Carbon dioxide (CO₂) | 4.20–4.35 |
-| Carbon monoxide (CO) | 4.55–4.85 |
+| Band                 | Windows                         |
+| -------------------- | ------------------------------- |
+| Starlight            | 0.75–1.10                       |
+| Water vapor (H₂O)    | 1.30–1.50, 1.80–2.00, 2.55–2.90 |
+| Methane (CH₄)        | 1.62–1.76, 3.20–3.50            |
+| Water ice            | 2.90–3.20                       |
+| Dust (PAH)           | 3.20–3.40                       |
+| Carbon dioxide (CO₂) | 4.20–4.35                       |
+| Carbon monoxide (CO) | 4.55–4.85                       |
 
 Source: the band table of the service (`data/bands.json`).
 
@@ -108,6 +108,10 @@ drop = regions of (odd & |d| > 3*noise(d)) with max |d| > 5*noise(d) and an area
 The test runs only in fields of 12′ or less, because above that a streak is fainter than the noise in a white frame.
 
 **Result:** in the 7′ field of Barnard's Star the visit test dropped 1,918, 461 and 1,230 pixels in the three passes, and in the 7′ field of ε Indi B 6,070, 4,544, 1,378 and 4,324 pixels in the four passes (Source: docs/validation/2026-11-14-m3-field.md).
+
+### Exposures people called broken
+
+A picture can be broken in a way no mask catches: a streak across it, a frame cut off, glare. People who see the odd exposures of a find can say so, and an exposure two different people call broken is left out of every stack and every spectrum. A field is named by the exposures it is built from, and the broken ones that touch it are part of that name, so a new flag makes only the fields it touches again, without that exposure; every other field keeps its stacks. In a spectrum the point of a broken exposure stays visible but is not used, with the reason beside it.
 
 ### Halos of bright stars
 
@@ -173,16 +177,16 @@ What a field size is for: an object that stays in the frame for a year moves at 
 A field is one of five sizes. The grid step is 1.5375″ up to 20′ and 3.075″ at 60′, and the grid side is a multiple of 4 grid pixels, that is a whole number of detector pixels.
 
 | Field | Grid step | Grid size | Visit test | Wavelength background |
-|---|---|---|---|---|
-| 2′ | 1.5375″ | 80 | yes | no |
-| 5′ | 1.5375″ | 196 | yes | no |
-| 10′ | 1.5375″ | 392 | yes | yes |
-| 20′ | 1.5375″ | 784 | no | yes |
-| 60′ | 3.075″ | 1172 | no | yes |
+| ----- | --------- | --------- | ---------- | --------------------- |
+| 2′    | 1.5375″   | 80        | yes        | no                    |
+| 5′    | 1.5375″   | 196       | yes        | no                    |
+| 10′   | 1.5375″   | 392       | yes        | yes                   |
+| 20′   | 1.5375″   | 784       | no         | yes                   |
+| 60′   | 3.075″    | 1172      | no         | yes                   |
 
 - **At most 800 exposures per field.** If more overlap, we thin the set evenly in time and keep every pass and every detector represented; the status line says so.
 - **Wide stacks are for display, not astrometry:** the shift of a star measured with a crude centroid on a 60′ stack is biased, so motion is measured on the narrow frames.
-Source: grid rule in the code of the field grid (`grid_for_fov`).
+  Source: grid rule in the code of the field grid (`grid_for_fov`).
 
 ## Streaming build and quick frame
 
@@ -204,15 +208,14 @@ We validate the stacks on real exposures of the two test fields where the answer
 
 [figure: pendulum-barnard | Barnard's Star in the white frame of the three passes, with its catalogue path]
 
-| Check | Barnard's Star | ε Indi B |
-|---|---|---|
-| Field and exposures | 7′, 402 exposures, 3 passes | 7′, 496 exposures, 4 passes |
-| White frame | D1–D6 | D2, D3, D5, D6 |
-| Target place per pass against the catalogue | within 0.6″ | within 0.6″ |
-| FWHM of isolated unsaturated stars, white frame, pass 1 | 8.8″ (9 stars) | 8.8″ (7 stars) |
-| Weight lattice, largest relative rms at the detector-pixel period in a detector stack | 4.6 % | 10.9 % |
+| Check                                                                                 | Barnard's Star              | ε Indi B                    |
+| ------------------------------------------------------------------------------------- | --------------------------- | --------------------------- |
+| Field and exposures                                                                   | 7′, 402 exposures, 3 passes | 7′, 496 exposures, 4 passes |
+| White frame                                                                           | D1–D6                       | D2, D3, D5, D6              |
+| Target place per pass against the catalogue                                           | within 0.6″                 | within 0.6″                 |
+| FWHM of isolated unsaturated stars, white frame, pass 1                               | 8.8″ (9 stars)              | 8.8″ (7 stars)              |
+| Weight lattice, largest relative rms at the detector-pixel period in a detector stack | 4.6 %                       | 10.9 %                      |
 
 **Result:** isolated unsaturated stars have a FWHM of 8.8″ in the white frame in both fields (Source: docs/validation/2026-11-14-m3-field.md).
 
 The weight lattice is the relative rms of a stack's weight in the band of spatial frequencies around one cycle per detector pixel (0.8–1.25 of that frequency), measured in the central half of the field and taken as the largest over all detector stacks of all passes. It is highest in the thin stacks, which have the fewest exposures, and that is why a wider kernel is used there.
-

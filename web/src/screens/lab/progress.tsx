@@ -72,8 +72,8 @@ export function useRetry(failed: boolean, retry: () => void, key: string): { nex
 
 /** The words after a failed search: who did not answer, and when the next try is. */
 export function failWord(s: SearchInfo): string {
-  const who = s.ours ? 'our server did not answer' : 'did not answer';
-  return s.retry?.nextIn != null ? `${who} · next try in ${s.retry.nextIn} s` : who;
+  const who = s.ours ? 'server error' : 'no answer';
+  return s.retry?.nextIn != null ? `${who} · retry ${s.retry.nextIn} s` : who;
 }
 
 /** One small mark after a switch or in the row: a turning ring while it runs (with its share), the count when done, the failure
@@ -89,8 +89,8 @@ export function SearchMark({ s }: { s: SearchInfo | null | undefined }) {
     );
   if (s.state === 'failed')
     return (
-      <span class="sm-fail" data-testid={`search-${s.name}`}>
-        · {failWord(s)}
+      <span class="sm-fail" data-testid={`search-${s.name}`} title={s.ours ? 'Our server did not answer; it is asked again by itself' : 'The archive did not answer; it is asked again by itself'}>
+        {failWord(s)}
         {s.retry && (
           <>
             {' · '}
@@ -101,8 +101,9 @@ export function SearchMark({ s }: { s: SearchInfo | null | undefined }) {
                 e.stopPropagation();
                 s.retry!.tryNow();
               }}
+              title="Ask again now"
             >
-              try now
+              now
             </a>
           </>
         )}
@@ -110,7 +111,7 @@ export function SearchMark({ s }: { s: SearchInfo | null | undefined }) {
     );
   return (
     <span class="sm-done" data-testid={`search-${s.name}`}>
-      · {s.count ?? '✓'}
+      {s.count ?? '✓'}
     </span>
   );
 }
@@ -123,7 +124,7 @@ export function SearchRow({ list }: { list: SearchInfo[] }) {
         <span key={s.name} class={`sr-item s-${s.state}`}>
           {k > 0 && <em aria-hidden="true">·</em>}
           {s.name}{' '}
-          {s.state === 'done' ? '✓' : s.state === 'running' ? (s.frac != null ? `${Math.round(s.frac * 100)}%` : '…') : s.state === 'failed' ? <SearchMark s={s} /> : '–'}
+          <b>{s.state === 'done' ? (s.count ?? '✓') : s.state === 'running' ? (s.frac != null ? `${Math.round(s.frac * 100)}%` : '…') : s.state === 'failed' ? <SearchMark s={s} /> : '–'}</b>
         </span>
       ))}
     </div>
@@ -134,5 +135,5 @@ export function SearchRow({ list }: { list: SearchInfo[] }) {
 export function searchingLine(list: SearchInfo[]): string {
   const run = list.filter((s) => s.state === 'running');
   if (!run.length) return '';
-  return `searching: ${run.map((s) => `${s.name}${s.frac != null ? ` ${Math.round(s.frac * 100)}%` : ''}`).join(' · ')}`;
+  return `searching ${run.map((s) => `${s.name}${s.frac != null ? ` ${Math.round(s.frac * 100)}%` : ''}`).join(' · ')}`;
 }

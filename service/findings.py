@@ -22,12 +22,13 @@ import math
 import sqlite3
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 import httpx
 
+from service import people_tracks
 from service.bodies import SB_IDENT, _iso, _sexa_dec, _sexa_ra
 from service.products.store import Store
 from service.products.versions import VERSIONS
@@ -147,7 +148,7 @@ GALAXY_TYPES = frozenset(
     }
 )
 GALAXY_NAMES = ("ACS-GC", "2MASX", "LEDA", "SDSS")  # catalogues of galaxies: a match to one is a galaxy, never a brown dwarf or a mover
-HIDDEN = ("residual", "galaxy", "below", "halo")  # statuses kept out of the leads and the default list
+HIDDEN = ("residual", "galaxy", "below", "halo", "set_aside")  # statuses kept out of the leads and the default list
 
 
 def is_galaxy(name: str | None, typ: str | None) -> bool:
@@ -1302,6 +1303,10 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         for i in idents
         if i["state"] == "ok"
     ]
+    if status == "set_aside":
+        a = f.get("people_aside") or {}
+        n = f" ({a['agree']} of {a['total']})" if a.get("agree") and a.get("total") else ""
+        return f"People set it aside{n}: they agree it is an artefact (a ghost, a streak or a glow), not a body. Not counted as a lead."
     if status == "halo":
         h = next((i for i in idents if i["catalogue"] == "halo" and i["state"] == "ok"), None)
         near = f" ({h['name']}, {h['sep']:.0f}″ away)" if h else ""
@@ -1383,6 +1388,7 @@ STAGE_OF_STATUS = {
     "galaxy": "artefact",
     "below": "artefact",
     "halo": "artefact",
+    "set_aside": "artefact",  # people agreed it is an artefact (service/accounts/field_people.py)
 }
 VIEW_RESULTS = ("moves", "artefact", "known", "nothing", "marks")
 # the promise of a finding, 0..100: what a person should look at first
@@ -1527,8 +1533,14 @@ def query(
     noted: bool = False,
     seen: Callable[[dict[str, Any]], tuple[bool | None, float | None]] | None = None,
     visibility: str | None = None,
+    aside: Mapping[str, dict[str, Any]] | None = None,
+    raised: Mapping[str, str] | None = None,
+    tracks: Mapping[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """The finds with what the catalogues said. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
+    """The finds with what the catalogues said. `aside`: the machine finds people set aside as artefacts ({id: {look, agree, total}},
+    service/accounts/field_people.set_aside): their status is `set_aside`, kept out of the leads and the default list like a halo.
+    `raised`: the finds people raised up the queue ({id: why}, service/accounts/people.raised): first in the promise order.
+    `tracks`: what people said about tracks (service/people_tracks.read): a corrected track is under data["people_track"]. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
     stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
     the old one). Every find also carries the flow fields (flow_fields)."""
     with _READ:
@@ -1545,6 +1557,8 @@ def query(
             "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "updated": r["updated"],
             "versions": json.loads(r["versions"] or "{}"), **rel[r["id"]],
         }  # fmt: skip
+        if tracks and r["id"] in tracks:
+            f = people_tracks.apply(f, tracks[r["id"]])
         ids_ = idents[r["id"]]
         have = {i["catalogue"] for i in ids_}
         for c in want_of(r["kind"], r["ra"], r["dec"], f["data"]):
@@ -1566,7 +1580,12 @@ def query(
         ids_.sort(key=lambda i: order.get(i["catalogue"], 99))
         _motion_identity(f, ids_)
         st = status_of(f, ids_)
+        if aside and f["id"] in aside and st in ("unexplained", "unchecked"):
+            st = "set_aside"  # a catalogue's answer (known, a galaxy) stays the stronger word
+            f["people_aside"] = aside[f["id"]]
         f["status"] = st
+        if raised and f["id"] in raised and st in ("unexplained", "unchecked"):
+            f["people_raised"] = raised[f["id"]]  # moves_old: the old pictures confirm the motion; candidate: a Planet X dot
         f["idents"] = ids_
         f["verdict"] = verdict_of(f, ids_, st)
         f.update(flow_fields(f, views.get(f["id"])))
@@ -1579,13 +1598,35 @@ def query(
             f["promise"] = min(f["promise"], PROMISE_LESS_CERTAIN)  # the search itself calls the track less certain
         items.append(f)
     counts: dict[str, dict[str, int]] = {
-        k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "halo": 0, "leads": 0}
+        k: {
+            "all": 0,
+            "unexplained": 0,
+            "unchecked": 0,
+            "known": 0,
+            "residual": 0,
+            "galaxy": 0,
+            "below": 0,
+            "halo": 0,
+            "set_aside": 0,
+            "leads": 0,
+        }
         for k in KINDS
     }
     for f in items:
         tally = counts.setdefault(
             f["kind"],
-            {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "halo": 0, "leads": 0},
+            {
+                "all": 0,
+                "unexplained": 0,
+                "unchecked": 0,
+                "known": 0,
+                "residual": 0,
+                "galaxy": 0,
+                "below": 0,
+                "halo": 0,
+                "set_aside": 0,
+                "leads": 0,
+            },
         )
         if f["status"] not in HIDDEN:  # a star's residual and a galaxy are not leads: counted apart
             tally["all"] += 1
@@ -1626,15 +1667,17 @@ def query(
         sel = [f for f in sel if f["visible"] is not False]
     elif visibility == "unseen":
         sel = [f for f in sel if f["visible"] is False]
-    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6}
+    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6, "set_aside": 7}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     if sort == "promise":
         # a find that can have no clip (a track whose visits are not kept, a place no field covers) goes below every find that can;
         # within equal promise the finds whose clip is ready come first: the first screen shows pictures, not empty cards
         cr = {f["id"]: clip_rank(f) for f in sel} if clip_rank is not None else {}
         # ... and a find that carries a machine note (it looks like an artefact) goes below every clean find
+        # ... and a find people raised (they agree it is worth the slow checks) goes before every other
         sel.sort(
             key=lambda f: (
+                "people_raised" not in f,
                 cr.get(f["id"], 0) == 2,
                 f["note"] is not None,
                 -f["promise"],

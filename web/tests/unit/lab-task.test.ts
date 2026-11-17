@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stepAt, taskOfParams, taskParams, TREES } from '../../src/screens/lab/task';
+import { SERIES, SERIES_OF_KIND, stepAt, taskOfParams, taskParams } from '../../src/screens/lab/task';
 
 describe('the lab task of an address', () => {
   it('is absent without a task parameter', () => {
@@ -25,18 +25,30 @@ describe('the lab task of an address', () => {
   });
 });
 
-describe('a tree of plain questions', () => {
-  it('walks a red source from the first question to the spectrum', () => {
-    const tree = TREES.red!;
-    expect(stepAt(tree, [])?.id).toBe('shape');
-    expect(stepAt(tree, ['sharp'])?.id).toBe('every_pass');
-    expect(stepAt(tree, ['sharp', 'yes', 'no'])?.id).toBe('spectrum');
-    // an answer that ends the path leaves no further step; nor does an answer the step does not have
-    expect(stepAt(tree, ['fuzzy'])).toBeNull();
-    expect(stepAt(tree, ['sharp', 'maybe'])).toBeNull();
+describe('a question series (spec §5e)', () => {
+  it('walks a track: some pictures missing, then dot or streak', () => {
+    const track = SERIES.track!;
+    expect(stepAt(track, [])?.id).toBe('steps');
+    expect(stepAt(track, ['some'])?.id).toBe('missing');
+    expect(stepAt(track, ['some'])?.tap).toBe(true);
+    expect(stepAt(track, ['some', 'done'])?.id).toBe('shape');
+    expect(stepAt(track, ['every'])?.id).toBe('shape');
+    expect(stepAt(track, ['no'])).toBeNull();
   });
-  it('ends every step with "Not sure", which is "Can’t tell"', () => {
-    for (const tree of [TREES.red!, TREES.anomaly!])
-      for (const s of tree) expect(s.answers[s.answers.length - 1]).toEqual({ id: 'not_sure', label: 'Not sure', result: 'cant_tell' });
+  it('asks only what an eye judges: no spectrum classes, detector places or exposure counts', () => {
+    const words = Object.values(SERIES)
+      .flat()
+      .map((s) => s.question)
+      .join(' ');
+    expect(words).not.toMatch(/detector|exposures|spectrum|brown dwarf|dusty/i);
+  });
+  it('ends every step that is not a tap with "Not sure"', () => {
+    for (const steps of Object.values(SERIES))
+      for (const s of steps) if (!s.tap) expect(s.answers[s.answers.length - 1]).toEqual({ id: 'not_sure', label: 'Not sure', result: 'cant_tell' });
+  });
+  it('knows the series of a find by its kind', () => {
+    expect(SERIES_OF_KIND['film']).toBe('track');
+    expect(SERIES_OF_KIND['browndwarf']).toBe('slow');
+    expect(SERIES_OF_KIND['peak']).toBe('peak');
   });
 });

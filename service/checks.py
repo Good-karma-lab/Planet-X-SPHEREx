@@ -32,6 +32,7 @@ import importlib
 import io
 import json
 import math
+import re
 import time
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -70,6 +71,31 @@ NEOWISE_FROM, NEOWISE_TO = 2014.0, 2024.6
 IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 MAX_MARKS = 40
 QUICK = ("two_passes", "straight_line", "gaia", "simbad", "edge_bright", "above_bar")  # answered first, within seconds
+# why people dropped a find (service/accounts/people.py, the question series): the slow checks are not spent on it
+DROPPED_WORD = {
+    "no_dot": "there is no dot where the track says",
+    "streak": "it is a streak, not a dot",
+    "still": "it does not move",
+    "blend": "it is two stars touching",
+    "no_peak": "there is no peak there",
+    "glow": "it is inside a bright star's glow or on its spike",
+}
+FIND_ID = re.compile(r"^[a-z]+:[0-9a-f]{6,40}$")
+
+
+def people_dropped(st: Any, field_key: str) -> str | None:
+    """Why people dropped the find this request checks (its field_key is a finding id), or None."""
+    if not FIND_ID.match(field_key or ""):
+        return None
+    try:
+        from service.accounts import people
+
+        why = people.dropped(st).get(field_key)
+    except Exception:  # no accounts here: nobody dropped anything
+        return None
+    return None if why is None else DROPPED_WORD.get(why, why)
+
+
 LIMIT_S = {"jpl": 1800.0, "neowise": 5400.0}  # a check that takes longer ends in no_answer
 QUICK_LIMIT_S = 180.0
 RETRY_S, MAX_TRIES = 600.0, 12  # checks without an answer are run again by the job itself this often, this many times
@@ -611,6 +637,9 @@ class Checks:
             blocked = ("no_answer", "The dates of the passes are not known (the field is not in the store and the marks carry no date).")
 
         fast = kind_of(req["marks"]) == "fast"
+        # people agreed the find is not a body: the slow checks (JPL for each visit, the NEOWISE archive) are not spent on it
+        dropped = await asyncio.to_thread(people_dropped, self.st, str(req.get("field_key", "")))
+        drop_answer: Answer | None = None if dropped is None else ("fail", f"People dropped this find ({dropped}): not asked.")
 
         async def two_passes() -> Answer:
             return check_fast_visits(marks) if fast else check_two_passes(marks)
@@ -630,7 +659,7 @@ class Checks:
             return blocked or check_edge_bright(marks, (meta or {}).get("grid"), await catalogue("gaia"), await catalogue("simbad"))
 
         async def jpl() -> Answer:
-            return blocked or await self._jpl(job, marks)
+            return blocked or drop_answer or await self._jpl(job, marks)
 
         async def above_bar() -> Answer:
             if not marks:
@@ -644,6 +673,8 @@ class Checks:
             return check_above_bar(marks, result, square)
 
         async def neowise() -> Answer:
+            if drop_answer is not None:
+                return drop_answer
             if fast and not req.get("orbit"):
                 return "pass", "Not applicable to a body that moves this fast: a path of hours cannot be added in a ten-year archive."
             return await self._neowise(job, marks if dated else [], req.get("orbit"))

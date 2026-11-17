@@ -85,7 +85,7 @@
 .vsq .fstatus .invchip { margin-left: 8px; padding: 1px 8px; border-radius: 9px; border: 1px solid rgba(95, 227, 214, 0.5); color: var(--accent-l); text-decoration: none; white-space: nowrap; }
 .vsq .fstatus .invchip:hover { background: rgba(95, 227, 214, 0.14); }
 /* a mark's card is open: the Object tab is the mark's alone (the selected source's passport waits) */
-.pobj.mark-open > :not(.objcard) { display: none; }
+.pobj.mark-open > :not(.objcard):not(.sel-head) { display: none; }
 
 /* the Candidates tab: one list of the field's finds */
 .candlist { display: flex; flex-direction: column; gap: 4px; }
@@ -161,7 +161,7 @@
 .sqlook .btn { flex: none; white-space: nowrap; }
 .sqlook .sq-line { min-width: 0; font: 500 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* the loading overlay: the telescope video under the step, about 60 % of the picture; on a phone it fills the picture */
+
 /* the loading card: the telescope video whole and at full brightness on top (16:9, the video's own shape, so nothing is cropped), the
    step, the bar, the count, the steps and the clock under it on the card's plain background */
 .vsq .loadov { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(560px, calc(100% - 32px)); z-index: 6; border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); background: #0a131b; transition: opacity 0.45s ease; pointer-events: none; display: flex; flex-direction: column; }
@@ -200,3 +200,175 @@
 .searchrow .sr-item.s-running { color: var(--accent-l); }
 .swgrid .sw { flex-wrap: wrap; row-gap: 0; }
 .swgrid .sw .sm-done, .swgrid .sw .sm-run, .swgrid .sw .sm-fail { min-width: 0; }
+/* the right panel as one column by importance (spec §5f): Task, To look at, Selected object, On the picture, View, Picture look, Place */
+.panel .pcol { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.panel .pcol > .psec { flex: none; }
+.panel .pcol .psh { display: flex; align-items: center; gap: 7px; }
+.panel .pcol .psh .tbadge { margin-left: 0; }
+.panel .pcol .vseg { display: flex; }
+.panel .pcol .vseg button { flex: 1 1 0; }
+.panel .pcol #sec-tune .seg { margin-bottom: 8px; }
+.panel .pcol #sec-tune .stretch { margin-bottom: 8px; }
+.candlist .cr-all { align-self: flex-start; margin-top: 2px; }
+/* the spectrum: a wide sheet over the picture, opened from the selected object */
+.lab .specsheet { position: absolute; left: 12px; top: 10px; bottom: 10px; right: 368px; z-index: 20; display: flex; flex-direction: column; border-radius: 16px; background: rgba(8, 16, 22, 0.97); border: 1px solid var(--edge); box-shadow: var(--shadow); overflow: hidden; }
+.lab .specsheet .ss-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--edge-soft); }
+.lab .specsheet .ss-head b { font: 650 13.5px var(--font); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab .specsheet .ss-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px 16px; }
+@media (max-width: 860px) { .lab .specsheet { right: 10px; left: 10px; } }
+/* the title of the picture opens the Place */
+.vsq .ftitle[role='button'] { cursor: pointer; }
+/* the selected object: name and the spectrum button, the card, and the passport folded */
+.panel .pcol .sel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.panel .pcol .sel-head b { font: 650 13px var(--font); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel .pcol .obj-more > summary { cursor: pointer; padding: 4px 0; font: 600 10.5px var(--font); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.panel .pcol .pobj.mark-open > .obj-more { display: none; }
+/* an anomaly's odd pictures (stamps) */
+.tv .tv-stamps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.tv .tv-st { margin: 0; position: relative; aspect-ratio: 1; border-radius: 6px; overflow: hidden; background: #000; border: 1px solid rgba(255, 255, 255, 0.1); }
+.tv .tv-st.empty { background: rgba(0, 0, 0, 0.25); }
+.tv .tv-st .tv-stamp { width: 100%; height: 100%; display: block; image-rendering: pixelated; }
+.tv .tv-st figcaption { position: absolute; left: 4px; bottom: 2px; font: 600 10px var(--mono); text-shadow: 0 0 3px #000; }
+/* a track's pictures to tap where it is missing; "Mark something the machine missed" */
+.taskpanel .tp-pics { display: flex; flex-wrap: wrap; gap: 4px; }
+.taskpanel .tp-pic { min-width: 30px; justify-content: center; }
+.taskpanel .tp-pic.on { border-color: rgba(255, 107, 107, 0.8); color: #ffb3b3; background: rgba(255, 107, 107, 0.14); }
+.taskpanel .tp-none { font: 500 11px var(--mono); color: var(--muted); }
+.taskpanel .tp-missed { align-self: flex-start; }
+.panel .pcol .look-missed { align-self: flex-start; margin: 2px 0 8px; }
+
+/* ---- lab v2: the panel's rows (one column, the count on the right, never wrapped) ---- */
+.lab .panel { width: 372px; }
+@media (max-width: 1360px) { .lab .panel { width: 340px; } }
+.panel .pcol { padding: 0 14px 14px; }
+.panel .pcol > .psec { padding: 12px 0 12px; gap: 8px; }
+.panel .pcol .psh { font: 650 10.5px var(--font); letter-spacing: 0.12em; color: var(--muted); min-height: 16px; }
+.swlist { display: flex; flex-direction: column; gap: 1px; }
+.swlist .sw { display: grid; grid-template-columns: 26px minmax(0, 1fr) auto; gap: 10px; align-items: center; min-height: 30px; padding: 0 8px 0 6px; margin: 0 -6px; border-radius: 8px; font-size: 13px; white-space: nowrap; }
+.swlist .sw:hover { background: rgba(255, 255, 255, 0.04); }
+.swlist .sw .swl { overflow: hidden; text-overflow: ellipsis; }
+.sw .swr { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; min-width: 0; font: 500 11.5px var(--mono); color: var(--muted); }
+.sw .swr:empty { display: none; }
+.swlist .sw .swr .sm-done { color: rgba(214, 231, 237, 0.9); }
+.sw .swr .sm-run, .sw .swr .sm-done, .sw .swr .sm-fail { margin: 0; }
+.sw .swr .why { margin: 0; font: 500 10.5px var(--mono); color: var(--faint); }
+.swlist .sw.dis .swl { color: var(--faint); }
+/* fine tuning: small pill toggles, three in a row, lighter than the main switches */
+.swgrid.chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 5px; }
+.swgrid.chips .sw { position: relative; display: flex; justify-content: center; min-height: 28px; padding: 0 6px; border-radius: 8px; border: 1px solid var(--edge-soft); background: rgba(255, 255, 255, 0.025); font-size: 11.5px; color: var(--muted); transition: 0.15s; }
+.swgrid.chips .sw input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; margin: 0; border-radius: 8px; cursor: pointer; }
+.swgrid.chips .sw:has(input:checked) { color: var(--accent-l); border-color: rgba(95, 227, 214, 0.45); background: rgba(95, 227, 214, 0.1); }
+.swgrid.chips .sw:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 1px; }
+.swgrid.chips .sw.dis { opacity: 0.45; }
+.swgrid.chips .sw .swl { overflow: hidden; text-overflow: ellipsis; }
+.swgrid.chips .sw .swr { display: none; }
+/* the searches: one quiet line, the number of what each found */
+.searchrow { gap: 3px 10px; margin: 0 0 6px; font: 500 11px var(--mono); color: var(--faint); }
+.searchrow .sr-item em { display: none; }
+.searchrow .sr-item b { font-weight: 600; color: rgba(214, 231, 237, 0.85); margin-left: 2px; }
+.searchrow .sr-item.s-running b { color: var(--accent-l); }
+.searchrow .sr-item.s-failed b { color: #ffb3b3; font-weight: 500; }
+/* lab v2: the task card */
+.taskpanel { gap: 8px; padding: 14px 14px 12px; background: linear-gradient(180deg, rgba(95, 227, 214, 0.07), rgba(95, 227, 214, 0.015)); border-bottom: 1px solid rgba(95, 227, 214, 0.25); }
+.taskpanel .tp-ask { font: 650 15px/1.3 var(--font); }
+.taskpanel .tp-tree { min-height: 0; gap: 6px; }
+.taskpanel .tp-ans { min-height: 38px; padding: 6px 12px; font-size: 13px; }
+.taskpanel .tp-line { display: flex; align-items: center; gap: 10px; height: 18px; }
+.taskpanel .tp-back { order: 2; margin-left: auto; border: 0; background: none; padding: 0; color: var(--accent-l); font: 600 11.5px var(--font); cursor: pointer; }
+.taskpanel .tp-back:hover:not(:disabled) { text-decoration: underline; }
+.tv.tv-fixed { min-height: 0; }
+.taskpanel .tp-missed { align-self: stretch; justify-content: center; border-style: dashed; }
+/* lab v2: the playback bar: one "⋯" for link, export and video; Blink's two passes stay in place */
+.tbar { overflow: visible; gap: 8px; }
+.tbar details.acts { position: relative; flex: none; }
+.tbar details.acts > summary { list-style: none; cursor: pointer; width: auto; min-width: 30px; height: 30px; justify-content: center; font-size: 16px; letter-spacing: 1px; }
+.tbar details.acts > summary::-webkit-details-marker { display: none; }
+.tbar details.acts > summary .t { font: 500 10.5px var(--mono); letter-spacing: 0; }
+.tbar details.acts[open] > summary { border-color: rgba(95, 227, 214, 0.55); color: var(--accent-l); }
+.tbar .acts-menu { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; display: flex; flex-direction: column; gap: 2px; min-width: 180px; padding: 5px; border-radius: 12px; background: rgba(8, 18, 24, 0.97); border: 1px solid var(--edge); box-shadow: var(--shadow); }
+.tbar .acts-menu > .mini, .tbar .acts-menu .expwrap > .mini { width: 100%; justify-content: flex-start; height: 32px; border: 0; background: none; font-size: 12.5px; }
+.tbar .acts-menu > .mini:hover:not(:disabled), .tbar .acts-menu .expwrap > .mini:hover:not(:disabled) { background: rgba(95, 227, 214, 0.12); color: var(--accent-l); }
+.tbar .acts-menu .expwrap { display: flex; flex-direction: column; align-items: stretch; }
+.tbar .acts-menu .expmenu { padding: 0 0 4px 28px; gap: 4px; }
+.tbar .blinkpick select.inp { width: 84px; font-size: 11.5px; padding: 3px 5px; }
+/* lab v2: the selected object as one card */
+.panel .pcol #sec-obj .pobj { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.03); }
+.panel .pcol #sec-obj .sel-head { margin: 0; }
+.panel .pcol #sec-obj .sel-head b { font-size: 14.5px; }
+.panel .pcol #sec-obj .objcard { gap: 8px; }
+.panel .pcol #sec-obj .oc-facts { font-size: 12px; grid-template-columns: 74px 1fr; }
+.panel .pcol #sec-obj .obj-more { border-top: 1px solid var(--edge-soft); padding-top: 4px; }
+/* lab v2: the picture's status line is one line; the whole line is its tooltip */
+:root .lab .vsq .float.fstatus, :root .lab .vsq.compact .float.fstatus { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
+/* lab v2, phones: the picture keeps most of the width under a task; the task card is compact */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .lab .vstage { min-height: min(100vw, 44dvh); }
+  :root .lab .taskpanel { padding: 10px 12px; gap: 6px; }
+  :root .lab .taskpanel .tp-ask { font-size: 14.5px; }
+  :root .lab .taskpanel .tp-ans, :root .lab .taskpanel .btn { min-height: 42px; }
+  :root .lab .taskpanel .tp-tree { gap: 5px; }
+  :root .lab .vsq .float.fstatus { max-width: calc(100% - 110px); font-size: 11px; }
+}
+/* lab v2: a mark's kind, one tap (spec §5g); an artefact's look */
+.objcard .oc-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.objcard .oc-kinds button { display: flex; align-items: center; gap: 7px; min-height: 34px; padding: 0 10px; border-radius: 9px; border: 1px solid var(--edge); background: rgba(255, 255, 255, 0.035); color: var(--ink); font: 600 12px var(--font); text-align: left; cursor: pointer; }
+.objcard .oc-kinds button i { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.objcard .oc-kinds button:hover { border-color: rgba(95, 227, 214, 0.5); }
+.objcard .oc-kinds button.on { border-color: rgba(95, 227, 214, 0.8); background: rgba(95, 227, 214, 0.13); color: var(--accent-l); }
+.objcard .oc-looks { display: flex; flex-wrap: wrap; gap: 4px; }
+.objcard .oc-looks button { height: 26px; padding: 0 9px; border-radius: 13px; border: 1px solid var(--edge-soft); background: none; color: var(--muted); font: 500 11.5px var(--font); cursor: pointer; }
+.objcard .oc-looks button.on { color: var(--ink); border-color: rgba(170, 180, 185, 0.8); background: rgba(170, 180, 185, 0.14); }
+/* lab v2: the look of a square, quiet: a thin bar; the seconds only in the last 20 */
+.lookbar { display: block; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.lookbar b { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, rgba(95, 227, 214, 0.45), var(--accent)); transition: width 0.9s linear; }
+.sqlook .lookbar { margin: 2px 0; }
+/* lab v2: the passport (More about it) as one short list: the card head names it, the rows say each thing once */
+.panel .pcol #sec-obj .obj-more[open] { display: flex; flex-direction: column; gap: 10px; }
+.panel .pcol #sec-obj .okv { display: flex; flex-direction: column; gap: 3px; }
+.panel .pcol #sec-obj .okv .orow { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; font-size: 12px; line-height: 1.4; }
+.panel .pcol #sec-obj .okv .orow[hidden] { display: none; }
+.panel .pcol #sec-obj .okv .orow > .faint { color: var(--muted); }
+.panel .pcol #sec-obj .ctxbox .search-h, .panel .pcol #sec-obj .lc-h, .panel .pcol #sec-obj .psub { font: 650 10px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); margin-top: 4px; }
+.panel .pcol #sec-obj .ctxbox > .mono-s { font-size: 10.5px; color: var(--faint); }
+/* lab v2: the panel's three tabs (Task · Object · View), the bar always at the top */
+.lab .panel .ptabs { flex: none; display: flex; gap: 2px; margin: 10px 14px 0; padding: 3px; border-radius: 11px; border: 1px solid var(--edge); background: rgba(0, 0, 0, 0.3); }
+.lab .panel .ptabs button { position: relative; flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: 600 12.5px var(--font); cursor: pointer; transition: 0.15s; }
+.lab .panel .ptabs button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
+.lab .panel .ptabs button.on { color: var(--accent-l); background: rgba(95, 227, 214, 0.16); box-shadow: inset 0 0 0 1px rgba(95, 227, 214, 0.55); }
+.lab .panel .ptabs .ptab-n { min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: rgba(255, 180, 84, 0.9); color: #1a1205; font: 700 10.5px/17px var(--mono); }
+.lab .panel .ptabs .ptab-dot { position: absolute; top: 6px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px rgba(255, 180, 84, 0.7); }
+.lab .panel .taskpanel { margin-top: 8px; }
+.panel .pcol > .psec[hidden] { display: none; }
+.panel .pcol .give-square { padding-top: 14px; }
+.panel .pcol .give-square .btn { width: 100%; justify-content: center; min-height: 40px; }
+.panel .pcol .obj-none { padding: 20px 0; font: 500 12px var(--mono); color: var(--muted); text-align: center; }
+.panel .pcol .people-line { font: 500 11.5px var(--mono); color: #d7a6ff; }
+/* the Object tab: the passport as one card, the spectrum inside it, "More about it" open */
+.panel .pcol #sec-obj { border-bottom: 0; }
+.panel .pcol #sec-obj .obj-more > summary { display: none; }
+.panel .pcol #sec-obj .obj-spec { border-top: 1px solid var(--edge-soft); padding-top: 8px; min-width: 0; overflow: hidden; }
+/* the spectrum inside the Object tab: the card head above already names the object */
+.panel .pcol #sec-obj .obj-spec .spec-head { display: none; }
+/* the Object tab says each thing once: the spectrum's line names what it is (the portrait's guess would repeat it); an empty
+   status line under "Add to investigation" takes no room */
+.objcard .oc-line:empty { display: none; }
+.panel .pcol #sec-obj .spec-state:empty { display: none; }
+/* the Object tab by question: What is it (the head, its record in Findings, the portrait and its class) · How it moves · Its light ·
+   Catalogues · Look it up */
+.panel .pcol #sec-obj .obj-h { margin: 10px 0 2px; font: 650 10px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.panel .pcol #sec-obj .obj-spec { border-top: 0; padding-top: 0; }
+.panel .pcol #sec-obj .obj-find { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--edge-soft); background: rgba(0, 0, 0, 0.18); font-size: 12px; }
+.panel .pcol #sec-obj .obj-findhead { display: flex; align-items: center; gap: 8px; }
+.panel .pcol #sec-obj .obj-findhead .cb-link { margin-left: auto; }
+.panel .pcol #sec-obj .obj-findtext { font-size: 12px; line-height: 1.45; color: #c4d8df; }
+.panel .pcol #sec-obj .obj-findtext.faint { color: var(--muted); }
+.panel .pcol #sec-obj .obj-seen { font-size: 11.5px; color: var(--muted); line-height: 1.4; }
+/* the free lab: this place's square and quarter, and its look */
+.panel .pcol .here-square { gap: 8px; }
+.panel .pcol .here-square .hs-line { font: 500 11.5px var(--mono); color: var(--muted); }
+.panel .pcol .here-square .btn { width: 100%; justify-content: center; min-height: 38px; }
+.lab .panel > .sqlook { margin: 8px 14px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(95, 227, 214, 0.3); background: rgba(95, 227, 214, 0.05); display: flex; flex-direction: column; gap: 6px; }
+.lab .panel > .sqlook .btn { width: 100%; justify-content: center; min-height: 36px; }
+/* the picture's title keeps its place in every width: the coordinates smaller, cut with … when there is no room */
+:root .lab .vsq .ftitle span, :root .lab .vsq.compact .ftitle span { display: inline; font-size: 10.5px; min-width: 0; }
+:root .lab .vsq .ftitle { display: flex; align-items: baseline; gap: 6px; text-overflow: ellipsis; }

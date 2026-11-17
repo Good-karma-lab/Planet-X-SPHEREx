@@ -76,6 +76,8 @@ export function useSpectrum(src: Source | null): {
       q.set('pmra', String(src.pmra ?? 0));
       q.set('pmdec', String(src.pmdec ?? 0));
     }
+    // a find: the service leaves out the exposures people said a neighbour touches it in (and the broken ones, always)
+    if (src.finding) q.set('finding', src.finding);
     const poll = async () => {
       while (!stop) {
         try {
@@ -114,7 +116,7 @@ export function useSpectrum(src: Source | null): {
     return () => {
       stop = true;
     };
-  }, [src?.ra, src?.dec, src?.pmra, src?.pmdec]);
+  }, [src?.ra, src?.dec, src?.pmra, src?.pmdec, src?.finding]);
   return { view, points, error };
 }
 
@@ -234,6 +236,24 @@ function SpectrumChart({
       }
       c.textAlign = 'right';
       c.fillText('◇ catalogue (2MASS, WISE)', W - R - 4, T + 10);
+      c.restore();
+    }
+    // exposures people left out (a neighbour star touches it here, or the picture is broken): kept on the chart, not used, hollow
+    const out = points.filter((p) => !p.ok && p.flux != null && /^left out: people/.test(p.why ?? ''));
+    if (out.length) {
+      c.save();
+      c.strokeStyle = 'rgba(200,210,215,0.75)';
+      c.lineWidth = 1.2;
+      for (const p of out) {
+        c.beginPath();
+        c.arc(x(p.lam), y(p.flux!), 3, 0, 7);
+        c.stroke();
+      }
+      c.fillStyle = 'rgba(200,210,215,0.85)';
+      c.font = '500 10px ui-monospace, Menlo, monospace';
+      c.textAlign = 'right';
+      // at the bottom right, clear of the catalogue diamonds' labels at the top
+      c.fillText(`○ ${out.length} left out by people`, W - R - 4, H - B - 6);
       c.restore();
     }
     for (const p of ok) {
@@ -376,7 +396,8 @@ function ExposurePlayer({
   );
 }
 
-export function SpectrumTab({ src }: { src: Source | null }) {
+export function SpectrumTab({ src, inPassport = false }: { src: Source | null; inPassport?: boolean }) {
+  // inPassport: the Object tab's portrait already says what it is; the chart's own line keeps only the measuring
   // Clear drops the spectrum until another source is picked (a new pick is a new object, even at the same place)
   const [cleared, setCleared] = useState<Source | null>(null);
   const shown = src && src !== cleared ? src : null;
@@ -456,7 +477,10 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           : view.state === 'running'
             ? `Measuring: ${view.measured} of ${view.total} exposures that cover this place · ${usable} used`
             : view.state === 'done'
-              ? guess.head
+              ? // a saturated star: the amber line below says it once; in the passport the portrait says what it is
+                saturated || inPassport
+                ? ''
+                : guess.head
               : `Failed: ${view.error}`}
       </div>
       {view?.state === 'done' && guess.features && <div class="spec-feat">{guess.features}</div>}
@@ -471,7 +495,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
       <SpectrumChart points={points} bins={bins} cur={saturated ? null : cur} quick={showQuick ? qpts : null} refs={refs} />
       {(bins.length > 0 || view?.state === 'done') && (
         <div class="spec-bin-note">
-          {view?.state === 'done' ? `${usable} points from the ${view.total} exposures that cover this place` : ''}
+          {view?.state === 'done' ? `${usable} of ${view.total} exposures usable` : ''}
           {view?.state === 'done' && bins.length > 0 ? ' · ' : ''}
           {bins.length > 0 ? binNote(bins) : ''}
         </div>
@@ -661,7 +685,9 @@ export function nameOf(src: Source, id: Identified | null | 'asking', held: Held
   return 'no catalogue name here';
 }
 
-export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpectrum: () => void; held?: Held | null }) {
+export function ObjectTab({ src, onSpectrum, held, compact = false }: { src: Source | null; onSpectrum: () => void; held?: Held | null; compact?: boolean }) {
+  // compact: the lab's passport, whose card head already gives the name and "Open spectrum"
+
   const id = useIdentify(src, held);
   if (!src) return <div class="mono-s">Click a source in the picture</div>;
   const pm = src.pmra || src.pmdec ? Math.hypot(src.pmra ?? 0, src.pmdec ?? 0) : 0;
@@ -675,7 +701,7 @@ export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpe
   const plx = ga?.state === 'ok' && ga.parallax != null && ga.parallax >= 3 && (ga.ruwe ?? 9) <= 1.4 ? ga.parallax : null;
   return (
     <div class="okv">
-      <div class="orow">
+      <div class="orow" hidden={compact}>
         <span class="faint">Name</span>
         <span data-testid="obj-name">{nameOf(src, id, held)}</span>
       </div>
@@ -692,12 +718,12 @@ export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpe
           <span>
             {pm >= 1000 ? `${(pm / 1000).toFixed(2)} ″/yr` : `${pm.toFixed(0)} mas/yr`}
             {src.pmKind === 'measured'
-              ? `${src.pmErr ? ` ± ${src.pmErr >= 1000 ? (src.pmErr / 1000).toFixed(2) + ' ″/yr' : src.pmErr.toFixed(0) + ' mas/yr'}` : ''} measured by the search from the exposures (no catalogue gave it)`
-              : " from the catalogue; the picture follows it on each exposure's date"}
+              ? `${src.pmErr ? ` ± ${src.pmErr >= 1000 ? (src.pmErr / 1000).toFixed(2) + ' ″/yr' : src.pmErr.toFixed(0) + ' mas/yr'}` : ''} · measured in the exposures`
+              : ' · catalogue'}
           </span>
         </div>
       )}
-      <div class="orow">
+      <div class="orow" hidden={compact}>
         <span class="faint">SIMBAD</span>
         <span>
           {id === 'asking'
@@ -713,7 +739,7 @@ export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpe
                   : 'not reachable'}
         </span>
       </div>
-      <div class="orow">
+      <div class="orow" hidden={compact}>
         <span class="faint">Gaia DR3</span>
         <span>
           {id === 'asking'
@@ -739,7 +765,7 @@ export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpe
           </span>
         </div>
       )}
-      <div class="orow">
+      <div class="orow" hidden={compact}>
         <span class="faint">Spectrum</span>
         <span>
           <button class="lnk" onClick={onSpectrum}>

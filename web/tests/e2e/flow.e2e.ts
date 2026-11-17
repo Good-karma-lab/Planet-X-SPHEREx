@@ -53,11 +53,17 @@ test('2. Findings: "Check this finding" opens the lab with the task', async () =
 
 const LOADED = /^[A-Z][a-z]{2} ’\d\d/; // the lab's status line is the date of the pass on show once the field is drawn
 
-test('3. the lab shows the task panel "Is this a real object?" for that finding', async () => {
+test('3. the lab shows the task panel for that finding: the first question of its series, with its answers', async () => {
+  // lab v2 (spec §5e): one question at a time from the series of the finding's kind (a track: "Does one dot step along the arrow?",
+  // a slow mover: "Does the dot in the ring shift…", …); the Task tab opens with the task
   await expect(page.getByTestId('task-panel')).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByTestId('task-panel')).toContainText('Check a machine finding');
-  await expect(page.getByTestId('task-panel')).toContainText('Is this a real object?');
-  for (const b of ['task-moves', 'task-artefact', 'task-known']) await expect(page.getByTestId(b)).toBeVisible();
+  await expect(page.getByTestId('ptab-task')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('task-ask')).toHaveText(/\?$/);
+  const answers = page.getByTestId('task-tree').locator('[data-testid^="task-answer-"]');
+  expect(await answers.count()).toBeGreaterThanOrEqual(2);
+  await expect(page.getByTestId('task-answer-not_sure')).toBeVisible();
+  await expect(page.getByTestId('task-line')).toContainText(/Question 1 of \d/);
+  await expect(page.getByTestId('task-missed')).toBeVisible();
   await shot('3-task-panel');
 });
 
@@ -66,6 +72,10 @@ const labels = [`e2e A ${Date.now().toString(36)}`, `e2e B ${Date.now().toString
 test('4. the user puts marks on two passes in the lab; they appear in My marks', async () => {
   // a finding's field that nobody opened yet is built now: the lab says how far it is (minutes for a cold 20′ field)
   test.setTimeout(900_000);
+  // a track's task opens in Days (the visits of its pass); the marks of this step go on two passes, so the lab goes to Months
+  const months = page.getByRole('button', { name: 'Months', exact: true });
+  await expect(months).toBeVisible({ timeout: 120_000 });
+  if ((await months.getAttribute('aria-pressed')) !== 'true') await months.click();
   await expect(page.getByTestId('lab-status')).toHaveText(LOADED, { timeout: 780_000 });
   const picture = page.getByTestId('picture');
   const box = (await picture.boundingBox())!;
@@ -83,7 +93,10 @@ test('4. the user puts marks on two passes in the lab; they appear in My marks',
     }).toPass({ timeout: 30_000, intervals: [1500] });
     return seen;
   };
-  for (const [i, at] of [[0, [0.3, 0.3]], [1, [0.7, 0.68]]] as const) {
+  for (const [i, at] of [
+    [0, [0.3, 0.3]],
+    [1, [0.7, 0.68]],
+  ] as const) {
     dates.push(await stay()); // the first pass to stay on, then the next one
     if (i === 1) expect(dates[1]).not.toBe(dates[0]);
     const tool = page.getByTestId('tool-mark');
@@ -111,9 +124,13 @@ test('5. Check and submit on a known star: the checks run and the submit is refu
   // the passes the machine measured it in): hitting a star to the arcsecond by clicking is not what this step is about.
   const made = await page.evaluate(async () => {
     const j = (p: string, b?: unknown) =>
-      fetch(p, b ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) } : undefined).then((r) => r.json());
+      fetch(p, b ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) } : undefined).then((r) =>
+        r.json(),
+      );
     const finds = ((await j('/api/v1/findings?status=known&kind=mover&limit=200')) as { finds: Find[] }).finds;
-    const star = finds.find((f) => /Barnard/.test((f as unknown as { place: string }).place) && (f.data.track?.ra ?? []).filter((x) => x != null).length >= 2);
+    const star = finds.find(
+      (f) => /Barnard/.test((f as unknown as { place: string }).place) && (f.data.track?.ra ?? []).filter((x) => x != null).length >= 2,
+    );
     if (!star) return null;
     const t = star.data.track!;
     // the key the lab gives a mark: the centre and size of the field on show ("ra,dec,fov"), here the 20′ field at the star
@@ -122,13 +139,24 @@ test('5. Check and submit on a known star: the checks run and the submit is refu
     for (let i = 0; i < t.ra!.length; i++) {
       if (t.ra![i] == null || t.dec![i] == null) continue;
       const id = `e2e-${Date.now().toString(36)}-${i}`;
-      await j('/api/me/marks', { id, field_key: key, cell_id: null, ra: t.ra![i], dec: t.dec![i], pass: i, label: `Barnard pass ${i + 1}`, level: 'suspicious', note: '', created: new Date().toISOString() });
+      await j('/api/me/marks', {
+        id,
+        field_key: key,
+        cell_id: null,
+        ra: t.ra![i],
+        dec: t.dec![i],
+        pass: i,
+        label: `Barnard pass ${i + 1}`,
+        level: 'suspicious',
+        note: '',
+        created: new Date().toISOString(),
+      });
       ids.push(id);
     }
     const inv = (await j('/api/me/investigations', { title: 'A known star (end-to-end)', mark_ids: ids })) as { id: string };
     return { inv: inv.id, marks: ids.length, star: star.id };
   });
-  expect(made, 'a known mover near Barnard\'s Star with a measured path is in the findings').not.toBeNull();
+  expect(made, "a known mover near Barnard's Star with a measured path is in the findings").not.toBeNull();
   expect(made!.marks).toBeGreaterThanOrEqual(2);
 
   await page.goto(`/#/me?inv=${made!.inv}`);
@@ -146,8 +174,14 @@ test('5. Check and submit on a known star: the checks run and the submit is refu
   await expect(page.getByTestId('panel-notifications')).toContainText(/“A known star \(end-to-end\)” was not submitted\. .*a known object/);
   // and the API refuses the same
   const code = await page.evaluate(async (inv) => {
-    const i = ((await fetch('/api/me/investigations').then((r) => r.json())) as { investigations: { id: string; checks_job: string }[] }).investigations.find((x) => x.id === inv)!;
-    return fetch('/api/findings/submit', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ investigation_id: inv, checks_job: i.checks_job }) }).then((r) => r.status);
+    const i = (
+      (await fetch('/api/me/investigations').then((r) => r.json())) as { investigations: { id: string; checks_job: string }[] }
+    ).investigations.find((x) => x.id === inv)!;
+    return fetch('/api/findings/submit', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ investigation_id: inv, checks_job: i.checks_job }),
+    }).then((r) => r.status);
   }, made!.inv);
   expect(code).toBe(409);
 });
@@ -159,14 +193,26 @@ test('6. a case that passes: the fast-mover lead is checked, commented and submi
   test.setTimeout(1_800_000);
   // The investigation of the lead is opened through the account API (in the lab it is "Save to investigation" on the finding).
   const inv = await page.evaluate(
-    (lead) => fetch('/api/me/investigations', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Fast mover near Barnard (end-to-end)', finding_id: lead }) }).then((r) => r.json()).then((d: { id: string }) => d.id),
+    (lead) =>
+      fetch('/api/me/investigations', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title: 'Fast mover near Barnard (end-to-end)', finding_id: lead }),
+      })
+        .then((r) => r.json())
+        .then((d: { id: string }) => d.id),
     LEAD,
   );
   await page.goto(`/#/me?inv=${inv}`);
   // said once, with the first comment given up front; then the user leaves the page
-  await page.getByTestId('declare-note').fill('Not one straight line: the body is 0.4 au away and its path curves over 169 hours; the track search fits all five visits.');
+  await page
+    .getByTestId('declare-note')
+    .fill('Not one straight line: the body is 0.4 au away and its path curves over 169 hours; the track search fits all five visits.');
   await page.getByTestId('check-submit').click();
-  await expect(page.getByTestId('checks-status')).toHaveText(/^(Submit declared · .*you may leave|Every check has answered · one comment needed)/, { timeout: 60_000 });
+  await expect(page.getByTestId('checks-status')).toHaveText(
+    /^(Submit declared · .*you may leave|Every check has answered · one comment needed)/,
+    { timeout: 60_000 },
+  );
   await shot('6-declared');
   await page.goto('/#/me');
   await expect(page.getByTestId('investigation').filter({ hasText: 'Fast mover near Barnard (end-to-end)' })).toBeVisible();
@@ -175,7 +221,10 @@ test('6. a case that passes: the fast-mover lead is checked, commented and submi
   await expect(async () => {
     await page.keyboard.press('Escape'); // the bell's panel closed, then opened again: it reads the notifications anew
     await page.getByTestId('tab-notifications').click();
-    await expect(page.getByTestId('panel-notifications')).toContainText('“Fast mover near Barnard (end-to-end)”: every check has answered. One comment is needed', { timeout: 5000 });
+    await expect(page.getByTestId('panel-notifications')).toContainText(
+      '“Fast mover near Barnard (end-to-end)”: every check has answered. One comment is needed',
+      { timeout: 5000 },
+    );
   }).toPass({ timeout: 1_500_000, intervals: [15_000] });
   await page.goto(`/#/me?inv=${inv}`);
   await expect(page.getByTestId('checks-status')).toHaveText(/one comment needed for the warnings/);
@@ -192,7 +241,9 @@ test('6. a case that passes: the fast-mover lead is checked, commented and submi
   // Findings: the lead carries the user's name (its own page: the list shows the most promising first, and there are a thousand)
   const name = email.split('@')[0]!;
   await page.goto(`/#/findings/${encodeURIComponent(LEAD)}`);
-  await expect(page.getByRole('heading', { name: 'Credit' }).locator('xpath=..')).toContainText(`marked first by ${name}`, { timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: 'Credit' }).locator('xpath=..')).toContainText(`marked first by ${name}`, {
+    timeout: 60_000,
+  });
   await shot('6-findings-credit');
 });
 
@@ -202,8 +253,13 @@ test('7. the verdict tool changes the status and the Cabinet tab shows the unrea
   const { execSync } = await import('node:child_process');
   await page.goto('/#/me?tab=notifications');
   await page.getByTestId('panel-notifications').waitFor();
-  await page.evaluate(() => fetch('/api/me/notifications/read', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }));
-  const out = execSync(`${process.env.UV ?? 'uv'} run --project .. python -m service.accounts.verdict ${LEAD} candidate`, { cwd: '..', env: { ...process.env, SKY_PRODUCT_DB: process.env.SKY_FLOW_PRODUCT_DB } }).toString();
+  await page.evaluate(() =>
+    fetch('/api/me/notifications/read', { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' }),
+  );
+  const out = execSync(`${process.env.UV ?? 'uv'} run --project .. python -m service.accounts.verdict ${LEAD} candidate`, {
+    cwd: '..',
+    env: { ...process.env, SKY_PRODUCT_DB: process.env.SKY_FLOW_PRODUCT_DB },
+  }).toString();
   expect(out).toContain('candidate');
   await page.keyboard.press('Escape');
   await page.getByTestId('tab-notifications').click();
@@ -221,7 +277,8 @@ test('8. the cabinet keeps the work: the investigation, its marks with pictures,
   expect(await page.getByTestId('mark-row').count()).toBeGreaterThanOrEqual(2);
   // the notification comes when the whole job has finished (JPL may still be answering)
   const finished = await page.evaluate(async () => {
-    const i = ((await fetch('/api/me/investigations').then((r) => r.json())) as { investigations: { checks: { state: string } | null }[] }).investigations[0];
+    const i = ((await fetch('/api/me/investigations').then((r) => r.json())) as { investigations: { checks: { state: string } | null }[] })
+      .investigations[0];
     return i?.checks?.state === 'done';
   });
   await page.getByTestId('tab-notifications').click();
@@ -229,7 +286,12 @@ test('8. the cabinet keeps the work: the investigation, its marks with pictures,
     await expect(page.getByTestId('panel-notifications')).toContainText('“A known star (end-to-end)” was not submitted');
     await expect(page.getByTestId('nav-unread')).toBeVisible();
   } else {
-    test.info().annotations.push({ type: 'note', description: 'the checks job was still running (JPL): the "checks finished" notification was not asserted' });
+    test
+      .info()
+      .annotations.push({
+        type: 'note',
+        description: 'the checks job was still running (JPL): the "checks finished" notification was not asserted',
+      });
   }
   await page.keyboard.press('Escape');
   await page.getByTestId('tab-history').click();

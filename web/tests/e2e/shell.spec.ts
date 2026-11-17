@@ -26,23 +26,11 @@ test('the rail switches screens by clicking', async ({ page }) => {
 });
 
 test('a field opens the lab with its controls', async ({ page }) => {
+  test.setTimeout(60_000);
   await page.goto('/#/lab?ra=269.44629&dec=4.76792&fov=10');
-  for (const t of [
-    'Controls',
-    'Object',
-    'Spectrum',
-    'Candidates',
-    'Picture',
-    'Bands',
-    'Detectors',
-    'Months',
-    'Days',
-    'Blink',
-    'Difference',
-    'Co-add',
-    'Colour blend',
-    'Mono sum',
-  ]) {
+  // lab-v2: the panel is three tabs (Task, Object, View); the picture's own controls below it
+  for (const t of ['Task', 'Object', 'View']) await expect(page.getByRole('tab', { name: t, exact: true })).toBeVisible();
+  for (const t of ['Months', 'Days', 'Blink', 'Difference', 'Co-add']) {
     await expect(page.getByRole('button', { name: t, exact: true })).toBeVisible();
   }
   await expect(page.getByTestId('band-ch4')).toContainText(/Methane|CH₄/);

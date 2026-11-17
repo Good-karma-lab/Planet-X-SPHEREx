@@ -67,8 +67,11 @@ export interface SquareLook {
   line: string;
   /** a look can be counted now (signed in, 60 s, every pass) */
   canCount: boolean;
-  /** why it cannot ('' when it can): "Sign in to count your look", "Look at every pass · 0:42" */
+  /** why it cannot ('' when it can, or while only time is needed and more than 20 s are left): "Sign in to count your look",
+   *  "passes 2 of 4", "0:18" */
   why: string;
+  /** how far the look is, 0..1 (the time and the passes shown): the thin bar of the task card */
+  frac: number;
   /** count the look (POST …/viewed): the caller has checked canCount */
   confirm: (result?: 'nothing' | 'marks') => Promise<boolean>;
   /** the button of the free lab ("I have looked through this quarter"), null in a task or off a square */
@@ -162,8 +165,10 @@ export function useSquareLook(a: SquareArgs): SquareLook {
     : !user
       ? 'Sign in to count your look'
       : left > 0 || !allPasses
-        ? `Look at every pass${allPasses ? '' : ` · ${look.current.passes.size} of ${a.passesTotal} shown`}${left ? ` · 0:${String(left).padStart(2, '0')}` : ''}`
+        ? // quiet: the bar says how far; words only for the passes not yet shown and for the last 20 seconds
+          [allPasses ? '' : `passes ${look.current.passes.size} of ${a.passesTotal}`, left > 0 && left <= 20 ? `0:${String(left).padStart(2, '0')}` : ''].filter(Boolean).join(' · ')
         : '';
+  const frac = !cell ? 0 : Math.min(1, look.current.seconds / LOOK_SECONDS) * 0.7 + (a.passesTotal ? Math.min(1, look.current.passes.size / a.passesTotal) : 1) * 0.3;
   const mine = cell?.quarters?.filter((q) => q.mine).length;
   const line = cell
     ? [`square ${cell.id}`, quarter ? `${quarter} quarter` : '', quarter && mine != null ? `${mine} of 4 looked through` : '']
@@ -238,6 +243,11 @@ export function useSquareLook(a: SquareArgs): SquareLook {
         >
           {quarter ? 'I have looked through this quarter' : 'I have looked through this square'}
         </button>
+        {!!user && !canCount && !line2 && (
+          <i class="lookbar" aria-hidden="true">
+            <b style={{ width: `${Math.round(frac * 100)}%` }} />
+          </i>
+        )}
         <span class="sq-line" data-testid="square-look-line">
           {line2 || why}
         </span>
@@ -245,5 +255,80 @@ export function useSquareLook(a: SquareArgs): SquareLook {
       </div>
     ) : null;
 
-  return { cell, quarter, outline: cell?.corners ?? null, line, canCount, why, confirm, button };
+  return { cell, quarter, outline: cell?.corners ?? null, line, canCount, why, frac, confirm, button };
+}
+
+/** The free lab on a place that is not exactly a square or a quarter: which square and quarter it is in, how many of its quarters
+ *  I looked through, and the one thing that makes sense here: look through this quarter (as a task: its card, the minute's look,
+ *  then the square's next quarter). Another square is offered only once this one is looked through. */
+const hereCache = new Map<string, { cell: GridCell; quarter: Quarter } | 'none'>();
+
+export function HereSquare({ ra, dec, open }: { ra: number; dec: number; open: (params: Record<string, string>) => void }) {
+  // the answer is kept for the place: coming back to the Task tab shows it at once (no row appearing late, no jump)
+  const hk = `${ra.toFixed(4)},${dec.toFixed(4)}`;
+  const [here, setHereRaw] = useState<{ cell: GridCell; quarter: Quarter } | null | 'none'>(() => hereCache.get(hk) ?? null);
+  const setHere = (v: { cell: GridCell; quarter: Quarter } | 'none' | null) => {
+    if (v) hereCache.set(hk, v);
+    setHereRaw(v);
+  };
+  const [line, setLine] = useState('');
+  useEffect(() => {
+    let stop = false;
+    setHereRaw(hereCache.get(hk) ?? null);
+    void (async () => {
+      try {
+        const r = await fetch(`/api/grid/cells?ra=${ra.toFixed(5)}&dec=${dec.toFixed(5)}&radius=0.3`);
+        const cells = r.ok ? (((await r.json()) as { cells?: GridCell[] }).cells ?? []) : [];
+        const sep = (c: GridCell) => Math.hypot(wrap(c.ra - ra) * Math.cos((dec * Math.PI) / 180), c.dec - dec);
+        const c0 = cells.sort((x, y) => sep(x) - sep(y))[0];
+        if (!c0 || sep(c0) > 0.2) return !stop && setHere('none');
+        const one = await fetch(`/api/grid/cell/${encodeURIComponent(c0.id)}`);
+        const c = one.ok ? ((await one.json()) as GridCell) : c0;
+        const q = `${dec >= c.dec ? 'N' : 'S'}${wrap(ra - c.ra) > 0 ? 'E' : 'W'}` as Quarter;
+        if (!stop) setHere({ cell: c, quarter: q });
+      } catch {
+        if (!stop) setHere('none');
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [ra.toFixed(4), dec.toFixed(4)]);
+  if (here === null || here === 'none') return null;
+  const mine = new Set((here.cell.quarters ?? []).filter((x) => x.mine).map((x) => (x.id ?? x.q) as Quarter));
+  const done = QUARTERS.every((q) => mine.has(q));
+  // this quarter, else the square's next one I have not looked through
+  const to = mine.has(here.quarter) ? QUARTERS.find((q) => !mine.has(q)) : here.quarter;
+  const go = async (cellId: string | null, q: Quarter | null) => {
+    setLine('asking…');
+    try {
+      const p = new URLSearchParams({ kind: 'cell' });
+      if (cellId) p.set('cell_id', cellId);
+      if (q) p.set('quarter', q);
+      const r = await fetch(`/api/tasks/next?${p}`);
+      const t = r.ok ? ((await r.json()) as { task: { id: string; ra: number | null; dec: number | null; cell_id: string | null; quarter: string | null } | null }).task : null;
+      if (!t || t.ra == null || t.dec == null) return setLine(r.ok ? 'No square is waiting for a look' : 'Tasks did not answer');
+      open({ ra: t.ra.toFixed(5), dec: t.dec.toFixed(5), fov: '10', task: t.id, kind: 'cell', ...(t.cell_id ? { cell: t.cell_id } : {}), ...(t.quarter ? { quarter: t.quarter } : {}) });
+    } catch {
+      setLine('Tasks did not answer');
+    }
+  };
+  return (
+    <section class="psec here-square" data-testid="here-square">
+      <div class="psh">This place</div>
+      <div class="hs-line">
+        square {here.cell.id} · {here.quarter} quarter · {mine.size} of 4 looked through
+      </div>
+      {done ? (
+        <button class="btn" onClick={() => void go(null, null)} data-testid="here-next-square">
+          Square looked through · give me another
+        </button>
+      ) : (
+        <button class="btn primary" onClick={() => void go(here.cell.id, to ?? here.quarter)} data-testid="here-look">
+          {to === here.quarter ? 'Look through this quarter' : `Look through the ${to} quarter`}
+        </button>
+      )}
+      {line && <span class="cb-status">{line}</span>}
+    </section>
+  );
 }

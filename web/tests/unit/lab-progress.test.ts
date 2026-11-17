@@ -8,9 +8,9 @@ describe('a search that did not answer is asked again by itself', () => {
   });
   it('says who did not answer and when the next try is', () => {
     const outside: SearchInfo = { name: 'known objects', state: 'failed', retry: { nextIn: 25, tryNow: () => {} } };
-    expect(failWord(outside)).toBe('did not answer · next try in 25 s');
-    expect(failWord({ ...outside, ours: true })).toBe('our server did not answer · next try in 25 s');
-    expect(failWord({ ...outside, retry: { nextIn: null, tryNow: () => {} } })).toBe('did not answer');
+    expect(failWord(outside)).toBe('no answer · retry 25 s');
+    expect(failWord({ ...outside, ours: true })).toBe('server error · retry 25 s');
+    expect(failWord({ ...outside, retry: { nextIn: null, tryNow: () => {} } })).toBe('no answer');
   });
 });
 
@@ -22,7 +22,7 @@ describe('the searches on the status line', () => {
       { name: 'Planet X', state: 'running', frac: 0.4 },
       { name: 'anomalies', state: 'running' },
     ];
-    expect(searchingLine(list)).toBe('searching: asteroids 21% · Planet X 40% · anomalies');
+    expect(searchingLine(list)).toBe('searching asteroids 21% · Planet X 40% · anomalies');
     expect(searchingLine([{ name: 'movers', state: 'done' }])).toBe('');
   });
 });

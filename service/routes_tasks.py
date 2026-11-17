@@ -19,6 +19,7 @@ Where the choices come from:
 from __future__ import annotations
 
 import importlib
+import math
 import re
 import sqlite3
 from typing import Any
@@ -26,7 +27,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from service import accounts
-from service.accounts import agreement
+from service.accounts import agreement, people
 from service.accounts.score import STAGE_OF_STATUS
 from service.quarters import Quarters
 
@@ -175,7 +176,13 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
         return None
     from service.findings import query
 
-    body = query(f.db, None, None, None, 100000, 0)
+    try:  # what people agreed: set-aside finds are not handed out, raised ones come first
+        from service.accounts import field_people, people
+
+        aside, raised = field_people.set_aside(st), people.raised(st)
+    except Exception:
+        aside, raised = {}, {}
+    body = query(f.db, None, None, None, 100000, 0, aside=aside, raised=raised)
     return [
         {
             "finding_id": x["id"],
@@ -185,20 +192,78 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
             "status": x["status"],
             "kind": x["kind"],
             "stage": STAGE_OF_STATUS.get(x["status"]),
+            **({"raised": x["people_raised"]} if "people_raised" in x else {}),
         }
         for x in body["finds"]
     ]
+
+
+def find_rows(st: Any) -> list[dict[str, Any]]:
+    """The machine findings in the Findings page's order (a test may put its own list in `st.task_findings`); 503 without them."""
+    source = getattr(st, "task_findings", None)
+    rows = source() if callable(source) else lead_findings(st)
+    if rows is None:
+        raise HTTPException(503, "the findings database is not loaded")
+    return list(rows)
+
+
+def find_row(st: Any, finding_id: str) -> dict[str, Any] | None:
+    """One machine find as a task needs it, with its data (the visits of a track), or None."""
+    row = next((r for r in find_rows(st) if r["finding_id"] == finding_id), None)
+    if row is None or "data" in row:
+        return row
+    f = getattr(st, "findings", None)
+    if f is not None:
+        from service.findings import find_row as one
+
+        full = one(f.db, finding_id)
+        if full is not None:
+            row = {**row, "data": full.get("data") or {}}
+    return row
+
+
+TASK_FOVS = (10.0, 20.0, 60.0)  # the field sizes a finding task opens at: the smallest that holds the whole track
+
+
+def task_fov(row: dict[str, Any] | None) -> float:
+    """The field a finding task opens at: 10′, or the smallest of 20′ / 60′ that holds the whole track with a margin; a time-lapse
+    at its own field (60′ unless it says)."""
+    if not row:
+        return TASK_FOVS[0]
+    data = row.get("data") or {}
+    if str(row.get("finding_id", "")).startswith("film:") or row.get("kind") == "film":
+        fp = data.get("field_params") or {}
+        return float(fp.get("fov") or 60.0)
+    tr = data.get("track") or {}
+    pts = [(a, d) for a, d in zip(tr.get("ra") or [], tr.get("dec") or [], strict=False) if a is not None and d is not None]
+    if len(pts) < 2:
+        return TASK_FOVS[0]
+    dec0 = sum(d for _, d in pts) / len(pts)
+    cosd = math.cos(math.radians(dec0))
+    ras = [((a - pts[0][0] + 540.0) % 360.0 - 180.0) * cosd for a, _ in pts]
+    span = max(max(ras) - min(ras), max(d for _, d in pts) - min(d for _, d in pts)) * 60.0  # arcmin
+    need = span * 1.25 + 2.0
+    return next((f for f in TASK_FOVS if f >= need), TASK_FOVS[-1])
+
+
+#: the question and the answers of the task kinds that are not a series (spec §5e "More ways people help")
+ASK = {
+    "find_again": ("Tap it if you see it.", (("seen", "Done"), ("not_seen", "I don't see it"), (people.CANT_TELL, "Not sure"))),
+    "recentre": (
+        "Tap the centre of the object in each picture where the ring sits off it.",
+        (("done", "Done"), (people.CANT_TELL, "Not sure")),
+    ),
+    "bad_picture": ("Does this picture look broken (a streak, cut off, glare)?",
+                    (("broken", "Yes, broken"), ("fine", "No, it looks fine"), (people.CANT_TELL, "Not sure"))),
+    "second_look": ("Is this a real object?", people.SECOND_LOOK_ANSWERS),
+}  # fmt: skip
 
 
 def make_tasks_router(st: Any) -> APIRouter:
     router = APIRouter()
 
     def findings() -> list[dict[str, Any]]:
-        source = getattr(st, "task_findings", None)  # a test may put its own list here
-        rows = source() if callable(source) else lead_findings(st)
-        if rows is None:
-            raise HTTPException(503, "the findings database is not loaded")
-        return list(rows)
+        return find_rows(st)
 
     qs = Quarters(st, quarter_place)
     st.quarters = qs
@@ -312,11 +377,12 @@ def make_tasks_router(st: Any) -> APIRouter:
         seen = acc.db.task_refs(user_id, "finding") if user_id else set()
         checked = acc.db.check_counts()
         leads = [r for r in rows if r.get("status") in LEADS and r["finding_id"] not in seen]
-        leads.sort(key=lambda r: checked.get(r["finding_id"], 0))  # stable: the page's order among the equally checked
+        # a find people raised first, then the least checked; stable: the page's order among the equal
+        leads.sort(key=lambda r: ("raised" not in r, checked.get(r["finding_id"], 0)))
         return leads[0] if leads else None
 
     def next_judged(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
-        """Does it really move? / What is this red source? / What is this spectral anomaly?"""
+        """A question series (spec §5e): moves (tracks, slow movers, Planet X peaks), red, anomaly."""
         rows = findings()
         if finding_id is not None:
             one = next((r for r in rows if r["finding_id"] == finding_id), None)
@@ -324,34 +390,80 @@ def make_tasks_router(st: Any) -> APIRouter:
                 raise HTTPException(404, "no such finding")
             return one
         seen = acc.db.task_refs(user_id, kind) if user_id else set()
-        return agreement.get(st, acc.db).pick(kind, rows, user_id, seen)
+        return people.get(st, acc.db).pick(kind, rows, user_id, seen)
+
+    def next_other(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
+        """find_again, recentre, bad_picture, second_look."""
+        p = people.get(st, acc.db)
+        if kind == "bad_picture":
+            return p.pick_exposure(user_id)
+        if kind == "second_look":
+            return p.pick_second_look(user_id)
+        rows = findings()
+        if finding_id is not None:
+            one = next((r for r in rows if r["finding_id"] == finding_id), None)
+            if one is None:
+                raise HTTPException(404, "no such finding")
+            return one
+        seen = acc.db.task_refs(user_id, kind) if user_id else set()
+        kinds = people.FIND_AGAIN_KINDS if kind == "find_again" else people.RECENTRE_KINDS
+        done = (
+            {r[0] for r in acc.db._conn().execute("SELECT DISTINCT finding_id FROM acc_taps WHERE kind=? AND user_id=?", (kind, user_id))}
+            if user_id
+            else set()
+        )
+        pool = [r for r in rows if r.get("kind") in kinds and r.get("stage") is None and r["finding_id"] not in seen | done]
+        return pool[0] if pool else None
 
     def with_ask(task: dict[str, Any] | None) -> dict[str, Any] | None:
-        """The question and the answers of a judged task, for the lab's panel."""
-        if task is not None and task["kind"] in agreement.KINDS:
-            task["question"] = agreement.QUESTION[task["kind"]]
-            task["answers"] = [{"id": a, "label": label} for a, label in agreement.ANSWERS[task["kind"]]]
-            tree = agreement.tree_of(task["kind"])
-            if tree is not None:  # plain questions, not classes: the lab asks the tree and sends the path of answers
-                task["tree"] = tree
+        """What the lab's panel asks: the question series of the find (spec §5e), or the question of the other task kinds. The
+        old one-click classes are not offered any more (they asked what a person cannot judge or the machine already knows)."""
+        if task is None:
+            return None
+        kind = task["kind"]
+        if kind in ("moves", "red", "anomaly", "finding") and task.get("finding_id"):
+            task["fov"] = task_fov(find_row(st, task["finding_id"]))  # the whole track in the picture
+            series = people.series_of(str(task["finding_id"]).split(":")[0])
+            if series is not None:
+                task["series"] = {"id": series, "steps": people.steps_of(series)}
+                if series == "track":
+                    task["pictures"] = people.picture_list(find_row(st, task["finding_id"]))
+        elif kind in ASK:
+            q, answers = ASK[kind]
+            task["question"] = q
+            task["answers"] = [{"id": a, "label": label} for a, label in answers]
+            if kind == "bad_picture":
+                task["exposure"] = task["finding_id"]
         return task
 
     @router.get("/api/tasks/results")
     def results(ids: str = Query(..., max_length=8000)) -> Any:
         """{results:{find id: {kind, result, label, agree, total, text}}}: what people said about red sources and anomalies."""
         acc = accounts.get(st)
-        return {"results": agreement.get(st, acc.db).people_say([i for i in ids.split(",") if i][:500])}
+        wanted = [i for i in ids.split(",") if i][:500]
+        out = agreement.get(st, acc.db).people_say(wanted)  # the one-click answers of before
+        p = people.get(st, acc.db)
+        out.update(p.set_aside_results(wanted))  # artefact marks of two people (spec §5g)
+        out.update(p.results(wanted))  # the question series
+        return {"results": out}
 
     @router.get("/api/tasks/brown-dwarf-queue")
     def brown_dwarf_queue() -> Any:
         """{candidates:[{finding_id, ra, dec, agree, total, at}]}: red sources people call cold brown dwarfs, for the brown-dwarf search."""
         acc = accounts.get(st)
-        return {"candidates": agreement.get(st, acc.db).brown_dwarf_queue()}
+        done = getattr(getattr(st, "bd_queue", None), "done", None) or {}
+        # each with what the brown-dwarf search made of it, once it has looked (service/people_queue.py)
+        return {
+            "candidates": [
+                {**c, **({"checked": done[c["finding_id"]]} if c.get("finding_id") in done else {})}
+                for c in agreement.get(st, acc.db).brown_dwarf_queue()
+            ]
+        }
 
     @router.get("/api/tasks/next")
     def next_task(
         request: Request,
-        kind: str = Query(..., pattern="^(cell|finding|moves|red|anomaly)$"),
+        kind: str = Query(..., pattern="^(cell|finding|moves|red|anomaly|find_again|recentre|bad_picture|second_look)$"),
         cell_id: str | None = Query(None, max_length=80),
         quarter: str | None = Query(None, pattern="^(NW|NE|SW|SE)$"),
         finding_id: str | None = Query(None, max_length=80),
@@ -372,6 +484,8 @@ def make_tasks_router(st: Any) -> APIRouter:
             ref = next_cell(acc, uid, cell_id, quarter)
         elif kind == "finding":
             ref = next_finding(acc, uid, finding_id)
+        elif kind in people.TASK_KINDS:
+            ref = next_other(acc, kind, uid, finding_id)
         else:
             ref = next_judged(acc, kind, uid, finding_id)
         if ref is None:

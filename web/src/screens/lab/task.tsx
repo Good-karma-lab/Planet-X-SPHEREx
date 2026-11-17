@@ -7,125 +7,151 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Mark } from '../../lib/marks';
 import { clearDo, pendingDo, useSignIn } from './signin';
 
-export type TaskKind = 'cell' | 'finding' | 'moves' | 'red' | 'anomaly';
-const KINDS: TaskKind[] = ['cell', 'finding', 'moves', 'red', 'anomaly'];
+export type TaskKind = 'cell' | 'finding' | 'moves' | 'red' | 'anomaly' | 'find_again' | 'recentre' | 'bad_picture' | 'second_look';
+const KINDS: TaskKind[] = ['cell', 'finding', 'moves', 'red', 'anomaly', 'find_again', 'recentre', 'bad_picture', 'second_look'];
 
-/** The kinds of task (product spec §5, §5b): the panel's title, its one question, and the answers ([result sent, button text, tooltip]). */
-export const TASKS: Record<TaskKind, { title: string; ask: string; answers: [string, string, string?][] }> = {
+/** The kinds of task (product spec §5, §5e): the panel's title, the question when there is no series, and its answers
+ *  ([result sent, button text]). A find's task asks the question series of its kind instead (SERIES), one step at a time. */
+export const TASKS: Record<TaskKind, { title: string; ask: string; answers: [string, string][] }> = {
   cell: { title: 'Look through a square', ask: 'Mark everything that moves and has no ring', answers: [['nothing', 'Nothing here'], ['marks', 'Done, with marks']] },
-  moves: {
-    title: 'Does it really move?',
-    ask: 'The machine says this moves. Does it?',
-    answers: [['moves', 'It moves'], ['still', 'It stands still'], ['artefact', 'It is an artefact'], ['cant_tell', 'Can’t tell']],
+  finding: { title: 'Check a machine finding', ask: 'Is this a real object?', answers: [['moves', 'It moves'], ['artefact', 'Artefact'], ['known', 'Known object'], ['cant_tell', 'Can’t tell']] },
+  moves: { title: 'Does it really move?', ask: 'The machine says this moves. Does it?', answers: [['moves', 'It moves'], ['still', 'It stands still'], ['artefact', 'It is an artefact'], ['cant_tell', 'Can’t tell']] },
+  red: { title: 'A red source', ask: '', answers: [] },
+  anomaly: { title: 'A spectral anomaly', ask: '', answers: [] },
+  find_again: { title: 'Find it again', ask: 'Tap it if you see it.', answers: [['seen', 'Done'], ['not_seen', 'I don’t see it'], ['cant_tell', 'Not sure']] },
+  recentre: {
+    title: 'Put the ring on it',
+    ask: 'Tap the centre of the object in each picture where the ring sits off it.',
+    answers: [['done', 'Done'], ['cant_tell', 'Not sure']],
   },
-  finding: {
-    title: 'Check a machine finding',
-    ask: 'Is this a real object?',
-    answers: [['moves', 'It moves'], ['artefact', 'Artefact'], ['known', 'Known object'], ['cant_tell', 'Can’t tell']],
+  bad_picture: {
+    title: 'This picture is broken',
+    ask: 'Does this picture look broken (a streak, cut off, glare)?',
+    answers: [['broken', 'Yes, broken'], ['fine', 'No, it looks fine'], ['cant_tell', 'Not sure']],
   },
-  red: {
-    title: 'What is this red source?',
-    ask: 'Why is it red?',
-    answers: [
-      ['brown_dwarf', 'Cold brown dwarf', 'Methane and water dips'],
-      ['dusty_star', 'Dusty or reddened star'],
-      ['galaxy', 'Galaxy or extended'],
-      ['artefact', 'Artefact'],
-      ['cant_tell', 'Can’t tell'],
-    ],
-  },
-  anomaly: {
-    title: 'What is this spectral anomaly?',
-    ask: 'Is this feature real?',
-    answers: [['real', 'Real feature'], ['detector', 'Detector edge or ghost'], ['cosmic_ray', 'Cosmic ray or one bad exposure'], ['cant_tell', 'Can’t tell']],
-  },
+  second_look: { title: 'Second look', ask: 'Is this a real object?', answers: [['moves', 'It moves'], ['artefact', 'Artefact'], ['cant_tell', 'Can’t tell']] },
 };
 
-/** One step of a question tree (plain questions, not classes: spec §5b): what the lab shows with it, and the answers; an answer
- *  leads to the next step or ends the path with a class. */
-export interface TreeStep {
+/** One step of a question series (spec §5e): the question, what the lab shows with it (`show`), whether the person taps pictures
+ *  (`tap`), and the answers; an answer goes on to the next step or ends the series with a result the service acts on. */
+export interface SeriesStep {
   id: string;
   question: string;
-  /** what the lab shows with the question: picture | passes | defects | spectrum | exposures | detector */
+  /** blink (a track's visits) · pictures (tap where it is missing) · blink2 (two passes) · old_surveys · sums (a peak's two sums)
+   *  · picture · passes · old_new · stamps (an anomaly's odd exposures) */
   show: string;
-  answers: { id: string; label: string; next?: string; result?: string; examples?: string[] }[];
+  tap?: boolean;
+  answers: { id: string; label: string; next?: string; result?: string }[];
 }
+/** (kept for the earlier name) */
+export type TreeStep = SeriesStep;
 
 const NOT_SURE = { id: 'not_sure', label: 'Not sure', result: 'cant_tell' };
-/** The trees as the service sends them in the task (service/accounts/agreement.py TREES): kept here too for a task opened by its
- *  id alone, whose body the lab does not have. The service decides the class from the path; the lab only walks the steps. */
-export const TREES: Partial<Record<TaskKind, TreeStep[]>> = {
+const s_ = (id: string, question: string, show: string, answers: SeriesStep['answers'], tap = false): SeriesStep => ({
+  id,
+  question,
+  show,
+  ...(tap ? { tap } : {}),
+  answers: tap ? answers : [...answers, NOT_SURE],
+});
+/** The series as the service sends them in the task (service/accounts/people.py SERIES, the user's final wording), kept here too
+ *  for a task whose body the lab does not have. The service turns the path into the result; the lab only walks the steps. */
+export const SERIES: Record<string, SeriesStep[]> = {
+  track: [
+    s_('steps', 'Does one dot step along the arrow?', 'blink', [
+      { id: 'every', label: 'Yes, in every picture', next: 'shape' },
+      { id: 'some', label: 'Only in some', next: 'missing' },
+      { id: 'no', label: 'No', result: 'no_dot' },
+    ]),
+    s_('missing', 'Tap the pictures where it is missing.', 'pictures', [{ id: 'done', label: 'Done', next: 'shape' }], true),
+    s_('shape', 'Is it a dot like the stars, or a streak?', 'blink', [
+      { id: 'dot', label: 'Dot', result: 'moves' },
+      { id: 'streak', label: 'Streak', result: 'streak' },
+    ]),
+  ],
+  slow: [
+    s_('shift', 'Does the dot in the ring shift while the stars stay put?', 'blink2', [
+      { id: 'yes', label: 'Yes', next: 'blend' },
+      { id: 'no', label: 'No', result: 'still' },
+    ]),
+    s_('blend', 'Is it one dot, or two touching?', 'blink2', [
+      { id: 'one', label: 'One', next: 'old' },
+      { id: 'two', label: 'Two', result: 'blend' },
+    ]),
+    s_('old', 'Old pictures (WISE 2010, 2MASS 2000): is there a dot along the arrow, further back?', 'old_surveys', [
+      { id: 'yes', label: 'Yes', result: 'moves_old' },
+      { id: 'no', label: 'No', result: 'moves' },
+    ]),
+  ],
+  peak: [
+    s_('left', 'Left: added along the orbit. Right: added as it is. Is there a dot in the ring on the left only?', 'sums', [
+      { id: 'yes', label: 'Yes', next: 'glow' },
+      { id: 'no', label: 'No', result: 'no_peak' },
+    ]),
+    s_('glow', 'Is it inside a bright star’s glow or on its spike?', 'picture', [
+      { id: 'yes', label: 'Yes', result: 'glow' },
+      { id: 'no', label: 'No', result: 'candidate' },
+    ]),
+  ],
   red: [
-    {
-      id: 'shape',
-      question: 'Is it a sharp point like the stars around it?',
-      show: 'picture',
-      answers: [
-        { id: 'sharp', label: 'Sharp point', next: 'every_pass', examples: ['star_point'] },
-        { id: 'fuzzy', label: 'Fuzzy or stretched', result: 'galaxy', examples: ['known_galaxy'] },
-        NOT_SURE,
-      ],
-    },
-    {
-      id: 'every_pass',
-      question: 'Is it there in every pass?',
-      show: 'passes',
-      answers: [{ id: 'yes', label: 'Yes', next: 'defect' }, { id: 'some', label: 'Only in some', result: 'artefact', examples: ['cosmic_ray'] }, NOT_SURE],
-    },
-    {
-      id: 'defect',
-      question: 'Does it look like one of these defects?',
-      show: 'defects',
-      answers: [
-        { id: 'yes', label: 'Yes', result: 'artefact', examples: ['satellite_streak', 'picture_edge', 'bright_star_ghost'] },
-        { id: 'no', label: 'No', next: 'spectrum' },
-        NOT_SURE,
-      ],
-    },
-    {
-      id: 'spectrum',
-      question: 'Its spectrum next to two examples: which shape is closer?',
-      show: 'spectrum',
-      answers: [
-        { id: 'dips', label: 'A: deep dips, like ε Indi B', result: 'brown_dwarf', examples: ['eps_indi_b', 'wise_0855'] },
-        { id: 'smooth', label: 'B: a smooth rise to the red', result: 'dusty_star', examples: ['dusty_star'] },
-        NOT_SURE,
-      ],
-    },
+    s_('shape', 'A sharp dot, or a fuzzy patch?', 'picture', [
+      { id: 'sharp', label: 'A sharp dot', next: 'every' },
+      { id: 'fuzzy', label: 'A fuzzy patch', result: 'galaxy' },
+    ]),
+    s_('every', 'Is it there every time?', 'passes', [
+      { id: 'yes', label: 'Yes', next: 'glow' },
+      { id: 'no', label: 'No', result: 'artefact' },
+    ]),
+    s_('glow', 'Is it on a bright star’s glow, a spike, or the picture edge?', 'picture', [
+      { id: 'yes', label: 'Yes', result: 'artefact' },
+      { id: 'no', label: 'No', next: 'moved' },
+    ]),
+    s_('moved', 'Old picture next to new: has it moved?', 'old_new', [
+      { id: 'yes', label: 'Yes', result: 'brown_dwarf' },
+      { id: 'no', label: 'No', result: 'still' },
+    ]),
   ],
   anomaly: [
-    {
-      id: 'exposures',
-      question: 'The odd point of the spectrum: is it in more than one exposure?',
-      show: 'exposures',
-      answers: [{ id: 'yes', label: 'Yes', next: 'detector' }, { id: 'one', label: 'Only one', result: 'cosmic_ray', examples: ['cosmic_ray'] }, NOT_SURE],
-    },
-    {
-      id: 'detector',
-      question: 'Where did those exposures fall on the detector?',
-      show: 'detector',
-      answers: [
-        { id: 'edge', label: 'Near an edge or a bright star', result: 'detector', examples: ['picture_edge', 'bright_star_ghost'] },
-        { id: 'open', label: 'In the open', result: 'real' },
-        NOT_SURE,
-      ],
-    },
+    s_('neighbour', 'In the odd pictures, does a neighbour star touch it?', 'stamps', [
+      { id: 'yes', label: 'Yes', result: 'neighbour' },
+      { id: 'no', label: 'No', next: 'broken' },
+    ]),
+    s_('broken', 'Do the odd pictures look broken (a streak, cut off, glare)?', 'stamps', [
+      { id: 'yes', label: 'Yes', result: 'broken' },
+      { id: 'no', label: 'No', result: 'real' },
+    ]),
   ],
 };
+/** the series of a find, by the machine's kind of find (the prefix of its id) */
+export const SERIES_OF_KIND: Record<string, string> = { film: 'track', mover: 'slow', browndwarf: 'slow', peak: 'peak', red: 'red', anomaly: 'anomaly' };
+/** small examples beside an answer, where they help (series.step.answer → pictures in /examples) */
+export const EXAMPLES: Record<string, string[]> = {
+  'red.shape.sharp': ['star_point'],
+  'red.shape.fuzzy': ['known_galaxy'],
+  'red.glow.yes': ['bright_star_ghost', 'picture_edge'],
+  'peak.glow.yes': ['bright_star_ghost'],
+  'track.shape.streak': ['satellite_streak'],
+  'anomaly.broken.yes': ['cosmic_ray', 'picture_edge'],
+};
 
-/** The step a path of answers has reached: the first step for an empty path; null when the path has ended or is not of the tree. */
-export function stepAt(tree: TreeStep[], path: string[]): TreeStep | null {
-  let step: TreeStep | null = tree[0] ?? null;
+/** The step a path of answers has reached: the first step for an empty path; null when the path has ended or is not of the series. */
+export function stepAt(series: SeriesStep[], path: string[]): SeriesStep | null {
+  let step: SeriesStep | null = series[0] ?? null;
   for (const answer of path) {
     const a = step?.answers.find((x) => x.id === answer);
     if (!a || !a.next) return null;
-    step = tree.find((x) => x.id === a.next) ?? null;
+    step = series.find((x) => x.id === a.next) ?? null;
   }
   return step;
 }
 
 /** A task about one object: that object alone gets the bright ring and its label, the rest is dimmed (spec §5b). */
-export const focusKind = (k: TaskKind): boolean => k !== 'cell';
+/** A track's task on the picture: its place in each visit of the pass (the task's pictures) and the visits tapped as missing.
+ *  The task writes it as it renders, the lab's overlay (flow.tsx) draws it: the path with its arrow, a dot per visit, the ring on
+ *  the visit shown. Empty when the task is not about a track. */
+export const taskTrack: { pts: { i: number; mjd: number; ra: number; dec: number }[]; missing: number[] } = { pts: [], missing: [] };
+
+export const focusKind = (k: TaskKind): boolean => k !== 'cell' && k !== 'bad_picture';
 
 export interface LabTask {
   id: string | null;
@@ -166,7 +192,16 @@ export function awardLine(): string {
 }
 
 type Takeable = TaskKind;
-interface NextTask {
+/** A place tapped in a picture (find_again, recentre): the pass (Months) or the visit (Days) it was tapped on, and its date. */
+export interface Tap {
+  ra: number;
+  dec: number;
+  pass?: number | null;
+  frame?: number | null;
+  mjd?: number | null;
+}
+/** A task as the service gives it (GET /api/tasks/next; flow-accounts' shapes). */
+export interface NextTask {
   id: string;
   kind: Takeable;
   cell_id: string | null;
@@ -175,13 +210,23 @@ interface NextTask {
   dec: number | null;
   /** the field size the find was made in, arcminutes (when the service says it) */
   fov?: number | null;
-  /** red sources and anomalies: the tree of plain questions the lab asks */
-  tree?: TreeStep[];
   /** a square task: the quarter of the square to look through (fov 10) */
   quarter?: string | null;
+  /** a find's question series (spec §5e) */
+  series?: { id: string; steps: SeriesStep[] } | null;
+  /** a track's pictures (its visits), to tap where it is missing */
+  pictures?: { i: number; mjd?: number | null; ra?: number | null; dec?: number | null }[] | null;
+  /** the other kinds: their question and answers */
+  question?: string | null;
+  answers?: { id: string; label: string }[] | null;
+  /** bad_picture: the exposure in question, and a picture of it when the service gives one */
+  exposure?: string | null;
+  cutout?: string | null;
+  /** find_again: where the lead should be in the next pass */
+  predicted?: { mjd?: number | null; path?: [number, number][] | null; ra?: number | null; dec?: number | null } | null;
 }
 
-async function takeTask(kind: Takeable, ref?: string | null): Promise<NextTask | null | 'failed'> {
+export async function takeTask(kind: Takeable, ref?: string | null): Promise<NextTask | null | 'failed'> {
   try {
     const q = new URLSearchParams({ kind });
     if (ref) q.set(kind === 'cell' ? 'cell_id' : 'finding_id', ref);
@@ -199,13 +244,16 @@ export function taskParams(t: NextTask): Record<string, string> | null {
   return {
     ra: t.ra.toFixed(5),
     dec: t.dec.toFixed(5),
-    fov: String(t.fov && t.fov > 0 ? t.fov : t.kind === 'cell' ? (t.quarter ? 10 : 20) : 5),
+    // the service's field size when it gives one (a whole track fits); else as lib/account.ts taskHash: a quarter 10′, a square 20′,
+    // a time-lapse its own 60′ field, any other find 10′
+    fov: String(t.fov && t.fov > 0 ? t.fov : t.kind === 'cell' ? (t.quarter ? 10 : 20) : t.finding_id?.startsWith('film:') ? 60 : 10),
     task: t.id,
     kind: t.kind,
     ...(t.cell_id ? { cell: t.cell_id } : {}),
     ...(t.quarter ? { quarter: t.quarter } : {}),
-    // the find is the lab's selected object (`find`): the one thing the task rings brightly
-    ...(t.finding_id ? { finding: t.finding_id, find: t.finding_id } : {}),
+    // the find is the lab's selected object (`find`): the one thing the task rings brightly (an exposure is no find)
+    ...(t.finding_id && t.kind !== 'bad_picture' ? { finding: t.finding_id, find: t.finding_id } : {}),
+    ...(t.finding_id && t.kind === 'bad_picture' ? { exposure: t.finding_id } : {}),
   };
 }
 
@@ -221,26 +269,46 @@ export interface TaskArgs {
   pass: number | null;
   passesTotal: number;
   /** a square task: whether a look can be counted now, why not, and the count itself (lab/square.tsx) */
-  square?: { canCount: boolean; why: string; confirm: (result?: 'nothing' | 'marks') => Promise<boolean> } | null;
-  /** what the lab shows for the task's question (the mover's blink and ruler), or for one step of a question tree (`show` of the step) */
-  view?: (show: string | null) => ComponentChildren;
+  square?: { canCount: boolean; why: string; frac?: number; confirm: (result?: 'nothing' | 'marks') => Promise<boolean> } | null;
+  /** what the lab shows with the task: for a series step its `show`, else null (the task's kind decides) */
+  view?: (show: string | null, task: NextTask | null) => ComponentChildren;
   /** the other overlays are on show (off by default in a task about one object); and the switch for it */
   others: boolean;
   setOthers: (on: boolean) => void;
+  /** "Mark something the machine missed": the Mark tool on the picture */
+  markMissed: () => void;
+  /** shows one of a track's pictures on the picture: the visit of the pass nearest its date (MJD) */
+  showPicture: (mjd: number) => void;
 }
 
-/** The Task panel, or null when the lab has no task. */
-export function useLabTask(a: TaskArgs): ComponentChildren {
+/** The task as the lab works with it: the panel, the step on show, the service's body, and the taps. */
+export interface LabTaskView {
+  panel: ComponentChildren;
+  kind: TaskKind | null;
+  /** the `show` of the series step on show, null without a series */
+  show: string | null;
+  /** the series of the task's find (track, slow, peak, red, anomaly), null without one */
+  series: string | null;
+  body: NextTask | null;
+  /** clicks on the picture are taps (find_again, recentre) */
+  tapping: boolean;
+  taps: Tap[];
+  addTap: (t: Tap) => void;
+}
+
+/** The Task panel and what goes with it (an empty view when the lab has no task). */
+export function useLabTask(a: TaskArgs): LabTaskView {
   const task = taskOfParams(a.params);
   const key = task ? `${task.kind}|${task.id}|${task.cell_id}|${task.finding_id}` : '';
   const [id, setId] = useState<string | null>(task?.id ?? null);
-  const [, setRefs] = useState<{ cell: string | null; finding: string | null }>({ cell: task?.cell_id ?? null, finding: task?.finding_id ?? null });
+  const [body, setBody] = useState<NextTask | null>(null);
   const [busy, setBusy] = useState(false);
   const si = useSignIn();
   const [line, setLine] = useState('');
-  // a tree of plain questions (red source, anomaly): the service's own when the task brought it, and the answers given so far
-  const [tree, setTree] = useState<TreeStep[] | null>(task ? (TREES[task.kind] ?? null) : null);
+  // a question series: the answers given so far, and the pictures tapped as "missing"
   const [path, setPath] = useState<string[]>([]);
+  const [missing, setMissing] = useState<number[]>([]);
+  const [taps, setTaps] = useState<Tap[]>([]);
   // how the task was looked at: seconds with the lab visible, and which passes were on show
   const look = useRef({ seconds: 0, passes: new Set<number>() });
   if (a.pass != null) look.current.passes.add(a.pass);
@@ -251,36 +319,35 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     }, 1000);
     return () => clearInterval(t);
   }, [key]);
-  // a lab opened with the kind only (from Findings, from the globe): the lab takes the task itself
+  // the task's body: the lab takes the task itself when opened with the kind only; a task opened by its id is found in my tasks
   useEffect(() => {
     setId(task?.id ?? null);
-    setRefs({ cell: task?.cell_id ?? null, finding: task?.finding_id ?? null });
+    setBody(null);
     setLine('');
-    setTree(task ? (TREES[task.kind] ?? null) : null);
     setPath([]);
+    setMissing([]);
+    setTaps([]);
     if (!task) return;
     let stop = false;
-    if (task.id) {
-      // a task opened by its id alone (the cabinet): its square or finding is in the user's own list of tasks
-      if (task.cell_id || task.finding_id) return;
+    const ref = task.kind === 'cell' ? task.cell_id : task.kind === 'bad_picture' ? (a.params['exposure'] ?? null) : task.finding_id;
+    if (task.id && !ref) {
       void fetch('/api/me/tasks')
         .then((r) => (r.ok ? r.json() : null))
         .then((d: { tasks?: NextTask[] } | null) => {
           const t = d?.tasks?.find((x) => x.id === task.id);
-          if (t && !stop) setRefs({ cell: t.cell_id, finding: t.finding_id });
+          if (t && !stop) setBody(t);
         })
         .catch(() => {});
       return () => {
         stop = true;
       };
     }
-    void takeTask(task.kind as Takeable, task.kind === 'cell' ? task.cell_id : task.finding_id).then((t) => {
+    void takeTask(task.kind as Takeable, ref).then((t) => {
       if (stop) return;
       if (t === 'failed' || !t) setLine(t === 'failed' ? 'Tasks did not answer' : 'No task here');
       else {
         setId(t.id);
-        setRefs({ cell: t.cell_id, finding: t.finding_id });
-        if (Array.isArray(t.tree) && t.tree.length) setTree(t.tree);
+        setBody(t);
       }
     });
     return () => {
@@ -296,7 +363,24 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     if (want.startsWith('path:')) void close('cant_tell', want.slice(5).split('.'));
     else void close(want.slice(7));
   }, [id, si.signedIn, a.square?.canCount, want]);
-  if (!task) return null;
+
+  // the series of the task's find: the service's own, else the lab's copy for the kind of the find
+  const seriesId = body?.series?.id ?? (task?.finding_id ? (SERIES_OF_KIND[task.finding_id.split(':')[0] ?? ''] ?? null) : null);
+  const steps: SeriesStep[] | null =
+    task && ['finding', 'moves', 'red', 'anomaly'].includes(task.kind) && seriesId ? (body?.series?.steps ?? SERIES[seriesId] ?? null) : null;
+  const step = steps ? stepAt(steps, path) : null;
+  const tapping = !!task && (task.kind === 'find_again' || task.kind === 'recentre');
+  const view: LabTaskView = {
+    panel: null,
+    kind: task?.kind ?? null,
+    show: step?.show ?? null,
+    series: steps ? seriesId : null,
+    body,
+    tapping,
+    taps,
+    addTap: (t) => setTaps((x) => [...x.filter((q) => (t.pass ?? t.frame) == null || (q.pass ?? q.frame) !== (t.pass ?? t.frame)), t]),
+  };
+  if (!task) return view;
 
   async function close(result: string, answers?: string[]) {
     if (!task || busy) return;
@@ -310,8 +394,9 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     if (task.kind === 'cell' && a.square?.canCount) await a.square.confirm(result === 'marks' ? 'marks' : 'nothing');
     if (id) {
       const r = await post(`/api/me/tasks/${encodeURIComponent(id)}/done`, {
-        // a tree of questions: the path of answers goes, and the service says which class it leads to
-        ...(answers ? { path: answers } : { result }),
+        // a series: the path of answers and the pictures tapped as missing; the service says what it leads to
+        ...(answers ? { path: answers, pictures: missing } : { result }),
+        ...(tapping && taps.length ? { taps } : {}),
         mark_ids: markIds,
         seconds: look.current.seconds,
         passes_shown: look.current.passes.size,
@@ -322,17 +407,19 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
       const got = (r.json ?? {}) as {
         points?: number;
         achievements?: { name?: string }[];
-        agreement?: { answers?: number; needed?: number };
+        result?: { label?: string };
         class?: { label?: string };
       };
       const items = [
-        ...(got.class?.label ? [`Your answers say: ${got.class.label}`] : []),
+        ...((got.result?.label ?? got.class?.label) ? [`Your answers say: ${got.result?.label ?? got.class?.label}`] : []),
         ...(got.achievements ?? []).map((x) => `Achievement: ${x.name ?? ''}`),
         ...(typeof got.points === 'number' && got.points > 0 ? [`+${got.points} points`] : []),
-        // red sources and anomalies settle by agreement: how many answers the find has so far
-        ...(got.agreement?.answers != null ? [`${got.agreement.answers} of ${got.agreement.needed ?? 3} answers`] : []),
       ];
       if (items.length) award = { text: items.join(' · '), until: Date.now() + 12000 };
+      if (!r.ok && r.status !== 401) {
+        setBusy(false);
+        return setLine(r.status === 422 ? 'The service did not take the answer' : 'The service did not answer');
+      }
     }
     const next = await takeTask(task.kind as Takeable);
     setBusy(false);
@@ -342,13 +429,15 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
   }
   const n = a.marksHere.length;
   const T = TASKS[task.kind];
-  // a tree of plain questions: one step at a time; an answer goes on to the next step or ends the task with the path
-  const step = tree ? stepAt(tree, path) : null;
-  const answer = (x: TreeStep['answers'][number]) => {
+  const answers: [string, string][] = body?.answers?.length ? body.answers.map((x) => [x.id, x.label]) : T.answers;
+  const answer = (x: SeriesStep['answers'][number]) => {
     if (x.next) setPath([...path, x.id]);
     else void close(x.result ?? 'cant_tell', [...path, x.id]);
   };
-  return (
+  const pictures = body?.pictures ?? [];
+  taskTrack.pts = pictures.filter((q): q is { i: number; mjd: number; ra: number; dec: number } => q.mjd != null && q.ra != null && q.dec != null);
+  taskTrack.missing = missing;
+  view.panel = (
     <div class={`taskpanel k-${task.kind}`} data-testid="task-panel">
       {si.popup}
       <div class="tp-head">
@@ -362,19 +451,62 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
         )}
       </div>
       <div class="tp-ask" data-testid="task-ask">
-        {step ? step.question : T.ask}
+        {step ? step.question : (body?.question ?? T.ask)}
       </div>
-      {a.view?.(step ? step.show : null)}
+      {a.view?.(step ? step.show : null, body)}
+      {step?.tap && (
+        <div class="tp-pics" data-testid="task-pictures">
+          {pictures.map((q) => (
+            <button
+              key={q.i}
+              class={`mini tp-pic${missing.includes(q.i) ? ' on' : ''}`}
+              aria-pressed={missing.includes(q.i)}
+              title={q.mjd != null ? `Missing in this picture · ${new Date((q.mjd - 40587) * 86400000).toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'Missing in this picture'}
+              onClick={() => {
+                if (q.mjd != null) a.showPicture(q.mjd);
+                setMissing((m) => (m.includes(q.i) ? m.filter((x) => x !== q.i) : [...m, q.i]));
+              }}
+            >
+              {q.i + 1}
+            </button>
+          ))}
+          {!pictures.length && <span class="tp-none">The pictures of this track are not given</span>}
+        </div>
+      )}
+      {task.kind === 'cell' && a.square && !a.square.canCount && a.square.why !== 'Sign in to count your look' && (
+        <i class="lookbar" aria-hidden="true" title="Your look: a minute with every pass shown">
+          <b style={{ width: `${Math.round((a.square.frac ?? 0) * 100)}%` }} />
+        </i>
+      )}
       <div class="tp-line" data-testid="task-line">
+        {step && (
+          <button
+            class="tp-back"
+            style={{ visibility: path.length > 0 ? 'visible' : 'hidden' }}
+            disabled={busy}
+            onClick={() => setPath(path.slice(0, -1))}
+            data-testid="task-back"
+            title="Back to the previous question"
+          >
+            ← Back
+          </button>
+        )}
         {line ||
           (task.kind === 'cell'
             ? [`${n} mark${n === 1 ? '' : 's'}`, a.square?.why ?? ''].filter(Boolean).join(' · ')
-            : step && tree
-                ? `Question ${path.length + 1} of at most ${tree.length}`
+            : step && steps
+              ? [`Question ${path.length + 1} of ${steps.length}`, step.tap ? `${missing.length} missing` : ''].filter(Boolean).join(' · ')
+              : tapping
+                ? `${taps.length} tapped`
                 : '')}
       </div>
       {step ? (
-        <div class="tp-tree" data-testid="task-tree">
+        <div
+          class="tp-tree"
+          data-testid="task-tree"
+          // as tall as the longest step of this series (its answers and their example pictures), so no step jumps and none leaves a gap
+          // the card hugs its content: a step with fewer answers is shorter (the tab's list under it moves, the picture never does)
+        >
           {step.answers.map((x, k) => (
             <button
               key={x.id}
@@ -384,7 +516,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
               data-testid={`task-answer-${x.id}`}
             >
               <span>{x.label}</span>
-              {(x.examples ?? []).map((name) => (
+              {(EXAMPLES[`${seriesId}.${step.id}.${x.id}`] ?? []).map((name) => (
                 <img
                   key={name}
                   class="tp-ex"
@@ -396,20 +528,13 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
               ))}
             </button>
           ))}
-          {/* always there, so the panel keeps its height from the first question on */}
-          <button
-            class="mini tp-back"
-            style={{ visibility: path.length > 0 ? 'visible' : 'hidden' }}
-            disabled={busy}
-            onClick={() => setPath(path.slice(0, -1))}
-            data-testid="task-back"
-          >
-            Back
+          <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
+            Mark something the machine missed
           </button>
         </div>
       ) : (
-        <div class={`tp-btns n${T.answers.length}`}>
-          {T.answers.map(([result, text, tip], k) => (
+        <div class={`tp-btns n${answers.length}`}>
+          {answers.map(([result, text], k) => (
             <button
               key={result}
               class={`btn sm${(task.kind === 'cell' ? result === 'marks' : k === 0) ? ' primary' : ''}${result === 'cant_tell' ? ' quiet' : ''}`}
@@ -417,9 +542,10 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
                 busy ||
                 (task.kind === 'cell' && result === 'marks' && n === 0) ||
                 // signed in: the look must be long enough to count; a guest may go on (nothing is counted)
-                (task.kind === 'cell' && !!a.square && !a.square.canCount && a.square.why !== 'Sign in to count your look')
+                (task.kind === 'cell' && !!a.square && !a.square.canCount && a.square.why !== 'Sign in to count your look') ||
+                // a tap task's "Done" needs a tap
+                (tapping && (result === 'seen' || result === 'done') && !taps.length)
               }
-              title={tip}
               onClick={() => void close(result)}
               data-testid={`task-${result}`}
             >
@@ -428,8 +554,14 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
           ))}
         </div>
       )}
+      {!step && (
+        <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
+          Mark something the machine missed
+        </button>
+      )}
     </div>
   );
+  return view;
 }
 
 /** What an example picture shows (its tooltip): each is a fixed picture made once from a real object of our own data. */
@@ -444,3 +576,23 @@ export const EXAMPLE_WORD: Record<string, string> = {
   wise_0855: 'WISE 0855−0714: deep dips',
   dusty_star: 'A dusty star: a smooth rise to the red',
 };
+
+/** No task open: the one way to start one from the lab ("Give me a square": the next quarter of a square to look through). */
+export function GiveSquare() {
+  const [line, setLine] = useState('');
+  const go = async () => {
+    setLine('asking…');
+    const t = await takeTask('cell');
+    const to = t && t !== 'failed' ? taskParams(t) : null;
+    if (to) location.hash = `#/lab?${new URLSearchParams(to).toString()}`;
+    else setLine(t === 'failed' ? 'Tasks did not answer' : 'No square is waiting for a look');
+  };
+  return (
+    <section class="psec give-square" data-testid="give-square">
+      <button class="btn primary" onClick={() => void go()} data-testid="give-square-button">
+        Give me a square
+      </button>
+      {line && <span class="cb-status">{line}</span>}
+    </section>
+  );
+}

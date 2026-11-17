@@ -31,7 +31,7 @@ export const REPOLL_MS = 2000;
 export const REPOLL_MAX = 10;
 export const hasPending = (r: ContextReply): boolean => Object.values(r).some((p) => typeof p === 'object' && p !== null && (p as Part).state === 'pending');
 
-type Ask = { state: 'loading' } | { state: 'absent' } | { state: 'error'; error: string } | { state: 'ok'; reply: ContextReply };
+type Ask = { state: 'loading' } | { state: 'absent' } | { state: 'error'; error: string } | { state: 'ok'; reply: ContextReply; stale?: boolean };
 
 /** What the catalogues know about a place at an epoch. `absent`: the service has no such route yet (the component then renders nothing).
  *  `skip`: catalogues the page already holds (not asked); `pm`: the held motion, mas/yr, that places the infrared surveys then. `nonce`:
@@ -63,7 +63,8 @@ export function useContext(
       if (r.status === 404) return setA({ state: 'absent' });
       if (!r.ok) throw new Error(`service answered ${r.status}`);
       const reply = (await r.json()) as ContextReply;
-      setA({ state: 'ok', reply });
+      // a catalogue still pending after REPOLL_MAX asks goes on the retry schedule with its countdown (it never stays "asking…")
+      setA({ state: 'ok', reply, ...(hasPending(reply) && n >= REPOLL_MAX ? { stale: true } : {}) });
       if (hasPending(reply) && n < REPOLL_MAX) {
         await new Promise((res) => setTimeout(res, REPOLL_MS));
         if (!ctl.signal.aborted) await ask(n + 1);
@@ -179,12 +180,15 @@ export function ContextRows({
   pmra = 0,
   pmdec = 0,
   held = null,
+  omit = [],
 }: {
   ra: number;
   dec: number;
   epoch?: number;
   pmra?: number;
   pmdec?: number;
+  /** rows another part of the page already shows (the lab's passport has SIMBAD and Gaia DR3 above): not repeated here */
+  omit?: string[];
   /** what the field's lookup already holds about this source (a ringed known star): its rows are shown from it, not asked again */
   held?: Held | null;
 }) {
@@ -194,10 +198,14 @@ export function ContextRows({
   const a = useContext(ra, dec, epoch, 6, skip, hpm, nonce);
   const cloud = useCloudAllwise(ra, dec, pmra, pmdec);
   // a catalogue that did not answer here is asked again by itself, on the field lookup's schedule, with its countdown
-  const silent = a.state === 'error' || (a.state === 'ok' && !hasPending(a.reply) && ROWS.some((r) => (a.reply[r.key] as Part | undefined)?.state === 'unavailable'));
+  const stale = a.state === 'ok' && !!a.stale;
+  const silent =
+    a.state === 'error' ||
+    stale ||
+    (a.state === 'ok' && !hasPending(a.reply) && ROWS.some((r) => (a.reply[r.key] as Part | undefined)?.state === 'unavailable'));
   const retry = useRetry(silent, () => setNonce((n) => n + 1), `${ra.toFixed(5)},${dec.toFixed(5)}`);
   const known = !!held || (a.state === 'ok' && ['simbad', 'gaia', 'twomass', 'allwise', 'catwise'].some((k) => (a.reply[k as keyof ContextReply] as Part | undefined)?.state === 'ok'));
-  const nextTry = retry.nextIn != null ? ` · next try in ${retry.nextIn} s` : '';
+  const nextTry = retry.nextIn != null ? ` · retry ${retry.nextIn} s` : '';
   if (a.state === 'absent') return null;
   return (
     <div class="ctxbox">
@@ -216,7 +224,7 @@ export function ContextRows({
       {a.state === 'ok' && (
         <>
           <div class="okv">
-            {ROWS.map((row) => {
+            {ROWS.filter((row) => !omit.includes(row.key)).map((row) => {
               const p = a.reply[row.key] as Part | undefined;
               const radius = a.reply.radius ?? 6;
               let text = 'not asked';
@@ -233,19 +241,19 @@ export function ContextRows({
                 text =
                   row.key === 'twomass'
                     ? c.j_m_2mass == null && c.h_m_2mass == null && c.k_m_2mass == null
-                      ? 'no 2MASS match in the AllWISE copy'
+                      ? 'no entry'
                       : `J ${mag(c.j_m_2mass)} · H ${mag(c.h_m_2mass)} · Ks ${mag(c.k_m_2mass)}${sep}`
                     : `W1 ${mag(c.w1mpro)} · W2 ${mag(c.w2mpro)} · W3 ${mag(c.w3mpro)} · W4 ${mag(c.w4mpro)}${sep}`;
-                text += ' · from the AllWISE copy on AWS';
+                text += ' · AllWISE copy';
                 tip =
                   "IRSA's catalogue service did not answer; these come from the AllWISE catalogue on AWS (cloud Parquet), which carries the 2MASS magnitudes";
               } else if (fromCloud?.state === 'none') {
-                text = `nothing within ${radius}″ · from the AllWISE copy on AWS`;
+                text = `nothing within ${radius}″ · AllWISE copy`;
               } else if (p?.state === 'pending') {
-                text = 'asking…';
+                text = `asking…${stale ? nextTry : ''}`;
                 tip = 'the catalogue has not answered yet: this page asks again';
               } else if (p?.state === 'unavailable') {
-                text = `did not answer${nextTry}`;
+                text = `no answer${nextTry}`;
                 tip = p.error;
               } else if (p?.state === 'none') {
                 // a known source that one catalogue does not list: a quiet "no entry", not the headline of an unknown
@@ -272,14 +280,13 @@ export function ContextRows({
             })}
           </div>
           <div class="mono-s">
-            searched at the epoch of the passes, radius {a.reply.radius ?? 6}″
-            {skip.length ? ` · ${skip.map((k) => (k === 'gaia' ? 'Gaia' : 'SIMBAD')).join(' and ')} from the field’s lookup` : ''}
-            {silent ? ` · a catalogue did not answer: asked again by itself${nextTry}` : ''}
+            radius {a.reply.radius ?? 6}″ at the passes' epoch
+            {silent ? nextTry : ''}
             {silent && (
               <>
                 {' '}
                 <button class="lnk" onClick={retry.tryNow}>
-                  try now
+                  now
                 </button>
               </>
             )}

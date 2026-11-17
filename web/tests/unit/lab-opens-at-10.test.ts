@@ -55,5 +55,7 @@ describe('a task from the service opens the lab', () => {
     expect(p(taskHash({ id: 't2', kind: 'finding', finding_id: 'film:y', ra: 1, dec: 2 } as never)).get('fov')).toBe('60');
     expect(p(taskHash({ id: 't3', kind: 'red', ra: 1, dec: 2 } as never)).get('fov')).toBe('10');
     expect(p(taskHash({ id: 't4', kind: 'cell', cell_id: '284-0802', quarter: 'NE', ra: 1, dec: 2 } as never)).get('fov')).toBe('10');
+    // the service says how big a field holds the whole track
+    expect(p(taskHash({ id: 't5', kind: 'finding', finding_id: 'mover:z', ra: 1, dec: 2, fov: 20 } as never)).get('fov')).toBe('20');
   });
 });

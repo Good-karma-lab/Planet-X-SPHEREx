@@ -5,6 +5,16 @@
 export type MarkLevel = 'suspicious' | 'interesting' | 'artefact';
 export const MARK_LEVELS: MarkLevel[] = ['suspicious', 'interesting', 'artefact'];
 
+/** What a mark says (spec §5g), chosen with one tap after the click: the server acts on it (a search job, a catalogue lookup, an
+ *  artefact count, the place's Talk). */
+export type MarkKind = 'moves' | 'not_in_catalogues' | 'artefact' | 'odd';
+export const MARK_KINDS: MarkKind[] = ['moves', 'not_in_catalogues', 'artefact', 'odd'];
+/** what an artefact looks like */
+export type MarkLook = 'blinks' | 'glare' | 'spike' | 'edge' | 'hot_dot';
+export const MARK_LOOKS: MarkLook[] = ['blinks', 'glare', 'spike', 'edge', 'hot_dot'];
+/** the level a kind is kept under for the marks of before (the account still stores a level) */
+export const LEVEL_OF_KIND: Record<MarkKind, MarkLevel> = { moves: 'interesting', not_in_catalogues: 'interesting', artefact: 'artefact', odd: 'suspicious' };
+
 /** The shape of spec §8 (`/api/me/marks`). The id is made here, so a guest's mark keeps it when it moves to the account. */
 export interface Mark {
   id: string;
@@ -18,6 +28,12 @@ export interface Mark {
   mjd?: number | null;
   label: string;
   level: MarkLevel;
+  /** spec §5g: what it is (none yet on a mark just put, and on the marks of before) */
+  kind?: MarkKind | null;
+  /** an artefact: what it looks like */
+  look?: MarkLook | null;
+  /** the same mover seen on another pass: the id of its first mark (one mark in the list, one label on the picture) */
+  link?: string | null;
   note: string;
   /** ISO time, UTC */
   created: string;
@@ -83,13 +99,24 @@ function newId(): string {
   return `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function push(job: Promise<unknown>): void {
+/** what the server did with the last mark it was sent (spec §5g: a search job, a lookup, an agreement), with the mark's id */
+export interface MarkEffect {
+  id: string;
+  effect: string;
+  state?: string;
+  people?: number;
+  [k: string]: unknown;
+}
+let lastEffect: MarkEffect | null = null;
+
+function push(job: Promise<unknown>, id?: string): void {
   job.then(
-    () => {
-      if (syncNote) {
-        syncNote = '';
-        for (const f of listeners) f();
-      }
+    (r) => {
+      const e = (r as { effect?: { effect?: string } } | null)?.effect;
+      const changed = !!syncNote || (!!id && !!e?.effect);
+      if (id && e?.effect) lastEffect = { ...(e as MarkEffect), id };
+      syncNote = '';
+      if (changed) for (const f of listeners) f();
     },
     () => {
       syncNote = 'Marks not saved to the account';
@@ -112,7 +139,7 @@ export function addMark(m: Omit<Mark, 'id' | 'created'> & Partial<Pick<Mark, 'id
   const mark: Mark = { ...m, id: m.id ?? newId(), created: m.created ?? new Date().toISOString() };
   load().push(mark);
   save();
-  if (remote) push(remote.put(mark));
+  if (remote) push(remote.put(mark), mark.id);
   return mark;
 }
 
@@ -123,7 +150,7 @@ export function updateMark(id: string, change: Partial<Omit<Mark, 'id' | 'create
   const mark = { ...list[i]!, ...change };
   list[i] = mark;
   save();
-  if (remote) push(remote.put(mark));
+  if (remote) push(remote.put(mark), mark.id);
   return mark;
 }
 
@@ -140,6 +167,11 @@ export function removeMark(id: string): void {
 export function onMarks(f: () => void): () => void {
   listeners.add(f);
   return () => listeners.delete(f);
+}
+
+/** the server's answer to the last mark sent, null before any (a guest's marks get none) */
+export function lastMarkEffect(): MarkEffect | null {
+  return lastEffect;
 }
 
 export function marksSyncNote(): string {
