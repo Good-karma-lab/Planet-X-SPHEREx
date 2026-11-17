@@ -1,7 +1,7 @@
 // What the lab shows for the question of a task about one object (product spec §5b): the spectrum of a red source with the
 // spectra of real reference objects of each class over it, and the spectrum of an anomaly with its anomalous bins marked, the
 // single exposures of those bins and the detectors they fell on. Every curve is measured by the sky service from SPHEREx exposures.
-import { useEffect, useMemo, useRef } from 'preact/hooks';
+import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { useSpectrum, type Anomaly, type Source } from '../spectrum';
 import { binSpectrum, LAM_HI, LAM_LO, type Bin } from '../spectrum/bins';
 import type { SpecPoint } from '../spectrum/types';
@@ -16,10 +16,12 @@ export const REFERENCES: { result: string; label: string; colour: string; src: S
     src: { ra: 331.04414658852124, dec: -56.782844195116105, name: 'ε Indi B', pmra: 3981.977, pmdec: -2466.832 },
   },
   {
+    // the cleanest unsaturated source of the stored RW Aurigae field whose spectrum rises smoothly to the red (388 usable
+    // exposures, none saturated); SIMBAD lists it as a mid-infrared source, not by a stellar class
     result: 'dusty_star',
-    label: 'Dusty star: RW Aurigae (T Tauri)',
+    label: 'Smooth rise to the red: WISE J050902.08+302841.3',
     colour: '#7fd8ff',
-    src: { ra: 76.95652603458333, dec: 30.401438173888888, name: 'RW Aurigae', pmra: 7.23, pmdec: -20.33 },
+    src: { ra: 77.25867, dec: 30.47814, name: 'WISE J050902.08+302841.3' },
   },
   {
     result: 'galaxy',
@@ -196,7 +198,7 @@ function specLine(view: { state?: string; measured?: number; total?: number } | 
 
 /** The two example spectra of the question "which shape is closer?": real objects, measured by the same service. */
 const EX_A = REFERENCES[0]!; // ε Indi B: deep dips
-const EX_B = REFERENCES[1]!; // RW Aurigae: a smooth rise to the red
+const EX_B = REFERENCES[1]!; // WISE J050902.08+302841.3: a smooth rise to the red
 
 /** A red source, one step of its questions at a time: the picture and the Blink answer the first three; the fourth shows its
  *  spectrum next to the two examples. The spectra are asked for when the task opens, so they are there by the fourth question. */
@@ -217,7 +219,7 @@ export function RedView({ src, show, passes }: { src: Source | null; show: strin
             [
               ['This source', bins, '#ffffff', state(own, usable)],
               [`A · ${EX_A.src.name}`, binsA, EX_A.colour, state(ra, ra.points.length)],
-              [`B · ${EX_B.src.name}, a dusty star`, binsB, EX_B.colour, state(rb, rb.points.length)],
+              [`B · ${EX_B.src.name}`, binsB, EX_B.colour, state(rb, rb.points.length)],
             ] as const
           ).map(([name, b, colour, st], k) => (
             <div class="tv-trio" key={k}>
@@ -226,7 +228,7 @@ export function RedView({ src, show, passes }: { src: Source | null; show: strin
                 {name}
                 {st ? <em> · {st}</em> : null}
               </div>
-              <SpecPlot bins={b} height={44} testid={k === 0 ? 'task-spectrum' : undefined} />
+              <SpecPlot bins={b} height={38} testid={k === 0 ? 'task-spectrum' : undefined} />
             </div>
           ))}
         </>
@@ -311,6 +313,64 @@ export function MoverView({ blink, ruler, search }: { blink: string; ruler: stri
       <div class="tv-row">
         <b>Search</b>
         <span>{search}</span>
+      </div>
+    </div>
+  );
+}
+
+interface ClipInfo {
+  url?: string;
+  state?: string;
+  reason?: string;
+  shows?: { frames?: { label?: string; sn?: number }[]; visits_added?: number } | null;
+}
+
+/** "Is this a real object?": the finding's own clip from the service. For a track or a Planet X peak it blinks the picture added
+ *  along the motion against the same exposures added without it: a real mover is there in the first and gone in the second. */
+export function FindingClip({ id }: { id: string | null }) {
+  const [info, setInfo] = useState<ClipInfo | null>(null);
+  useEffect(() => {
+    setInfo(null);
+    if (!id) return;
+    let stop = false;
+    void (async () => {
+      for (let i = 0; i < 60 && !stop; i++) {
+        try {
+          const r = await fetch(`/api/findings/${encodeURIComponent(id)}/clip`, { cache: 'no-store' });
+          const d = r.ok ? ((await r.json()) as ClipInfo) : ({ state: 'none', reason: `the service answered ${r.status}` } as ClipInfo);
+          if (stop) return;
+          setInfo(d);
+          if (d.state === 'ready' || d.state === 'none') return;
+          // not made yet: asking for the picture itself puts it in the service's queue
+          void fetch(`/api/findings/${encodeURIComponent(id)}/clip.webp`).catch(() => {});
+        } catch {
+          if (!stop) setInfo({ state: 'none', reason: 'the service did not answer' });
+          return;
+        }
+        await new Promise((res) => setTimeout(res, 5000));
+      }
+    })();
+    return () => {
+      stop = true;
+    };
+  }, [id]);
+  const frames = info?.shows?.frames ?? [];
+  const line = !id
+    ? ''
+    : !info
+      ? 'Clip: asking…'
+      : info.state === 'ready'
+        ? frames.length
+          ? frames.map((f) => `${f.label ?? ''}${f.sn != null ? ` S/N ${f.sn.toFixed(1)}` : ''}`).join(' · ')
+          : 'Clip of the finding'
+        : info.state === 'none'
+          ? `No clip: ${info.reason ?? 'it cannot be made'}`
+          : 'Clip: being made…';
+  return (
+    <div class="tv tv-clip" data-testid="task-clip">
+      <div class="tv-clipbox">{info?.state === 'ready' && info.url ? <img src={info.url} alt="Clip of the finding" /> : null}</div>
+      <div class="tv-line" title={line}>
+        {line}
       </div>
     </div>
   );

@@ -7,7 +7,7 @@ import { catalogueAt, drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, 
 import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, useLabTask } from './task';
-import { AnomalyView, MoverView, RedView } from './taskviews';
+import { AnomalyView, FindingClip, MoverView, RedView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
 import { placeAt } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
@@ -385,6 +385,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     setInvLine('');
     setInvList(null);
   }, [a.ra, a.dec, a.fov, open, a.sel?.ra, a.sel?.dec]);
+  // the chip is the investigation of the field it was added from: another field has none until something is added there
+  useEffect(() => setInv(null), [a.ra, a.dec, a.fov]);
   const openInvList = async () => {
     if (invList) return setInvList(null);
     setInvLine('');
@@ -552,6 +554,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           search={track ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes` : 'no track at this place yet'}
         />
       );
+    if (task?.kind === 'finding') return <FindingClip id={task.finding_id} />;
     if (task?.kind === 'red') return <RedView src={taskSrc} show={show} passes={a.passes.length} />;
     if (task?.kind === 'anomaly') return <AnomalyView src={taskSrc} anomaly={anomaly} show={show} />;
     return null;

@@ -109,12 +109,12 @@
 .candlist .cr-details .sbar .tray-head { display: none; }
 
 /* a tree of plain questions: the answers one under another, each with its example pictures; the views keep one height per task */
-.taskpanel .tp-tree { display: flex; flex-direction: column; gap: 5px; }
+.taskpanel .tp-tree { display: flex; flex-direction: column; gap: 5px; min-height: 218px; } /* three answers with example pictures and Back: every step is as tall */
 .taskpanel .tp-ans { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; text-align: left; white-space: normal; }
 .taskpanel .tp-ans span { flex: 1; min-width: 0; }
 .taskpanel .tp-ex { width: 44px; height: 44px; flex: none; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.16); object-fit: cover; background: #000; }
-.taskpanel .tp-back { align-self: flex-start; }
-.tv.tv-fixed { min-height: 196px; }
+.taskpanel .tp-back { align-self: flex-start; margin-top: auto; }
+.tv.tv-fixed { min-height: 214px; }
 .tv .tv-trio { display: flex; flex-direction: column; gap: 1px; }
 .tv .tv-cap { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--ink); }
 .tv .tv-cap i { width: 14px; height: 2px; border-radius: 1px; flex: none; }
@@ -130,3 +130,8 @@
 .objcard .oc-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; padding: 4px; border-radius: 10px; background: rgba(8, 18, 24, 0.97); border: 1px solid var(--edge); box-shadow: var(--shadow); max-height: 190px; overflow-y: auto; }
 .objcard .oc-menu button { text-align: left; padding: 6px 9px; border-radius: 7px; border: 0; background: none; color: var(--ink); font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .objcard .oc-menu button:hover { background: rgba(95, 227, 214, 0.14); color: var(--accent-l); }
+/* the finding's own clip in its task: a fixed square, so the panel never changes height while it is made */
+.tv .tv-clipbox { width: 170px; height: 170px; align-self: center; border-radius: 8px; background: #000; border: 1px solid rgba(255, 255, 255, 0.1); overflow: hidden; }
+.tv .tv-clipbox img { width: 100%; height: 100%; display: block; object-fit: cover; }
+/* a question of a tree may take two lines: every step keeps room for two */
+.taskpanel.k-red .tp-ask, .taskpanel.k-anomaly .tp-ask { min-height: 38px; }
