@@ -147,3 +147,14 @@ def test_bar_at(tmp_path: Path) -> None:
     assert grid.bar_at(db, 50, 8) is None
     db.put(grid.cell_at(50, 8).id, "searched", bar={"kind": "sweep", "mover_sigma": 5.0}, source="sweep")
     assert grid.bar_at(db, 50.01, 8.01) == {"kind": "sweep", "mover_sigma": 5.0}
+
+
+def test_privacy_and_terms_are_server_pages() -> None:
+    from service.routes_legal import make_legal_router
+
+    app = FastAPI()
+    app.include_router(make_legal_router())
+    c = TestClient(app)
+    for path, word in (("/privacy", "Resend"), ("/terms", "leads, not discoveries")):
+        r = c.get(path)
+        assert r.status_code == 200 and r.headers["content-type"].startswith("text/html") and word in r.text
