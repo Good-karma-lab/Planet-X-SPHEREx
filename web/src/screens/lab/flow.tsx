@@ -29,8 +29,8 @@ import {
 } from './known';
 import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
-import { awardLine, focusKind, taskOfParams, useLabTask } from './task';
-import { AnomalyView, FindingClip, MoverView, RedView } from './taskviews';
+import { awardLine, focusKind, taskOfParams, useLabTask, type NextTask } from './task';
+import { FindingClip, MoverView, StampsView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
 import { KNOWN_SOURCES, placeAt } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
@@ -92,6 +92,14 @@ export interface FlowArgs {
   setTab: (tab: 'ctl' | 'obj' | 'spec' | 'cand') => void;
   pickAnomaly: (n: number) => void;
   pickTrack: (i: number) => void;
+  /** holds one frame on the picture: the visit `i` in Days, the pass `i` in Months */
+  showFrame: (i: number) => void;
+  /** holds the pass nearest a date (MJD) on the picture */
+  showPass: (mjd: number) => void;
+  /** holds the visit of the pass on show (Days) nearest a date (MJD) */
+  showVisit: (mjd: number) => void;
+  /** the visit on show in Days (null in Months) */
+  visit: number | null;
 }
 
 const ICON_MARK =
@@ -279,6 +287,49 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       }
       ctx.restore();
     }
+    // a tap task: the taps (a small cross each) and, for "Find it again", the strip where the lead should be
+    const tv = taskRef.current;
+    if (tv?.tapping && !wall) {
+      ctx.save();
+      for (const box of rects) {
+        const path = tv.body?.predicted?.path;
+        if (path && path.length > 1) {
+          ctx.beginPath();
+          path.forEach(([r, d], i) => {
+            const [u, v] = uv(r, d);
+            if (i) ctx.lineTo(box.x + u * box.w, box.y + v * box.h);
+            else ctx.moveTo(box.x + u * box.w, box.y + v * box.h);
+          });
+          ctx.lineCap = 'round';
+          ctx.lineWidth = 16;
+          ctx.strokeStyle = 'rgba(255,214,140,0.16)';
+          ctx.stroke();
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = 'rgba(255,214,140,0.8)';
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        for (const t of tv.taps) {
+          const [u, v] = uv(t.ra, t.dec);
+          const x = box.x + u * box.w;
+          const y = box.y + v * box.h;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+          for (const w of [3, 1.4]) {
+            ctx.lineWidth = w;
+            ctx.beginPath();
+            ctx.moveTo(x - 7, y);
+            ctx.lineTo(x + 7, y);
+            ctx.moveTo(x, y - 7);
+            ctx.lineTo(x, y + 7);
+            ctx.stroke();
+            ctx.strokeStyle = '#ffe27a';
+          }
+        }
+      }
+      ctx.restore();
+    }
     const ms = marksRef.current;
     const rl = rulerRef.current;
     if (!ms.length && !rl.length) return;
@@ -381,6 +432,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
 
   const click = (x: number, y: number): boolean => {
     if (!g || !a.single) return false;
+    // a tap task (find it again, put the ring on it): the click is a tap at that place, on the frame on show
+    const tv = taskRef.current;
+    if (tv?.tapping && tool !== 'mark' && tool !== 'ruler') {
+      const [ra, dec] = skyOf(x / a.side, y / a.side);
+      tv.addTap({ ra, dec, pass: a.pass, frame: a.pass == null ? (a.visit ?? null) : null, mjd: a.epochNow != null ? 51544.5 + (a.epochNow - 2000) * 365.25 : null });
+      return true;
+    }
     const hit = markAt(x, y);
     if (tool === 'ruler') {
       // a ruler point: the mark under the click, else the click's own place; with the date of the frame on show
@@ -598,48 +656,33 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     found.current.anomaly = best?.n ?? -1;
     return best;
   }, [a.anomalies, spots, taskKey]);
-  // set up once per task, when what it needs has arrived
-  const setUp = useRef('');
-  useEffect(() => {
-    if (!task || setUp.current === taskKey) return;
-    if (task.kind === 'moves') {
-      if (!track || track.passes.length < 2) return;
-      setUp.current = taskKey;
-      // the two passes with the largest shift between them: the Blink plays those two, the ruler lies from one to the other
-      let i0 = 0;
-      let i1 = 1;
-      let far = -1;
-      for (let i = 0; i < track.passes.length; i++)
-        for (let j = i + 1; j < track.passes.length; j++) {
-          const d = sep(track.ra[i]!, track.dec[i]!, track.ra[j]!, track.dec[j]!);
-          if (d > far) {
-            far = d;
-            i0 = i;
-            i1 = j;
-          }
-        }
-      const yr = (mjd: number) => 2000 + (mjd - 51544.5) / 365.25;
-      setPair([track.passes[i0]!, track.passes[i1]!]);
-      setRuler([
-        { ra: track.ra[i0]!, dec: track.dec[i0]!, epoch: yr(track.mjd[i0]!), pass: track.passes[i0]! },
-        { ra: track.ra[i1]!, dec: track.dec[i1]!, epoch: yr(track.mjd[i1]!), pass: track.passes[i1]! },
-      ]);
-      a.pickTrack(trackIx);
-    } else if (task.kind === 'red') {
-      setUp.current = taskKey;
-      a.set({ arch: '1' }); // the old surveys (DSS2, 2MASS, AllWISE) play before the SPHEREx passes
-      a.setTab('obj'); // the passport
-    } else if (task.kind === 'anomaly') {
-      if (!anomaly) return;
-      setUp.current = taskKey;
-      a.pickAnomaly(anomaly.n); // its passport
-    } else setUp.current = taskKey;
-  }, [taskKey, track, anomaly]);
   const labelOf = (i: number) => a.passes.find((q) => q.index === i)?.label ?? `pass ${i + 1}`;
-  const taskSrc: Source | null = task && (task.kind === 'red' || task.kind === 'anomaly') && a.grid ? at : null;
-  // what the lab shows with the task's question, or with one step of a tree of questions (`show` of the step)
-  const view = (show: string | null): ComponentChildren => {
-    if (task?.kind === 'moves')
+  const taskSrc: Source | null = task && a.grid ? at : null;
+  /** the two passes of a mover's track farthest apart: the Blink plays those two, the ruler lies from one place to the other */
+  const blinkTrack = (t: FlowTrack) => {
+    let i0 = 0;
+    let i1 = 1;
+    let far = -1;
+    for (let i = 0; i < t.passes.length; i++)
+      for (let j = i + 1; j < t.passes.length; j++) {
+        const d = sep(t.ra[i]!, t.dec[i]!, t.ra[j]!, t.dec[j]!);
+        if (d > far) {
+          far = d;
+          i0 = i;
+          i1 = j;
+        }
+      }
+    const yr = (mjd: number) => 2000 + (mjd - 51544.5) / 365.25;
+    setPair([t.passes[i0]!, t.passes[i1]!]);
+    setRuler([
+      { ra: t.ra[i0]!, dec: t.dec[i0]!, epoch: yr(t.mjd[i0]!), pass: t.passes[i0]! },
+      { ra: t.ra[i1]!, dec: t.dec[i1]!, epoch: yr(t.mjd[i1]!), pass: t.passes[i1]! },
+    ]);
+  };
+  // what the lab shows with the task: for a series step its `show`, else the task's kind decides
+  const view = (show: string | null, body: NextTask | null): ComponentChildren => {
+    const kind = task?.kind;
+    if (show === 'blink2' || (!show && kind === 'moves'))
       return (
         <MoverView
           blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'all passes' : 'waits for the search of the field'}
@@ -651,13 +694,24 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           }
         />
       );
-    if (task?.kind === 'finding') return <FindingClip id={task.finding_id} />;
-    if (task?.kind === 'red') return <RedView src={taskSrc} show={show} passes={a.passes.length} />;
-    if (task?.kind === 'anomaly') return <AnomalyView src={taskSrc} anomaly={anomaly} show={show} />;
+    if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={task?.finding_id ?? null} />;
+    if (show === 'stamps') return <StampsView src={taskSrc} anomaly={anomaly} />;
+    if (show === 'blink' || show === 'pictures') return <div class="tv-line">{body?.pictures?.length ? `The visits of its pass · ${body.pictures.length} pictures` : 'The visits of its pass'}</div>;
+    if (show === 'old_surveys' || show === 'old_new') return <div class="tv-line">Old surveys play first: DSS 1985–99 · 2MASS 1997–2001 · WISE 2010</div>;
+    if (kind === 'bad_picture')
+      return (
+        <div class="tv tv-clip">
+          <div class="tv-clipbox">{body?.cutout ? <img src={body.cutout} alt="The exposure" /> : null}</div>
+          <div class="tv-line" title={body?.exposure ?? ''}>
+            {body?.exposure ? `Exposure ${body.exposure}` : 'asking for the exposure…'}
+          </div>
+        </div>
+      );
+    if (kind === 'find_again') return <div class="tv-line">{body?.predicted ? 'The strip where it should be is drawn on the next pass' : 'The next pass · a ring at its last place'}</div>;
     return null;
   };
   const others = a.params['others'] === '1';
-  const taskPanel = useLabTask({
+  const taskView = useLabTask({
     view,
     others,
     setOthers: (on) => a.set({ others: on ? '1' : null }),
@@ -670,7 +724,50 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     pass: a.pass,
     passesTotal: a.passes.length,
     square: a.square && a.square.outline ? a.square : null,
+    markMissed: () => {
+      setRuler([]);
+      setTool('mark');
+    },
+    showPicture: (mjd) => a.showVisit(mjd),
   });
+  const taskRef = useRef(taskView);
+  taskRef.current = taskView;
+  // set up the lab for the step on show (once per step, when what it needs has arrived)
+  const setUp = useRef('');
+  const stepKey = `${taskKey}|${taskView.show ?? ''}|${taskView.body ? 1 : 0}`;
+  useEffect(() => {
+    if (!task || setUp.current === stepKey) return;
+    const show = taskView.show;
+    const body = taskView.body;
+    const visits = (body?.pictures ?? []).map((q) => q.mjd).filter((m): m is number => typeof m === 'number');
+    if (show === 'blink' || show === 'pictures') {
+      // a track: the visits of its pass, in the Days scale
+      if (!visits.length) return;
+      setUp.current = stepKey;
+      if (!a.params['film']) a.set({ film: (visits.reduce((x, y) => x + y, 0) / visits.length).toFixed(3), arch: null });
+    } else if (show === 'blink2' || (!show && task.kind === 'moves')) {
+      if (!track || track.passes.length < 2) return;
+      setUp.current = stepKey;
+      if (a.params['film']) a.set({ film: null });
+      blinkTrack(track);
+      a.pickTrack(trackIx);
+    } else if (show === 'old_surveys' || show === 'old_new') {
+      setUp.current = stepKey;
+      a.set({ arch: '1', film: null });
+    } else if (show === 'passes') {
+      setUp.current = stepKey;
+      setPair([null, null]); // every pass plays
+      a.set({ arch: null, film: null });
+    } else if (show === 'stamps') {
+      if (!anomaly) return;
+      setUp.current = stepKey;
+      a.pickAnomaly(anomaly.n);
+    } else if (task.kind === 'find_again' && body?.predicted?.mjd != null) {
+      setUp.current = stepKey;
+      a.showPass(body.predicted.mjd);
+    } else setUp.current = stepKey;
+  }, [stepKey, track, anomaly]);
+  const taskPanel = taskView.panel;
 
   const cur = open ? (marks.find((m) => m.id === open) ?? null) : null;
   // Esc leaves a tool, then closes the open mark
