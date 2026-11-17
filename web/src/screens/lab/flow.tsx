@@ -401,7 +401,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   /** the object as the investigation keeps it: its place, its marks, the ruler's result and the catalogue match, and this view */
   const addTo = async (target: string, title: string) => {
     const m = open ? (marks.find((x) => x.id === open) ?? null) : null;
-    const place = m ? { ra: m.ra, dec: m.dec } : a.sel ? at : null;
+    const place = m ? { ra: m.ra, dec: m.dec } : selNow();
     if (!place) return;
     setInvList(null);
     setInvLine('adding…');
@@ -650,7 +650,14 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   // ---- the card of what is selected (Object tab): a mark, or the lab's selected source. Note, "Add to investigation" and
   // "Check and submit" exist only here: with nothing selected there is nothing to note or submit.
   const matchAt = (ra: number, dec: number): string => (a.epochNow != null ? catalogueAt(known, ra, dec, a.epochNow).word : 'asking the catalogues…');
-  const selPlace = cur ? { ra: cur.ra, dec: cur.dec } : a.sel ? at : null;
+  // where the selected source is on the date shown: a moving one carries its J2000 place and its motion
+  const selNow = (): { ra: number; dec: number } | null => {
+    if (!a.sel) return null;
+    if (!(a.sel.pmra || a.sel.pmdec)) return { ra: a.sel.ra, dec: a.sel.dec };
+    const [r, d] = atEpoch(a.sel.ra, a.sel.dec, a.sel.pmra ?? 0, a.sel.pmdec ?? 0, a.epochNow ?? SURVEY_EPOCH);
+    return { ra: r, dec: d };
+  };
+  const selPlace = cur ? { ra: cur.ra, dec: cur.dec } : selNow();
   const rulerNow = ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '';
   const newTitle = (cur ? cur.label : a.sel?.name) || `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)}`;
   const actions = (
