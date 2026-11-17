@@ -2,6 +2,7 @@ import { isSquareTask } from './lab/rules';
 import { LoadOverlay, loadStep } from './lab/loading';
 import { useSquareLook } from './lab/square';
 import { GiveSquare } from './lab/task';
+import { FindStatus } from './lab/passport';
 import { SearchMark, SearchRow, searchingLine, useRetry, type SearchInfo } from './lab/progress';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
@@ -492,8 +493,18 @@ export function Lab({ route }: { route: Route }) {
           }[];
         }) => {
           targets.current = d.catalog.filter((o) => o.b);
-          // a small field opened at a catalogue object's J2000 place (from the catalogue, the front page, a finding) is centred where the object is during the SPHEREx
-          // survey: a fast star has moved by arcminutes since 2000 and would be outside the field (WISE 0855 moved 3.5')
+          recentre();
+        },
+      )
+      .catch(() => {});
+  }, []);
+  // a small field opened at a catalogue object's J2000 place (from the catalogue, the front page, a finding, another field of the lab)
+  // is centred where the object is during the SPHEREx survey: a fast star has moved by arcminutes since 2000 and would be outside the
+  // field (WISE 0855 moved 3.5'). On the first load (when the catalogue arrives) and on every move to another place.
+  useEffect(() => {
+    if (targets.current.length) recentre();
+  }, [p['ra'], p['dec'], p['fov']]);
+  function recentre(): void {
           const cur = parseHash(location.hash);
           const cra = Number(cur.params['ra']);
           const cdec = Number(cur.params['dec']);
@@ -510,10 +521,7 @@ export function Lab({ route }: { route: Route }) {
               break;
             }
           }
-        },
-      )
-      .catch(() => {});
-  }, []);
+  }
   const wrap = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const overlay = useRef<HTMLCanvasElement>(null);
@@ -2097,6 +2105,9 @@ export function Lab({ route }: { route: Route }) {
     // a mover the catalogues know (the same /api/known answer as the picture's rings) is selected as that catalogue object: its
     // J2000 place and its catalogue motion, so the card never says "no catalogue gave it" about a star the picture calls known
     const known = flowRef.current?.catalogueAt(t.ra_2025_9, t.dec_2025_9, 2025.9) ?? null;
+    // the track of the task's find stays that find (its record in Findings, its name), whatever the track adds
+    const of = selRef.current?.finding ? { finding: selRef.current.finding } : {};
+    const findName = selRef.current?.finding ? selRef.current.name : undefined;
     if (known && known.pmra != null && known.pmdec != null) {
       const cd = Math.cos((t.dec_2025_9 * Math.PI) / 180);
       const p0 = known.positions[0]!;
@@ -2104,19 +2115,21 @@ export function Lab({ route }: { route: Route }) {
       setSel({
         ra: (p0.ra + (known.pmra * back) / 3.6e6 / cd + 360) % 360,
         dec: p0.dec + (known.pmdec * back) / 3.6e6,
-        name: name || known.simbad || known.name || undefined,
+        name: name || known.simbad || known.name || findName || undefined,
         pmra: known.pmra,
         pmdec: known.pmdec,
+        ...of,
       });
     } else
       setSel({
         ra: (ra0 + 360) % 360,
         dec: dec0,
-        name: name || undefined,
+        name: name || findName || undefined,
         pmra: t.v_east * 1000,
         pmdec: t.v_north * 1000,
         pmKind: 'measured',
         pmErr: speedErr(t) * 1000,
+        ...of,
       });
     setTab('obj');
   };
@@ -4391,11 +4404,7 @@ export function Lab({ route }: { route: Route }) {
                     </div>
                   )}
                   {!flow.markOpen && flow.card}
-                  {sel && (
-                    <div class="obj-spec" data-testid="obj-spectrum">
-                      <SpectrumTab src={sel} />
-                    </div>
-                  )}
+                  {sel?.finding && <FindStatus id={sel.finding} />}
                   <details class="obj-more" data-testid="obj-more" open>
                     <summary>More about it</summary>
                     {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
@@ -4425,6 +4434,13 @@ export function Lab({ route }: { route: Route }) {
                           `Anomaly ${selAn}`,
                         )}
                         <Passport a={an.result.anomalies.find((a) => a.n === selAn)!} f={an.result} />
+                        {sel && (
+                          <div class="obj-spec" data-testid="obj-spectrum">
+                            <div class="obj-h">Its light</div>
+                            <SpectrumTab src={sel} inPassport />
+                          </div>
+                        )}
+                        <div class="obj-h">Catalogues</div>
                         <ContextRows
                           ra={an.result.anomalies.find((a) => a.n === selAn)!.ra}
                           dec={an.result.anomalies.find((a) => a.n === selAn)!.dec}
@@ -4434,6 +4450,42 @@ export function Lab({ route }: { route: Route }) {
                       </>
                     ) : (
                       <>
+                        {sel &&
+                          portraitOf(
+                            sel,
+                            sel.name ?? 'selected source',
+                            <>
+                              <ObjectGuess src={sel} held={flow.selHeld} />
+                              {seenText(sel) && <div class="obj-seen">{seenText(sel)}</div>}
+                            </>,
+                          )}
+                        <div class="obj-h">How it moves</div>
+                        {sel && (
+                          <div class="okv obj-moves" data-testid="obj-moves">
+                            {(() => {
+                              // our passes' own measure of its motion (the field's mover search), beside the catalogue's
+                              const [r0, d0] = sel.pmra || sel.pmdec ? atEpoch(sel.ra, sel.dec, sel.pmra ?? 0, sel.pmdec ?? 0, 2025.9) : [sel.ra, sel.dec];
+                              const t = (mvr?.tracks ?? []).find((x) => Math.hypot((x.ra_2025_9 - r0) * Math.cos((d0 * Math.PI) / 180), x.dec_2025_9 - d0) * 3600 < 8);
+                              return (
+                                <>
+                                  <div class="orow">
+                                    <span class="faint">Measured</span>
+                                    <span>{t ? `${rateText(t)} toward ${t.pa.toFixed(0)}° · ${t.passes.length} passes` : mv?.state === 'done' ? 'no motion between our passes' : 'the mover search is running'}</span>
+                                  </div>
+                                  {(sel.pmra || sel.pmdec) && sel.pmKind !== 'measured' ? (
+                                    <div class="orow">
+                                      <span class="faint">pmRA, pmDec</span>
+                                      <span class="mono-s">
+                                        {(sel.pmra ?? 0).toFixed(1)}, {(sel.pmdec ?? 0).toFixed(1)} mas/yr
+                                      </span>
+                                    </div>
+                                  ) : null}
+                                </>
+                              );
+                            })()}
+                          </div>
+                        )}
+                        <ObjectTab src={sel} onSpectrum={() => setSpecOpen(true)} held={flow.selHeld} compact />
                         {sel && objCard && objCard.key === cardKey(sel.ra, sel.dec) && (
                           <div class="why-card" data-testid="object-card">
                             <b>{objCard.title}</b>
@@ -4473,16 +4525,14 @@ export function Lab({ route }: { route: Route }) {
                             }
                             return best && bd < 60 ? <LeadPassport ds={best.ds} c={best.c} ra0={ra} dec0={dec} /> : null;
                           })()}
-                        {sel &&
-                          portraitOf(
-                            sel,
-                            sel.name ?? 'selected source',
-                            <>
-                              <ObjectGuess src={sel} held={flow.selHeld} />
-                              {seenText(sel) && <div class="obj-seen">{seenText(sel)}</div>}
-                            </>,
-                          )}
-                        <ObjectTab src={sel} onSpectrum={() => setSpecOpen(true)} held={flow.selHeld} compact />
+                        {sel && (
+                          <div class="obj-spec" data-testid="obj-spectrum">
+                            <div class="obj-h">Its light</div>
+                            <SpectrumTab src={sel} inPassport />
+                          </div>
+                        )}
+                        {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}
+                        <div class="obj-h">Catalogues</div>
                         {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
                         {sel && (
                           <ContextRows
@@ -4492,10 +4542,8 @@ export function Lab({ route }: { route: Route }) {
                             pmra={sel.pmra ?? 0}
                             pmdec={sel.pmdec ?? 0}
                             held={flow.selHeld}
-                            omit={['simbad', 'gaia']}
                           />
                         )}
-                        {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}
                         {sel && (
                           <div class="xlinks">
                             <span class="faint">Look it up:</span>

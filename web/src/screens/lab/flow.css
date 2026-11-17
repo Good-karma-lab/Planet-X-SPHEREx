@@ -323,7 +323,6 @@
 .lookbar b { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, rgba(95, 227, 214, 0.45), var(--accent)); transition: width 0.9s linear; }
 .sqlook .lookbar { margin: 2px 0; }
 /* lab v2: the passport (More about it) as one short list: the card head names it, the rows say each thing once */
-.panel .pcol #sec-obj .obj-seen { display: none; }
 .panel .pcol #sec-obj .obj-more[open] { display: flex; flex-direction: column; gap: 10px; }
 .panel .pcol #sec-obj .okv { display: flex; flex-direction: column; gap: 3px; }
 .panel .pcol #sec-obj .okv .orow { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; font-size: 12px; line-height: 1.4; }
@@ -352,6 +351,15 @@
 .panel .pcol #sec-obj .obj-spec .spec-head { display: none; }
 /* the Object tab says each thing once: the spectrum's line names what it is (the portrait's guess would repeat it); an empty
    status line under "Add to investigation" takes no room */
-.panel .pcol #sec-obj .obj-more .obj-guess { display: none; }
 .objcard .oc-line:empty { display: none; }
 .panel .pcol #sec-obj .spec-state:empty { display: none; }
+/* the Object tab by question: What is it (the head, its record in Findings, the portrait and its class) · How it moves · Its light ·
+   Catalogues · Look it up */
+.panel .pcol #sec-obj .obj-h { margin: 10px 0 2px; font: 650 10px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.panel .pcol #sec-obj .obj-spec { border-top: 0; padding-top: 0; }
+.panel .pcol #sec-obj .obj-find { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--edge-soft); background: rgba(0, 0, 0, 0.18); font-size: 12px; }
+.panel .pcol #sec-obj .obj-findhead { display: flex; align-items: center; gap: 8px; }
+.panel .pcol #sec-obj .obj-findhead .cb-link { margin-left: auto; }
+.panel .pcol #sec-obj .obj-findtext { font-size: 12px; line-height: 1.45; color: #c4d8df; }
+.panel .pcol #sec-obj .obj-findtext.faint { color: var(--muted); }
+.panel .pcol #sec-obj .obj-seen { font-size: 11.5px; color: var(--muted); line-height: 1.4; }

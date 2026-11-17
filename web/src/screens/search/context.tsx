@@ -31,7 +31,7 @@ export const REPOLL_MS = 2000;
 export const REPOLL_MAX = 10;
 export const hasPending = (r: ContextReply): boolean => Object.values(r).some((p) => typeof p === 'object' && p !== null && (p as Part).state === 'pending');
 
-type Ask = { state: 'loading' } | { state: 'absent' } | { state: 'error'; error: string } | { state: 'ok'; reply: ContextReply };
+type Ask = { state: 'loading' } | { state: 'absent' } | { state: 'error'; error: string } | { state: 'ok'; reply: ContextReply; stale?: boolean };
 
 /** What the catalogues know about a place at an epoch. `absent`: the service has no such route yet (the component then renders nothing).
  *  `skip`: catalogues the page already holds (not asked); `pm`: the held motion, mas/yr, that places the infrared surveys then. `nonce`:
@@ -63,7 +63,8 @@ export function useContext(
       if (r.status === 404) return setA({ state: 'absent' });
       if (!r.ok) throw new Error(`service answered ${r.status}`);
       const reply = (await r.json()) as ContextReply;
-      setA({ state: 'ok', reply });
+      // a catalogue still pending after REPOLL_MAX asks goes on the retry schedule with its countdown (it never stays "asking…")
+      setA({ state: 'ok', reply, ...(hasPending(reply) && n >= REPOLL_MAX ? { stale: true } : {}) });
       if (hasPending(reply) && n < REPOLL_MAX) {
         await new Promise((res) => setTimeout(res, REPOLL_MS));
         if (!ctl.signal.aborted) await ask(n + 1);
@@ -197,7 +198,11 @@ export function ContextRows({
   const a = useContext(ra, dec, epoch, 6, skip, hpm, nonce);
   const cloud = useCloudAllwise(ra, dec, pmra, pmdec);
   // a catalogue that did not answer here is asked again by itself, on the field lookup's schedule, with its countdown
-  const silent = a.state === 'error' || (a.state === 'ok' && !hasPending(a.reply) && ROWS.some((r) => (a.reply[r.key] as Part | undefined)?.state === 'unavailable'));
+  const stale = a.state === 'ok' && !!a.stale;
+  const silent =
+    a.state === 'error' ||
+    stale ||
+    (a.state === 'ok' && !hasPending(a.reply) && ROWS.some((r) => (a.reply[r.key] as Part | undefined)?.state === 'unavailable'));
   const retry = useRetry(silent, () => setNonce((n) => n + 1), `${ra.toFixed(5)},${dec.toFixed(5)}`);
   const known = !!held || (a.state === 'ok' && ['simbad', 'gaia', 'twomass', 'allwise', 'catwise'].some((k) => (a.reply[k as keyof ContextReply] as Part | undefined)?.state === 'ok'));
   const nextTry = retry.nextIn != null ? ` · retry ${retry.nextIn} s` : '';
@@ -245,7 +250,7 @@ export function ContextRows({
               } else if (fromCloud?.state === 'none') {
                 text = `nothing within ${radius}″ · AllWISE copy`;
               } else if (p?.state === 'pending') {
-                text = 'asking…';
+                text = `asking…${stale ? nextTry : ''}`;
                 tip = 'the catalogue has not answered yet: this page asks again';
               } else if (p?.state === 'unavailable') {
                 text = `no answer${nextTry}`;
