@@ -776,6 +776,9 @@ export function Landing() {
               <p>
                 A free public tool by Good Karma Lab. Independent project, not affiliated with or endorsed by NASA, JPL, Caltech or ESA.
               </p>
+              <p>
+                <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a>
+              </p>
             </div>
             <div>
               <h4>Data and credits</h4>

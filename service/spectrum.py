@@ -189,7 +189,7 @@ class Spectra:
                 p = {"ok": False, "why": f"not readable ({type(ex).__name__})"}
             st = p.pop("_stamp", {"status": 0})
             run.stamps[i] = st
-            run.points.append({"i": i, "mjd": round(e.mjd0, 5), "det": e.det, "release": e.release, **p})
+            run.points.append({"i": i, "key": e.key, "mjd": round(e.mjd0, 5), "det": e.det, "release": e.release, **p})
 
     async def measure(self, params: dict[str, Any], e: Exposure) -> dict[str, Any]:
         lay = await self.files.layout(e.key)

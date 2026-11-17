@@ -63,6 +63,9 @@ export function AboutBody() {
             (Apache-2.0).
           </p>
           <p class="mono-s">Achievement badges generated with Google Gemini.</p>
+          <p class="mono-s">
+            <a href="/privacy">Privacy</a> · <a href="/terms">Terms of use</a>
+          </p>
         </section>
       </div>
     </>

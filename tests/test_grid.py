@@ -77,8 +77,8 @@ def test_db_and_routes(tmp_path: Path) -> None:
     assert cells[0]["id"] == cid and cells[0]["state"] == "searched" and len(cells[0]["corners"]) == 4
     one = c.get(f"/api/grid/cell/{cid}").json()
     assert one["field_key"] == "k" and one["bar"]["partial"] is True and one["open"]["fov"] == 20
-    assert [q["q"] for q in one["quarters"]] == ["NW", "NE", "SW", "SE"] and one["quarters"][0]["fov"] == 10
-    nw = one["quarters"][0]
+    assert [q["id"] for q in one["quarters"]] == ["NE", "NW", "SE", "SW"] and one["quarters"][0]["fov"] == 10
+    nw = one["quarters"][1]
     assert nw["dec"] > one["dec"] and nw["ra"] < one["ra"]  # north is larger Dec, west smaller RA
     # a guest's look is never counted; a signed-in look needs the quarter and the person's own confirm
     assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "NW", "confirm": True}).status_code == 401
@@ -93,6 +93,12 @@ def test_db_and_routes(tmp_path: Path) -> None:
     who["user"] = {"id": "u2"}
     assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "SE", "confirm": True}).json()["quarters"] == 4
     assert c.get("/api/grid/meta").json()["counts"]["viewed"] == 1 and c.get(f"/api/grid/cell/{cid}").json()["viewers"] == 2
+    assert {q["id"]: q["mine"] for q in c.get(f"/api/grid/cell/{cid}").json()["quarters"]} == {
+        "NE": False,
+        "NW": False,
+        "SE": True,
+        "SW": False,
+    }
     assert {x["id"]: x["quarters"] for x in c.get("/api/grid/coverage").json()["cells"]}[cid] == 4
     assert c.get("/api/grid/cell/999-0000").status_code == 404
     other = grid.cell_at(120, -30).id
@@ -113,7 +119,8 @@ def test_old_views_migrate_and_anonymous_ones_do_not_count(tmp_path: Path) -> No
         )
     db = GridDB(path)
     assert db.viewers(["294-0148"]) == {"294-0148": 1}  # the anonymous cookie is not a viewer
-    assert db.quarters_viewed(["294-0148"])["294-0148"] == {"NW": 1, "NE": 1, "SW": 1, "SE": 1}  # a whole-square view of before
+    assert db.quarters_viewed(["294-0148"])["294-0148"] == {"NE": 1, "NW": 1, "SE": 1, "SW": 1}  # a whole-square view of before
+    assert db.quarters_of("294-0148", "user:a") == {"NE", "NW", "SE", "SW"}
     assert db.counts()["viewed"] == 1
 
 
@@ -140,3 +147,14 @@ def test_bar_at(tmp_path: Path) -> None:
     assert grid.bar_at(db, 50, 8) is None
     db.put(grid.cell_at(50, 8).id, "searched", bar={"kind": "sweep", "mover_sigma": 5.0}, source="sweep")
     assert grid.bar_at(db, 50.01, 8.01) == {"kind": "sweep", "mover_sigma": 5.0}
+
+
+def test_privacy_and_terms_are_server_pages() -> None:
+    from service.routes_legal import make_legal_router
+
+    app = FastAPI()
+    app.include_router(make_legal_router())
+    c = TestClient(app)
+    for path, word in (("/privacy", "Resend"), ("/terms", "leads, not discoveries")):
+        r = c.get(path)
+        assert r.status_code == 200 and r.headers["content-type"].startswith("text/html") and word in r.text

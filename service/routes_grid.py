@@ -68,7 +68,11 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         rows, views = D().rows(ids), D().viewers(ids)
         return {"cells": [grid.view_of(c, rows.get(c.id), views.get(c.id, 0)) for c in cs]}
 
-    def one(cid: str) -> dict[str, Any]:
+    def user_of(request: Request | None) -> dict[str, Any] | None:
+        cu = getattr(st, "current_user", None)
+        return cu(request) if callable(cu) and request is not None else None
+
+    def one(cid: str, request: Request | None = None) -> dict[str, Any]:
         try:
             ce = grid.by_id(cid)
         except ValueError as e:
@@ -81,22 +85,25 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         out["open"] = {"ra": round(ce.ra, 5), "dec": round(ce.dec, 5), "fov": grid.FIELD_FOV_ARCMIN}
         out["error"] = (row or {}).get("error")
         seen = D().quarters_viewed([cid]).get(cid, dict.fromkeys(grid.QUARTERS, 0))
+        u = user_of(request)
+        mine = D().quarters_of(cid, f"user:{u['id']}") if u else set()
         out["quarters"] = [
             {
-                "q": q,
+                "id": q,
                 "ra": round(qc.ra, 6),
                 "dec": round(qc.dec, 6),
                 "fov": grid.QUARTER_FOV_ARCMIN,
                 "corners": qc.corners(),
                 "viewers": seen[q],
+                "mine": q in mine,
             }
             for q, qc in ((q, grid.quarter(ce, q)) for q in grid.QUARTERS)
         ]
         return out
 
     @router.get("/api/grid/cell/{cid}")
-    async def cell(cid: str) -> Any:
-        return one(cid)
+    async def cell(cid: str, request: Request) -> Any:
+        return one(cid, request)
 
     @router.post("/api/grid/cell/{cid}/viewed")
     async def viewed(cid: str, body: Viewed, request: Request) -> Any:
@@ -105,8 +112,7 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
             grid.parse_id(cid)
         except ValueError as e:
             raise HTTPException(404, str(e)) from e
-        cu = getattr(st, "current_user", None)
-        u = cu(request) if callable(cu) else None
+        u = user_of(request)
         if not u:
             raise HTTPException(401, "sign in to count a square as looked through")
         viewers = D().view(cid, f"user:{u['id']}", body.result, body.quarter)
