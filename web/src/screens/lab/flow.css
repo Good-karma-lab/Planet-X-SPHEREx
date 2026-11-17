@@ -135,3 +135,11 @@
 .tv .tv-clipbox img { width: 100%; height: 100%; display: block; object-fit: cover; }
 /* a question of a tree may take two lines: every step keeps room for two */
 .taskpanel.k-red .tp-ask, .taskpanel.k-anomaly .tp-ask { min-height: 38px; }
+/* the folded group of red sources and anomalies (not counted), and the task button of a row */
+.candlist .cr-group { margin-top: 6px; }
+.candlist .cr-group > summary { cursor: pointer; padding: 6px 2px; font: 600 11.5px var(--font); color: var(--muted); }
+.candlist .cr-group[open] > summary { color: var(--ink); }
+.candlist .cr-group .crow-wrap { margin-top: 4px; }
+.candlist .crow-wrap { display: flex; flex-direction: column; gap: 3px; }
+.candlist .crow-wrap .crow { width: 100%; }
+.candlist .cr-ask { align-self: flex-end; }

@@ -22,11 +22,17 @@ export interface FindRow {
   uv: [number, number] | null;
   /** selects it on the picture and opens its card */
   pick: () => void;
+  /** a red source or a spectral anomaly: as in Findings these are kept apart, in one folded group, and never counted */
+  group?: 'red' | 'anomaly';
+  /** its place (degrees), for finding the service's own find of it */
+  ra?: number;
+  dec?: number;
 }
 
-/** What the tab's counter says: the unexplained finds of the field; known ones, and ones still being checked, never count. */
+/** What the tab's counter says: the unexplained movers, tracks, brown dwarfs, pairs and Planet X peaks of the field. Known ones,
+ *  ones still being checked, and every red source and spectral anomaly (the folded group) never count. */
 export function unexplainedCount(rows: FindRow[]): number {
-  return rows.filter((r) => r.status === 'unexplained').length;
+  return rows.filter((r) => r.status === 'unexplained' && !r.group).length;
 }
 
 /** The order of the list: unexplained first, then those being checked or without JPL's answer, the known ones last. */
@@ -111,12 +117,60 @@ export function useJplState(filmKey: string | undefined): 'done' | 'unavailable'
   return st;
 }
 
+/** The service's own finds of the two folded kinds near the field (asked once, when the group is opened): a row whose place has
+ *  one can start its question task. */
+export function useFieldFinds(open: boolean, ra: number, dec: number, fov: number): { id: string; kind: string; ra: number; dec: number }[] {
+  const [finds, setFinds] = useState<{ id: string; kind: string; ra: number; dec: number }[]>([]);
+  useEffect(() => {
+    setFinds([]);
+    if (!open) return;
+    let stop = false;
+    // the two kinds, each asked for whole (the list gives at most 2000 a time)
+    void Promise.all(
+      (['red', 'anomaly'] as const).map((kind) =>
+        fetch(`/api/findings?limit=2000&kind=${kind}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((d: { finds?: { id: string; kind: string; ra: number; dec: number }[] } | null) => d?.finds ?? [])
+          .catch(() => []),
+      ),
+    ).then((lists) => {
+      if (stop) return;
+      const half = fov / 120 + 0.01;
+      const cosd = Math.cos((dec * Math.PI) / 180);
+      setFinds(lists.flat().filter((f) => Math.abs(f.dec - dec) < half && Math.abs(((f.ra - ra + 540) % 360) - 180) * cosd < half));
+    });
+    return () => {
+      stop = true;
+    };
+  }, [open, ra, dec, fov]);
+  return finds;
+}
+
+/** The find of the service at a row's place (within 6″, of the row's kind), or null. */
+export function findOfRow(row: FindRow, finds: { id: string; kind: string; ra: number; dec: number }[]): string | null {
+  if (!row.group || row.ra == null || row.dec == null) return null;
+  const cosd = Math.cos((row.dec * Math.PI) / 180);
+  let best: string | null = null;
+  let bd = 6;
+  for (const f of finds) {
+    if (f.kind !== row.group) continue;
+    const d = Math.hypot((((f.ra - row.ra + 540) % 360) - 180) * cosd, f.dec - row.dec) * 3600;
+    if (d < bd) {
+      bd = d;
+      best = f.id;
+    }
+  }
+  return best;
+}
+
 export function CandList({
   rows,
   also,
   selected,
   picture,
   details,
+  field,
+  onTask,
 }: {
   rows: FindRow[];
   also: string;
@@ -125,12 +179,20 @@ export function CandList({
   picture: () => HTMLCanvasElement | null;
   /** per-search statistics, exports and switches: folded away under "Details" */
   details: ComponentChildren;
+  /** the field on show: its centre and size */
+  field: { ra: number; dec: number; fov: number };
+  /** starts the question task of a red source or an anomaly (the service's find id) */
+  onTask: (kind: 'red' | 'anomaly', findId: string, row: FindRow) => void;
 }) {
-  const list = orderRows(rows);
-  return (
-    <div class="candlist" data-testid="cand-list">
-      {list.map((r) => (
-        <button key={r.key} class={`crow s-${r.status}${selected === r.key ? ' on' : ''}`} onClick={r.pick} data-testid="cand-row">
+  const list = orderRows(rows.filter((r) => !r.group));
+  const folded = orderRows(rows.filter((r) => r.group));
+  const [openGroup, setOpenGroup] = useState(false);
+  const finds = useFieldFinds(openGroup && folded.length > 0, field.ra, field.dec, field.fov);
+  const row = (r: FindRow) => {
+    const fid = r.group ? findOfRow(r, finds) : null;
+    return (
+      <div key={r.key} class="crow-wrap">
+        <button class={`crow s-${r.status}${selected === r.key ? ' on' : ''}`} onClick={r.pick} data-testid="cand-row">
           <Still uv={r.uv} picture={picture} />
           <span class="cr-text">
             <b title={r.name}>{r.name}</b>
@@ -138,8 +200,31 @@ export function CandList({
           </span>
           <em class={`cr-badge s-${r.status}`}>{STATUS_WORD[r.status]}</em>
         </button>
-      ))}
-      {!list.length && <div class="cr-none">Nothing found in this field yet</div>}
+        {r.group && fid && (
+          <button
+            class="mini cr-ask"
+            title={r.group === 'red' ? 'Start the task: why is it red?' : 'Start the task: is this feature real?'}
+            onClick={() => onTask(r.group!, fid, r)}
+            data-testid="cand-ask"
+          >
+            Answer the questions
+          </button>
+        )}
+      </div>
+    );
+  };
+  return (
+    <div class="candlist" data-testid="cand-list">
+      {list.map(row)}
+      {!list.length && <div class="cr-none">No mover, track, brown dwarf, pair or Planet X peak in this field so far</div>}
+      {folded.length > 0 && (
+        <details class="cr-group" open={openGroup} onToggle={(e) => setOpenGroup((e.target as HTMLDetailsElement).open)} data-testid="cand-group">
+          <summary>
+            Red sources and anomalies · {folded.length}
+          </summary>
+          {folded.map(row)}
+        </details>
+      )}
       <div class="cr-also" data-testid="cand-also">
         {also}
       </div>

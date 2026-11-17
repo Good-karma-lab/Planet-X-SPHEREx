@@ -53,6 +53,7 @@ MAX_BUILDS = 2  # fields being built for clips at once (running or queued); furt
 LABELS_MIN_SIZE = 200  # a clip smaller than this carries no dates and no width (they would run into each other)
 RING_ARCSEC = 15.0  # radius of the ring round the object
 MOVING = ("mover", "browndwarf", "peak")  # kinds whose motion between passes is a few arcseconds: they want the fine grid
+PRERENDER_FIRST = {"mover": 0, "browndwarf": 1, "film": 2, "pair": 3, "peak": 4}  # the kinds of the first Findings screen
 FIELD = "field"
 
 # the lab's display law (web/src/viewer/law.ts and renderer.ts)
@@ -1035,6 +1036,8 @@ class Clips:
         async def loop() -> None:
             while True:
                 todo = [f for f in await finds() if not self.ready(str(f["id"])) and str(f["id"]) not in self.failed]
+                # the first screen first: movers, brown dwarfs, time-lapse tracks, pairs and Planet X peaks, in page order, then the rest
+                todo.sort(key=lambda f: PRERENDER_FIRST.get(str(f.get("kind")), len(PRERENDER_FIRST)))
                 self.pre.update({"running": True, "left": len(todo)})
                 for f in todo:
                     self.pre["now"] = f["id"]

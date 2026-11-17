@@ -1620,10 +1620,12 @@ def query(
     in_view = {"visible": 0, "not_visible": 0, "not_measured": 0}
     for f in sel:
         in_view[vis_of(f)] += 1
+    # "seen" is every find not known to be invisible: visible in its picture, or its picture not measured yet (a fresh store renders
+    # its clips in the background for hours, and the page must not be empty meanwhile); "unseen" is only the measured not visible
     if visibility == "seen":
-        sel = [f for f in sel if f["visible"]]
+        sel = [f for f in sel if f["visible"] is not False]
     elif visibility == "unseen":
-        sel = [f for f in sel if not f["visible"]]
+        sel = [f for f in sel if f["visible"] is False]
     rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     if sort == "promise":

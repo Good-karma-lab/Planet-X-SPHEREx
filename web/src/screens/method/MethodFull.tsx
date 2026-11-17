@@ -33,7 +33,7 @@ const CHANGES: [string, string, string][] = [
   [
     'M38',
     '2026-11-17',
-    'The sky grid and the background sweep; known objects of a frame and the deep match; the checks before submit for slow and fast movers with the NEOWISE stack; "visible in the picture" measured against the ring\'s own neighbourhood; people\'s questions, agreement and score; Time-lapse for film.',
+    'The sky grid and the background sweep; known objects of a frame and the deep match; the checks before submit for slow and fast movers with the NEOWISE stack; "visible in the picture" measured against the ring\'s own neighbourhood; people\'s questions, agreement and score; the glow rule for "unknown" next to a bright star; Time-lapse for film.',
   ],
 ];
 
