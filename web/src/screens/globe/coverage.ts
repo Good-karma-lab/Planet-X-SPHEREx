@@ -8,10 +8,11 @@
 // with ids "{band:03d}-{col:04d}". A scheme of another name switches the grid list off (the list of searched fields stands in). The
 // unit test checks the lattice against corners the API gave. The card of a square is `GET /api/grid/cell/{id}`.
 //
-// Readable at every zoom: where a square is 22 px or more on screen its real outline is drawn (every square, new ones as a thin
-// frame); below that the squares that are not new are gathered into blocks of 2×2, 4×4, … squares, each block at least 12 px on
-// screen and filled by what it holds. Drawing is a few thousand projected points per frame at most (under 2 ms), so turning the globe
-// costs the same with the layer on.
+// Readable at every zoom, and never larger than the truth: where a square is under 6 px on screen each square that is not new is one
+// small mark of a fixed size (5 px) at its place, so 44 searched squares of 371 272 look like 44 points on the whole sky; from 6 px
+// each square that is not new is drawn at its true outline; from 22 px the lattice is drawn too (new squares as thin frames).
+// Nothing is gathered into blocks: a block filled because one square in it is searched overstates the searched sky a hundredfold.
+// Drawing is a few thousand projected points per frame at most (under 2 ms), so turning the globe costs the same with the layer on.
 
 import { D2R } from '../../lib/sky';
 
@@ -225,70 +226,39 @@ export function kindOf(c: { state: CellState; finds: number; viewers: number }):
   if (c.state === 'failed') return 'failed';
   return null;
 }
-const RANK: Record<Kind, number> = { finds: 4, viewed: 3, searching: 2, searched: 1, failed: 0 };
 
-interface Block {
-  ra0: number;
-  ra1: number;
-  dec0: number;
-  dec1: number;
-  n: number;
-  kind: Kind;
-  /** the square a click on the block opens: the one with the most finds, else the first */
-  best: string;
-  bestFinds: number;
-}
-/** a square this large on screen (CSS pixels) is drawn as itself: at most about 2 500 squares are in sight then */
+/** from this size of a square on screen (CSS pixels) a square that is not new is drawn at its true outline; below it, as a mark of MARK_PX */
+export const TRUE_PX = 6;
+export const MARK_PX = 5;
+/** from this size the lattice is drawn too (every square, new ones as thin frames): at most about 2 500 squares are in sight then */
 export const REAL_PX = 22;
-/** The side of a block in squares at a zoom: 1 when a square is REAL_PX or more, else the power of two that makes a block 12 px or more. */
-export function blockSide(cellPx: number): number {
-  if (cellPx >= REAL_PX) return 1;
-  let k = 2;
-  while (k * cellPx < 12 && k < 256) k *= 2;
-  return k;
+/** How the layer is drawn at a zoom. */
+export function modeOf(cellPx: number): 'marks' | 'squares' | 'lattice' {
+  return cellPx >= REAL_PX ? 'lattice' : cellPx >= TRUE_PX ? 'squares' : 'marks';
 }
-/** The block (of side k squares) a place lies in: its key and its edges. */
-function blockAt(k: number, ra: number, dec: number): { key: string; ra0: number; ra1: number; dec0: number; dec1: number } {
-  const g = Math.floor(bandOf(dec) / k);
-  const b0 = g * k;
-  const b1 = Math.min(N_BANDS, b0 + k);
-  const mid = Math.min(N_BANDS - 1, b0 + (k >> 1));
-  const n = Math.max(1, Math.round(COLS[mid]! / k));
-  const w = 360 / n;
-  const c = Math.floor((((ra % 360) + 360) % 360) / w) % n;
-  return { key: `${g}-${c}`, ra0: c * w, ra1: (c + 1) * w, dec0: DEC0 + b0 * CELL_DEG, dec1: DEC0 + b1 * CELL_DEG };
-}
-let blocksOf: { k: number; version: number; blocks: Map<string, Block> } | null = null;
-function blocks(cov: Coverage, k: number): Map<string, Block> {
-  if (blocksOf && blocksOf.k === k && blocksOf.version === cov.version) return blocksOf.blocks;
-  const out = new Map<string, Block>();
-  for (const c of cov.cells.values()) {
-    const kind = kindOf(c);
-    const p = parseId(c.id);
-    if (!kind || !p) continue;
-    const ce = c.ra != null && c.dec != null ? { ra: c.ra, dec: c.dec } : cellCentre(p.band, p.col);
-    const b = blockAt(k, ce.ra, ce.dec);
-    const old = out.get(b.key);
-    if (!old) out.set(b.key, { ra0: b.ra0, ra1: b.ra1, dec0: b.dec0, dec1: b.dec1, n: 1, kind, best: c.id, bestFinds: c.finds });
-    else {
-      old.n++;
-      if (RANK[kind] > RANK[old.kind]) old.kind = kind;
-      if (c.finds > old.bestFinds) {
-        old.best = c.id;
-        old.bestFinds = c.finds;
+const placeOf = (c: CovCell): { ra: number; dec: number } | null => {
+  if (c.ra != null && c.dec != null) return { ra: c.ra, dec: c.dec };
+  const p = parseId(c.id);
+  return p ? cellCentre(p.band, p.col) : null;
+};
+
+/** The square a click at a sky place opens: the square under it; where squares are marks, the marked square within 8 px of the click (the nearest), else the square under it. */
+export function pickCell(cov: Coverage | null, ra: number, dec: number, cellPx: number): string {
+  if (cov && modeOf(cellPx) === 'marks') {
+    const tol = (8 / cellPx) * CELL_DEG;
+    let best = '';
+    let bd = tol;
+    for (const c of cov.cells.values()) {
+      if (!kindOf(c)) continue;
+      const pl = placeOf(c);
+      if (!pl || Math.abs(pl.dec - dec) > tol) continue;
+      const d = sepDeg(pl.ra, pl.dec, ra, dec);
+      if (d < bd) {
+        bd = d;
+        best = c.id;
       }
     }
-  }
-  blocksOf = { k, version: cov.version, blocks: out };
-  return out;
-}
-
-/** The square a click at a sky place opens: the square under it, or at a wide zoom the best square of the block under it. */
-export function pickCell(cov: Coverage | null, ra: number, dec: number, cellPx: number): string {
-  const k = blockSide(cellPx);
-  if (k > 1 && cov) {
-    const b = blocks(cov, k).get(blockAt(k, ra, dec).key);
-    if (b) return b.best;
+    if (best) return best;
   }
   const c = cellAt(ra, dec);
   return cellId(c.band, c.col);
@@ -343,37 +313,50 @@ let vx = new Float64Array(1024);
 
 /** Draws the layer; returns how many squares or blocks it drew (for tests). */
 export function drawCoverage(ctx: CanvasRenderingContext2D, cov: Coverage | null, v: CovView): number {
-  const k = blockSide(v.cellPx);
+  const mode = modeOf(v.cellPx);
   let drawn = 0;
   ctx.save();
   ctx.lineJoin = 'round';
-  if (k > 1) {
-    // gathered blocks: only what is not new
+  if (mode !== 'lattice') {
+    // only what is not new: a mark of a fixed size where a square is too small to see, its true outline from TRUE_PX
     if (cov) {
-      const size = k * v.cellPx;
-      const reach = v.radius + (k * CELL_DEG) / 2 + 1;
-      for (const b of blocks(cov, k).values()) {
-        const cra = (b.ra0 + b.ra1) / 2;
-        const cde = (b.dec0 + b.dec1) / 2;
-        if (v.radius < 179 && sepDeg(cra, cde, v.ra, v.dec) > reach) continue;
-        const col = KIND_COLOUR[b.kind];
+      const reach = v.radius + CELL_DEG + 0.5;
+      for (const c of cov.cells.values()) {
+        const kind = kindOf(c);
+        const pl = kind && placeOf(c);
+        if (!kind || !pl) continue;
+        if (v.radius < 179 && (Math.abs(pl.dec - v.dec) > reach || sepDeg(pl.ra, pl.dec, v.ra, v.dec) > reach)) continue;
+        const col = KIND_COLOUR[kind];
         ctx.beginPath();
-        let ok = false;
-        if (size >= 7) ok = boxPath(ctx, v, b.ra0, b.ra1, b.dec0, b.dec1, 2);
-        if (!ok) {
-          // too small to show as a box (or cut by the limb): a mark of 5 px at its centre
-          const p = v.project(cra, cde);
-          if (!p[2]) continue;
-          ctx.beginPath();
-          ctx.rect(p[0] - 2.5, p[1] - 2.5, 5, 5);
+        if (mode === 'squares') {
+          const p = parseId(c.id);
+          const q = c.corners?.length === 4 ? c.corners.map(([ra, de]) => v.project(ra, de)) : null;
+          if (q && q.every((t) => t[2]) && !(v.flat && Math.max(...q.map((t) => t[0])) - Math.min(...q.map((t) => t[0])) > v.W / 3)) {
+            ctx.moveTo(q[0]![0], q[0]![1]);
+            for (let i = 1; i < 4; i++) ctx.lineTo(q[i]![0], q[i]![1]);
+            ctx.closePath();
+          } else {
+            const b = p && cellBox(p.band, p.col);
+            if (!b || !boxPath(ctx, v, b.ra0, b.ra1, b.dec0, b.dec1, 1)) continue;
+          }
+          ctx.globalAlpha = kind === 'searching' ? 0.2 : 0.45;
+          ctx.fillStyle = col;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.strokeStyle = col;
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        } else {
+          const p = v.project(pl.ra, pl.dec);
+          if (!p[2] || p[0] < -MARK_PX || p[0] > v.W + MARK_PX || p[1] < -MARK_PX || p[1] > v.H + MARK_PX) continue;
+          ctx.rect(Math.round(p[0]) - MARK_PX / 2, Math.round(p[1]) - MARK_PX / 2, MARK_PX, MARK_PX);
+          ctx.globalAlpha = 1;
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = 'rgba(0,0,0,.7)';
+          ctx.stroke();
+          ctx.fillStyle = kind === 'searching' ? 'rgba(255,255,255,.45)' : col;
+          ctx.fill();
         }
-        ctx.globalAlpha = b.kind === 'searching' ? 0.28 : 0.4 + 0.4 * Math.min(1, b.n / (k * k));
-        ctx.fillStyle = col;
-        ctx.fill();
-        ctx.globalAlpha = 0.95;
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 1;
-        ctx.stroke();
         drawn++;
       }
     }
