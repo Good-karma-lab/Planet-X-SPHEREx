@@ -27,9 +27,9 @@ test.afterAll(async () => {
 test('1. a guest signs in by the e-mail link (dev mode)', async () => {
   await page.goto('/#/me');
   await expect(page.getByTestId('signin')).toBeVisible();
-  await page.getByLabel('E-mail address').fill(email);
-  await page.getByRole('button', { name: 'Send me a sign-in link' }).click();
-  await expect(page.getByTestId('signin-status')).toContainText('Link sent');
+  await page.getByLabel('E-mail', { exact: true }).fill(email);
+  await page.getByRole('button', { name: 'Continue with e-mail' }).click();
+  await expect(page.getByTestId('signin-status')).toContainText('We sent a link to');
   await page.getByTestId('dev-link').click();
   await expect(page.getByTestId('who-name')).toHaveText(email.split('@')[0]!);
   await shot('1-signed-in');
