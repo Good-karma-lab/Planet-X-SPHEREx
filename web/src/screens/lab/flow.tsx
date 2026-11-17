@@ -112,6 +112,8 @@ export interface LabFlow {
   taskPanel: ComponentChildren;
   /** a task about one object, the others not asked for: only that object is bright, every other overlay a quiet outline */
   focus: boolean;
+  /** Known objects is on and a catalogue is still being asked */
+  knownBusy: boolean;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -120,8 +122,15 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   knownRef.current = known;
   const epochsKey = a.epochs.map((e) => e.toFixed(4)).join(',');
   useEffect(() => {
-    if (!a.known || !a.epochs.length || !Number.isFinite(a.ra) || !Number.isFinite(a.dec)) {
+    if (!a.epochs.length || !Number.isFinite(a.ra) || !Number.isFinite(a.dec)) {
       setKnown(KNOWN_OFF);
+      return;
+    }
+    if (!a.known) {
+      // the overlay is off: the question is asked once all the same when the field opens, so that the service has the
+      // catalogues by the time the switch is turned on (it goes on asking them in the background)
+      setKnown(KNOWN_OFF);
+      void fetch(knownUrl(a.ra, a.dec, a.fov, a.epochs)).catch(() => {});
       return;
     }
     return followKnown(knownUrl(a.ra, a.dec, a.fov, a.epochs), setKnown);
@@ -792,5 +801,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     blink,
     taskPanel,
     focus: !!task && focusKind(task.kind) && !others,
+    knownBusy: known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0)),
   };
 }
