@@ -17,6 +17,11 @@ export interface KnownObject {
   pm_total?: number | null;
   /** a Solar System body's rate, ″/h */
   rate_arcsec_h?: number | null;
+  /** the SIMBAD name of a Gaia star that has one */
+  simbad?: string | null;
+  /** proper motion, mas/yr (the objects with a name carry it) */
+  pmra?: number | null;
+  pmdec?: number | null;
   /** its place at each epoch asked for (decimal years) */
   positions: { epoch: number; ra: number; dec: number }[];
   /** the name and the speed are written at the ring; otherwise a thin ring with the name on hover */
@@ -106,6 +111,9 @@ export function parseKnown(raw: unknown): KnownReply {
       mag: Number.isFinite(o.mag as number) ? (o.mag as number) : null,
       pm_total: Number.isFinite(o.pm_total as number) ? (o.pm_total as number) : null,
       rate_arcsec_h: Number.isFinite(o.rate_arcsec_h as number) ? (o.rate_arcsec_h as number) : null,
+      simbad: typeof o.simbad === 'string' && o.simbad ? o.simbad : null,
+      pmra: Number.isFinite(o.pmra as number) ? (o.pmra as number) : null,
+      pmdec: Number.isFinite(o.pmdec as number) ? (o.pmdec as number) : null,
       positions,
       label: o.label === true,
     });
@@ -128,6 +136,8 @@ export function parseKnown(raw: unknown): KnownReply {
  *  this far apart, and what has arrived is drawn at once. After this long without everything it stops and says who is silent. */
 const ASK_AGAIN_MS = 1500;
 const GIVE_UP_MS = 180000;
+const ASK_SILENT_MS = 15000;
+const ASK_SILENT_TIMES = 4;
 
 /** Ask the service for the known objects of a field; `on` gets every state: loading, then each partial reply as catalogues arrive. */
 export function followKnown(url: string, on: (s: KnownState) => void): () => void {
@@ -137,6 +147,7 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
   void (async () => {
     const t0 = Date.now();
     let had = false;
+    let again = 0;
     for (let fails = 0; !stop; ) {
       let reply: KnownReply | null = null;
       try {
@@ -152,7 +163,15 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
         fails = 0;
         const waiting = reply.pending.length > 0 || reply.deepPending.length > 0;
         on({ state: 'ok', ...reply, ...(late && waiting ? { pending: [], deepPending: [], gaveUp: true } : {}) });
-        if (!waiting || late) return;
+        if (late) return;
+        if (!waiting) {
+          // nothing is being asked any more. A catalogue that did not answer (its server was away for a moment) is asked again a
+          // few times, further apart, before the status settles on "did not answer"
+          const silent = KNOWN_SOURCES.some((c) => !reply!.answered[c]) || reply.deepSilent.length > 0;
+          if (!silent || ++again > ASK_SILENT_TIMES) return;
+          await new Promise((res) => setTimeout(res, ASK_SILENT_MS));
+          continue;
+        }
       } else if (++fails >= 3 || late) {
         if (!had) on({ ...KNOWN_OFF, state: 'failed' });
         return;
@@ -461,4 +480,38 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
   }
   ctx.restore();
   return hover?.o ?? null;
+}
+
+/** What the catalogues of `/api/known` have at a place on a date: the nearest drawn object within 8″, said as the picture's
+ *  ring says it ("known: Gaia DR3 4472832130942575872 · SIMBAD Barnard's star · 10.39″/yr"), else a deeper-catalogue entry
+ *  within 3″, else that no catalogue has it (or which ones have not answered yet). One source of truth with the picture. */
+export function catalogueAt(k: KnownState, ra: number, dec: number, year: number): { word: string; object: KnownObject | null; sep: number | null } {
+  if (k.state === 'off' || k.state === 'loading') return { word: 'asking the catalogues…', object: null, sep: null };
+  if (k.state === 'failed') return { word: 'the catalogues did not answer', object: null, sep: null };
+  const cosd = Math.cos((dec * Math.PI) / 180);
+  const away = (p: [number, number]) => Math.hypot((((p[0] - ra + 540) % 360) - 180) * cosd, p[1] - dec) * 3600;
+  let best: { o: KnownObject; d: number } | null = null;
+  for (const o of k.objects) {
+    const p = placeAt(o, year);
+    if (!p) continue;
+    const d = away(p);
+    if (d < 8 && (!best || d < best.d)) best = { o, d };
+  }
+  if (best) {
+    const o = best.o;
+    const gaia = o.source === 'gaia' ? `Gaia DR3 ${o.id.replace(/^gaia:/, '')}` : '';
+    const name = o.source === 'gaia' ? (o.simbad ? `SIMBAD ${o.simbad}` : '') : `${SOURCE_WORD[o.source]} ${o.name}`.trim();
+    const rate = o.source === 'jpl' ? speedWord(o) : o.pm_total != null && o.pm_total >= 50 ? `${(o.pm_total / 1000).toFixed(2)}″/yr` : '';
+    return { word: `known: ${[gaia, name, rate].filter(Boolean).join(' · ')}`, object: o, sep: best.d };
+  }
+  for (const o of k.deep) {
+    const p = placeAt(o, year);
+    if (p && away(p) < DEEP_ARCSEC) {
+      const cat = o.id.split(':')[0];
+      return { word: `known: in ${cat === 'gaia' ? 'Gaia DR3 (fainter than G 19)' : cat === 'catwise' ? 'CatWISE2020' : cat === 'allwise' ? 'AllWISE' : '2MASS'}`, object: null, sep: null };
+    }
+  }
+  const silent = [...KNOWN_SOURCES.filter((c) => !k.answered[c]).map((c) => SOURCE_WORD[c]), ...k.deepSilent];
+  const asked = k.pending.length > 0 || k.deepPending.length > 0;
+  return { word: silent.length ? `no match so far · ${silent.join(', ')} ${asked ? 'being asked' : 'did not answer'}` : 'in no catalogue', object: null, sep: null };
 }

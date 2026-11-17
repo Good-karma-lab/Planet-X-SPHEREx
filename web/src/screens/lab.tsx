@@ -1,4 +1,4 @@
-import { taskOfParams } from './lab/task';
+import { isSquareTask } from './lab/rules';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
@@ -428,7 +428,7 @@ export function Lab({ route }: { route: Route }) {
         : [1, 2, 3, 4, 5, 6];
   // a task ("Mark everything that moves and has no ring"): Known objects on, red sources and anomalies off, unless the address says
   const inTask = !!p['task'];
-  const squareTask = inTask && taskOfParams(p)?.kind === 'cell';
+  const squareTask = isSquareTask(p);
   const opts: Opts = {
     reference: p['ref'] === '1',
     archive: p['arch'] === '1',
@@ -878,8 +878,9 @@ export function Lab({ route }: { route: Route }) {
       onError: (t) => setPhase(`failed: ${t}`),
       onMeta: (m) => {
         setMeta(m);
-        // the test target in the field is selected from the start (Object and Spectrum tabs show it); a click selects another source
-        if (!selRef.current) {
+        // the test target in the field is selected from the start (Object and Spectrum tabs show it); a click selects another source.
+        // Not in a square task: a square has no object of its own (lab/rules.ts)
+        if (!selRef.current && !squareTaskRef.current) {
           const half = (m.grid.n * m.grid.step_arcsec) / 2 / 3600;
           const o = targets.current.find((t) => {
             const [tra, tdec] = atEpoch(t.ra, t.dec, t.pmra ?? 0, t.pmdec ?? 0, 2025.9);
@@ -1508,6 +1509,8 @@ export function Lab({ route }: { route: Route }) {
       const all = selMark ? [...marks, selMark] : marks;
       const focus = !!flowRef.current?.focus || candSelRef.current !== null;
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+      // no name is put on the 2′ inset (a label pushed to the picture's left edge used to land on it)
+      if (inset) placed.push({ x0: inset.x - 6, y0: inset.y - 6, x1: inset.x + inset.w + 6, y1: inset.y + inset.h + 6 });
       let labelled = 0;
       const ring = (x: number, y: number, mk: Mark, rr: number, ticks: boolean) => {
         // a target: a thin crosshair, four 1 px arms with a gap at the centre (no ring over the star); anything else: a thin 1 px ring
@@ -2038,15 +2041,30 @@ export function Lab({ route }: { route: Route }) {
     const years = 2025.9 - 2000;
     const dec0 = t.dec_2025_9 - (t.v_north * years) / 3600;
     const ra0 = t.ra_2025_9 - (t.v_east * years) / 3600 / Math.cos((t.dec_2025_9 * Math.PI) / 180);
-    setSel({
-      ra: (ra0 + 360) % 360,
-      dec: dec0,
-      name: name || undefined,
-      pmra: t.v_east * 1000,
-      pmdec: t.v_north * 1000,
-      pmKind: 'measured',
-      pmErr: speedErr(t) * 1000,
-    });
+    // a mover the catalogues know (the same /api/known answer as the picture's rings) is selected as that catalogue object: its
+    // J2000 place and its catalogue motion, so the card never says "no catalogue gave it" about a star the picture calls known
+    const known = flowRef.current?.catalogueAt(t.ra_2025_9, t.dec_2025_9, 2025.9) ?? null;
+    if (known && known.pmra != null && known.pmdec != null) {
+      const cd = Math.cos((t.dec_2025_9 * Math.PI) / 180);
+      const p0 = known.positions[0]!;
+      const back = 2000 - p0.epoch;
+      setSel({
+        ra: (p0.ra + (known.pmra * back) / 3.6e6 / cd + 360) % 360,
+        dec: p0.dec + (known.pmdec * back) / 3.6e6,
+        name: name || known.simbad || known.name || undefined,
+        pmra: known.pmra,
+        pmdec: known.pmdec,
+      });
+    } else
+      setSel({
+        ra: (ra0 + 360) % 360,
+        dec: dec0,
+        name: name || undefined,
+        pmra: t.v_east * 1000,
+        pmdec: t.v_north * 1000,
+        pmKind: 'measured',
+        pmErr: speedErr(t) * 1000,
+      });
     setTab('obj');
   };
 
