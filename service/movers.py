@@ -76,6 +76,9 @@ def year_of(mjd: float) -> float:
     return 2000.0 + (mjd - 51544.5) / 365.25
 
 
+SATURATED_NAME_ARCSEC = 30.0  # SIMBAD's cone for the name of a saturated star's track (its place is the saturated zone's centre)
+
+
 @dataclass
 class Run:
     key: str
@@ -104,7 +107,11 @@ class Movers:
         if run is None:
             path = self.dir / f"{key}.json"
             if path.is_file():
-                run = Run(key, field_key, state="done", result=json.loads(path.read_text()))
+                result = json.loads(path.read_text())
+                for t in result.get("tracks", []):  # kept before saturated stars were always named: Gaia's name, never "Mover N"
+                    if t.get("saturated") and not t.get("name") and (t.get("gaia") or {}).get("source_id"):
+                        t["name"] = f"Gaia DR3 {t['gaia']['source_id']}"
+                run = Run(key, field_key, state="done", result=result)
             else:
                 run = Run(key, field_key)
                 asyncio.get_running_loop().create_task(self._run(run))
@@ -168,17 +175,22 @@ class Movers:
             tmp.replace(self.dir / f"{run.key}.json")
 
     async def _star_name(self, t: dict[str, Any]) -> str | None:
-        """SIMBAD's name for a catalogue-named track (its display name, e.g. "eps Ind A"), or None."""
+        """SIMBAD's name for a catalogue-named track (its display name, e.g. "eps Ind A"); else Gaia's ("Gaia DR3 …"), so a known
+        bright star is never shown as an unnamed mover. A saturated track's place is the centre of its saturated zone, several
+        arcseconds off the star, so SIMBAD is asked within SATURATED_NAME_ARCSEC of it (one bright star dominates such a cone)."""
+        gaia = (t.get("gaia") or {}).get("source_id")
+        fallback = f"Gaia DR3 {gaia}" if gaia else None
         if self.catalogue is None:
-            return None
+            return fallback
+        radius = SATURATED_NAME_ARCSEC if t.get("saturated") else 6.0
         try:
-            r = await asyncio.wait_for(self.catalogue.simbad_at(t["ra_2025_9"], t["dec_2025_9"], 2025.9, 6.0), 6.0)
+            r = await asyncio.wait_for(self.catalogue.simbad_at(t["ra_2025_9"], t["dec_2025_9"], 2025.9, radius), 6.0)
         except (TimeoutError, httpx.HTTPError, BreakerOpenError, ValueError):
-            return None
+            return fallback
         if r.get("state") != "ok":
-            return None
+            return fallback
         name = r.get("display_name") or r.get("name")
-        return str(name) if name else None
+        return str(name) if name else fallback
 
     async def _fast_stars(self, meta: dict[str, Any]) -> list[dict[str, Any]]:
         """The bright fast stars of the field in Gaia DR3 (G < SAT_STAR_G, proper motion above SAT_PM_MAS), from the archive or, when it

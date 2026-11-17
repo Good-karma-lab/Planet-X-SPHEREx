@@ -156,3 +156,31 @@ def test_a_saturated_centroid_track_gives_way_to_the_saturated_zone_track_of_its
     assert kept == [other]  # the biased halo track is replaced, the unrelated one stays
     assert replace_saturated([right], extra, [star]) == [right]
     assert replace_saturated([biased, other], [], [star]) == [biased, other]  # nothing replaces it when no saturated track was found
+
+
+def test_a_saturated_star_is_named_by_simbad_in_a_wide_cone_else_by_gaia(tmp_path: object) -> None:
+    """ε Indi A on ε Indi B's 20′ field was "Mover 2": a saturated track's centre is several arcseconds off the star, so SIMBAD is
+    asked in a wider cone, and Gaia's name stands when SIMBAD gives nothing."""
+    import asyncio
+    from pathlib import Path
+
+    from service.movers import SATURATED_NAME_ARCSEC, Movers
+
+    asked: list[float] = []
+
+    class Cat:
+        def __init__(self, answer: dict[str, object]) -> None:
+            self.answer = answer
+
+        async def simbad_at(self, ra: float, dec: float, epoch: float, radius: float) -> dict[str, object]:
+            asked.append(radius)
+            return self.answer
+
+    m = Movers(None, Path(str(tmp_path)))  # type: ignore[arg-type]
+    t = {"ra_2025_9": 330.84, "dec_2025_9": -56.79, "saturated": True, "gaia": {"source_id": "6412595290592307840"}}
+    m.catalogue = Cat({"state": "ok", "display_name": "eps Ind A"})
+    assert asyncio.run(m._star_name(t)) == "eps Ind A" and asked == [SATURATED_NAME_ARCSEC]
+    m.catalogue = Cat({"state": "none"})
+    assert asyncio.run(m._star_name(t)) == "Gaia DR3 6412595290592307840"
+    m.catalogue = None
+    assert asyncio.run(m._star_name(t)) == "Gaia DR3 6412595290592307840"
