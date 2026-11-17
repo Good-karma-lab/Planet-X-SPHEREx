@@ -4,7 +4,7 @@ import { useSquareLook } from './lab/square';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
-import { FieldClient, mjdToDate, type FieldMeta } from '../lib/field';
+import { FieldClient, mjdToDate, type FieldMeta, type PassMeta } from '../lib/field';
 import { formatHash, parseHash, type Route } from '../lib/route';
 import { formatDec, formatRA, parseDec, parseRA } from '../lib/sky';
 import type { SxpPart } from '../lib/sxp';
@@ -2368,6 +2368,28 @@ export function Lab({ route }: { route: Route }) {
     set,
     setTab,
     pickAnomaly: (n) => pickAnomaly(n),
+    // a task step holds one frame: a visit in Days, a pass in Months
+    showFrame: (i) => {
+      setPlaying(false);
+      setFrame(i);
+    },
+    showPass: (mjd) => {
+      const q = (meta?.passes ?? []).reduce<PassMeta | null>((b, x) => (!b || Math.abs(x.mjd_mid - mjd) < Math.abs(b.mjd_mid - mjd) ? x : b), null);
+      if (!q) return;
+      setPlaying(false);
+      setFrame(q.index);
+    },
+    visit: film !== null ? visit : null,
+    showVisit: (mjd) => {
+      const fr = filmData?.meta.frames ?? [];
+      if (!fr.length) return;
+      let k = 0;
+      fr.forEach((f, i) => {
+        if (Math.abs(f.mjd - mjd) < Math.abs(fr[k]!.mjd - mjd)) k = i;
+      });
+      setPlaying(false);
+      setFrame(k);
+    },
     pickTrack: (i) => {
       const t = mv?.result?.tracks[i];
       if (t) pickTrack(t, trackNamesRef.current[i] ?? '');
@@ -3719,6 +3741,16 @@ export function Lab({ route }: { route: Route }) {
               <div class="psh">
                 To look at{foundCount > 0 && <span class="tbadge" data-testid="look-count">{foundCount}</span>}
               </div>
+              {!inTask && (
+                <button
+                  class="mini look-missed"
+                  onClick={() => flow.setTool('mark')}
+                  title="Put a mark on something that moves or looks odd and has no ring"
+                  data-testid="look-missed"
+                >
+                  Mark something the machine missed
+                </button>
+              )}
                 {pairSel !== null && pairs[pairSel] && (
                   <PairCard
                     pair={pairs[pairSel]!}
