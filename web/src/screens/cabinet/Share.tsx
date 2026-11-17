@@ -353,7 +353,7 @@ export function StoryPage({ id }: { id: string }) {
         <div class="cb-storygrid">
           <div class="cb-storypic">
             <Pic findingId={s.machine ? s.finding_id : null} ra={s.ra} dec={s.dec} size={320} label={s.title} />
-            <span class="mono-s">The time-lapse: one frame per SPHEREx pass</span>
+            <span class="mono-s">The object in the SPHEREx frames</span>
           </div>
           <div class="cb-storytext">
             {edit ? (

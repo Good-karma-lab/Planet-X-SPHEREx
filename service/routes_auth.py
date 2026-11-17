@@ -1,6 +1,7 @@
 """Sign-in without passwords: a single-use e-mail link, and Google when `SKY_GOOGLE_CLIENT_ID` / `SKY_GOOGLE_CLIENT_SECRET` are set.
 
-  GET  /api/me                      {user:{id, name, email}|null, auth:{google, dev}}
+  GET  /api/me                      {user:{id, name, email}|null, auth:{email, google, dev}}   (email false and google false:
+                                    "Sign-in opens soon"; POST /api/auth/email then answers 503)
   POST /api/auth/email {email, next?}   → {sent:true, minutes, dev_link?}   (dev_link only with SKY_AUTH_DEV=1)
   GET  /api/auth/callback?token=    sets the session cookie, goes to the cabinet (or to `next`)
   GET  /api/auth/google             goes to Google; GET /api/auth/google/callback comes back
@@ -23,6 +24,7 @@ from pydantic import BaseModel, Field
 
 from service import accounts
 from service.accounts import COOKIE, LINK_MINUTES, OAUTH_COOKIE, SESSION_S, check_origin, is_local, public_base
+from service.accounts.mail import MailFailedError
 
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 NEXT = re.compile(r"^#/[A-Za-z0-9_\-/?=&.%+:,~]*$")  # only a place inside this app
@@ -57,12 +59,14 @@ def make_auth_router(st: Any) -> APIRouter:
     @router.get("/api/me")
     def me(request: Request) -> Any:
         acc = accounts.get(st)
-        return {"user": acc.current_user(request), "auth": {"google": acc.google is not None, "dev": acc.dev}}
+        return {"user": acc.current_user(request), "auth": {"email": acc.email, "google": acc.google is not None, "dev": acc.dev}}
 
     @router.post("/api/auth/email")
     def email_link(body: EmailIn, request: Request) -> Any:
         acc = accounts.get(st)
         check_origin(request)
+        if not acc.email:  # no mail sender is set up: no address is taken, no token is made
+            raise HTTPException(503, "Sign-in opens soon")
         email = body.email.strip().lower()
         if not EMAIL.match(email):
             raise HTTPException(422, "this does not look like an e-mail address")
@@ -72,7 +76,10 @@ def make_auth_router(st: Any) -> APIRouter:
         nxt = body.next if body.next and NEXT.match(body.next) else None
         token = acc.db.new_login_token(email, LINK_MINUTES * 60.0, nxt)
         link = f"{base}/api/auth/callback?token={token}"
-        acc.mail.send_link(email, link, LINK_MINUTES)
+        try:
+            acc.mail.send_link(email, link, LINK_MINUTES)
+        except MailFailedError:
+            raise HTTPException(502, "The mail could not be sent. Try again in a minute.") from None
         out: dict[str, Any] = {"sent": True, "minutes": LINK_MINUTES}
         if acc.dev:
             out["dev_link"] = link

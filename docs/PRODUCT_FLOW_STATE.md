@@ -165,6 +165,9 @@ cd /Users/aostapenko/Work/Planet-X-SPHEREx && ./deploy/push.sh ubuntu@158.179.21
 SKY_PUBLIC_URL=https://www.spherex.space
 SKY_PRODUCT_DB=/var/lib/sky/product.sqlite
 SKY_CLIPS=/var/lib/sky/clips
+# only when the user gives them (sign-in opens by itself):
+# SKY_RESEND_API_KEY=...   SKY_MAIL_FROM="SPHEREx Space <signin@spherex.space>"
+# SKY_GOOGLE_CLIENT_ID=... SKY_GOOGLE_CLIENT_SECRET=...
 ```
 
 - **Never** `SKY_AUTH_DEV`: it shows the sign-in link on the page.
@@ -197,10 +200,13 @@ SKY_CLIPS=/var/lib/sky/clips
 - The e-mail field and the Google button are hidden. `POST /api/auth/email` refuses with 503 "sign-in opens soon".
 - Everything a guest can do works: take a square, mark, close a task, see Findings, the leaderboard and the globe.
 - This is better than hiding the tab: the tab tells a visitor that accounts are coming, and nothing they do is lost.
-- **Needed in flow-accounts' files before the release:** the sign-in panel, and /api/me's `auth` saying `{email: false, google: false}`
-  when no sender and no Google keys are set. To be built by flow-accounts.
-- **Release blocker:** if it isn't in by acceptance, the release waits for it. A public "send me a link" that only writes to a
-  log would lose people's mails silently.
+- **Built (flow-accounts a1f3a01, merged):**
+- With no mail sender and no Google keys, `/api/me` says `auth {email:false, google:false, dev:false}`.
+- `POST /api/auth/email` answers 503 "Sign-in opens soon" and keeps no address.
+- The cabinet shows one status line and no form.
+- Real mail opens by itself when `SKY_RESEND_API_KEY` is set in /etc/sky/env, with `SKY_MAIL_FROM` (default
+  "SPHEREx Space <signin@spherex.space>"; the domain must be verified at Resend).
+- The release blocker is resolved.
 
 ### Later jobs (not in this release)
 
@@ -235,8 +241,8 @@ Each test is done in a real browser (Chrome, and the globe also in Firefox) and 
    `curl -A "facebookexternalhit/1.1"` and `-A "Twitterbot"`.
    - It must return HTML with og:title, og:description, og:image (1200×630, an absolute https URL that answers image/*),
      og:url and twitter:card.
-   - Hash routes (#/…) are never seen by crawlers, so share links must be server paths that answer those tags.
-   - This needs flow-accounts' sharing work. If it isn't in the release, this test is "not in release".
+   - Share pages are server paths, `/s/<kind>/<ref>`, served by the API (Caddy passes every path to it). Hash routes are never
+     seen by crawlers.
 9. **Mobile:** a 375×812 phone. Landing, globe, a square task and the bottom bar, with no sideways scroll.
 10. **Grid API:** `/api/grid/meta` (38 imported squares, scheme dec20), `/api/grid/coverage?corners=1`.
 11. **Checks:** one "Check and submit" declared by a guest is refused with 401 (submitting needs an account).
