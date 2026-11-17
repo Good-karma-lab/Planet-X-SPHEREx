@@ -19,4 +19,12 @@ describe('hash routes', () => {
     const r = { screen: 'lab' as const, params: { ra: '331.077', dec: '-56.794', fov: '5' } };
     expect(parseHash(formatHash(r))).toEqual(r);
   });
+  it("opens a finding's own page at #/findings/<id> (the id's case kept) and writes it back the same way", () => {
+    expect(parseHash('#/findings/mover:AbC123')).toEqual({ screen: 'findings', params: { id: 'mover:AbC123' } });
+    expect(parseHash('#/findings/mover%3Aabc?from=cabinet')).toEqual({ screen: 'findings', params: { from: 'cabinet', id: 'mover:abc' } });
+    expect(parseHash('#/findings?lead=x').params).toEqual({ lead: 'x' });
+    const r = { screen: 'findings' as const, params: { id: 'peak:9f' } };
+    expect(formatHash(r)).toBe('#/findings/peak%3A9f');
+    expect(parseHash(formatHash(r))).toEqual(r);
+  });
 });

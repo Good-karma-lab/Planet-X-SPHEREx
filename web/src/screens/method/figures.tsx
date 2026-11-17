@@ -126,10 +126,10 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     ),
   },
   'raw-to-video': {
-    cap: 'From the raw exposures to a film: raw frames, the stack of the passes, colour by wavelength, then the passes played',
+    cap: 'From the raw exposures to a time-lapse: raw frames, the stack of the passes, colour by wavelength, then the passes played',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="raw-to-video" label='Raw exposures, the stack, the coloured stack and the passes as a film' />
+        <Vid f="raw-to-video" label='Raw exposures, the stack, the coloured stack and the passes as a time-lapse' />
       </Fig>
     ),
   },
@@ -142,10 +142,10 @@ const FIGS: Record<string, { cap: string; make: (cap: string, name: string) => p
     ),
   },
   'film-ecliptic-dec2025': {
-    cap: 'The Days film of the 60′ ecliptic field, December 2025: the visits hours apart, the known asteroids ringed and named',
+    cap: 'The Days time-lapse of the 60′ ecliptic field, December 2025: the visits hours apart, the known asteroids ringed and named',
     make: (cap, name) => (
       <Fig name={name} cap={cap}>
-        <Vid f="film-ecliptic-dec2025" label='The Days film of the ecliptic field with the asteroid tracks' />
+        <Vid f="film-ecliptic-dec2025" label='The Days time-lapse of the ecliptic field with the asteroid tracks' />
       </Fig>
     ),
   },

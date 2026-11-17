@@ -1,13 +1,13 @@
 # Searches for movers
 
-Things in the sky change in different ways, and each way needs its own search: a star that drifts a few arcseconds a year shows up as a shift between passes, an asteroid that crosses a field in days as a track through the visits of one pass, and a close pair whose brightness ratio changes as a peak that hops. We run these searches by themselves on every field we build, and nothing about any object is given to them. In the 60′ ecliptic field of December 2025 the film search recovers 6 of the 8 known bodies it should see, blind, with no unexplained track.
+Things in the sky change in different ways, and each way needs its own search: a star that drifts a few arcseconds a year shows up as a shift between passes, an asteroid that crosses a field in days as a track through the visits of one pass, and a close pair whose brightness ratio changes as a peak that hops. We run these searches by themselves on every field we build, and nothing about any object is given to them. In the 60′ ecliptic field of December 2025 the time-lapse search recovers 6 of the 8 known bodies it should see, blind, with no unexplained track.
 
 ## Kinds of searches
 
 | What changes | How it looks in SPHEREx data | Our search |
 |---|---|---|
 | nearby stars, brown dwarfs | arcseconds per year: a shift between passes, the same in every stack | search between passes |
-| asteroids, comets | tens of arcseconds per hour: a new place in every visit, in no stack | film search inside a pass |
+| asteroids, comets | tens of arcseconds per hour: a new place in every visit, in no stack | time-lapse search inside a pass |
 | bodies beyond Neptune | a few arcseconds per day inside a pass, a jump of tens of arcminutes between passes, too faint for one exposure | exposures added along the motion (next part) |
 | a pair or a variable in place | the peak of a blend hops; the flux ratio changes at fixed places | pairs changing in place |
 
@@ -128,13 +128,13 @@ A pair is a candidate when either component's own flux changes by at least 2.5 s
 
 Depth and limits: a pair closer than 3.5″ or wider than 12″ is not tested; both cores must be strong in every pass (flux/error at least 10), so a faint core is never judged.
 
-## Film search inside a pass
+## Time-lapse search inside a pass
 
 Asteroids and comets move too fast for any stack: in each visit they stand somewhere else. We search the visits of one pass, one frame per visit, for sources that are not in the static sky, link them into tracks with a motion model that knows the Earth's orbit and the telescope's orbit, and keep only tracks that chance does not make. It works on fields up to 60′ across and on the middle pass of the field; nothing about any body is given to it.
 
 ### Frames
 
-Each exposure is smoothed to point-source size before the median of its visit is taken, because one object lands on different pixels in the exposures of a visit and a median of unsmoothed images would lose it. Frames of one detector are aligned, because a residual shift of a few tenths of a grid point leaves every star as a bright-and-dark pair. We do not apply the leave-one-out cosmic-ray test to the film, because it would take a bright fast mover for a hit, and we keep OUTLIER pixels because the pipeline flags asteroid pixels with that bit.
+Each exposure is smoothed to point-source size before the median of its visit is taken, because one object lands on different pixels in the exposures of a visit and a median of unsmoothed images would lose it. Frames of one detector are aligned, because a residual shift of a few tenths of a grid point leaves every star as a bright-and-dark pair. We do not apply the leave-one-out cosmic-ray test to the time-lapse, because it would take a bright fast mover for a hit, and we keep OUTLIER pixels because the pipeline flags asteroid pixels with that bit.
 
 ```
 exposures: detectors D1–D3; flagged pixels dropped except OUTLIER (the pipeline sets that flag on asteroids)
@@ -203,15 +203,15 @@ A track that lies within 30″ of a known body's predicted place (median over th
 
 [figure: film-ecliptic-dec2025 | the 60′ ecliptic field in motion-only view, known bodies ringed, December 2025]
 
-The film of the 60′ ecliptic field (RA 169.8917, Dec +4.3514; pass 2025-12-02 to 2025-12-20, MJD 61011.71–61029.77; D1–D3, 24 visits, 178 exposures of which 166 were read) was searched blind. Of the 8 known bodies with at least 4 frames inside the film and V ≤ 19.1 the search recovered 6, each matched to JPL positions within 2.5″, and all 6 drawn tracks are matched to a known body.
+The time-lapse of the 60′ ecliptic field (RA 169.8917, Dec +4.3514; pass 2025-12-02 to 2025-12-20, MJD 61011.71–61029.77; D1–D3, 24 visits, 178 exposures of which 166 were read) was searched blind. Of the 8 known bodies with at least 4 frames inside the time-lapse and V ≤ 19.1 the search recovered 6, each matched to JPL positions within 2.5″, and all 6 drawn tracks are matched to a known body.
 
-**Result:** the film search recovers 6 of 8 known bodies blind with 0 unexplained tracks in the 60′ December ecliptic field (live service, /api/v1/film/48c5bbb2c5e028b847075c51/tracks, product `filmsearch` version t4, 2026-11-14 21:04 UTC).
+**Result:** the time-lapse search recovers 6 of 8 known bodies blind with 0 unexplained tracks in the 60′ December ecliptic field (live service, /api/v1/film/48c5bbb2c5e028b847075c51/tracks, product `filmsearch` version t4, 2026-11-14 21:04 UTC).
 
 | Body | V | Result |
 |---|---|---|
 | (9952) 1991 AK | 18.1 | found, 11 visits, 19.3 sigma |
 | (43959) 1997 CB26 | 18.4 | found, 12.6 sigma |
-| (7948) Whitaker | 18.5 | missed (only 4 frames inside the film) |
+| (7948) Whitaker | 18.5 | missed (only 4 frames inside the time-lapse) |
 | (11020) Orwell | 18.8 | found, 11.9 sigma |
 | (9078) 1994 PB2 | 18.9 | found, 11.6 sigma |
 | (4759) Aretta | 19.0 | found, 7.1 sigma |
@@ -220,15 +220,15 @@ The film of the 60′ ecliptic field (RA 169.8917, Dec +4.3514; pass 2025-12-02 
 
 **Result:** the chance control (12 trials) makes 0.0 tracks of at least 4 visits and 1.83 of 3 visits, which is why 4 visits is the shortest length drawn (live service, same product).
 
-**Result:** of the four bodies of the first validation of this field (9952, 9078, 11020, 43959) the search found 4 of 4 blind with 0 false tracks (docs/PROGRESS.md, film search version t4).
+**Result:** of the four bodies of the first validation of this field (9952, 9078, 11020, 43959) the search found 4 of 4 blind with 0 false tracks (docs/PROGRESS.md, time-lapse search version t4).
 
 ### Depth and limits
 
-The faintest body recovered is V 19.1 (5.7 sigma); a body needs at least 4 visits of the pass (3 of them with a candidate verified at 3 sigma), so a body with only 4 frames inside the film can be missed. Orbits are limited to 0.8–8 au semi-major axis and eccentricity below 0.6: a comet on a parabola, or a body beyond 8 au, is not linked by the orbit and can only appear as an unverified straight-line track. Rates are limited to 3–200 ″/h. The time sampling is the survey's: a few visits a day with gaps of days. Very bright stars make halo candidates around them, which the halo mask removes.
+The faintest body recovered is V 19.1 (5.7 sigma); a body needs at least 4 visits of the pass (3 of them with a candidate verified at 3 sigma), so a body with only 4 frames inside the time-lapse can be missed. Orbits are limited to 0.8–8 au semi-major axis and eccentricity below 0.6: a comet on a parabola, or a body beyond 8 au, is not linked by the orbit and can only appear as an unverified straight-line track. Rates are limited to 3–200 ″/h. The time sampling is the survey's: a few visits a day with gaps of days. Very bright stars make halo candidates around them, which the halo mask removes.
 
-## Known bodies in a film
+## Known bodies in a time-lapse
 
-For every film we ask which known asteroids and comets should be in it, so that the page can ring them on each frame and a track can be named.
+For every time-lapse we ask which known asteroids and comets should be in it, so that the page can ring them on each frame and a track can be named.
 
 ```
 candidates: JPL Small-Body Identification at the middle of the pass, over the field widened by 40 ″/h × half the pass
@@ -255,3 +255,23 @@ The plane count uses the ephemeris every 30 minutes, interpolated to each exposu
 **Result:** the plane counts equal IRSA's for all four bodies (docs/validation/2026-11-14-v-most.md). The stack along a body's track is a detection test of that body, not astrometry of it; a body whose frames number only a few is judged by its few frames.
 
 The next part, Bodies beyond Neptune, describes the searches for bodies too faint and too slow for any of these.
+
+## The sky grid and the background sweep
+
+We cut the whole sky into a fixed grid of squares, one square for one 20′ search field. The grid has 540 declination bands, each 20′ high, from the south pole to the north pole. Each band is split into n = max(1, round(360° cos δ_mid / (1/3)°)) equal steps of right ascension starting at RA 0, so every square is about 20′ × 20′ on the sky, and the whole sky is 371 272 squares. A square's id is its band and its step (`294-0148`); the grid never changes, so an id always names the same square.
+
+A square is `new` until something happens to it, then `searching`, then `searched` or `failed`. With it we keep the number of finds, the ids of those finds, the bar the search used, and how many people have looked at it (one person counts once).
+
+The machine walks the squares one after another, in its own process, never inside the service that serves people. For each square it asks a private instance of our own service for the 20′ field at the square's centre, then the search between passes and the brown-dwarf search, exactly as a visitor would. The order is:
+
+1. the predicted Planet Nine band (after Brown & Batygin 2021): RA 15°–105°, ecliptic latitude −25° to +15°, from its centre at RA 50°, Dec +8° outwards (31 680 squares);
+2. the rest of the ecliptic, |β| ≤ 10°, by ecliptic longitude from that centre (48 780 squares);
+3. everything else, from the ecliptic outwards.
+
+**The bar.** A square's find is a source detected at 8σ in each pass whose motion is measured to at least 5σ and shifts at least 6.15″ (one SPHEREx pixel) over the baseline of the passes, or a brown-dwarf candidate as that search grades it. A Gaia star moving as Gaia says is not a find. With every square we keep the bar it was searched to: the number of passes and the passes used, the sources per pass, and the chance of one false track. "Nothing here" is recorded the same way, with its bar.
+
+**Memory.** A watchdog adds up the resident memory of the whole process tree of the sweep's instance twice a second. Over the cap, it stops the instance, records the square as failed with "memory cap", and the sweep ends; it never grows past the cap. Every worker also has its own share of the cap, and the instance is started afresh every 10 squares, because its caches grow by about 150 MB a square.
+
+**Measured.** On a 14-core desktop with 4 workers, in the Planet Nine band: 23 squares searched, none with a find, 10.8 to 16 squares an hour (the first square of a fresh store takes 831 s, a square whose exposures are cached 75–590 s), peak resident memory 3.0–4.2 GB. Building the 20′ field is about 95% of a square's time; the search between passes takes 7–11 s and the brown-dwarf search less than one.
+
+The 47 places searched before the grid existed are marked in the grid as searched, with their own field size: a place smaller than 20′ covers its square only in part.

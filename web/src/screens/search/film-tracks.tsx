@@ -138,8 +138,8 @@ export function FilmTracks({
         </div>
       )}
       {nt > 0 && tr && fov > 10 && (
-        <div class="chips" title="Open the film of the same pass again, centred on the middle place of the chosen track, in a smaller field: the body is several pixels there. The field is read again (minutes if it is new).">
-          <span class="mono-s">Film around this track</span>
+        <div class="chips" title="Open the time-lapse of the same pass again, centred on the middle place of the chosen track, in a smaller field: the body is several pixels there. The field is read again (minutes if it is new).">
+          <span class="mono-s">Time-lapse around this track</span>
           {[10, 20]
             .filter((f) => f < fov)
             .map((f) => (

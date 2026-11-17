@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
 from service import __version__, cpu
+from service.accounts import register_accounts
 from service.anomalies import Anomalies
 from service.bodies import KnownBodies
 from service.browndwarfs import BrownDwarfs
@@ -31,6 +32,7 @@ from service.context import CatalogueContext
 from service.coverage import coverage_payload, index_key
 from service.findings import Findings
 from service.fpx_known import FpxIdentifier
+from service.grid import GridDB, import_searched
 from service.jobs.scheduler import Priority, Scheduler
 from service.known import Known
 from service.lightcurves import neowise as lc_neowise
@@ -47,17 +49,23 @@ from service.reader.files import FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
 from service.routes_brightness import make_brightness_router
+from service.routes_checks import checks_of, make_checks_router
+from service.routes_clips import make_clips_router
 from service.routes_dwarfs import make_dwarfs_router
 from service.routes_export import make_export_router
 from service.routes_extras import register as register_extras
 from service.routes_findings import make_findings_router
+from service.routes_grid import make_grid_router
 from service.routes_known import make_known_router
+from service.routes_known_field import make_known_field_router
+from service.routes_known_field import prewarm as known_prewarm
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
 from service.routes_search import make_router
 from service.routes_searched import make_searched_router
 from service.searched import Searched
 from service.spectrum import Spectra, place_at, spectrum_params
+from service.storage import product_db_path
 from service.upstream.hips import HipsTiles
 from service.warm import WarmField, WarmRunner, warm_set
 from service.workers import fieldjob, filmjob, filmsearchjob
@@ -66,6 +74,9 @@ SERVICE_NAME = "spherex-sky"
 API_PREFIX = "/api/v1"
 # a second instance that takes over while the main one restarts (deploy/push.sh): it builds nothing new
 STANDBY = os.environ.get("SKY_STANDBY", "0") == "1"
+# a local run on a snapshot of the production finds (tools/findings_snapshot.py): Findings only reads its database and the Find Planet X
+# identifier does not ask JPL, while every field and search is built as usual (a standby would build nothing new)
+FINDINGS_READONLY = os.environ.get("SKY_FINDINGS_READONLY", "0") == "1"
 LIGHTCURVES_WAIT_S = 3.0  # IRSA may take a minute for NEOWISE: the light curves route answers within this, the rest `pending`
 
 
@@ -106,6 +117,10 @@ class State:
         self.findings: Findings | None = None
         self.fpx_known: FpxIdentifier | None = None
         self.loopwatch: LoopWatch | None = None
+        self.grid: GridDB | None = None
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.known_warmed: set[str] = set()
+        self.grid_import: asyncio.Task[None] | None = None
 
 
 class _NoAnomalies:
@@ -119,9 +134,28 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     cfg = config or load()
     st = State(cfg)
 
+    async def grid_import_loop() -> None:
+        """Marks the grid squares of the searched places: the list kept in data/searched_seed.json (the places searched before the
+        grid existed) once, then the service's own list of searched places every ten minutes."""
+        seed = Path(__file__).resolve().parent.parent / "data" / "searched_seed.json"
+        with contextlib.suppress(Exception):
+            if st.grid is not None and seed.is_file():
+                await asyncio.to_thread(import_searched, st.grid, json.loads(seed.read_text()).get("fields", []))
+        while True:
+            await asyncio.sleep(30)
+            with contextlib.suppress(Exception):
+                if st.searched is not None and st.grid is not None:
+                    body = await st.searched.get()
+                    await asyncio.to_thread(import_searched, st.grid, body.get("fields", []))
+            await asyncio.sleep(570)
+
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        st.loop = asyncio.get_running_loop()
         st.store = Store(cfg.store_dir)
+        st.grid = GridDB(product_db_path(cfg.store_dir))
+        if not STANDBY:  # the places searched before the grid existed, once (and the service's own searches, every ten minutes)
+            st.grid_import = asyncio.get_running_loop().create_task(grid_import_loop())
         st.hips = HipsTiles(cfg.store_dir / "hips")
         st.store.purge_stale()
         index_path = cfg.store_dir / "index" / "exposures.sqlite"
@@ -173,13 +207,14 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                         store.reopen(row["key"])
 
             asyncio.get_running_loop().run_in_executor(None, reopen_unread)
-        st.findings = Findings(
-            st.store, cfg.store_dir, st.catalogue, st.movers, st.pairs, st.dwarfs, st.anomalies or _NoAnomalies(), writer=not STANDBY
-        )
+        anomalies = st.anomalies or _NoAnomalies()
+        writer = not (STANDBY or FINDINGS_READONLY)
+        st.findings = Findings(st.store, cfg.store_dir, st.catalogue, st.movers, st.pairs, st.dwarfs, anomalies, writer=writer)
         st.findings.start()
         st.fpx_known = FpxIdentifier(st.store, cfg.store_dir / "fpx_known")
-        if not STANDBY:  # one process asks JPL (the standby only reads the kept answers): two would double the rate JPL sees
+        if not (STANDBY or FINDINGS_READONLY):  # one process asks JPL (the standby only reads the kept answers): two would double the rate
             st.fpx_known.start()
+        checks_of(st).resume()  # check jobs a restart interrupted run again at once, not on the first request
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         if st.index is not None:
@@ -206,6 +241,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         yield
         if warm_task is not None:
             warm_task.cancel()
+        if st.grid_import is not None:
+            st.grid_import.cancel()
         if st.findings is not None:
             await st.findings.stop()
         if st.fpx_known is not None:
@@ -464,13 +501,18 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     # the searches' own routes: what else is known at a place, comets and asteroids, the movers route with pairs, Find Planet X
     app.include_router(make_router(st))
     app.include_router(make_known_router(st))
+    app.include_router(make_known_field_router(st))  # the known objects of a frame at each epoch (stream B2)
+    app.include_router(make_checks_router(st))  # the checks before submit (stream B2)
     app.include_router(make_pairs_router(st))
     app.include_router(make_dwarfs_router(st))
     app.include_router(make_searched_router(st))
     app.include_router(make_findings_router(st))
+    app.include_router(make_clips_router(st))  # the time-lapse clips of findings (stream F3)
     app.include_router(make_brightness_router(st))
     app.include_router(make_export_router(st))
     app.include_router(make_planetx_router(st))
+    app.include_router(make_grid_router(st))  # the sky grid and its coverage (product flow)
+    register_accounts(app, st)  # accounts, sign-in, marks, tasks, investigations, submit (stream B3)
     # the extra data sources: deep references, cloud cross-match, tracked stack, ADES export, SSOIS, Gaia DR4 readiness
     register_extras(app)
 
@@ -532,6 +574,18 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.index_health = {"files": st.index.count(), **meta}
         return st.index_health
 
+    def warm_known(key: str, ra: float, dec: float, fov: float, meta: dict[str, Any] | None) -> None:
+        """The first time a finished field is asked for, its known objects are asked of every catalogue in the background (the lab's
+        Known objects button then answers from the cache). The lab asks with the address's place, size and the passes' dates: so does
+        this."""
+        if key in st.known_warmed or st.loop is None or not meta or os.environ.get("SKY_KNOWN_PREWARM", "1") != "1":
+            return
+        st.known_warmed.add(key)
+        if len(st.known_warmed) > 5000:
+            st.known_warmed.clear()
+        mjds = [float(q["mjd_mid"]) for q in meta.get("passes") or [] if q.get("mjd_mid") is not None]
+        st.loop.call_soon_threadsafe(known_prewarm, st, ra, dec, fov, mjds)
+
     @app.get(f"{API_PREFIX}/fields")
     def field(
         request: Request, ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90), fov: float = Query(5, gt=0, le=60)
@@ -542,7 +596,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         params = fieldjob.canonical(ra, dec, fov)
         key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
         if st.store.is_complete(key):
-            return {"key": key, "state": "done", "params": params, "meta": fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))}
+            meta = fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))
+            warm_known(key, ra, dec, fov, meta)
+            return {"key": key, "state": "done", "params": params, "meta": meta}
         if key not in st.scheduler.by_key or st.scheduler.jobs[st.scheduler.by_key[key]].state in ("error", "cancelled"):
             wait = st.new_work.take(client_id(request, st.salt))
             if wait > 0:

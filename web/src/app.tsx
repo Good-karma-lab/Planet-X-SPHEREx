@@ -7,6 +7,12 @@ import { InfoPage } from './screens/pages';
 import { Landing } from './screens/landing';
 import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
+import { Cabinet } from './screens/cabinet/Cabinet';
+import { FindingPage } from './screens/findings/page';
+import { Leaders } from './screens/cabinet/Score';
+import { ProfilePage, StoryPage } from './screens/cabinet/Share'; // flow-accounts: #/u/<slug> and #/findings/<id>/story
+import { useUnread } from './lib/account';
+import { MoreTab } from './ui/BottomNav';
 
 const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
   { screen: 'globe', name: 'Globe', icon: 'globe', tip: 'The sky: globe and catalogue' },
@@ -16,6 +22,7 @@ const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
   { screen: 'index', name: 'Index', icon: 'database', tip: 'Exposure index: what the sky service can search' },
   { screen: 'method', name: 'Method', icon: 'sigma', tip: 'Method: how everything is computed' },
   { screen: 'about', name: 'About', icon: 'info', tip: 'About, data and credits' },
+  { screen: 'me', name: 'Cabinet', icon: 'user', tip: 'Cabinet: your squares, marks, findings and history' },
 ];
 
 function useRoute(): Route {
@@ -30,9 +37,12 @@ function useRoute(): Route {
 
 export function App() {
   const route = useRoute();
+  const unread = useUnread();
   const [health, setHealth] = useState<Health | null>(null);
   useEffect(() => {
-    void getHealth().then(setHealth).catch(() => setHealth(null));
+    void getHealth()
+      .then(setHealth)
+      .catch(() => setHealth(null));
   }, []);
   // the Lab keeps its own place in the address; returning to it from another screen restores the last field
   const [lastLab, setLastLab] = useState('#/lab');
@@ -52,13 +62,19 @@ export function App() {
     <div class="app">
       <nav class="rail">
         <a class="brand" href="#/" title="SPHEREx Space: the front page">
-          <span class="logo" dangerouslySetInnerHTML={{ __html: '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/></svg>' }} />
+          <span
+            class="logo"
+            dangerouslySetInnerHTML={{
+              __html:
+                '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.2"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/></svg>',
+            }}
+          />
         </a>
         <div class="tabs">
           {NAV.map((n) => (
             <a
               key={n.screen}
-              class={`tab ${route.screen === n.screen ? 'on' : ''}`}
+              class={`tab ${route.screen === n.screen ? 'on' : ''} ${n.screen === 'me' ? 'tab-end' : ''}`}
               href={n.screen === 'lab' ? lastLab : n.screen === 'globe' ? '#/explore' : `#/${n.screen}`}
               title={n.tip}
               aria-current={route.screen === n.screen ? 'page' : undefined}
@@ -66,12 +82,40 @@ export function App() {
             >
               <span dangerouslySetInnerHTML={{ __html: icon(n.icon, 26) }} style={{ display: 'contents' }} />
               <span>{n.name}</span>
+              {n.screen === 'me' && unread > 0 && (
+                <span class="navbadge" data-testid="nav-unread">
+                  {unread}
+                </span>
+              )}
             </a>
           ))}
+          <MoreTab screen={route.screen} />
         </div>
       </nav>
       <main data-screen={route.screen}>
-        {route.screen === 'lab' ? <Lab route={route} /> : route.screen === 'globe' ? <Globe /> : route.screen === 'planetx' ? <PlanetXPage /> : <InfoPage screen={route.screen} health={health} />}
+        {route.screen === 'lab' ? (
+          <Lab route={route} />
+        ) : route.screen === 'globe' ? (
+          <Globe />
+        ) : route.screen === 'planetx' ? (
+          <PlanetXPage />
+        ) : route.screen === 'me' ? (
+          <Cabinet route={route} />
+        ) : route.screen === 'findings' && (route.params['id'] ?? '').endsWith('/story') ? (
+          <StoryPage id={(route.params['id'] ?? '').slice(0, -'/story'.length)} />
+        ) : route.screen === 'findings' && route.params['id'] ? (
+          <div class="screen">
+            <div class="ipage">
+              <FindingPage id={route.params['id']} />
+            </div>
+          </div>
+        ) : route.screen === 'leaders' ? (
+          <Leaders route={route} />
+        ) : route.screen === 'u' ? (
+          <ProfilePage slug={route.params['id'] ?? ''} badge={route.params['badge']} />
+        ) : (
+          <InfoPage screen={route.screen} health={health} />
+        )}
       </main>
     </div>
   );

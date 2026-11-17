@@ -7,13 +7,15 @@ import '../landing.css';
 
 /** The app's main page (the globe). Links that do not open one object go here. */
 const APP = '#/explore';
+/** "Start searching", the one primary button: the globe with the Coverage layer on (the grid of squares, coloured by what is searched). */
+const START = '#/explore?cov=1';
 /** "Watch a star move": the globe with Barnard's Star selected and its path drawn. */
 const STAR = `#/explore?sel=${encodeURIComponent("Barnard's Star")}&path=1`;
 /** "See a brown dwarf move": the lab on ε Indi B, one of the five warmed test fields (its 2025-26 place). */
 const BROWN_DWARF = '#/lab?ra=331.09645&dec=-56.80059&fov=5'; // its place at 2025.9: the warm field
 /** Eris: the lab on its field, where Find Planet X runs. */
 const ERIS = '#/lab?ra=27.378&dec=-0.120&fov=20';
-/** The demo film (about 80 seconds), served as a static file of the web app. */
+/** The demo video (30 seconds), served as a static file of the web app. */
 const VIDEO = '/demo/spherex-sky-demo.mp4';
 const REPO = 'https://github.com/Good-karma-lab/Planet-X-SPHEREx';
 const IMG = '/landing/';
@@ -214,7 +216,10 @@ function PathHero() {
           );
         })}
         {/* the card stands on the side of the star with room for it (a narrow picture would cut it off at its right edge) */}
-        <div class={`lp-pnow${nx > 48 ? ' flip' : ''}${nowHit ? ' hit' : ''}`} style={{ left: `${nx > 48 ? nx - R - 2.4 : nx + R + 2.4}%`, top: `${ny}%` }}>
+        <div
+          class={`lp-pnow${nx > 48 ? ' flip' : ''}${nowHit ? ' hit' : ''}`}
+          style={{ left: `${nx > 48 ? nx - R - 2.4 : nx + R + 2.4}%`, top: `${ny}%` }}
+        >
           <b>Barnard's Star</b>seen by SPHEREx 2025–26
           <br />
           moves 10.4″ a year (Gaia)
@@ -250,14 +255,27 @@ function ThenAndNow() {
   const b = BLINK[i]!;
   const [x, y] = at(b.t);
   return (
-    <div class="lp-pic lp-then" role="img" aria-label="The same 24 arcminutes of sky in 1950, 1991 and 2026: Barnard's Star, ringed, walks north along its path; the other stars stay put.">
+    <div
+      class="lp-pic lp-then"
+      role="img"
+      aria-label="The same 24 arcminutes of sky in 1950, 1991 and 2026: Barnard's Star, ringed, walks north along its path; the other stars stay put."
+    >
       {BLINK.map((f, j) => (
         <img key={f.src} src={IMG + f.src} alt="" class={j === i ? 'on' : ''} loading="lazy" />
       ))}
       <span class="lp-yr">{b.txt}</span>
       <svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         {i > 0 && <line x1={A[0]} y1={A[1]} x2={x - U[0] * b.r} y2={y - U[1] * b.r} stroke="#ffb454" stroke-width="0.5" />}
-        <line x1={x + U[0] * b.r} y1={y + U[1] * b.r} x2={B[0]} y2={B[1]} stroke="#ffb454" stroke-width="0.5" stroke-dasharray="1.2 1" opacity="0.7" />
+        <line
+          x1={x + U[0] * b.r}
+          y1={y + U[1] * b.r}
+          x2={B[0]}
+          y2={B[1]}
+          stroke="#ffb454"
+          stroke-width="0.5"
+          stroke-dasharray="1.2 1"
+          opacity="0.7"
+        />
         {BLINK.map((f, j) => {
           if (j === i) return null;
           const [px, py] = at(f.t);
@@ -285,7 +303,15 @@ function Video() {
   return (
     <div class="lp-video">
       {ok ? (
-        <video controls playsInline preload="metadata" poster="/demo/spherex-sky-demo.jpg" src={VIDEO} onError={() => setOk(false)} aria-label="30-second film of SPHEREx Space with a voice-over and captions" />
+        <video
+          controls
+          playsInline
+          preload="metadata"
+          poster="/demo/spherex-sky-demo.jpg"
+          src={VIDEO}
+          onError={() => setOk(false)}
+          aria-label="30-second demo video of SPHEREx Space with a voice-over and captions"
+        />
       ) : (
         <a class="lp-video-slot" href={APP} aria-label="Open SPHEREx Space">
           <span class="lp-play">
@@ -300,6 +326,44 @@ function Video() {
 }
 
 /* ------------------------------------------------------------------ the page */
+
+/** The latest discovery (GET /api/discoveries/latest, from the accounts): a finding confirmed as new, with its finder. Nothing is shown
+ * while there is none. */
+interface Discovery {
+  finding_id: string;
+  title: string;
+  finder: string | null;
+  summary: string | null;
+  url: string | null;
+  page: string | null;
+  image: string | null;
+}
+
+function LatestDiscovery() {
+  const [d, setD] = useState<Discovery | null>(null);
+  useEffect(() => {
+    let stop = false;
+    void fetch('/api/discoveries/latest')
+      .then(async (r) => (r.ok ? ((await r.json()) as { discovery?: Discovery | null }) : null))
+      .then((b) => !stop && setD(b?.discovery ?? null))
+      .catch(() => undefined);
+    return () => {
+      stop = true;
+    };
+  }, []);
+  if (!d) return null;
+  const href = d.page || `#/findings/${encodeURIComponent(d.finding_id)}`;
+  return (
+    <a class="lp-disc" href={href} data-testid="landing-discovery">
+      {d.image && <img class="lp-disc-pic" src={d.image} alt="" loading="lazy" />}
+      <span class="lp-disc-text">
+        <span class="lp-disc-eyebrow">Latest discovery</span>
+        <b>{d.title}</b>
+        {d.finder && <span>Found by {d.finder}</span>}
+      </span>
+    </a>
+  );
+}
 
 export function Landing() {
   const scroller = useRef<HTMLDivElement>(null);
@@ -317,13 +381,23 @@ export function Landing() {
             SPHEREx Space <small>by Good Karma Lab</small>
           </a>
           <nav class="lp-nav" aria-label="Sections">
-            <a href="#how" onClick={jump('how')}>How it works</a>
-            <a href="#finds" onClick={jump('finds')}>What moves</a>
-            <a href="#team" onClick={jump('team')}>Team</a>
-            <a href="#challenge" onClick={jump('challenge')}>The challenge</a>
-            <a href={REPO} target="_blank" rel="noopener noreferrer" data-testid="landing-source">Source code</a>
-            <a class="lp-btn lp-btn-primary lp-btn-sm" href={APP} data-testid="landing-open">
-              Open the app
+            <a href="#how" onClick={jump('how')}>
+              How it works
+            </a>
+            <a href="#finds" onClick={jump('finds')}>
+              What moves
+            </a>
+            <a href="#team" onClick={jump('team')}>
+              Team
+            </a>
+            <a href="#challenge" onClick={jump('challenge')}>
+              The challenge
+            </a>
+            <a href={REPO} target="_blank" rel="noopener noreferrer" data-testid="landing-source">
+              Source code
+            </a>
+            <a class="lp-btn lp-btn-primary lp-btn-sm" href={START} data-testid="landing-open">
+              Start searching
             </a>
           </nav>
         </div>
@@ -340,34 +414,55 @@ export function Landing() {
                 Spot <em>what moves</em>.
               </h1>
               <p class="lp-lede">
-                Pluto was found by comparing two photographs of the same stars and noticing one dot that had shifted. Since 2025, SPHEREx has
-                photographed the entire sky every six months in 102 colours of infrared light, far more than anyone can check alone. Pick any spot,
-                play its images like a short film, and see what moved: nearby stars and brown dwarfs stepping across the sky, worlds beyond Neptune,
-                maybe a planet nobody has found yet.
+                Pluto was found by comparing two photographs of the same stars and noticing one dot that had shifted. Since 2025, SPHEREx
+                has photographed the entire sky every six months in 102 colours of infrared light, far more than anyone can check alone.
+                Pick any spot, play its images as a Time-lapse, and see what moved: nearby stars and brown dwarfs stepping across the sky,
+                worlds beyond Neptune, maybe a planet nobody has found yet.
               </p>
               <div class="lp-cta">
-                <a class="lp-btn lp-btn-primary" href={STAR} data-testid="landing-cta-star">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                    <path d="M8 5v14l11-7z" />
+                <a class="lp-btn lp-btn-primary lp-btn-lg" href={START} data-testid="landing-start">
+                  <svg
+                    width="18"
+                    height="18"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.2"
+                    stroke-linecap="round"
+                    aria-hidden="true"
+                  >
+                    <circle cx="11" cy="11" r="7" />
+                    <path d="M16.5 16.5 21 21" />
                   </svg>
-                  Watch a star move
-                </a>
-                <a class="lp-btn lp-btn-ghost" href={BROWN_DWARF} data-testid="landing-cta-dwarf">
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                    <circle cx="12" cy="12" r="8" />
-                    <circle cx="12" cy="12" r="3" fill="#ff7a4a" stroke="none" />
-                  </svg>
-                  See a brown dwarf move
+                  Start searching
                 </a>
               </div>
               <ul class="lp-trust">
                 <li>1.6 million real SPHEREx exposures</li>
                 <li>Every mover checked against ESA Gaia</li>
-                <li>Free, no account, <a href={REPO} target="_blank" rel="noopener noreferrer">open source</a></li>
+                <li>
+                  Free, no account,{' '}
+                  <a href={REPO} target="_blank" rel="noopener noreferrer">
+                    open source
+                  </a>
+                </li>
               </ul>
-              <p class="lp-or">
-                Or <a href={APP}>explore the whole sky map</a> and pick your own spot.
+              <p class="lp-or" data-testid="landing-more">
+                Or first{' '}
+                <a href={STAR} data-testid="landing-cta-star">
+                  watch a star move
+                </a>
+                ,{' '}
+                <a href={BROWN_DWARF} data-testid="landing-cta-dwarf">
+                  see a brown dwarf move
+                </a>
+                , or{' '}
+                <a href={APP} data-testid="landing-map">
+                  open the sky map
+                </a>
+                .
               </p>
+              <LatestDiscovery />
             </div>
             <PathHero />
           </div>
@@ -392,23 +487,31 @@ export function Landing() {
                 <p class="lp-eyebrow">How it works</p>
                 <h2 id="lp-howh">Three steps. No astronomy degree needed.</h2>
                 <p class="lp-lede">
-                  The app reads the real SPHEREx files from NASA’s public archive and turns them into pictures you can play, so change over time is
-                  something you see, not something you calculate.
+                  The app reads the real SPHEREx files from NASA’s public archive and turns them into pictures you can play, so change over
+                  time is something you see, not something you calculate.
                 </p>
               </div>
-              <a class="lp-btn lp-btn-ghost" href={APP}>
+              <a class="lp-link" href={APP}>
                 Try it now →
               </a>
             </div>
             <div class="lp-steps">
               <article class="lp-card">
-                <div class="lp-pic" style={{ backgroundImage: `url(${IMG}sky_svs_milky_way.jpg)` }} role="img" aria-label="The Milky Way towards Sagittarius on NASA's Deep Star Maps, the sky behind this page">
+                <div
+                  class="lp-pic"
+                  style={{ backgroundImage: `url(${IMG}sky_svs_milky_way.jpg)` }}
+                  role="img"
+                  aria-label="The Milky Way towards Sagittarius on NASA's Deep Star Maps, the sky behind this page"
+                >
                   <span class="lp-badge">the sky behind this page · NASA SVS star map</span>
                 </div>
                 <div class="lp-body">
                   <span class="lp-n">01</span>
                   <h3>Pick a patch of sky</h3>
-                  <p>Spin the globe, type a star’s name or its coordinates, or start from our picks. Choose how much sky you see, from 2 to 60 arcminutes.</p>
+                  <p>
+                    Spin the globe, type a star’s name or its coordinates, or start from our picks. Choose how much sky you see, from 2 to
+                    60 arcminutes.
+                  </p>
                 </div>
               </article>
               <article class="lp-card">
@@ -419,10 +522,10 @@ export function Landing() {
                 />
                 <div class="lp-body">
                   <span class="lp-n">02</span>
-                  <h3>Play it like a film</h3>
+                  <h3>Play it as a Time-lapse</h3>
                   <p>
-                    SPHEREx returns to every spot about every six months. Play the passes and nearby stars and brown dwarfs step between them; the days inside
-                    a pass show asteroids too.
+                    SPHEREx returns to every spot about every six months. Play the passes and nearby stars and brown dwarfs step between
+                    them; the days inside a pass show asteroids too.
                   </p>
                 </div>
               </article>
@@ -432,8 +535,8 @@ export function Landing() {
                   <span class="lp-n">03</span>
                   <h3>Check what you see</h3>
                   <p>
-                    Sky photographs from 1950 and 1991 line up with SPHEREx, so a slow mover shows its whole path. Every mover is checked against ESA Gaia, and
-                    any dot gives its spectrum in 102 colours.
+                    Sky photographs from 1950 and 1991 line up with SPHEREx, so a slow mover shows its whole path. Every mover is checked
+                    against ESA Gaia, and any dot gives its spectrum in 102 colours.
                   </p>
                 </div>
               </article>
@@ -466,9 +569,9 @@ export function Landing() {
                 <p class="lp-eyebrow">What you can find</p>
                 <h2 id="lp-fh">What moves in the SPHEREx sky.</h2>
                 <p class="lp-lede">
-                  Nearby stars, brown dwarfs, comets, asteroids, even unknown planets give themselves away by shifting between images. Seen in real SPHEREx
-                  data: a nearby star and a brown dwarf stepping between passes, a dwarf planet found by Find Planet X, and, as an extra, an asteroid. The
-                  globe lists 2,000 brown dwarfs and 700 fast-moving stars more.
+                  Nearby stars, brown dwarfs, comets, asteroids, even unknown planets give themselves away by shifting between images. Seen
+                  in real SPHEREx data: a nearby star and a brown dwarf stepping between passes, a dwarf planet found by Find Planet X, and,
+                  as an extra, an asteroid. The globe lists 2,000 brown dwarfs and 700 fast-moving stars more.
                 </p>
               </div>
             </div>
@@ -483,7 +586,10 @@ export function Landing() {
                 <div class="lp-body">
                   <span class="lp-kind">Nearby star</span>
                   <h3>Barnard's Star</h3>
-                  <p>The fastest star in our sky, 6 light-years away. In a 20′ field three SPHEREx passes measure 10.7 ± 0.8″ a year; ESA Gaia gives 10.4. (On a 5′ field the star's saturated core pulls the measure to 11.4 ± 0.5, and the lab says so.)</p>
+                  <p>
+                    The fastest star in our sky, 6 light-years away. In a 20′ field three SPHEREx passes measure 10.7 ± 0.8″ a year; ESA
+                    Gaia gives 10.4. (On a 5′ field the star's saturated core pulls the measure to 11.4 ± 0.5, and the lab says so.)
+                  </p>
                   <span class="lp-go">Watch it move →</span>
                 </div>
               </a>
@@ -498,8 +604,8 @@ export function Landing() {
                   <span class="lp-kind">Brown dwarf</span>
                   <h3>ε Indi B</h3>
                   <p>
-                    Two brown dwarfs, 12 light-years away: too heavy to be planets, too light to shine like stars. The orange-red dot crosses the white stars at
-                    4.7″ a year.
+                    Two brown dwarfs, 12 light-years away: too heavy to be planets, too light to shine like stars. The orange-red dot
+                    crosses the white stars at 4.7″ a year.
                   </p>
                   <span class="lp-go">See it move in the lab →</span>
                 </div>
@@ -517,8 +623,8 @@ export function Landing() {
                   <span class="lp-kind">Beyond Neptune</span>
                   <h3>Eris, the dwarf planet</h3>
                   <p>
-                    Too faint for one picture. Add the exposures along its slow path and it comes into focus; linking three passes puts it 95.6 ± 0.4 au from the Sun. A planet far beyond
-                    Neptune would be found the same way.
+                    Too faint for one picture. Add the exposures along its slow path and it comes into focus; linking three passes puts it
+                    95.6 ± 0.4 au from the Sun. A planet far beyond Neptune would be found the same way.
                   </p>
                   <span class="lp-go">Run Find Planet X →</span>
                 </div>
@@ -548,11 +654,11 @@ export function Landing() {
             <p class="lp-eyebrow">Why your eyes matter</p>
             <h2 id="lp-eh">Someone has to be the first to look.</h2>
             <p class="lp-lede">
-              Volunteers comparing sky images by eye have found asteroids, comets and many brown dwarfs, in projects like Backyard Worlds: Planet 9. SPHEREx is
-              a new sky to search, in 102 colours. Start from the globe, or click any empty spot.
+              Volunteers comparing sky images by eye have found asteroids, comets and many brown dwarfs, in projects like Backyard Worlds:
+              Planet 9. SPHEREx is a new sky to search, in 102 colours. Start from the globe, or click any empty spot.
             </p>
-            <a class="lp-btn lp-btn-primary" href={APP}>
-              Open the sky map
+            <a class="lp-btn lp-btn-primary" href={START}>
+              Start searching
             </a>
           </div>
         </section>
@@ -563,12 +669,13 @@ export function Landing() {
               <p class="lp-eyebrow">The team</p>
               <h2 id="lp-th">Good Karma Lab</h2>
               <p class="lp-lede">
-                We bring 15+ years of software engineering and architecture experience, with expertise in AI, autonomous agents, advanced information retrieval,
-                and delivering solutions from concept to production.
+                We bring 15+ years of software engineering and architecture experience, with expertise in AI, autonomous agents, advanced
+                information retrieval, and delivering solutions from concept to production.
               </p>
               <p class="lp-text">
-                Our strengths combine hands-on development with technical leadership: designing scalable systems, building AI workflows, connecting complex data,
-                and creating reliable, usable applications. Our experience spans aerospace, healthcare, banking, and other demanding industries.
+                Our strengths combine hands-on development with technical leadership: designing scalable systems, building AI workflows,
+                connecting complex data, and creating reliable, usable applications. Our experience spans aerospace, healthcare, banking,
+                and other demanding industries.
               </p>
             </div>
             <div class="lp-members">
@@ -602,8 +709,8 @@ export function Landing() {
               <p class="lp-eyebrow">Made for</p>
               <h2 id="lp-ch">NASA Space Apps Challenge 2026</h2>
               <p class="lp-lede">
-                The world's largest annual hackathon for space and Earth science. We took part at the Barcelona Local Event and built SPHEREx Space for the
-                challenge “Planet X and SPHEREx”.
+                The world's largest annual hackathon for space and Earth science. We took part at the Barcelona Local Event and built
+                SPHEREx Space for the challenge “Planet X and SPHEREx”.
               </p>
               <dl class="lp-facts">
                 <dt>Event</dt>
@@ -626,32 +733,33 @@ export function Landing() {
             <div class="lp-brief">
               <p class="lp-brief-h">The challenge: Planet X and SPHEREx</p>
               <blockquote>
-                Since 2025, NASA’s SPHEREx mission has been mapping the entire sky every six months in 102 bands of near-infrared light, returning images of
-                more than a billion objects. Comets, asteroids, stars, brown dwarfs, and even new planets reveal themselves by shifting position between images,
-                but no one person can sift through all that data alone. Your challenge is to create a public-facing web tool to display images of the sky from
-                SPHEREx mission, making it easy for anyone to quickly see how they change over time.
+                Since 2025, NASA’s SPHEREx mission has been mapping the entire sky every six months in 102 bands of near-infrared light,
+                returning images of more than a billion objects. Comets, asteroids, stars, brown dwarfs, and even new planets reveal
+                themselves by shifting position between images, but no one person can sift through all that data alone. Your challenge is to
+                create a public-facing web tool to display images of the sky from SPHEREx mission, making it easy for anyone to quickly see
+                how they change over time.
               </blockquote>
               <p class="lp-brief-h">Our answer, point by point</p>
               <ul class="lp-checks">
                 <li>
-                  <b>Coordinates in, a little video out:</b> type RA and Dec, or a name, and the images of that patch play like a film. The address keeps them,
-                  so any view can be shared or embedded.
+                  <b>Coordinates in, a little video out:</b> type RA and Dec, or a name, and the images of that patch play as a Time-lapse.
+                  The address keeps them, so any view can be shared or embedded.
                 </li>
                 <li>
-                  <b>Easy to see change:</b> blink, add or subtract passes, choose the field of view; nearby stars and brown dwarfs step between passes, checked
-                  against ESA Gaia.
+                  <b>Easy to see change:</b> blink, add or subtract passes, choose the field of view; nearby stars and brown dwarfs step
+                  between passes, checked against ESA Gaia.
                 </li>
                 <li>
-                  <b>Moving objects found for you:</b> movers between passes, Find Planet X for bodies beyond Neptune, and asteroids
-                  inside a pass.
+                  <b>Moving objects found for you:</b> movers between passes, Find Planet X for bodies beyond Neptune, and asteroids inside
+                  a pass.
                 </li>
                 <li>
-                  <b>102 bands made usable:</b> plain-named colours (water, methane, CO₂…), each detector added up on its own, and a spectrum for any dot,
-                  measured on the fly.
+                  <b>102 bands made usable:</b> plain-named colours (water, methane, CO₂…), each detector added up on its own, and a
+                  spectrum for any dot, measured on the fly.
                 </li>
               </ul>
-              <a class="lp-btn lp-btn-primary" href={APP}>
-                Open the app
+              <a class="lp-link" href={APP}>
+                Open the app →
               </a>
             </div>
           </div>
@@ -665,7 +773,9 @@ export function Landing() {
               <a class="lp-brand" href={APP}>
                 SPHEREx Space
               </a>
-              <p>A free public tool by Good Karma Lab. Independent project, not affiliated with or endorsed by NASA, JPL, Caltech or ESA.</p>
+              <p>
+                A free public tool by Good Karma Lab. Independent project, not affiliated with or endorsed by NASA, JPL, Caltech or ESA.
+              </p>
             </div>
             <div>
               <h4>Data and credits</h4>
@@ -698,9 +808,9 @@ export function Landing() {
             </div>
           </div>
           <p class="lp-ack">
-            This site makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices Explorer (SPHEREx),
-            which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is funded by the National Aeronautics and
-            Space Administration.
+            This site makes use of data products from the Spectro-Photometer for the History of the Universe, Epoch of Reionization and Ices
+            Explorer (SPHEREx), which is a joint project of the Jet Propulsion Laboratory and the California Institute of Technology, and is
+            funded by the National Aeronautics and Space Administration.
           </p>
           <div class="lp-legal">
             <span>Code: Apache-2.0 · Icons: Phosphor (MIT)</span>

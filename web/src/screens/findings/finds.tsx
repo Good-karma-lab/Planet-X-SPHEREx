@@ -3,6 +3,9 @@ import { formatHash } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
 import { parseSxp, halfToFloat } from '../../lib/sxp';
 import { ATLAS_LEAD, LeadPanel } from './leads';
+import { api, useUser } from '../../lib/account';
+import { FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
+import { peopleLine, usePeople } from './people';
 
 export interface Ident {
   catalogue: string;
@@ -40,12 +43,25 @@ interface Reply {
   total: number;
   counts: Record<string, { all: number; unexplained: number; unchecked: number; known: number; leads?: number }>;
   labels: Record<string, string>;
-  identification: { pending: number; unavailable: number; unavailable_decisive?: number; unavailable_extras?: number; catalogues: string[] };
+  identification: {
+    pending: number;
+    unavailable: number;
+    unavailable_decisive?: number;
+    unavailable_extras?: number;
+    catalogues: string[];
+  };
   finds: Find[];
 }
 
-const KIND_SHORT: Record<string, string> = { mover: 'Movers', browndwarf: 'Brown dwarfs', red: 'Red sources', anomaly: 'Spectral anomalies', pair: 'Pairs changing', film: 'Film tracks', peak: 'Planet X peaks' };
-const KIND_ORDER = ['mover', 'browndwarf', 'film', 'pair', 'red', 'anomaly', 'peak'];
+const KIND_SHORT: Record<string, string> = {
+  mover: 'Movers',
+  browndwarf: 'Brown dwarfs',
+  red: 'Red sources',
+  anomaly: 'Spectral anomalies',
+  pair: 'Pairs changing',
+  film: 'Time-lapse tracks',
+  peak: 'Planet X peaks',
+};
 const um = (v: number) => v.toFixed(2).replace(/0$/, '');
 const mjdDate = (m: number | null) => (m == null ? '' : new Date((m - 40587) * 864e5).toISOString().slice(0, 10));
 
@@ -59,7 +75,9 @@ export function useFinds(): Reply | null {
         .then((d: Reply | null) => {
           if (stop || !d) return;
           // a Planet X peak the service calls a residual (not a lead: ok false) reads as a residual, not as 'not yet checked'
-          for (const f of d.finds) if (f.kind === 'peak' && (f.data as { peak?: { ok?: boolean } })?.peak?.ok === false && f.status !== 'known') f.status = 'residual';
+          for (const f of d.finds)
+            if (f.kind === 'peak' && (f.data as { peak?: { ok?: boolean } })?.peak?.ok === false && f.status !== 'known')
+              f.status = 'residual';
           setR(d);
         })
         .catch(() => {});
@@ -73,7 +91,30 @@ export function useFinds(): Reply | null {
   return r;
 }
 
-const GREEK: Record<string, string> = { alf: 'α', bet: 'β', gam: 'γ', del: 'δ', eps: 'ε', zet: 'ζ', eta: 'η', tet: 'θ', iot: 'ι', kap: 'κ', lam: 'λ', mu: 'μ', nu: 'ν', ksi: 'ξ', pi: 'π', rho: 'ρ', sig: 'σ', tau: 'τ', phi: 'φ', chi: 'χ', psi: 'ψ', ome: 'ω' };
+const GREEK: Record<string, string> = {
+  alf: 'α',
+  bet: 'β',
+  gam: 'γ',
+  del: 'δ',
+  eps: 'ε',
+  zet: 'ζ',
+  eta: 'η',
+  tet: 'θ',
+  iot: 'ι',
+  kap: 'κ',
+  lam: 'λ',
+  mu: 'μ',
+  nu: 'ν',
+  ksi: 'ξ',
+  pi: 'π',
+  rho: 'ρ',
+  sig: 'σ',
+  tau: 'τ',
+  phi: 'φ',
+  chi: 'χ',
+  psi: 'ψ',
+  ome: 'ω',
+};
 const CONST: Record<string, string> = { Ind: 'Indi', Dra: 'Draconis', Aur: 'Aurigae', Cen: 'Centauri', Eri: 'Eridani', Oph: 'Ophiuchi' };
 /** A SIMBAD name read by people: no leading mark, Greek letters as letters, the constellation in full where it is common. */
 export const cleanName = (n: string) =>
@@ -94,7 +135,9 @@ export function titleOf(f: Find): string {
   switch (f.kind) {
     case 'mover': {
       const nm = knownName(f);
-      return nm ? `${nm} · ${(f.rate ?? 0).toFixed(2)}″/yr` : `${(f.rate ?? 0).toFixed(2)}″/yr mover${f.status === 'known' ? ' (a known star)' : ''}`;
+      return nm
+        ? `${nm} · ${(f.rate ?? 0).toFixed(2)}″/yr`
+        : `${(f.rate ?? 0).toFixed(2)}″/yr mover${f.status === 'known' ? ' (a known star)' : ''}`;
     }
     case 'browndwarf':
       return `${d.group === 'known' ? 'Known brown dwarf' : d.group === 'slow' ? 'Slow red mover' : 'Brown dwarf candidate'} · ${(f.rate ?? 0).toFixed(1)}″/yr`;
@@ -110,17 +153,14 @@ export function titleOf(f: Find): string {
       return `${(f.rate ?? 0).toFixed(1)}″/h object moving in a pass${d.less_certain ? ' (less certain)' : ''}`;
     default: {
       const jpl = f.idents.find((i) => i.catalogue === 'sbident' && i.state === 'ok' && i.name);
-      return jpl ? `${String(jpl.name).replace(/^\d+ /, '').replace(/ \(.*\)$/, '')} · ${(d.peak?.d ?? 0).toFixed(1)} au (a known body)` : `Planet X peak · ${(d.peak?.d ?? 0).toFixed(0)} au`;
+      return jpl
+        ? `${String(jpl.name)
+            .replace(/^\d+ /, '')
+            .replace(/ \(.*\)$/, '')} · ${(d.peak?.d ?? 0).toFixed(1)} au (a known body)`
+        : `Planet X peak · ${(d.peak?.d ?? 0).toFixed(0)} au`;
     }
   }
 }
-
-/** The best name any catalogue gave, for the second line of a row. */
-const nameOf = (f: Find) => {
-  if (f.identity) return f.identity.catalogue === 'SIMBAD' ? cleanName(f.identity.name) : f.identity.name;
-  const i = f.idents.find((x) => x.state === 'ok' && x.name && x.catalogue !== 'gaia') ?? f.idents.find((x) => x.state === 'ok' && x.name);
-  return i?.name ? (i.catalogue === 'simbad' ? cleanName(i.name) : i.name) : '';
-};
 
 // ---- the 2′ picture as a blink of the passes ----
 const frames = new Map<string, Promise<{ n: number; g: Uint8ClampedArray } | null>>();
@@ -175,7 +215,9 @@ function Blink({ f }: { f: Find }) {
       return;
     }
     void (async () => {
-      const m = await fetch(`/api/v1/fields?ra=${fp.ra}&dec=${fp.dec}&fov=${fp.fov}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      const m = await fetch(`/api/v1/fields?ra=${fp.ra}&dec=${fp.dec}&fov=${fp.fov}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
       const g = m?.meta?.grid;
       const passes: { index: number; mjd_mid: number }[] = m?.meta?.passes ?? [];
       if (!g || !passes.length || stop) return setSt({ ok: false, labels: [], msg: 'picture not available' });
@@ -234,17 +276,31 @@ function Blink({ f }: { f: Find }) {
   return (
     <div class="fblink">
       <div class="fthumb" style="width:240px;height:240px;position:relative">
-        <canvas ref={ref} style={{ display: st.ok ? 'block' : 'none', imageRendering: 'auto' }} aria-label="The 2′ around the find in each pass" />
+        <canvas
+          ref={ref}
+          style={{ display: st.ok ? 'block' : 'none', imageRendering: 'auto' }}
+          aria-label="The 2′ around the find in each pass"
+        />
         {!st.ok && <span class="mono-s">{st.msg}</span>}
         {st.ok && <span class="fring" aria-hidden="true" />}
       </div>
-      <div class="mono-s">{st.ok ? `2′ · pass ${(i % st.labels.length) + 1} of ${st.labels.length} · ${st.labels[i % st.labels.length]}` : ''}</div>
+      <div class="mono-s">
+        {st.ok ? `2′ · pass ${(i % st.labels.length) + 1} of ${st.labels.length} · ${st.labels[i % st.labels.length]}` : ''}
+      </div>
     </div>
   );
 }
 
 // ---- small charts from the stored rows ----
-function Chart({ pts, title, xlab }: { pts: { x: number; y: number; e?: number | null; m?: number | null }[]; title: string; xlab: string }) {
+function Chart({
+  pts,
+  title,
+  xlab,
+}: {
+  pts: { x: number; y: number; e?: number | null; m?: number | null }[];
+  title: string;
+  xlab: string;
+}) {
   if (!pts.length) return null;
   const W = 420;
   const H = 150;
@@ -264,10 +320,18 @@ function Chart({ pts, title, xlab }: { pts: { x: number; y: number; e?: number |
       <figcaption class="mono-s">{title}</figcaption>
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={title}>
         <line x1={px} y1={Y(y0)} x2={W - 8} y2={Y(y0)} stroke="var(--edge)" />
-        <text x={px} y={H - 1} class="ft">{x0.toFixed(2)}</text>
-        <text x={W - 8} y={H - 1} class="ft" text-anchor="end">{x1.toFixed(2)} {xlab}</text>
-        <text x={px - 4} y={py + 4} class="ft" text-anchor="end">{y1.toPrecision(2)}</text>
-        {mod.length > 1 && <polyline fill="none" stroke="var(--amber)" stroke-width="1.4" points={mod.map((p) => `${X(p.x)},${Y(p.m!)}`).join(' ')} />}
+        <text x={px} y={H - 1} class="ft">
+          {x0.toFixed(2)}
+        </text>
+        <text x={W - 8} y={H - 1} class="ft" text-anchor="end">
+          {x1.toFixed(2)} {xlab}
+        </text>
+        <text x={px - 4} y={py + 4} class="ft" text-anchor="end">
+          {y1.toPrecision(2)}
+        </text>
+        {mod.length > 1 && (
+          <polyline fill="none" stroke="var(--amber)" stroke-width="1.4" points={mod.map((p) => `${X(p.x)},${Y(p.m!)}`).join(' ')} />
+        )}
         {pts.map((p, i) => (
           <g key={i}>
             {p.e ? <line x1={X(p.x)} x2={X(p.x)} y1={Y(p.y - p.e)} y2={Y(p.y + p.e)} stroke="var(--accent)" opacity="0.6" /> : null}
@@ -291,20 +355,58 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
   const lab = formatHash({
     screen: 'lab',
     params: fp
-      ? { ra: fp.ra.toFixed(5), dec: fp.dec.toFixed(5), fov: String(fp.fov), find: f.id, find_ra: f.ra.toFixed(5), find_dec: f.dec.toFixed(5) }
+      ? {
+          ra: fp.ra.toFixed(5),
+          dec: fp.dec.toFixed(5),
+          fov: String(fp.fov),
+          find: f.id,
+          find_ra: f.ra.toFixed(5),
+          find_dec: f.dec.toFixed(5),
+        }
       : { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id },
   });
-  const json = () => encodeURIComponent(JSON.stringify({ ...f, note: 'a lead, not a discovery', exported: new Date().toISOString() }, null, 2));
-  const spec = f.spectrum.filter((s) => s.lam != null && s.flux != null).map((s) => ({ x: ((s.lam as number) + (s.lam_hi ?? (s.lam as number))) / 2, y: s.flux as number, e: s.err, m: s.model }));
+  const json = () =>
+    encodeURIComponent(JSON.stringify({ ...f, note: 'a lead, not a discovery', exported: new Date().toISOString() }, null, 2));
+  const spec = f.spectrum
+    .filter((s) => s.lam != null && s.flux != null)
+    .map((s) => ({ x: ((s.lam as number) + (s.lam_hi ?? (s.lam as number))) / 2, y: s.flux as number, e: s.err, m: s.model }));
   const curves = [...new Set(f.lightcurve.map((p) => p.label))];
   const nums: [string, string][] = [
-    ...(f.rate != null ? ([['Rate', `${f.rate.toFixed(2)}${f.data.rate_err ? ` ± ${Number(f.data.rate_err).toFixed(2)}` : ''} ${f.kind === 'film' ? '″/h' : '″/yr'}${f.data.best_detection ? ` · best of ${f.data.detections.length}` : ''}`]] as [string, string][]) : []),
+    ...(f.rate != null
+      ? ([
+          [
+            'Rate',
+            `${f.rate.toFixed(2)}${f.data.rate_err ? ` ± ${Number(f.data.rate_err).toFixed(2)}` : ''} ${f.kind === 'film' ? '″/h' : '″/yr'}${f.data.best_detection ? ` · best of ${f.data.detections.length}` : ''}`,
+          ],
+        ] as [string, string][])
+      : []),
     ...(f.snr != null ? ([['S/N', f.snr.toFixed(1)]] as [string, string][]) : []),
     ...(f.score != null ? ([['Score', f.score.toFixed(2)]] as [string, string][]) : []),
-    ...(f.chance != null ? ([['Chance', f.kind === 'film' ? `controls: ${f.chance.toFixed(2)} per search at ${f.data.track?.n} visits` : `${f.chance.toFixed(2)} per field`]] as [string, string][]) : []),
+    ...(f.chance != null
+      ? ([
+          [
+            'Chance',
+            f.kind === 'film'
+              ? `controls: ${f.chance.toFixed(2)} per search at ${f.data.track?.n} visits`
+              : `${f.chance.toFixed(2)} per field`,
+          ],
+        ] as [string, string][])
+      : []),
     [f.kind === 'peak' ? "Place at the search's reference date" : 'Place', `${formatRA(f.ra)} ${formatDec(f.dec)}`],
     ['Field', `${f.place} · ${f.fov}′`],
-    ...(((f.data.detections?.length ?? 0) > 1) ? ([['Detections', f.data.detections.map((d: any) => `${d.fov}′${d.rate != null ? ` ${Number(d.rate).toFixed(2)}${d.rate_err ? ` ± ${Number(d.rate_err).toFixed(2)}` : ''}` : ''}${d.sigma != null ? ` (${Number(d.sigma).toFixed(1)}σ)` : ''}`).join(' · ')]] as [string, string][]) : []),
+    ...((f.data.detections?.length ?? 0) > 1
+      ? ([
+          [
+            'Detections',
+            f.data.detections
+              .map(
+                (d: any) =>
+                  `${d.fov}′${d.rate != null ? ` ${Number(d.rate).toFixed(2)}${d.rate_err ? ` ± ${Number(d.rate_err).toFixed(2)}` : ''}` : ''}${d.sigma != null ? ` (${Number(d.sigma).toFixed(1)}σ)` : ''}`,
+              )
+              .join(' · '),
+          ],
+        ] as [string, string][])
+      : []),
   ];
   return (
     <aside class={`leadpanel glass fdetail${inline ? ' inline' : ''}`} role={inline ? 'region' : 'dialog'} aria-label="Find report">
@@ -315,7 +417,10 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
       )}
       <h3 class="lp-title">{titleOf(f)}</h3>
       <div class="mono-s">
-        {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} · <b class={f.status === 'known' ? 'st-known' : f.status === 'unchecked' || f.status === 'residual' ? 'st-wait' : 'st-un'}>{f.status === 'unchecked' ? 'not yet checked' : f.status}</b>
+        {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} ·{' '}
+        <b class={f.status === 'known' ? 'st-known' : f.status === 'unchecked' || f.status === 'residual' ? 'st-wait' : 'st-un'}>
+          {f.status === 'unchecked' ? 'not yet checked' : f.status}
+        </b>
       </div>
       <p class="fverdict">{f.verdict}</p>
       <div class="fmedia">
@@ -331,7 +436,14 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
       </div>
       {spec.length > 0 && <Chart pts={spec} title="Spectrum (binned flux, model in amber)" xlab="µm" />}
       {curves.map((c) => (
-        <Chart key={c} pts={f.lightcurve.filter((p) => p.label === c && p.flux != null).map((p, i) => ({ x: p.mjd ?? i, y: p.flux as number, e: p.err }))} title={`Light curve · ${c}`} xlab={f.lightcurve.some((p) => p.mjd != null) ? 'MJD' : 'pass'} />
+        <Chart
+          key={c}
+          pts={f.lightcurve
+            .filter((p) => p.label === c && p.flux != null)
+            .map((p, i) => ({ x: p.mjd ?? i, y: p.flux as number, e: p.err }))}
+          title={`Light curve · ${c}`}
+          xlab={f.lightcurve.some((p) => p.mjd != null) ? 'MJD' : 'pass'}
+        />
       ))}
       {f.positions.length > 0 && (
         <table class="ftab">
@@ -355,7 +467,15 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
             <tr key={i.catalogue} class={`c-${i.state}`}>
               <td>{i.label}</td>
               <td title={i.name ?? ''}>
-                {i.state === 'ok' ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}${i.catalogue === 'sbident' && i.detail.visits_matched ? ` · at ${i.detail.visits_matched} of ${i.detail.visits_checked} visits` : ''}${i.note ? ` · ${i.note}` : ''}` : i.state === 'none' ? (i.catalogue === 'halo' ? 'no bright star within 60″' : 'nothing within 6″') : i.state === 'unavailable' ? 'did not answer' : 'not asked yet'}
+                {i.state === 'ok'
+                  ? `${i.name ?? '—'}${i.type ? ` · ${i.type}` : ''}${i.catalogue === 'sbident' && i.detail.visits_matched ? ` · at ${i.detail.visits_matched} of ${i.detail.visits_checked} visits` : ''}${i.note ? ` · ${i.note}` : ''}`
+                  : i.state === 'none'
+                    ? i.catalogue === 'halo'
+                      ? 'no bright star within 60″'
+                      : 'nothing within 6″'
+                    : i.state === 'unavailable'
+                      ? 'did not answer'
+                      : 'not asked yet'}
               </td>
               <td>{i.state === 'ok' && i.sep != null ? `${i.sep.toFixed(1)}″` : ''}</td>
             </tr>
@@ -366,107 +486,295 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
         <a class="btn sm primary" href={lab}>
           Open in the lab
         </a>
-        <a class="btn sm" download={`find-${f.id.replace(/[^a-z0-9]+/gi, '_')}.json`} href={`data:application/json;charset=utf-8,${json()}`}>
+        <a
+          class="btn sm"
+          download={`find-${f.id.replace(/[^a-z0-9]+/gi, '_')}.json`}
+          href={`data:application/json;charset=utf-8,${json()}`}
+        >
           Download JSON
         </a>
       </div>
-      <div class="mono-s fver">{Object.entries(f.versions).map(([k, v]) => `${k} ${v}`).join(' · ')}</div>
+      <div class="mono-s fver">
+        {Object.entries(f.versions)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(' · ')}
+      </div>
     </aside>
   );
 }
 
-export function FindingsView({ wide, leadId, setLeadId }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void }) {
-  const r = useFinds();
-  const [kind, setKind] = useState<string>('all');
-  const [stat, setStat] = useState<'all' | 'unexplained' | 'unchecked' | 'known'>('all');
-  if (!r) return <div class="mono-s">reading the findings…</div>;
-  const rows = r.finds.filter((f) => (kind === 'all' || f.kind === kind) && (stat === 'all' || f.status === stat));
-  const sel = r.finds.find((f) => f.id === leadId);
+interface CardReply {
+  count: number;
+  total: number;
+  counts: Record<string, { all: number; leads?: number }>;
+  stages: Record<string, number>;
+  waiting: number;
+  waiting_promising: number;
+  promising: number;
+  promising_kinds: string[];
+  noted: number;
+  visibility: {
+    by_kind: Record<string, { visible: number; not_visible: number; not_measured: number }>;
+    in_view: { visible: number; not_visible: number; not_measured: number };
+  };
+  identification: { pending: number; unavailable_decisive?: number };
+  finds: CardFind[];
+}
+type KindSel = 'submitted' | 'promising' | 'mover' | 'browndwarf' | 'peak' | 'film' | 'pair' | 'red' | 'anomaly';
+type StageSel = 'any' | 'mine' | 'noted' | 'waiting' | 'new' | 'in_review' | 'submitted' | 'candidate' | 'confirmed' | 'known';
+const PAGE = 48;
+const PROMISING = ['mover', 'browndwarf', 'peak', 'film', 'pair'];
+
+/** The cards of one filter, a page at a time: the next page is asked for when the end of the list comes on screen. */
+function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolean) {
+  const [state, setState] = useState<{
+    key: string;
+    head: CardReply | null;
+    finds: CardFind[];
+    done: boolean;
+    loading: boolean;
+    failed: boolean;
+  }>({ key: '', head: null, finds: [], done: false, loading: false, failed: false });
+  const key = `${kind}|${stage}|${stage === 'mine' ? mine.length : 0}|${unseen}`;
+  const busy = useRef(false);
+  const load = (reset: boolean) => {
+    if (busy.current && !reset) return;
+    busy.current = true;
+    if (kind === 'submitted') {
+      // what people submitted (the accounts of the service): a short list, all at once
+      setState({ key, head: state.head, finds: [], done: false, loading: true, failed: false });
+      fetch('/api/findings/submitted')
+        .then((r) => (r.ok ? (r.json() as Promise<{ findings: Submitted[] }>) : Promise.reject(new Error(String(r.status)))))
+        .then((d) => setState((s) => (s.key !== key ? s : { ...s, finds: d.findings.map(submittedCard), done: true, loading: false })))
+        .catch(() => setState((s) => (s.key === key ? { ...s, loading: false, failed: true, done: true } : s)))
+        .finally(() => {
+          busy.current = false;
+        });
+      return;
+    }
+    const offset = reset ? 0 : state.finds.length;
+    const q = new URLSearchParams({ lite: '1', sort: 'promise', status: 'all', limit: String(PAGE), offset: String(offset) });
+    if (kind === 'promising') q.set('kinds', PROMISING.join(','));
+    else q.set('kind', kind);
+    // the list shows the finds whose object the eye can see in the ring; the rest are behind "Not visible in the picture"
+    if (stage !== 'mine') q.set('visibility', unseen ? 'unseen' : 'seen');
+    if (stage === 'mine') q.set('ids', mine.join(',') || '-');
+    else if (stage === 'noted') q.set('noted', '1');
+    else if (stage === 'waiting') q.set('waiting', '1');
+    else if (stage !== 'any') q.set('stage', stage);
+    setState((s) => (reset ? { key, head: s.head, finds: [], done: false, loading: true, failed: false } : { ...s, loading: true }));
+    fetch(`/api/v1/findings?${q}`)
+      .then((r) => (r.ok ? (r.json() as Promise<CardReply>) : Promise.reject(new Error(String(r.status)))))
+      .then((d) => {
+        setState((s) => {
+          if (s.key !== key) return s; // the filter changed while this page was on its way
+          const finds = reset ? d.finds : [...s.finds, ...d.finds.filter((f) => !s.finds.some((x) => x.id === f.id))];
+          return { key, head: d, finds, done: finds.length >= d.count || d.finds.length === 0, loading: false, failed: false };
+        });
+      })
+      .catch(() => setState((s) => (s.key === key ? { ...s, loading: false, failed: true, done: true } : s)))
+      .finally(() => {
+        busy.current = false;
+      });
+  };
+  useEffect(() => {
+    busy.current = false;
+    load(true);
+  }, [key]);
+  return { ...state, more: () => !state.done && !state.loading && state.key === key && load(false) };
+}
+
+/** The full report of one find (catalogue answers, spectrum, positions): asked for when its card is opened. */
+function useFind(id: string | null): Find | null {
+  const [f, setF] = useState<Find | null>(null);
+  useEffect(() => {
+    setF(null);
+    if (!id || id === ATLAS_LEAD.id) return;
+    let stop = false;
+    void fetch(`/api/v1/findings/${encodeURIComponent(id)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: Find | null) => {
+        if (stop || !d) return;
+        if (d.kind === 'peak' && (d.data as { peak?: { ok?: boolean } })?.peak?.ok === false && d.status !== 'known') d.status = 'residual';
+        setF(d);
+      })
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, [id]);
+  return f;
+}
+
+export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void }) {
+  const [kind, setKind] = useState<KindSel>('promising');
+  const [stage, setStage] = useState<StageSel>('any');
+  // the findings the signed-in user closed a task on (the accounts of the service): "Viewed by me"
+  const { user } = useUser();
+  const [mine, setMine] = useState<string[]>([]);
+  useEffect(() => {
+    if (!user) return setMine([]);
+    let stop = false;
+    void api<{ findings: { finding_id: string; role: string }[] }>('/api/me/findings')
+      .then((d) => !stop && setMine([...new Set(d.findings.filter((x) => x.role === 'checked').map((x) => x.finding_id))]))
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, [user?.id]);
+  const [unseen, setUnseen] = useState(false);
+  const cards = useCards(kind, stage, mine, unseen);
+  const peopleSaid = usePeople(cards.finds.map((f) => f.id));
+  const sel = useFind(leadId);
+  // findings submitted by people: the button is there only when the service has accounts and somebody has submitted one
+  const [people, setPeople] = useState(0);
+  useEffect(() => {
+    void fetch('/api/findings/submitted')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { findings?: unknown[] } | null) => setPeople(d?.findings?.length ?? 0))
+      .catch(() => {});
+  }, []);
+  const end = useRef<HTMLDivElement>(null);
+  const more = useRef(cards.more);
+  more.current = cards.more;
+  useEffect(() => {
+    const el = end.current;
+    if (!el || typeof IntersectionObserver === 'undefined') return;
+    const io = new IntersectionObserver((es) => es.some((e) => e.isIntersecting) && more.current(), { rootMargin: '300px 0px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [cards.finds.length, cards.done]);
+  const h = cards.head;
   const atlas = leadId === ATLAS_LEAD.id;
-  const shown = atlas ? undefined : (sel ?? (wide ? rows[0] : undefined));
-  // the Planet X leads counted from the peaks themselves, after the service's JPL, residual and halo verdicts (a peak still ok and still open:
-  // not a known body, a residual or a bright star's halo); the count the service sends is made before some of those verdicts
-  const peakLeads = r.finds.filter((f) => f.kind === 'peak' && (f.data as { peak?: { ok?: boolean } })?.peak?.ok !== false && (f.status === 'unchecked' || f.status === 'unexplained')).length;
-  const cnt = (k: string) => (k === 'all' ? r.total : k === 'peak' ? peakLeads : (r.counts[k]?.all ?? 0));
-  let n = 0;
-  const list = (
-    <section class="card glass leads">
-      <div class="fkinds" role="group" aria-label="Kind">
-        {['all', ...KIND_ORDER].filter((k) => cnt(k) > 0 || k === 'all').map((k) => (
-          <button key={k} class={kind === k ? 'on' : ''} onClick={() => setKind(k)}>
-            {k === 'all' ? 'All' : KIND_SHORT[k]} <span>{cnt(k)}</span>
-          </button>
-        ))}
-      </div>
-      <div class="fkinds fstat" role="group" aria-label="Status">
-        {(['all', 'unexplained', 'unchecked', 'known'] as const).map((s) => (
-          <button key={s} class={stat === s ? 'on' : ''} onClick={() => setStat(s)}>
-            {s === 'all' ? 'Any' : s === 'unexplained' ? 'Unexplained' : s === 'unchecked' ? 'Not yet checked' : 'Known'}
-          </button>
-        ))}
-      </div>
-      <p class="hint leadcount">
-        {rows.length} of {r.total} finds in the searched fields · a find is a lead, not a discovery
-        {r.identification.pending > 0 && ` · identifying: ${r.identification.pending} catalogue answers to come`}
-        {(r.identification.unavailable_decisive ?? 0) > 0 && ` · ${r.identification.unavailable_decisive} deciding answers being retried`}
-        {(r.identification.unavailable_extras ?? r.identification.unavailable) > 0 && ` · extra catalogues that did not answer: ${r.identification.unavailable_extras ?? r.identification.unavailable} (they add detail, they do not decide)`}
-      </p>
-      {(kind === 'all' ? KIND_ORDER : [kind]).map((k) => {
-        const g = rows.filter((f) => f.kind === k);
-        if (!g.length) return null;
-        return (
-          <div key={k}>
-            <div class="leadgroup">
-              {KIND_SHORT[k]} <span>{g.length}</span>
-            </div>
-            <ol class="leadlist">
-              {g.map((f) => (
-                <li key={f.id}>
-                  <button class="leadrow" aria-current={shown?.id === f.id ? 'true' : undefined} title={`${titleOf(f)} · ${f.place}`} onClick={() => setLeadId(f.id)}>
-                    <span class="rank">{++n}</span>
-                    <span class="lt">
-                      <b>{titleOf(f)}</b>
-                      <span class="mono-s">
-                        {f.place}
-                        {nameOf(f) ? ` · ${nameOf(f)}` : ''}
-                      </span>
-                    </span>
-                    <span class={`badge ${f.status === 'known' ? 'green' : f.status === 'unchecked' || f.status === 'residual' ? '' : 'orange'}`}>{f.status === 'known' ? 'Known' : f.status === 'unchecked' ? 'Not yet checked' : f.status === 'residual' ? 'Residual' : 'Unexplained'}</span>
-                  </button>
-                </li>
-              ))}
-            </ol>
-          </div>
-        );
-      })}
-      <div class="leadgroup">
-        Comet <span>1</span>
-      </div>
-      <ol class="leadlist">
-        <li>
-          <button class="leadrow" aria-current={atlas ? 'true' : undefined} onClick={() => setLeadId(ATLAS_LEAD.id)}>
-            <span class="rank">{++n}</span>
-            <span class="lt">
-              <b>{ATLAS_LEAD.title}</b>
-              <span class="mono-s">{ATLAS_LEAD.sub}</span>
-            </span>
-            <span class="badge green">Comet</span>
-          </button>
-        </li>
-      </ol>
-      <p class="hint leadnote">A lead is not a discovery. Known objects are listed so a recovery is not mistaken for a find.</p>
-    </section>
-  );
-  const panel = atlas ? <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={wide} /> : shown ? <Detail f={shown} onClose={() => setLeadId(null)} inline={wide} /> : null;
-  return wide ? (
-    <div class="fsplit wide2">
-      {list}
-      {panel ?? <div class="leadpanel glass inline mono-s">no finds match these filters</div>}
-    </div>
-  ) : (
+  const cnt = (k: KindSel) => (!h || k === 'submitted' ? null : k === 'promising' ? h.promising : (h.counts[k]?.all ?? 0));
+  const kinds: [KindSel, string][] = [
+    ['promising', 'Promising'],
+    ['mover', KIND_SHORT.mover!],
+    ['browndwarf', KIND_SHORT.browndwarf!],
+    ['peak', KIND_SHORT.peak!],
+    ['film', KIND_SHORT.film!],
+    ['pair', KIND_SHORT.pair!],
+  ];
+  const more2: [KindSel, string][] = [
+    ['red', KIND_SHORT.red!],
+    ['anomaly', KIND_SHORT.anomaly!],
+  ];
+  const stages: StageSel[] = ['any', 'mine', 'waiting', 'noted', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
+  // the numbers on the status buttons are of the whole list, so they are shown only where they are what the button gives
+  const stageTotal = (s: StageSel) =>
+    !h || s === 'any' || s === 'mine' || s === 'noted' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0);
+  const stageCount = (s: StageSel) =>
+    s === 'mine' ? mine.length : h && s === 'noted' ? h.noted : h && s === 'waiting' && kind === 'promising' ? h.waiting_promising : null;
+  const chip = (k: KindSel, label: string) =>
+    (cnt(k) ?? 1) > 0 || k === 'promising' || k === kind ? (
+      <button key={k} class={kind === k ? 'on' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}>
+        {label} <span>{cnt(k) ?? ''}</span>
+      </button>
+    ) : null;
+  return (
     <>
-      {list}
-      {panel}
+      <section class="card glass fbar">
+        <div class="fkinds" role="group" aria-label="Kind">
+          {people > 0 && (
+            <button class={kind === 'submitted' ? 'on' : ''} aria-pressed={kind === 'submitted'} onClick={() => setKind('submitted')}>
+              Found by people <span>{people}</span>
+            </button>
+          )}
+          {kinds.map(([k, l]) => chip(k, l))}
+          <span class="fsep" aria-hidden="true" />
+          {more2.map(([k, l]) => chip(k, l))}
+        </div>
+        <div class="fkinds fstat" role="group" aria-label="Status">
+          {stages
+            .filter(
+              (s) =>
+                (s === 'mine' ? !!user : s === 'noted' ? (h?.noted ?? 0) > 0 || stage === 'noted' : false) ||
+                s === 'any' ||
+                s === 'waiting' ||
+                s === 'new' ||
+                s === 'known' ||
+                s === stage ||
+                stageTotal(s) > 0,
+            )
+            .map((s) => (
+              <button key={s} class={stage === s ? 'on' : ''} aria-pressed={stage === s} onClick={() => setStage(s)}>
+                {s === 'any'
+                  ? 'Any status'
+                  : s === 'mine'
+                    ? 'Viewed by me'
+                    : s === 'noted'
+                      ? 'Looks like an artefact (machine note)'
+                      : s === 'waiting'
+                        ? 'Waiting for a look'
+                        : STAGE_LABEL[s]}{' '}
+                {stageCount(s) != null && <span>{stageCount(s)}</span>}
+              </button>
+            ))}
+        </div>
+        {h && kind !== 'submitted' && stage !== 'mine' && (
+          <div class="fkinds fstat" role="group" aria-label="Visible in the picture">
+            <button class={!unseen ? 'on' : ''} aria-pressed={!unseen} onClick={() => setUnseen(false)}>
+              Visible in the picture <span>{h.visibility.in_view.visible}</span>
+            </button>
+            <button class={unseen ? 'on' : ''} aria-pressed={unseen} onClick={() => setUnseen(true)}>
+              Not visible in the picture <span>{h.visibility.in_view.not_visible + h.visibility.in_view.not_measured}</span>
+            </button>
+          </div>
+        )}
+        <p class="hint leadcount">
+          <a href="#/leaders">Leaderboard</a>
+          {kind === 'submitted'
+            ? `${cards.finds.length} findings submitted by people`
+            : h
+              ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery`
+              : 'reading the findings…'}
+          {h && h.identification.pending > 0 && ` · identifying: ${h.identification.pending} catalogue answers to come`}
+        </p>
+      </section>
+      <div class="fgrid-wrap">
+        <ol class="fgrid" aria-busy={cards.loading}>
+          {cards.finds.map((f) => (
+            <FindCard
+              key={f.id}
+              f={f}
+              current={leadId === f.id}
+              onOpen={setLeadId}
+              mine={mine.includes(f.id)}
+              people={peopleLine(peopleSaid[f.id])}
+            />
+          ))}
+          {kind === 'promising' && (stage === 'any' || stage === 'known') && cards.done && (
+            <li class={`fcard glass${atlas ? ' on' : ''}`}>
+              <button class="fcard-pic" onClick={() => setLeadId(ATLAS_LEAD.id)} aria-label={`Open the report: ${ATLAS_LEAD.title}`}>
+                <div class="fclip">
+                  <img
+                    src="/neossat/3i-2025-12-14.png"
+                    alt="Comet 3I/ATLAS in a NEOSSat frame, ringed at the place JPL predicts"
+                    loading="lazy"
+                  />
+                </div>
+                <span class="badge green fcard-stage">Known</span>
+              </button>
+              <div class="fcard-body">
+                <b class="fcard-title">{ATLAS_LEAD.title}</b>
+                <span class="mono-s fcard-sub">Comet · {ATLAS_LEAD.sub}</span>
+                <button class="btn sm fcard-go" onClick={() => setLeadId(ATLAS_LEAD.id)}>
+                  Open the report
+                </button>
+              </div>
+            </li>
+          )}
+        </ol>
+        <div ref={end} class="fend" />
+      </div>
+      {cards.failed && <p class="mono-s">the findings did not load; the page asks again when the filter is changed</p>}
+      {!cards.loading && cards.done && cards.finds.length === 0 && !cards.failed && <p class="mono-s">no finds match these filters</p>}
+      {cards.loading && <p class="mono-s">reading the findings…</p>}
+      {atlas ? (
+        <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={false} />
+      ) : leadId && sel ? (
+        <Detail f={sel} onClose={() => setLeadId(null)} inline={false} />
+      ) : null}
     </>
   );
 }

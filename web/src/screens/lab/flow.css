@@ -1,0 +1,145 @@
+/* The product-flow pieces of the lab: the mark editor over the picture, the Tools section, the task panel. */
+.ft-mark { display: flex; align-items: center; gap: 7px; padding: 4px 7px; border-radius: 7px; border: 1px solid transparent; background: rgba(255, 255, 255, 0.04); color: var(--ink); font-size: 11.5px; text-align: left; }
+.ft-mark:hover, .ft-mark.on { border-color: rgba(95, 227, 214, 0.5); }
+.ft-mark b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ft-mark span { color: var(--muted); font-size: 10.5px; }
+/* the status line of the picture sits above the band chips, so neither covers the other (the chips are centred and reach the corner) */
+@media (min-width: 561px) {
+  .lab .vsq:not(.compact) .fstatus { bottom: 46px; max-width: calc(100% - 24px); }
+}
+.checks { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+.checks .chk { display: flex; align-items: center; gap: 7px; height: 20px; font-size: 11.5px; color: var(--ink); }
+.checks .chk i { width: 7px; height: 7px; border-radius: 50%; background: rgba(255, 255, 255, 0.22); flex: none; }
+.checks .chk span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.checks .chk em { font: 500 10.5px var(--mono); color: var(--muted); font-style: normal; }
+.checks .chk.pass i { background: #5fe3a1; }
+.checks .chk.warn i { background: var(--amber); }
+.checks .chk.fail i { background: #ff6b6b; }
+.checks .chk.fail em { color: #ff9c9c; }
+.checks .chk.warn em { color: var(--amber); }
+.taskpanel { flex: none; display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-bottom: 1px solid var(--edge-soft); }
+.taskpanel .tp-head { display: flex; align-items: baseline; gap: 8px; }
+.taskpanel .tp-head b { font: 700 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent-l); }
+.taskpanel .tp-head span { font-size: 11.5px; color: var(--muted); }
+.taskpanel .tp-ask { font: 600 13.5px var(--font); color: var(--ink); }
+.taskpanel .tp-line { height: 16px; font: 500 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.taskpanel .tp-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.taskpanel .tp-btns .btn { flex: 1; white-space: nowrap; }
+/* the picture's Mark button exists for touch windows only: `.vsq .float` gives every float `display: flex`, which beat `.touch-only`, so
+   on a desktop it sat at the top left over the picture's title. button + class outweighs `.vsq .float` and stays below the phone layer's
+   `:root .vsq .fmark` (which shows it at the bottom right). */
+.vsq button.touch-only { display: none; }
+.taskpanel .tp-others { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.taskpanel .tp-others input { accent-color: var(--accent-l); }
+.taskpanel .tp-btns .btn.quiet { opacity: 0.8; }
+.taskpanel .tp-btns.n5 .btn, .taskpanel .tp-btns.n4 .btn { flex: 1 1 40%; }
+.tv { display: flex; flex-direction: column; gap: 4px; }
+.tv .tv-plot { width: 100%; display: block; border-radius: 8px; background: rgba(0, 0, 0, 0.32); }
+.tv .tv-legend { display: flex; flex-direction: column; gap: 1px; font-size: 10.5px; color: var(--ink); min-height: 44px; }
+.tv .tv-legend span { display: flex; align-items: center; gap: 6px; }
+.tv .tv-legend span.off { color: var(--muted); }
+.tv .tv-legend i { width: 14px; height: 2px; border-radius: 1px; flex: none; }
+.tv .tv-line { min-height: 15px; font: 500 10.5px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv .tv-dets { display: flex; gap: 4px; }
+.tv .tv-dets span { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; height: 22px; border-radius: 6px; border: 1px solid var(--edge-soft); font: 500 10.5px var(--mono); color: var(--muted); }
+.tv .tv-dets span.on { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
+.tv .tv-dets b { font-weight: 700; }
+.tv .tv-row { display: flex; gap: 8px; font-size: 11.5px; min-height: 17px; }
+.tv .tv-row b { width: 46px; flex: none; font: 600 10.5px var(--font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding-top: 1px; }
+.tv .tv-row span { font: 500 11px var(--mono); color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv .tv-cat { min-height: 20px; max-height: 120px; overflow-y: auto; }
+/* a switch whose data is still arriving: a small turning ring after its name (Known objects while a catalogue is asked) */
+.sw.busy > span::after { content: ''; display: inline-block; width: 9px; height: 9px; margin-left: 7px; vertical-align: -1px; border-radius: 50%; border: 1.5px solid rgba(95, 227, 214, 0.25); border-top-color: var(--accent-l); animation: swbusy 0.9s linear infinite; }
+@keyframes swbusy { to { transform: rotate(360deg); } }
+
+/* the picture's tools: a small vertical strip on its right edge, under the field size (the look of the globe's zoom buttons) */
+.vsq .float.toolstrip { right: 10px; top: 52px; flex-direction: column; gap: 4px; padding: 5px 4px; border-radius: 14px; background: rgba(8, 18, 24, 0.62); border: 1px solid rgba(255, 255, 255, 0.1); cursor: default; }
+.toolstrip button { width: 28px; height: 28px; padding: 5px; border-radius: 8px; border: 1px solid var(--edge); background: rgba(0, 0, 0, 0.3); color: var(--ink); cursor: pointer; display: grid; place-items: center; }
+.toolstrip button svg { width: 16px; height: 16px; display: block; }
+.toolstrip button:hover { background: rgba(95, 227, 214, 0.18); }
+.toolstrip button.on { border-color: rgba(95, 227, 214, 0.8); color: var(--accent-l); background: rgba(95, 227, 214, 0.16); box-shadow: 0 0 10px rgba(95, 227, 214, 0.35); }
+.vsq[data-tool='mark'] { cursor: copy !important; }
+.vsq[data-tool='ruler'] { cursor: cell !important; }
+/* the two pass pickers of a Blink of two passes, in the playback bar next to Blink */
+.tbar .blinkpick { flex: none; display: inline-flex; gap: 4px; }
+.tbar .blinkpick select.inp { height: 26px; width: 74px; padding: 0 4px; font-size: 11px; }
+/* the card of what is selected, at the top of the Object tab */
+.objcard { display: flex; flex-direction: column; gap: 7px; padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--edge-soft); }
+.objcard .oc-head { display: flex; align-items: center; gap: 7px; }
+.objcard .oc-head .inp { flex: 1; min-width: 0; }
+.objcard .inp { height: 28px; font-size: 12px; padding: 0 8px; }
+.objcard .oc-glyph { width: 9px; height: 9px; flex: none; border: 1.6px solid; transform: rotate(45deg); margin: 0 3px; }
+.objcard .oc-levels { display: flex; }
+.objcard .oc-levels button { flex: 1 1 0; min-width: 0; padding: 4px 2px; font-size: 11px; gap: 5px; display: inline-flex; align-items: center; justify-content: center; }
+.objcard .oc-levels i, .ft-mark i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; flex: none; transform: rotate(45deg); }
+.objcard .oc-facts { display: grid; grid-template-columns: 78px 1fr; gap: 3px 8px; margin: 0; font-size: 11.5px; }
+.objcard .oc-facts dt { color: var(--muted); }
+.objcard .oc-facts dd { margin: 0; color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
+.objcard .oc-facts dd.warn { color: var(--amber); }
+.objcard .oc-row { display: flex; gap: 6px; }
+.objcard .oc-row .oc-note { flex: 1; min-width: 0; }
+.objcard .oc-row .btn { flex: 1; white-space: nowrap; }
+.objcard .oc-line { min-height: 16px; font: 500 11px var(--mono); color: var(--muted); }
+.objcard .oc-marks { display: flex; flex-direction: column; gap: 3px; max-height: 132px; overflow-y: auto; }
+/* the investigation of the field on the picture's status line */
+.vsq .fstatus .invchip { margin-left: 8px; padding: 1px 8px; border-radius: 9px; border: 1px solid rgba(95, 227, 214, 0.5); color: var(--accent-l); text-decoration: none; white-space: nowrap; }
+.vsq .fstatus .invchip:hover { background: rgba(95, 227, 214, 0.14); }
+/* a mark's card is open: the Object tab is the mark's alone (the selected source's passport waits) */
+.pobj.mark-open > :not(.objcard) { display: none; }
+
+/* the Candidates tab: one list of the field's finds */
+.candlist { display: flex; flex-direction: column; gap: 4px; }
+.candlist .crow { display: flex; align-items: center; gap: 9px; padding: 5px 8px 5px 5px; border-radius: 10px; border: 1px solid var(--edge-soft); background: rgba(255, 255, 255, 0.035); color: var(--ink); text-align: left; cursor: pointer; min-height: 56px; }
+.candlist .crow:hover { border-color: rgba(95, 227, 214, 0.5); }
+.candlist .crow.on { border-color: rgba(95, 227, 214, 0.85); background: rgba(95, 227, 214, 0.1); }
+.candlist .crow.s-known { opacity: 0.62; }
+.candlist .cr-still { width: 44px; height: 44px; flex: none; border-radius: 7px; background: #000; border: 1px solid rgba(255, 255, 255, 0.1); }
+.candlist .cr-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.candlist .cr-text b { font: 600 12.5px var(--font); overflow-wrap: anywhere; line-height: 1.25; }
+.candlist .cr-text span { font-size: 11px; color: var(--muted); line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.candlist .cr-badge { flex: none; font: 600 10px var(--font); font-style: normal; letter-spacing: 0.03em; padding: 2px 7px; border-radius: 8px; border: 1px solid var(--edge); color: var(--muted); white-space: nowrap; }
+.candlist .cr-badge.s-unexplained { color: #ffd08a; border-color: rgba(255, 180, 84, 0.6); background: rgba(255, 180, 84, 0.1); }
+.candlist .cr-badge.s-checking { color: var(--accent-l); border-color: rgba(95, 227, 214, 0.4); }
+.candlist .cr-badge.s-jpl { color: #ffb3b3; border-color: rgba(255, 107, 107, 0.5); }
+.candlist .cr-none { font-size: 11.5px; color: var(--muted); padding: 6px 2px; }
+.candlist .cr-also { min-height: 16px; margin-top: 6px; font-size: 11px; color: var(--muted); line-height: 1.4; }
+.candlist .cr-details { margin-top: 8px; border-top: 1px solid var(--edge-soft); padding-top: 6px; }
+.candlist .cr-details > summary { cursor: pointer; font: 600 10.5px var(--font); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); padding: 4px 0; }
+.candlist .cr-details .sbar { max-height: none; overflow: visible; background: none; border-top: 1px solid var(--edge-soft); padding: 8px 0 0; margin-top: 8px; cursor: default; }
+.candlist .cr-details .sbar .tray-head { display: none; }
+
+/* a tree of plain questions: the answers one under another, each with its example pictures; the views keep one height per task */
+.taskpanel .tp-tree { display: flex; flex-direction: column; gap: 5px; min-height: 218px; } /* three answers with example pictures and Back: every step is as tall */
+.taskpanel .tp-ans { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 34px; text-align: left; white-space: normal; }
+.taskpanel .tp-ans span { flex: 1; min-width: 0; }
+.taskpanel .tp-ex { width: 44px; height: 44px; flex: none; border-radius: 6px; border: 1px solid rgba(255, 255, 255, 0.16); object-fit: cover; background: #000; }
+.taskpanel .tp-back { align-self: flex-start; margin-top: auto; }
+.tv.tv-fixed { min-height: 214px; }
+.tv .tv-trio { display: flex; flex-direction: column; gap: 1px; }
+.tv .tv-cap { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--ink); }
+.tv .tv-cap i { width: 14px; height: 2px; border-radius: 1px; flex: none; }
+.tv .tv-cap em { font-style: normal; color: var(--muted); }
+.tv .tv-detmap { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.tv .tv-det { position: relative; aspect-ratio: 1.6; border-radius: 6px; border: 1px solid var(--edge-soft); background: rgba(0, 0, 0, 0.3); }
+.tv .tv-det.on { background: rgba(255, 255, 255, 0.04); }
+.tv .tv-det i { position: absolute; width: 5px; height: 5px; margin: -2.5px 0 0 -2.5px; border-radius: 50%; }
+.tv .tv-det span { position: absolute; left: 5px; bottom: 3px; font: 500 10px var(--mono); color: var(--muted); }
+.tv .tv-det.on span { color: var(--ink); }
+/* "Add to investigation": a new one, or one of mine */
+.objcard .oc-add { position: relative; }
+.objcard .oc-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; padding: 4px; border-radius: 10px; background: rgba(8, 18, 24, 0.97); border: 1px solid var(--edge); box-shadow: var(--shadow); max-height: 190px; overflow-y: auto; }
+.objcard .oc-menu button { text-align: left; padding: 6px 9px; border-radius: 7px; border: 0; background: none; color: var(--ink); font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.objcard .oc-menu button:hover { background: rgba(95, 227, 214, 0.14); color: var(--accent-l); }
+/* the finding's own clip in its task: a fixed square, so the panel never changes height while it is made */
+.tv .tv-clipbox { width: 170px; height: 170px; align-self: center; border-radius: 8px; background: #000; border: 1px solid rgba(255, 255, 255, 0.1); overflow: hidden; }
+.tv .tv-clipbox img { width: 100%; height: 100%; display: block; object-fit: cover; }
+/* a question of a tree may take two lines: every step keeps room for two */
+.taskpanel.k-red .tp-ask, .taskpanel.k-anomaly .tp-ask { min-height: 38px; }
+/* the folded group of red sources and anomalies (not counted), and the task button of a row */
+.candlist .cr-group { margin-top: 6px; }
+.candlist .cr-group > summary { cursor: pointer; padding: 6px 2px; font: 600 11.5px var(--font); color: var(--muted); }
+.candlist .cr-group[open] > summary { color: var(--ink); }
+.candlist .cr-group .crow-wrap { margin-top: 4px; }
+.candlist .crow-wrap { display: flex; flex-direction: column; gap: 3px; }
+.candlist .crow-wrap .crow { width: 100%; }
+.candlist .cr-ask { align-self: flex-end; }

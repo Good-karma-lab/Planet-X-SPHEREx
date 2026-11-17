@@ -8,6 +8,7 @@
 import { D2R } from '../../lib/sky';
 import { EQUI_NOTHING, EquiSampler, equiFrame, equiOf } from '../../lib/equi';
 import { FROM_NOTHING, HIPS, bakedOf, facePt, orderFor, Sampler, tiles, type FacePt } from '../../lib/hips';
+import { GlSky, footprintOffset } from './skygl';
 
 export interface SkyView {
   ra: number;
@@ -98,10 +99,10 @@ export function projectIn(v: SkyView, ra: number, dec: number): [number, number,
   const zc = x * b.c[0] + y * b.c[1] + z * b.c[2];
   if (v.inside) {
     if (zc < 0.05) return [0, 0, false];
-    return [v.W / 2 - ((x * b.e[0] + y * b.e[1]) / zc) * v.R, v.H / 2 - ((x * b.n[0] + y * b.n[1] + z * b.n[2]) / zc) * v.R, true];
+    return [v.W / 2 - ((x * b.e[0] + y * b.e[1] + z * b.e[2]) / zc) * v.R, v.H / 2 - ((x * b.n[0] + y * b.n[1] + z * b.n[2]) / zc) * v.R, true];
   }
   if (zc < 0.02) return [0, 0, false];
-  return [v.W / 2 - (x * b.e[0] + y * b.e[1]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
+  return [v.W / 2 - (x * b.e[0] + y * b.e[1] + z * b.e[2]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
 }
 
 interface Pass {
@@ -148,7 +149,23 @@ export const STAR_MAP_TO_VISIBLE = 12000;
 /** the black point (of 255) some baked layers need on top of what the manifest says: the faint colour of the empty sky of 2MASS */
 const EXTRA_BLACK: Record<string, number> = { '2mass': 16 };
 
+/** The GPU painter paints the sky wherever the browser has WebGL2; gl=0 in the address leaves it to the CPU loop (gl=1 takes it back). The choice holds until
+ *  the page is loaded again. A view the GPU painter cannot paint is painted by the CPU loop. */
+let glAsked = true;
+export function glWanted(): boolean {
+  // the picture check switches the painter on one page, without a reload
+  const forced = (globalThis as { __skyGl?: boolean }).__skyGl;
+  if (forced !== undefined) return forced;
+  const m = /[?&]gl=([01])/.exec(location.hash);
+  if (m) glAsked = m[1] === '1';
+  return glAsked;
+}
+
 class SkyPainter {
+  private glSky: GlSky | null = null;
+  /** how the last frame was painted, for the tests and the frame-time reports: 'gpu', or 'cpu' with the reason the GPU painter left it */
+  painter = 'cpu';
+
   /** the picture on screen, W×H CSS pixels */
   canvas = document.createElement('canvas');
   private spare = document.createElement('canvas');
@@ -166,6 +183,11 @@ class SkyPainter {
   frame(view: SkyView, layer: SkyLayer[], moving: boolean): boolean {
     // the star map before the manifest has said where it is: nothing to paint yet
     if (layer[0]!.id === 'svs' && !equiOf('svs') && !HIPS['svs']) return false;
+    if (glWanted()) {
+      if (!moving && !this.stale && !this.pass) return false;
+      const done = this.glFrame(view, layer);
+      if (done !== null) return done;
+    } else this.painter = 'cpu';
     if (moving) {
       // every frame is painted at full resolution (one source pixel per screen pixel), with the same level selection as at rest: no coarse step while the view moves and
       // no re-painting when it stops. A slow machine gets a lower frame rate, never a change of quality.
@@ -190,6 +212,49 @@ class SkyPainter {
     return false;
   }
 
+  /** One frame on the GPU (see skygl.ts); null when this view or layer is left to the CPU loop. */
+  private glFrame(view: SkyView, layer: SkyLayer[]): boolean | null {
+    const l0 = layer[0]!;
+    const cpu = (why: string): null => {
+      this.painter = `cpu: ${why}`;
+      return null;
+    };
+    if ((l0.id === 'dust' && !bakedOf('dust')) || (layer.length === 1 && equiOf(l0.id))) return cpu('a picture of the whole sky');
+    if (layer.length !== 1 && layer.length !== 3) return cpu(`${layer.length} surveys`);
+    this.glSky ??= new GlSky();
+    const g = this.glSky;
+    if (!g.ok) return cpu('no WebGL2');
+    tiles.frame();
+    const moll = view.proj === 'moll';
+    const R = moll ? mw(view) / 5 : view.R;
+    const samplers = layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
+    const sw = Math.ceil(view.W);
+    const sh = Math.ceil(view.H);
+    const b = basis(view);
+    const gal = layer.every((l) => HIPS[l.id]?.frame === 'galactic');
+    // the tones as the CPU loop applies them: one survey (a baked tile may want a black point on top), or three surveys, one per colour
+    const tones = layer.map((l): [number, number, number, number] => {
+      const B = bakedOf(l.id);
+      const blackLive = l.black;
+      const gainLive = (l.gain * 255) / (255 - l.black);
+      if (layer.length === 3) return [B?.black ?? 0, B?.gain ?? 1, blackLive, gainLive];
+      const blackBaked = B ? Math.max(B.black, EXTRA_BLACK[l.id] ?? 0) : blackLive;
+      return [blackBaked, B ? (B.gain * 255) / (255 - blackBaked) : gainLive, blackLive, gainLive];
+    });
+    const r = g.paint({
+      sw, sh, R: view.R, inside: !!view.inside, c: b.c, e: b.e, n: b.n, gal, samplers, tones,
+      map: moll ? { x: mcx(view), y: mcy(view), w: mw(view) } : undefined,
+      place: (i, j, f) => this.place(view, b, gal, 1, sw, sh, i, j, f),
+    });
+    if (!r) return cpu(g.why);
+    this.painter = 'gpu';
+    this.pass = null;
+    this.stale = false;
+    const shown0 = this.shown;
+    this.finish({ view: { ...view }, layer, s: 1, sw, sh, painted: r.painted, total: r.total }, g.canvas);
+    return this.shown !== shown0;
+  }
+
   private begin(view: SkyView, layer: SkyLayer[], s: number): Pass {
     tiles.frame();
     equiFrame();
@@ -209,8 +274,193 @@ class SkyPainter {
     return { view: { ...view }, layer, s, sw, sh, img: new ImageData(sw, sh), row: 0, samplers, painted: 0, total: 0, fade, equi };
   }
 
-  /** Paints rows until the deadline; true when the pass is done. */
+  // the grid of exact sky places a band of rows is painted from (see rows): two grid rows and the centres of the blocks between them
+  private gN = 0;
+  private gFace = new Int8Array(0);
+  private gX = new Float64Array(0);
+  private gY = new Float64Array(0);
+  private zone = 0;
+  /** |sin Dec| of the place `place` answered last (in the frame of the tiles) */
+  private za = 0;
+  private gZ = new Float64Array(0);
+
+  /** The exact sky place of a picture pixel as a face point (in the frame of the layer's tiles); false when the pixel is off the globe or the map. */
+  private place(v: SkyView, b: ReturnType<typeof basis>, gal: boolean, s: number, sw: number, sh: number, i: number, j: number, f: FacePt): boolean {
+    let ra: number;
+    let z: number;
+    if (v.proj === 'moll') {
+      const M = mw(v);
+      const X = (i * s - mcx(v)) / (M / 2);
+      const Y = -(j * s - mcy(v)) / (M / 4);
+      if (X * X + Y * Y > 1) return false;
+      const th = Math.asin(Y);
+      z = (2 * th + Math.sin(2 * th)) / Math.PI;
+      ra = 180 - ((Math.PI * X) / Math.cos(th)) / D2R;
+    } else {
+      const Rs = v.R / s;
+      let sx = (sw / 2 - i) / Rs;
+      let sy = (sh / 2 - j) / Rs;
+      let zz: number;
+      if (v.inside) {
+        const n = Math.sqrt(1 + sx * sx + sy * sy);
+        zz = 1 / n;
+        sx /= n;
+        sy /= n;
+      } else {
+        const rr = sx * sx + sy * sy;
+        if (rr > 1) return false;
+        zz = Math.sqrt(1 - rr);
+      }
+      const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
+      const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
+      z = zz * b.c[2] + sx * b.e[2] + sy * b.n[2]; // the east axis has a z part when the view is rolled
+      ra = Math.atan2(vy, vx) / D2R;
+    }
+    let zc = z > 1 ? 1 : z < -1 ? -1 : z;
+    if (gal) {
+      const g = toGalactic(ra, zc);
+      ra = g[0];
+      zc = g[1] > 1 ? 1 : g[1] < -1 ? -1 : g[1];
+    }
+    facePt(ra, zc, f);
+    // the two zones of a HEALPix face (equatorial belt, polar cap) are two different maps that meet with a kink
+    this.zone = Math.abs(zc) > 2 / 3 ? 1 : 0;
+    this.za = Math.abs(zc);
+    return true;
+  }
+
+  /** One pixel of a picture made of three surveys (one per colour), at the face point f. */
+  private three(p: Pass, f: FacePt, q: number): boolean {
+    const o = p.img.data;
+    const rgb = this.rgb;
+    for (let c = 0; c < 3; c++) {
+      const l = p.layer[c]!;
+      const sm = p.samplers[c]!;
+      if (sm.at(f, rgb, 0) === FROM_NOTHING) return false;
+      if (sm.lastBaked) o[q + c] = Math.max(0, rgb[0]! - (bakedOf(l.id)?.black ?? 0)) * (bakedOf(l.id)?.gain ?? 1);
+      else o[q + c] = Math.max(0, rgb[0]! - l.black) * ((l.gain * 255) / (255 - l.black));
+    }
+    o[q + 3] = 255;
+    return true;
+  }
+
+  /**
+   * Paints rows until the deadline; true when the pass is done.
+   *
+   * The sky place of a pixel (a square root, an arctangent, the HEALPix face) is worked out exactly only at the corners and the centre of blocks of 8×8 pixels.
+   * Where a block lies inside one face and one zone, and the centre agrees with the mean of the corners to 1/20 of a screen pixel, the places inside it are
+   * interpolated (the map is smooth there) and each row is painted as one run of the tile sampler. Every other block (the limb of the globe, a face edge, a pole)
+   * is worked out pixel by pixel. The picture is the same; a frame costs a fraction of the arithmetic, so the globe turns smoothly in every browser.
+   */
   private rows(p: Pass, deadline: number): boolean {
+    const { view: v, s, sw, sh, samplers, layer } = p;
+    const l0 = layer[0]!;
+    if (p.equi || (l0.id === 'dust' && !bakedOf('dust'))) return this.rowsPlain(p, deadline);
+    const o = p.img.data;
+    const b = basis(v);
+    const one = layer.length === 1;
+    const gal = layer.every((l) => HIPS[l.id]?.frame === 'galactic');
+    // the tone of a single survey: a baked tile has its own (and may want a black point on top), a live one the layer's
+    const B0 = bakedOf(l0.id);
+    const blackLive = l0.black;
+    const gainLive = (l0.gain * 255) / (255 - l0.black);
+    const blackBaked = B0 ? Math.max(B0.black, EXTRA_BLACK[l0.id] ?? 0) : blackLive;
+    const gainBaked = B0 ? (B0.gain * 255) / (255 - blackBaked) : gainLive;
+    const sm = samplers[0]!;
+    // a face is 2^order tiles of w pixels across: 1/20 of a tile pixel (no more than a screen pixel) in face units
+    let across = 512;
+    for (const x of samplers) across = Math.max(across, (x.order >= 0 ? 2 ** x.order : 1) * (HIPS[x.id]?.w ?? 512));
+    const tol = 0.05 / across;
+    const BL = 8;
+    const nG = Math.ceil(sw / BL) + 1;
+    if (this.gN !== nG) {
+      this.gN = nG;
+      this.gFace = new Int8Array(nG * 3);
+      this.gX = new Float64Array(nG * 3);
+      this.gY = new Float64Array(nG * 3);
+      this.gZ = new Float64Array(nG);
+    }
+    const gF = this.gFace;
+    const gX = this.gX;
+    const gY = this.gY;
+    const f = this.f;
+    while (p.row < sh) {
+      const j0 = p.row;
+      p.row += BL;
+      const jn = Math.min(BL, sh - j0);
+      // the exact places: grid row 0 at j0, row 1 at j0 + 8, row 2 the centres of the blocks; face −1 where there is no sky, the zone in bit 4
+      for (let g = 0; g < nG; g++) {
+        for (let r = 0; r < 3; r++) {
+          const ok = r < 2 ? this.place(v, b, gal, s, sw, sh, g * BL, j0 + r * BL, f) : this.place(v, b, gal, s, sw, sh, g * BL + BL / 2, j0 + BL / 2, f);
+          const k = r * nG + g;
+          gF[k] = ok ? f.face + this.zone * 16 : -1;
+          gX[k] = f.x;
+          gY[k] = f.y;
+          if (r === 2) this.gZ[g] = this.za;
+        }
+      }
+      for (let g = 0; g + 1 < nG; g++) {
+        const i0 = g * BL;
+        const cnt = Math.min(BL, sw - i0);
+        if (cnt <= 0) break;
+        const fa = gF[g]!;
+        const x00 = gX[g]!;
+        const y00 = gY[g]!;
+        const x10 = gX[g + 1]!;
+        const y10 = gY[g + 1]!;
+        const x01 = gX[nG + g]!;
+        const y01 = gY[nG + g]!;
+        const x11 = gX[nG + g + 1]!;
+        const y11 = gY[nG + g + 1]!;
+        const smooth =
+          fa >= 0 &&
+          gF[g + 1] === fa &&
+          gF[nG + g] === fa &&
+          gF[nG + g + 1] === fa &&
+          gF[2 * nG + g] === fa &&
+          Math.abs((x00 + x10 + x01 + x11) / 4 - gX[2 * nG + g]!) < tol &&
+          Math.abs((y00 + y10 + y01 + y11) / 4 - gY[2 * nG + g]!) < tol;
+        if (smooth) {
+          const face = fa & 15;
+          // the two reads that make the texel's footprint round (see footprintOffset): one offset for the block, from the place of its centre
+          const off = footprintOffset(this.gZ[g]!);
+          for (let jj = 0; jj < jn; jj++) {
+            const a = jj / BL;
+            const xl = x00 + (x01 - x00) * a;
+            const yl = y00 + (y01 - y00) * a;
+            const dx = (x10 + (x11 - x10) * a - xl) / BL;
+            const dy = (y10 + (y11 - y10) * a - yl) / BL;
+            const q = ((j0 + jj) * sw + i0) * 4;
+            p.total += cnt;
+            if (one) p.painted += sm.run(face, xl, yl, dx, dy, cnt, o, q, blackBaked, gainBaked, blackLive, gainLive, off);
+            else {
+              for (let i = 0; i < cnt; i++) {
+                f.face = face;
+                f.x = xl + dx * i;
+                f.y = yl + dy * i;
+                if (this.three(p, f, q + i * 4)) p.painted++;
+              }
+            }
+          }
+        } else if (fa >= 0 || gF[g + 1]! >= 0 || gF[nG + g]! >= 0 || gF[nG + g + 1]! >= 0 || gF[2 * nG + g]! >= 0) {
+          for (let jj = 0; jj < jn; jj++) {
+            for (let i = 0; i < cnt; i++) {
+              if (!this.place(v, b, gal, s, sw, sh, i0 + i, j0 + jj, f)) continue;
+              p.total++;
+              const q = ((j0 + jj) * sw + i0 + i) * 4;
+              if (one) p.painted += sm.run(f.face, f.x, f.y, 0, 0, 1, o, q, blackBaked, gainBaked, blackLive, gainLive, footprintOffset(this.za));
+              else if (this.three(p, f, q)) p.painted++;
+            }
+          }
+        }
+      }
+      if (performance.now() > deadline) return false;
+    }
+    return true;
+  }
+
+  /** The same, pixel by pixel: the layers that are one picture of the whole sky (the dust picture, an equirectangular map). */
+  private rowsPlain(p: Pass, deadline: number): boolean {
     const { view: v, s, sw, sh, samplers, layer } = p;
     const o = p.img.data;
     const b = basis(v);
@@ -254,7 +504,7 @@ class SkyPainter {
           }
           const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
           const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
-          z = zz * b.c[2] + sy * b.n[2];
+          z = zz * b.c[2] + sx * b.e[2] + sy * b.n[2]; // the east axis has a z part when the view is rolled
           ra = Math.atan2(vy, vx) / D2R;
         }
         p.total++;
@@ -343,7 +593,7 @@ class SkyPainter {
   private switchKey = '';
   private switchSince = 0;
 
-  private finish(p: Pass): void {
+  private finish(p: Pick<Pass, 'view' | 'layer' | 's' | 'sw' | 'sh' | 'painted' | 'total'> & { img?: ImageData }, src?: HTMLCanvasElement): void {
     const v = p.view;
     const key = p.layer.map((l) => l.id).join('+');
     const same = key === this.shownKey;
@@ -359,10 +609,12 @@ class SkyPainter {
       }
     }
     this.shownKey = key;
-    const sc = this.scratch;
-    sc.width = p.sw;
-    sc.height = p.sh;
-    sc.getContext('2d')!.putImageData(p.img, 0, 0);
+    const sc = src ?? this.scratch;
+    if (!src) {
+      sc.width = p.sw;
+      sc.height = p.sh;
+      sc.getContext('2d')!.putImageData(p.img!, 0, 0);
+    }
     const nx = this.spare;
     nx.width = Math.max(1, Math.round(v.W));
     nx.height = Math.max(1, Math.round(v.H));
@@ -397,3 +649,6 @@ class SkyPainter {
 
 /** One painter for the page: the last picture survives a visit to another screen. */
 export const sky = new SkyPainter();
+// for the picture checks and the frame-time reports
+(globalThis as { __skyPainter?: () => string; __sky?: SkyPainter }).__skyPainter = () => sky.painter;
+(globalThis as { __sky?: SkyPainter }).__sky = sky;

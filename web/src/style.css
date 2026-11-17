@@ -2437,3 +2437,12 @@ input[type='range']::-moz-range-thumb {
 
 /* the frame: ONE fixed 1 px line round the picture's box, the same in every view (picture, bands, detectors, Days), drawn over the canvases so that nothing behind them shows and nothing about it depends on the canvas; no drop shadow */
 .vsq::after { content: ''; position: absolute; inset: 0; border: 1px solid #55707a; border-radius: 4px; pointer-events: none; z-index: 4; box-sizing: border-box; }
+
+/* the Cabinet tab sits alone at the bottom edge of the rail (U 16 Nov), at the far right of the horizontal nav; the other tabs stay at
+   the top. The tabs fill the rail's height so that the auto margin has room; the rail itself never changes size between screens. */
+.rail .tabs { flex: 1 1 auto; min-height: 0; }
+.rail .tab { position: relative; }
+.rail .tab.tab-end { margin-top: auto; }
+@media (max-width: 860px), (max-aspect-ratio: 1/1) {
+  .rail .tab.tab-end { margin-top: 0; margin-left: auto; }
+}

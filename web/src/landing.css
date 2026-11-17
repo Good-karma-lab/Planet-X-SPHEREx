@@ -78,6 +78,10 @@
 .lp-trust li::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--lp-accent); }
 .lp-or { margin-top: 20px !important; font-size: 15px; color: var(--lp-muted); }
 .lp-or a { color: var(--lp-text); text-decoration: underline; text-underline-offset: 3px; }
+/* a secondary entry: a text link, never a second button beside "Start searching" */
+.lp-link { color: var(--lp-text); font-size: 16px; text-decoration: underline; text-underline-offset: 4px; text-decoration-color: rgba(230, 240, 243, 0.45); white-space: nowrap; text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
+.lp-link:hover { text-decoration-color: var(--lp-accent); color: #fff; }
+.lp-btn-lg { height: 56px; padding: 0 30px; font-size: 18px; }
 
 /* live pendulum */
 .lp-live-fig { margin: 0; }
@@ -161,7 +165,7 @@
   padding: 6px 9px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.14);
 }
 .lp-ok::before { content: '✓ '; color: var(--lp-accent); }
-/* the asteroid strip holds five visits side by side; play them as a film */
+/* the asteroid strip holds five visits side by side; play them one after another (a Blink of five) */
 .lp-hop { background-size: 500% 100%; background-position: 0 0; animation: lp-hop 3s steps(1) infinite; }
 @keyframes lp-hop { 0% { background-position: 0% 0; } 20% { background-position: 25% 0; } 40% { background-position: 50% 0; } 60% { background-position: 75% 0; } 80% { background-position: 100% 0; } }
 
@@ -298,3 +302,10 @@
 .lp-pnow.flip { transform: translate(-100%, -50%); text-align: right; }
 /* a phone: the card beside the ring wraps inside the picture instead of running past its left edge */
 @media (max-width: 560px) { .lp-pnow.flip { white-space: normal; max-width: 40%; } }
+/* the latest discovery under the hero's links (shown only when there is one) */
+.lp-disc { display: inline-flex; align-items: center; gap: 12px; margin-top: 22px; padding: 10px 14px 10px 10px; max-width: 460px; border: 1px solid rgba(95, 227, 214, 0.45); border-radius: 14px; background: rgba(6, 12, 16, 0.6); color: var(--lp-text); text-decoration: none; }
+.lp-disc:hover { border-color: var(--lp-accent); }
+.lp-disc-pic { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; flex: none; background: #000; }
+.lp-disc-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; color: var(--lp-muted); }
+.lp-disc-text b { color: var(--lp-text); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lp-disc-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lp-accent); }

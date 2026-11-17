@@ -8,14 +8,15 @@ belong together if ONE heliocentric orbit passes through both tracks; the fit gi
 Every candidate contributes three points of its track (the first, middle and last visit of its pass: t0 - span/2, t0, t0 + span/2). Free parameters: the two end points of the whole arc (4 numbers),
 the distance at the first point and its rate of change. The orbit must be bound (a penalty above 0.9 of the escape speed): two passes do not fix the motion along the line of sight.
 Nothing here is a discovery: the caller says what the candidates are and how strong."""
+
 import numpy as np
 from scipy.optimize import least_squares
 
 from . import orbit
 from . import distant as edist
 
-TOL, SIGMA = 6.0, 2.5           # arcsec: the misfit that is accepted as one body; the position error of a track point
-Q0S = (1 / 40, 1 / 60, 1 / 90, 1 / 140, 1 / 220, 1 / 350, 1 / 550, 1 / 900)       # starting 1/distance (1/au) of the fits
+TOL, SIGMA = 6.0, 2.5  # arcsec: the misfit that is accepted as one body; the position error of a track point
+Q0S = (1 / 40, 1 / 60, 1 / 90, 1 / 140, 1 / 220, 1 / 350, 1 / 550, 1 / 900)  # starting 1/distance (1/au) of the fits
 
 
 def candidate_points(c, grid, t0, span, step=edist.S):
@@ -60,25 +61,42 @@ def fit(pts, q0s=Q0S):
         r = np.where(np.isfinite(r), r, 1e4)
         esc = (st[1] @ st[1]) / (2 * orbit.MU / np.linalg.norm(st[0]))
         return np.append(r, 200.0 * max(0.0, esc - 0.9))
+
     best = None
     for q0 in q0s:
-        s = least_squares(res, [0, 0, 0, 0, q0, 0.0], bounds=([-60, -60, -60, -60, 1 / 3000, -8], [60, 60, 60, 60, 1 / 20, 8]), x_scale=[1, 1, 1, 1, 1e-4, 0.3])
+        s = least_squares(
+            res,
+            [0, 0, 0, 0, q0, 0.0],
+            bounds=([-60, -60, -60, -60, 1 / 3000, -8], [60, 60, 60, 60, 1 / 20, 8]),
+            x_scale=[1, 1, 1, 1, 1e-4, 0.3],
+        )
         if best is None or s.cost < best.cost:
             best = s
     if best is None:
         return None
     r = res(best.x)[:-1]
-    rms = float(np.sqrt(np.mean(r[:len(t)] ** 2 + r[len(t):] ** 2)))
+    rms = float(np.sqrt(np.mean(r[: len(t)] ** 2 + r[len(t) :] ** 2)))
     st = model(best.x)[0]
     aa, ee = orbit.elements(st[0], st[1])
     dof = max(2 * len(t) - 6, 1)
-    s2 = max(SIGMA ** 2, 2 * best.cost / dof)
+    s2 = max(SIGMA**2, 2 * best.cost / dof)
     try:
         cov = s2 * np.linalg.inv(best.jac.T @ best.jac)
         eq = float(np.sqrt(cov[4, 4]))
     except Exception:  # noqa
         eq = float("nan")
-    return dict(rms=rms, dist=float(1 / best.x[4]), dist_err=float(eq / best.x[4] ** 2), ddot=float(best.x[5]), a=float(aa / orbit.AU), e=float(ee), state=st, plane=(P.rac, P.decc), t=t, n=len(t))
+    return dict(
+        rms=rms,
+        dist=float(1 / best.x[4]),
+        dist_err=float(eq / best.x[4] ** 2),
+        ddot=float(best.x[5]),
+        a=float(aa / orbit.AU),
+        e=float(ee),
+        state=st,
+        plane=(P.rac, P.decc),
+        t=t,
+        n=len(t),
+    )
 
 
 def predict(f, mjd, R):
@@ -118,7 +136,13 @@ def link_passes(passes, tol=TOL, third_max=120.0, progress=None):
                 f3 = fit(pa + pb + best[2])
                 if f3 is not None:
                     ok3 = best[0] <= third_max and f3["rms"] <= tol
-                    link.update(pred_sep=float(best[0]), c=best[1], pred=[float(best[3][0]), float(best[3][1])], fit3={k_: v for k_, v in f3.items() if k_ not in ("state", "t")}, ok3=bool(ok3))
+                    link.update(
+                        pred_sep=float(best[0]),
+                        c=best[1],
+                        pred=[float(best[3][0]), float(best[3][1])],
+                        fit3={k_: v for k_, v in f3.items() if k_ not in ("state", "t")},
+                        ok3=bool(ok3),
+                    )
         out.append(link)
     if progress:
         progress(len(pairs), len(pairs))

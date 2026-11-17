@@ -11,8 +11,8 @@ Every search on this site has a depth and a set of conditions under which it wor
 ## Limits of the searches
 
 - A run on a known body is called blind when the field was centred on it: the search knew the area but not the place inside it, the distance or the motion.
-- The film search recovered 6 of the 8 known bodies brighter than V 19.1 that have at least four frames in the ecliptic film; none of the 17 fainter bodies in that film was recovered, so its limit there is about V 19 (live run on spherex.space, 2026-11-14).
-- A track in the film search needs at least four visits, because chance alone makes 1.83 tracks per trial at three visits and 0.0 at four or more (12 trials, same film).
+- The time-lapse search recovered 6 of the 8 known bodies brighter than V 19.1 that have at least four frames in the ecliptic time-lapse; none of the 17 fainter bodies in that time-lapse was recovered, so its limit there is about V 19 (live run on spherex.space, 2026-11-14).
+- A track in the time-lapse search needs at least four visits, because chance alone makes 1.83 tracks per trial at three visits and 0.0 at four or more (12 trials, same time-lapse).
 - The search between passes needs at least three passes; a track of only three passes whose faintest member is below S/N 15 is counted and not drawn.
 - The motion of a saturated star in a 5′ field is pulled by its saturated core: Barnard's Star gives 11.37 ± 0.47 ″/yr at 5′ against Gaia's 10.393, and 10.7 ± 0.8 at 20′ (live service, 2026-11-14).
 - Saturated stars have no SPHEREx spectrum, and RW Aurigae and R Draconis give no tracks for the same reason; the spectrum tab says so and shows the catalogue photometry instead.
@@ -20,7 +20,7 @@ Every search on this site has a depth and a set of conditions under which it wor
 - One pass of the search for bodies beyond Neptune finds a place but does not fix the distance: a single pass of Eris gave a range of 70 to 165 au, and the link of three passes gave 95.6 ± 0.4 au (live runs, 2026-11-15); two passes of Makemake are linked but not confirmed by a third.
 - The blind deep sum of Sedna's field is above its noise ceiling and below its bar, so we call it a strong lead and not a formal detection (live run, 2026-11-15).
 - The quick look from the all-sky cube is a placeholder for a few seconds, from a 12.9 arcsecond pixel, and is never a measurement of a source.
-- The survey's own time sampling limits what the film shows: visits come a few times a day with gaps of days, so a body that crosses a field between visits is seen in few frames.
+- The survey's own time sampling limits what the time-lapse shows: visits come a few times a day with gaps of days, so a body that crosses a field between visits is seen in few frames.
 
 ## What we claim
 

@@ -204,3 +204,8 @@ table.v td.n { font-family: var(--mono); color: var(--ink); white-space: nowrap;
 .er-axis span { position: absolute; transform: translateX(-50%); }
 .er-axis em { position: absolute; right: -28px; font-style: normal; }
 @media (max-width: 700px) { .er-row { grid-template-columns: 1fr; gap: 4px; } .er-v { text-align: left; } .er-axis { margin: 4px 0 0; } }
+
+/* the version of the account and what changed in it */
+.mchanges { margin: 6px 0 14px; font-size: 13px; color: var(--muted); }
+.mchanges summary { cursor: pointer; }
+.mchanges ul { margin: 6px 0 0; padding-left: 18px; }
