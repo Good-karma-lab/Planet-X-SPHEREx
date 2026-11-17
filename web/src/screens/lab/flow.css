@@ -143,3 +143,20 @@
 .candlist .crow-wrap { display: flex; flex-direction: column; gap: 3px; }
 .candlist .crow-wrap .crow { width: 100%; }
 .candlist .cr-ask { align-self: flex-end; }
+
+/* a field being made or loaded: the held picture dimmed, no rings, and the controls that change the frame wait */
+.lab.loading .vsq canvas.vid { opacity: 0.38; }
+.lab.loading .vsq canvas.ov { visibility: hidden; }
+.lab.loading .tbar .play, .lab.loading .tbar .seg.scale, .lab.loading .tbar .blinkpick, .lab.loading .tbar .tl-mid, .lab.loading .vsq .fbands { pointer-events: none; opacity: 0.4; }
+.vsq .float.loadblock { left: 50%; top: 50%; transform: translate(-50%, -50%); width: 300px; height: 78px; box-sizing: border-box; flex-direction: column; align-items: stretch; justify-content: center; gap: 7px; padding: 12px 16px; z-index: 4; pointer-events: none; }
+.vsq .loadblock b { font: 650 13.5px var(--font); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vsq .loadblock .lb-bar { position: relative; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, 0.12); overflow: hidden; }
+.vsq .loadblock .lb-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background: var(--accent-l); transition: width 0.4s ease; }
+.vsq .loadblock .lb-bar i.busy { animation: lbbusy 1.4s ease-in-out infinite; }
+@keyframes lbbusy { 0% { left: -30%; } 100% { left: 100%; } }
+.vsq .loadblock .lb-detail { min-height: 15px; font: 500 11.5px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vsq .loadblock.failed b { color: #ff9c9c; }
+/* a grid square or quarter in the free lab: the button that counts a look, and why it cannot yet */
+.sqlook { flex: none; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--edge-soft); }
+.sqlook .btn { flex: none; white-space: nowrap; }
+.sqlook .sq-line { min-width: 0; font: 500 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

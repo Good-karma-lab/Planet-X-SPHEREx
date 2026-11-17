@@ -1,4 +1,6 @@
 import { isSquareTask } from './lab/rules';
+import { LoadBlock, loadStep } from './lab/loading';
+import { useSquareLook } from './lab/square';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
@@ -411,7 +413,7 @@ export function Lab({ route }: { route: Route }) {
   // the nearest of the five sizes (a link with fov=18, the size a distance search reads, opens the 20′ field)
   const fovAsked = Number(p['fov']);
   const fov =
-    Number.isFinite(fovAsked) && fovAsked > 0 ? SIZES.reduce((a, b) => (Math.abs(b - fovAsked) < Math.abs(a - fovAsked) ? b : a)) : 5;
+    Number.isFinite(fovAsked) && fovAsked > 0 ? SIZES.reduce((a, b) => (Math.abs(b - fovAsked) < Math.abs(a - fovAsked) ? b : a)) : 10;
   const view: View = (['picture', 'bands', 'det'] as const).find((v) => v === p['view']) ?? 'picture';
   const time: Time = (['loop', 'diff', 'sum'] as const).find((v) => v === p['time']) ?? 'loop';
   const film = p['film'] ? Number(p['film']) : null;
@@ -713,6 +715,7 @@ export function Lab({ route }: { route: Route }) {
     stretch,
     film,
     loading: false,
+    ready: false,
     meta: null as FieldMeta | null,
     prov: { ra0: ra, dec0: dec, step_arcsec: 1.5375, n: 4 },
   });
@@ -729,6 +732,8 @@ export function Lab({ route }: { route: Route }) {
     film,
     // the field is still being read: the part of the picture that has not arrived is dark, not a flat grey slab (grey is for sky the survey does not cover)
     loading: phase !== '',
+    // the field is finished and its pictures are in hand: until then one finished pass is held still (or nothing) and nothing plays
+    ready: !!meta && phase === '',
     meta,
     // the grid the service builds for this field (engine/grid.py), known before the field is finished: marks during a cold load
     prov: (() => {
@@ -1017,6 +1022,8 @@ export function Lab({ route }: { route: Route }) {
         // chosen bands whose pictures are still on their way: the picture stays as it was (no black frame), the status says so
         const bandsPending = st.view === 'picture' && stack === 'bands' && !r.loaded('bands').length;
         if (bandsPending) stack = r.loaded('picture').length ? 'picture' : 'quick';
+        // a field still being made: never a quick (half-built) stack; one finished pass, held still
+        if (!st.ready && st.view === 'picture') stack = 'picture';
         setBandsWait((w) => (w === bandsPending ? w : bandsPending));
         const all = r.loaded(stack);
         // Difference: the reference pass shows no change, so the loop plays the passes compared with it
@@ -1031,7 +1038,7 @@ export function Lab({ route }: { route: Route }) {
           let a = loaded[0]!;
           let b = a;
           let t = 0;
-          if (st.time === 'sum') a = b = loaded[0]!;
+          if (st.time === 'sum' || !st.ready) a = b = loaded[0]!;
           else if (st.frame !== null && loaded.includes(st.frame)) a = b = st.frame;
           else if (loaded.length > 1) {
             const seq = order(loaded.length);
@@ -2295,6 +2302,7 @@ export function Lab({ route }: { route: Route }) {
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if ((e.target as HTMLElement)?.tagName === 'INPUT') return;
+      if (state.current.film === null && !state.current.ready) return; // playback and stepping wait for the finished field
       const n = state.current.film !== null ? (filmRef.current?.meta.frames.length ?? 0) : (meta?.passes.length ?? 0);
       if (e.code === 'Space') {
         e.preventDefault();
@@ -2317,7 +2325,21 @@ export function Lab({ route }: { route: Route }) {
   // the product flow (Known objects, marks, the ruler): the dates on show are the passes, or in Days the visits of the pass
   const yearOf = (mjd: number) => 2000 + (mjd - 51544.5) / 365.25;
   const flowDays = film !== null && !!filmData;
+  // a grid square or one of its quarters: its outline, its status words, the look that counts only on purpose
+  const square = useSquareLook({
+    params: p,
+    ra,
+    dec,
+    fov,
+    pass: film === null ? (shown?.pass ?? null) : null,
+    passesTotal: meta?.passes.length ?? 0,
+    ready: !!meta && phase === '' && film === null,
+    open: (q) => {
+      location.hash = formatHash({ screen: 'lab', params: q });
+    },
+  });
   const flow = useLabFlow({
+    square,
     ra,
     dec,
     fov,
@@ -2816,7 +2838,10 @@ export function Lab({ route }: { route: Route }) {
           (Math.abs(beta) > 25 ? ' · far from the ecliptic: few asteroids expected here' : '') +
           (opts.motion ? ' · motion only' : '');
   // the line over the picture is only the date of what is shown (the time bar has the rest; the full line is its tooltip)
-  const dateLabel = time === 'sum' ? 'all seasons' : passMeta ? season(passMeta.mjd_mid) : phase || '';
+  // a field still being made or loaded (Months scale): one finished pass held still, dimmed, the progress in the middle; nothing plays
+  const fieldLoading = valid && film === null && !(meta && phase === '');
+  const loadNow = fieldLoading ? loadStep(phase || 'asking the sky service…', pictures.current.size, meta?.passes.length ?? 0) : null;
+  const dateLabel = time === 'sum' ? 'all seasons' : passMeta ? season(passMeta.mjd_mid) : fieldLoading ? '' : phase || '';
   const daysShort = filmData ? `visit ${visit + 1} of ${nVisits} · ${utc(filmData.meta.frames[visit]?.mjd ?? 0)}` : daysStatus;
   const passMjd = (passes.find((q) => q.index === (shown?.pass ?? 0)) ?? passes[0])?.mjd_mid;
   const toDays = () => {
@@ -3195,9 +3220,22 @@ export function Lab({ route }: { route: Route }) {
   ];
   const foundCount = unexplainedCount(findRows);
 
+  // the picture's status line: a note, a wait, the date of what is shown (the flow's own words follow it)
+  const mainStatus: string =
+    note ||
+                  (bandsWait
+                    ? 'loading the pictures of the chosen bands…'
+                    : film === null && view !== 'det' && !bands.length
+                      ? 'No band chosen: switch a band on (or ALL) to see the sky'
+                      : film === null && view === 'det' && !dets.length
+                        ? 'No detector chosen: switch one on (or ALL)'
+                        : film !== null
+                          ? daysShort
+                          : dateLabel);
+
   return (
     <div class="screen">
-      <div class="lab">
+      <div class={`lab${fieldLoading ? ' loading' : ''}`}>
         <div class="vwrap" ref={wrap}>
           <div class="vstage" ref={stageRef}>
             <div
@@ -3296,6 +3334,7 @@ export function Lab({ route }: { route: Route }) {
                 data-testid="picture"
               />
               <canvas ref={overlay} class="ov" />
+              {loadNow && <LoadBlock step={loadNow} />}
               {flow.floats}
               {labels.map((l) =>
                 l.empty ? (
@@ -3379,17 +3418,8 @@ export function Lab({ route }: { route: Route }) {
                 Mark
               </button>
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
-                {note ||
-                  (bandsWait
-                    ? 'loading the pictures of the chosen bands…'
-                    : film === null && view !== 'det' && !bands.length
-                      ? 'No band chosen: switch a band on (or ALL) to see the sky'
-                      : film === null && view === 'det' && !dets.length
-                        ? 'No detector chosen: switch one on (or ALL)'
-                        : film !== null
-                          ? daysShort
-                          : dateLabel)}
-                {!note && flow.status && <span data-testid="flow-status"> · {flow.status}</span>}
+                {mainStatus}
+                {!note && flow.status && <span data-testid="flow-status">{mainStatus ? ' · ' : ''}{flow.status}</span>}
                 {flow.chip}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
@@ -3673,6 +3703,7 @@ export function Lab({ route }: { route: Route }) {
           {/* phones and upright tablets: the panel is a bottom sheet pulled up by this grabber (not displayed on a desktop) */}
           <SheetGrip peek=".taskpanel, :scope:not(:has(.taskpanel)) > .panel-head" under=".lab .tbar" label="Lab panel" />
           {flow.taskPanel}
+          {square.button}
           <div class="panel-head">
             <div class="seg sm" role="group" aria-label="Panel">
               {(
