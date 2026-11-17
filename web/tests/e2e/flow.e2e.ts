@@ -189,10 +189,10 @@ test('6. a case that passes: the fast-mover lead is checked, commented and submi
   await page.getByTestId('tab-findings').click();
   await expect(page.getByTestId('panel-findings')).toContainText('Fast mover near Barnard (end-to-end)');
   await expect(page.getByTestId('panel-findings')).toContainText(/submitted/i);
-  // Findings: the card of the lead carries the user's name
-  await page.getByTestId('nav-findings').click();
+  // Findings: the lead carries the user's name (its own page: the list shows the most promising first, and there are a thousand)
   const name = email.split('@')[0]!;
-  await expect(page.locator('.fcard-credit', { hasText: name }).first()).toBeVisible({ timeout: 60_000 });
+  await page.goto(`/#/findings/${encodeURIComponent(LEAD)}`);
+  await expect(page.getByRole('heading', { name: 'Credit' }).locator('xpath=..')).toContainText(`marked first by ${name}`, { timeout: 60_000 });
   await shot('6-findings-credit');
 });
 
