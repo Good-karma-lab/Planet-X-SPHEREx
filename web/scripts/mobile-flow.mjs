@@ -8,6 +8,7 @@
 import { chromium, webkit } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { SIZES } from './mobile-sizes.mjs';
 
 const arg = (k, d) => {
@@ -18,6 +19,8 @@ const URL = arg('url', 'http://localhost:5187');
 const OUT = arg('out', 'test-results/mobile-flow');
 const sizeKey = arg('size', 'p390');
 const ENGINE = arg('engine', 'chromium');
+// --auth <file>: keep the signed-in session there and use it again (the service gives one client only a few sign-in links in a while)
+const AUTH = arg('auth', '');
 // --at ra,dec: the square to take (the globe is opened on it). Without it the square under the middle of the globe is taken,
 // and its field may have to be built from nothing (minutes).
 const AT = arg('at', '');
@@ -29,7 +32,7 @@ mkdirSync(dir, { recursive: true });
 const browser = ENGINE === 'webkit' ? await webkit.launch() : await chromium.launch({ channel: 'chromium', args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 let failed = 0;
 try {
-  const ctx = await browser.newContext({ viewport: { width: S.width, height: S.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, ...(S.userAgent ? { userAgent: S.userAgent } : {}) });
+  const ctx = await browser.newContext({ viewport: { width: S.width, height: S.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, ...(AUTH && existsSync(AUTH) ? { storageState: AUTH } : {}), ...(S.userAgent ? { userAgent: S.userAgent } : {}) });
   await ctx.addInitScript(() => localStorage.setItem('spherex-tour-seen', '1'));
   const page = await ctx.newPage();
   page.setDefaultTimeout(30000);
@@ -88,7 +91,7 @@ try {
       const note = await fn();
       const h = await hscroll();
       if (h > 0) throw new Error(`the page scrolls sideways by ${h} px`);
-      console.log(`PASS ${name}${note ? ` — ${note}` : ''}`);
+      console.log(`${typeof note === 'string' && note.startsWith('not tried') ? 'SKIP' : 'PASS'} ${name}${note ? ` — ${note}` : ''}`);
     } catch (e) {
       failed++;
       console.log(`FAIL ${name} — ${String(e.message ?? e).split('\n')[0].slice(0, 260)}`);
@@ -267,17 +270,20 @@ try {
 
   await step('Cabinet: sign in by the e-mail link, the tabs slide, the open tab is on screen', async () => {
     await page.getByTestId('nav-me').tap();
+    await page.locator('[data-testid="signin"], [data-testid="who-name"]').first().waitFor();
     const signin = page.getByTestId('signin');
     if (await signin.isVisible().catch(() => false)) {
       const mail = page.getByLabel('E-mail address');
       await mail.tap();
-      await mail.fill('mobile-flow@example.org');
+      // a new address each run: the service allows only a few sign-in links per address in a while
+      await mail.fill(`mobile-flow-${Date.now().toString(36)}@example.org`);
       const m = await mail.evaluate((e) => ({ type: e.type, auto: e.autocomplete, font: parseFloat(getComputedStyle(e).fontSize), h: e.getBoundingClientRect().height }));
       if (m.type !== 'email' || m.font < 16 || m.h < 44) throw new Error(`the e-mail field: type ${m.type}, ${m.font} px text, ${m.h} px high`);
       await page.getByRole('button', { name: 'Send me a sign-in link' }).tap();
       await page.getByTestId('dev-link').tap();
     }
     await page.getByTestId('who-name').waitFor();
+    if (AUTH) await ctx.storageState({ path: AUTH });
     for (const t of ['marks', 'notifications']) {
       await page.getByTestId(`tab-${t}`).scrollIntoViewIfNeeded();
       await page.getByTestId(`tab-${t}`).tap();

@@ -2184,3 +2184,20 @@
     padding: 3px 8px;
   }
 }
+
+/* ----- the Cabinet's place in the navigation (the desktop pushes it to the foot of its bar) ----- */
+@media (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
+  /* tablets: at the foot of the rail, as on the desktop */
+  :root .rail .tabs {
+    flex: 1;
+  }
+  :root .rail .tab.tab-end {
+    margin: auto 0 0;
+  }
+}
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px) {
+  /* phones: the last of the five, with no gap of its own */
+  :root .rail .tab.tab-end {
+    margin: 0;
+  }
+}

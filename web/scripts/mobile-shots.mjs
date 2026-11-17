@@ -7,6 +7,7 @@
 import { chromium, webkit } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import { SIZES } from './mobile-sizes.mjs';
 
 const arg = (k, d) => {
@@ -16,6 +17,8 @@ const arg = (k, d) => {
 const URL = arg('url', 'http://localhost:5187');
 const OUT = arg('out', 'test-results/mobile');
 const ENGINE = arg('engine', 'chromium');
+// --auth <file>: keep the signed-in session there and use it again (the service gives one client only a few sign-in links in a while)
+const AUTH = arg('auth', '');
 const ONLY = arg('only', '').split(',').filter(Boolean);
 const GEOM = process.argv.includes('--geom');
 const AB = process.argv.includes('--ab');
@@ -163,6 +166,7 @@ async function run(sizeKey) {
       deviceScaleFactor: S.dsf,
       isMobile: S.mobile,
       hasTouch: S.mobile,
+      ...(AUTH && existsSync(AUTH) ? { storageState: AUTH } : {}),
       userAgent: S.userAgent
         ? S.userAgent
         : S.mobile
@@ -282,17 +286,21 @@ async function run(sizeKey) {
 
     await step('cabinet', async () => {
       await go('#/me');
-      await page.getByTestId('signin').waitFor();
-      await shot('16-cabinet-guest');
-      const mail = page.getByLabel('E-mail address');
-      await tap(mail);
-      await mail.fill(EMAIL);
-      report['16-email-input'] = await mail.evaluate((e) => ({ type: e.type, inputmode: e.inputMode, autocomplete: e.autocomplete, fontSize: getComputedStyle(e).fontSize }));
-      await tap(page.getByRole('button', { name: 'Send me a sign-in link' }));
-      await page.getByTestId('dev-link').waitFor();
-      await shot('17-cabinet-link-sent');
-      await tap(page.getByTestId('dev-link'));
+      await page.locator('[data-testid="signin"], [data-testid="who-name"]').first().waitFor();
+      if (await page.getByTestId('signin').isVisible()) {
+        await page.getByTestId('signin').waitFor();
+        await shot('16-cabinet-guest');
+        const mail = page.getByLabel('E-mail address');
+        await tap(mail);
+        await mail.fill(EMAIL);
+        report['16-email-input'] = await mail.evaluate((e) => ({ type: e.type, inputmode: e.inputMode, autocomplete: e.autocomplete, fontSize: getComputedStyle(e).fontSize }));
+        await tap(page.getByRole('button', { name: 'Send me a sign-in link' }));
+        await page.getByTestId('dev-link').waitFor();
+        await shot('17-cabinet-link-sent');
+        await tap(page.getByTestId('dev-link'));
+      }
       await page.getByTestId('who-name').waitFor();
+      if (AUTH) await ctx.storageState({ path: AUTH });
       const inv = await page.evaluate(async () => {
         const list = await fetch('/api/me/investigations').then((r) => r.json());
         const have = (list.investigations || []).find((x) => x.title === 'Fast mover near Barnard (mobile audit)');
