@@ -58,6 +58,7 @@ from service.routes_findings import make_findings_router
 from service.routes_grid import make_grid_router
 from service.routes_known import make_known_router
 from service.routes_known_field import make_known_field_router
+from service.routes_known_field import prewarm as known_prewarm
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
 from service.routes_search import make_router
@@ -117,6 +118,8 @@ class State:
         self.fpx_known: FpxIdentifier | None = None
         self.loopwatch: LoopWatch | None = None
         self.grid: GridDB | None = None
+        self.loop: asyncio.AbstractEventLoop | None = None
+        self.known_warmed: set[str] = set()
         self.grid_import: asyncio.Task[None] | None = None
 
 
@@ -148,6 +151,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        st.loop = asyncio.get_running_loop()
         st.store = Store(cfg.store_dir)
         st.grid = GridDB(product_db_path(cfg.store_dir))
         if not STANDBY:  # the places searched before the grid existed, once (and the service's own searches, every ten minutes)
@@ -570,6 +574,18 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.index_health = {"files": st.index.count(), **meta}
         return st.index_health
 
+    def warm_known(key: str, ra: float, dec: float, fov: float, meta: dict[str, Any] | None) -> None:
+        """The first time a finished field is asked for, its known objects are asked of every catalogue in the background (the lab's
+        Known objects button then answers from the cache). The lab asks with the address's place, size and the passes' dates: so does
+        this."""
+        if key in st.known_warmed or st.loop is None or not meta or os.environ.get("SKY_KNOWN_PREWARM", "1") != "1":
+            return
+        st.known_warmed.add(key)
+        if len(st.known_warmed) > 5000:
+            st.known_warmed.clear()
+        mjds = [float(q["mjd_mid"]) for q in meta.get("passes") or [] if q.get("mjd_mid") is not None]
+        st.loop.call_soon_threadsafe(known_prewarm, st, ra, dec, fov, mjds)
+
     @app.get(f"{API_PREFIX}/fields")
     def field(
         request: Request, ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90), fov: float = Query(5, gt=0, le=60)
@@ -580,7 +596,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         params = fieldjob.canonical(ra, dec, fov)
         key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
         if st.store.is_complete(key):
-            return {"key": key, "state": "done", "params": params, "meta": fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))}
+            meta = fieldjob.annotate(st.store.read_meta(fieldjob.KIND, key))
+            warm_known(key, ra, dec, fov, meta)
+            return {"key": key, "state": "done", "params": params, "meta": meta}
         if key not in st.scheduler.by_key or st.scheduler.jobs[st.scheduler.by_key[key]].state in ("error", "cancelled"):
             wait = st.new_work.take(client_id(request, st.salt))
             if wait > 0:

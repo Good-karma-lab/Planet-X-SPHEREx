@@ -257,7 +257,7 @@ class KnownField:
         return r.text
 
     # ---- Gaia -------------------------------------------------------------------------------------------------------------------------
-    async def gaia(self, ra: float, dec: float, size_arcmin: float) -> dict[str, Any]:
+    async def gaia(self, ra: float, dec: float, size_arcmin: float, wait_s: float | None = None) -> dict[str, Any]:
         radius = (size_arcmin * 60.0 / 2.0 * math.sqrt(2.0) + GAIA_MARGIN_ARCSEC) / 3600.0
         fast2 = GAIA_FAST_KEEP_MAS**2
 
@@ -296,10 +296,10 @@ class KnownField:
                 raise (err or e) from e
             return keep(rows, "Gaia DR3 on AWS (the archives did not answer)")
 
-        return await self._kept(f"gaia_{ra:.4f}_{dec:.4f}_{size_arcmin:.1f}", fetch)
+        return await self._kept(f"gaia_{ra:.4f}_{dec:.4f}_{size_arcmin:.1f}", fetch, wait_s)
 
     # ---- SIMBAD -----------------------------------------------------------------------------------------------------------------------
-    async def simbad(self, ra: float, dec: float, size_arcmin: float) -> dict[str, Any]:
+    async def simbad(self, ra: float, dec: float, size_arcmin: float, wait_s: float | None = None) -> dict[str, Any]:
         radius = (size_arcmin * 60.0 / 2.0 * math.sqrt(2.0) + SIMBAD_MARGIN_ARCSEC) / 3600.0
         adql = (
             f"SELECT TOP {SIMBAD_MAX_ROWS + 1} b.main_id, b.ra, b.dec, b.pmra, b.pmdec, b.plx_value, b.otype, f.V, f.G, f.J "
@@ -327,7 +327,7 @@ class KnownField:
                     err = e
             raise err or RuntimeError("no SIMBAD mirror")
 
-        return await self._kept(f"simbad_{ra:.4f}_{dec:.4f}_{size_arcmin:.1f}", fetch)
+        return await self._kept(f"simbad_{ra:.4f}_{dec:.4f}_{size_arcmin:.1f}", fetch, wait_s)
 
     # ---- JPL --------------------------------------------------------------------------------------------------------------------------
     async def jpl_at(self, ra: float, dec: float, size_arcmin: float, mjd: float, wait_s: float | None = JPL_WAIT_S) -> dict[str, Any]:
@@ -486,12 +486,18 @@ class KnownField:
         jpl_wait_s: float | None = JPL_WAIT_S,
         match: bool = True,
         match_wait_s: float | None = MATCH_WAIT_S,
+        wait_s: float | None = None,
     ) -> dict[str, Any]:
+        """`wait_s`: answer within about this long with whatever is ready; a catalogue still being asked is `pending` and goes on in the
+        background (the next ask has it). None waits for Gaia and SIMBAD (the checks before submit need them)."""
         epochs = epochs[:MAX_EPOCHS]
+        if wait_s is not None:
+            jpl_wait_s = wait_s if jpl_wait_s is None else min(jpl_wait_s, wait_s)
+            match_wait_s = wait_s if match_wait_s is None else min(match_wait_s, wait_s)
         deep: dict[str, Any] = {}
         gaia, simbad, *rest = await asyncio.gather(
-            self.gaia(ra, dec, size_arcmin),
-            self.simbad(ra, dec, size_arcmin),
+            self.gaia(ra, dec, size_arcmin, wait_s),
+            self.simbad(ra, dec, size_arcmin, wait_s),
             *(self.jpl_at(ra, dec, size_arcmin, epoch_mjd(e), jpl_wait_s) for e in epochs),
             *(self._deep_parts(ra, dec, size_arcmin, match_wait_s) if match else []),
         )
