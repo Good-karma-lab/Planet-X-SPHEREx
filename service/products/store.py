@@ -109,6 +109,26 @@ class Store:
         with self._lock:
             self._db.execute("UPDATE products SET pinned = ? WHERE key = ?", (int(pinned), key))
 
+    def strip(self, kind: str, key: str) -> int:
+        """Remove a finished product's parts but keep its row and its meta, marked `stripped` (its searches' result files keep
+        pointing at it, and the product is made again when someone asks for it). Nothing for a pinned product. Returns bytes freed."""
+        with self._lock:
+            row = self._db.execute("SELECT pinned FROM products WHERE key = ? AND complete = 1", (key,)).fetchone()
+        if row is None or row[0]:
+            return 0
+        meta = self.read_meta(kind, key)
+        if meta is None:
+            return 0
+        freed = 0
+        for f in self.path(kind, key).iterdir():
+            if f.name != "meta.json" and f.is_file():
+                freed += f.stat().st_size
+                f.unlink(missing_ok=True)
+        self.write_meta(kind, key, {**meta, "stripped": True})
+        with self._lock:
+            self._db.execute("UPDATE products SET bytes = ? WHERE key = ?", (len(jsonsafe.dumps(meta)), key))
+        return freed
+
     def purge_stale(self) -> dict[str, int]:
         """Delete every product whose version is not current (whole version folders); returns {kind: products removed}."""
         removed: dict[str, int] = {}

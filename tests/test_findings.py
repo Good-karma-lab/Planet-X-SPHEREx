@@ -241,6 +241,8 @@ def test_film_tracks_all_listed_with_their_own_control(tmp_path: Path) -> None:
     by = {f["data"]["track"]["method"]: f for f in finds}
     assert len(finds) == 2 and by["orbit"]["chance"] == 0.04 and not by["orbit"]["data"]["less_certain"]
     assert by["line"]["data"]["less_certain"] and by["line"]["chance"] == 0.0
+    # the lab opens a film on the film's own field (warm), not on a new field centred on the track
+    assert by["orbit"]["data"]["field_params"] == {"ra": 10.0, "dec": 5.0, "fov": 60.0}
 
 
 def test_slow_motions_are_not_finds(tmp_path: Path) -> None:
@@ -620,3 +622,10 @@ def test_a_find_people_raised_comes_first(tmp_path: Path) -> None:
     known = next(f for f in base if f["status"] == "known")
     out2 = query(db, None, "all", None, 100, 0, sort="promise", raised={known["id"]: "candidate"})["finds"]
     assert "people_raised" not in next(f for f in out2 if f["id"] == known["id"])
+
+
+def test_every_find_says_the_unit_of_its_rate() -> None:
+    from service.findings import LITE_KEYS, rate_unit
+
+    assert rate_unit("film") == "″/h" and rate_unit("mover") == "″/yr" and rate_unit("browndwarf") == "″/yr"
+    assert "rate_unit" in LITE_KEYS

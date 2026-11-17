@@ -347,7 +347,7 @@ function HistoryItem({ h }: { h: HistoryRow }) {
   const pl = placeOf(h.ref);
   const screen = h.ref.replace(/^#\/?/, '').split(/[?/]/)[0] ?? '';
   const [name, ic] = SCREEN_NAME[screen] ?? ['This place', 'compass'];
-  const title = h.title || describeHash(h.ref)?.title || name;
+  const title = describeHash(h.ref)?.title || h.title || name; // said again from the address: older rows kept the raw find id
   const has = pl.findingId || pl.ra != null;
   return <SmallRow testid="history-row" href={h.ref} pic={has ? { ...pl, label: title } : { label: title, icon: ic }} title={title} line={ago(h.at)} />;
 }

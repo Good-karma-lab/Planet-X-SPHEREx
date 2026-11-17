@@ -356,23 +356,27 @@ class PointMeter:
                 cw, _ = await self.wl.get(lay.detector)
             except Exception:  # the calibration map could not be read: such places are left out
                 cw = None
-        for k in np.flatnonzero(ok):
-            x, y = float(px[k]), float(py[k])
-            xi, yi = round(x), round(y)
-            sl = (slice(yi - HALF - y0, yi + HALF + 1 - y0), slice(xi - HALF, xi + HALF + 1))
-            st = img[sl]
-            if st.shape != (2 * HALF + 1, 2 * HALF + 1):
-                continue
-            usable = good[sl]
-            saturated = overflow[sl] | (~np.isfinite(st) & ~bad[sl])
-            fx, fy = x - xi, y - yi
-            psf = spxpsf.stamp(ps, ps.zone_index(x, y), fx, fy, HALF)
-            pt = photometry.fit(st, var, usable, saturated, psf, fx, fy, OMEGA_SR)
-            if not pt.ok or pt.flux_mjy is None or pt.err_mjy is None or cw is None:
-                continue
-            lam = float(cw[yi, xi])
-            if np.isfinite(lam) and lam > 0 and np.isfinite(pt.flux_mjy):
-                out[k] = (lam, pt.flux_mjy, pt.err_mjy)
+
+        def fit_all() -> None:  # the PSF stamps and fits: CPU work, in a thread (on the event loop it held the service for a second)
+            for k in np.flatnonzero(ok):
+                x, y = float(px[k]), float(py[k])
+                xi, yi = round(x), round(y)
+                sl = (slice(yi - HALF - y0, yi + HALF + 1 - y0), slice(xi - HALF, xi + HALF + 1))
+                st = img[sl]
+                if st.shape != (2 * HALF + 1, 2 * HALF + 1):
+                    continue
+                usable = good[sl]
+                saturated = overflow[sl] | (~np.isfinite(st) & ~bad[sl])
+                fx, fy = x - xi, y - yi
+                psf = spxpsf.stamp(ps, ps.zone_index(x, y), fx, fy, HALF)
+                pt = photometry.fit(st, var, usable, saturated, psf, fx, fy, OMEGA_SR)
+                if not pt.ok or pt.flux_mjy is None or pt.err_mjy is None or cw is None:
+                    continue
+                lam = float(cw[yi, xi])
+                if np.isfinite(lam) and lam > 0 and np.isfinite(pt.flux_mjy):
+                    out[k] = (lam, pt.flux_mjy, pt.err_mjy)
+
+        await asyncio.to_thread(fit_all)
         return out
 
 

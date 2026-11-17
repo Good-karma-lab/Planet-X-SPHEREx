@@ -316,7 +316,10 @@ def diff_pass(
 
 
 def unread(meta: dict[str, Any] | None) -> bool:
-    """A kept field none of whose exposures was read (its build failed in the reader): it must be made again."""
+    """A kept field none of whose exposures was read (its build failed in the reader), or one the sweep stripped of its pictures
+    after searching it: it must be made again when someone asks for it."""
+    if meta and meta.get("stripped"):
+        return True
     if not meta or meta.get("passes"):
         return False
     n = int(meta.get("exposures") or 0)

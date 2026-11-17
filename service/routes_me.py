@@ -34,6 +34,7 @@ from service.accounts import score as scoring
 from service.accounts import share as sharing
 from service.accounts import submit as auto
 from service.accounts.db import LimitReachedError, iso
+from service.accounts.score import POINTS as SCORE_POINTS
 from service.ratelimit import Buckets
 
 ID = r"^[A-Za-z0-9_\-:.]{6,64}$"
@@ -366,7 +367,25 @@ def make_me_router(st: Any) -> APIRouter:
         acc.db.claim_task(task_id, u["id"])
         done = acc.db.finish_task(task_id, result, body.mark_ids)
         return {"task": done, "points": points, "achievements": scoring.get(st, acc.db).award(u["id"]),
-                "result": {"id": result, "label": people.label_of(series, result)}}  # fmt: skip
+                "result": {"id": result, "label": people.label_of(series, result)},
+                "agreement": agreement_of(acc, series, task["finding_id"])}  # fmt: skip
+
+    def agreement_of(acc: accounts.Accounts, series: str, finding_id: str) -> dict[str, Any]:
+        """Where the people's answers on this find stand: how many answered (controls apart), how many are needed, and the settled
+        result once there is one. Points for an answer are paid when the find settles (a control object's at once)."""
+        c = acc.db._conn()
+        n = c.execute(
+            "SELECT COUNT(*) FROM acc_series_answers WHERE series=? AND finding_id=? AND control=0", (series, finding_id)
+        ).fetchone()[0]
+        settled = c.execute("SELECT result FROM acc_series_results WHERE series=? AND finding_id=?", (series, finding_id)).fetchone()
+        return {
+            "answers": int(n),
+            "needed": int(people.AGREE_WEIGHT),
+            "max_answers": int(people.MAX_ANSWERS),
+            "settled": settled is not None,
+            "result": None if settled is None or settled[0] is None else {"id": settled[0], "label": people.label_of(series, settled[0])},
+            "points_when_agreed": int(SCORE_POINTS["check"]),
+        }
 
     def other_done(acc: accounts.Accounts, u: dict[str, Any], task_id: str, task: dict[str, Any], body: DoneIn) -> Any:
         kind, ref = task["kind"], str(task.get("finding_id") or "")

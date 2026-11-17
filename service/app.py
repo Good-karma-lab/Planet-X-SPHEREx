@@ -17,11 +17,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__, cpu, exposure_flags, jsonsafe, people_queue, quarters
+from service import __version__, cpu, exposure_flags, jsonsafe, people_queue, quarters, sweep_runner
+from service import grid as grid_mod
 from service.accounts import get as accounts_get
 from service.accounts import register_accounts
 from service.anomalies import Anomalies
@@ -109,6 +111,7 @@ class State:
         self.quarter_stock: dict[str, Any] = {}
         # people's queue for the brown-dwarf search (service/people_queue.py) and its last step for /health
         self.bd_queue: Any = None
+        self.sweep: Any = None  # the background sweep of the grid (service/sweep_runner.py)
         self.bd_queue_last: dict[str, Any] = {}
         self.catalogue: CatalogueContext | None = None
         self.known: Known | None = None
@@ -258,11 +261,19 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.quarters.bind(asyncio.get_running_loop())
         stock_task = None
         bd_task = None
+        sweep_task = None
         flags_task = asyncio.get_running_loop().create_task(exposure_flags_loop())
-        if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None and not STANDBY and quarters.STOCK > 0:
+        background = st.index is not None and not STANDBY
+        if os.environ.get("SKY_WARM", "1") == "1" and background and quarters.STOCK > 0:
             stock_task = asyncio.get_running_loop().create_task(quarter_stock_loop())
             st.bd_queue = people_queue.BDQueue(st)
             bd_task = asyncio.get_running_loop().create_task(bd_queue_loop())
+        # the background sweep of the grid (service/sweep_runner.py): on wherever the service has its exposure index and is not the
+        # standby, unless SKY_SWEEP=0; it gives way to people, the stock, the disk and the archive by itself
+        sweep_env = os.environ.get("SKY_SWEEP", "1")
+        if background and (sweep_env == "force" or (sweep_env == "1" and os.environ.get("SKY_WARM", "1") == "1")):
+            st.sweep = sweep_runner.SweepRunner(st, sweep_searches, sweep_planetx, lambda: sweep_runner.top_find_fields(st))
+            sweep_task = asyncio.get_running_loop().create_task(sweep_loop())
         yield
         if warm_task is not None:
             warm_task.cancel()
@@ -270,6 +281,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             stock_task.cancel()
         if bd_task is not None:
             bd_task.cancel()
+        if sweep_task is not None:
+            sweep_task.cancel()
         flags_task.cancel()
         if st.grid_import is not None:
             st.grid_import.cancel()
@@ -498,6 +511,92 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             while srun.state == "running":
                 await asyncio.sleep(3.0)
 
+    async def sweep_searches(key: str, ce: Any) -> dict[str, Any]:
+        """The searches of a sweep square's 20′ field (what a visitor's field gets, without the spectra): movers, pairs, brown
+        dwarfs, red sources, anomalies, the asteroid search of the middle pass. Returns the ids of its finds (the ids Findings gives
+        them) and what the searches measured, for the grid's bar."""
+        from service.findings import find_id
+        from service.movers import MOVER_SHIFT_ARCSEC, MOVER_SIGMA
+
+        assert st.store is not None
+        store = st.store
+        ids: list[str] = []
+        bar: dict[str, Any] = {"mover_sigma": MOVER_SIGMA, "mover_shift_arcsec": MOVER_SHIFT_ARCSEC}
+        await give_way()
+        if st.movers is not None:
+            mrun = st.movers.get_or_start(key)
+            while mrun.state == "running":
+                await asyncio.sleep(2.0)
+            res = mrun.result or {}
+            tracks = res.get("tracks", [])
+            ids += [find_id("mover", float(t["ra_2025_9"]), float(t["dec_2025_9"])) for t in tracks
+                    if t.get("ra_2025_9") is not None and t.get("check") != "same"]  # fmt: skip
+            bar |= {"known_movers": sum(1 for t in tracks if t.get("check") == "same"), "chance_any": (res.get("chance") or {}).get("any")}
+        await give_way()
+        if st.pairs is not None:
+            prun = st.pairs.get_or_start(key)
+            while prun.state == "running":
+                await asyncio.sleep(2.0)
+        await give_way()
+        if st.dwarfs is not None:
+            drun = st.dwarfs.get_or_start(key)
+            while drun.state == "running":
+                await asyncio.sleep(2.0)
+            cands = (drun.result or {}).get("candidates", [])
+            ids += [find_id("browndwarf", float(x["ra"]), float(x["dec"])) for x in cands if x.get("ra") is not None]
+            bar["browndwarfs"] = drun.state
+        await give_way()
+        with contextlib.suppress(Exception):
+            red = await find_red_async(store, key, cfg.store_dir / "red")
+            bar["red_sources"] = len((red or {}).get("red") or [])
+        await give_way()
+        if st.anomalies is not None:
+            arun = st.anomalies.get(key) or st.anomalies.start(key)
+            while arun.state in ("running", "waiting"):
+                await asyncio.sleep(5.0)
+            bar["anomalies"] = len((arun.result or {}).get("anomalies", []))
+        await give_way()
+        with contextlib.suppress(Exception):  # the asteroid search of the middle pass (its film): a failure leaves the rest
+            await warm_asteroid_search(WarmField("sweep", float(ce.ra), float(ce.dec), float(grid_mod.FIELD_FOV_ARCMIN)), key)
+        return {"find_ids": ids, "bar": bar}
+
+    async def sweep_planetx(ce: Any, key: str) -> dict[str, Any]:
+        """Find Planet X on a swept square of the Planet Nine band: the four searches the lab runs by itself (the middle pass,
+        30-300 au and 250-2000 au, detectors 1-3 and 4), asked of the service's own route as background runs (bg=1: every person's
+        job goes first). Returns the leads each found, for the grid's bar."""
+        assert st.store is not None
+        meta = await asyncio.to_thread(st.store.read_meta, fieldjob.KIND, key) or {}
+        passes = meta.get("passes") or []
+        if not passes:
+            return {}
+        mjd = float(passes[len(passes) // 2]["mjd_mid"])
+        out: dict[str, Any] = {}
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://sweep", timeout=120) as c:
+            for dmin, dmax, det in ((30, 300, "123"), (30, 300, "4"), (250, 2000, "123"), (250, 2000, "4")):
+                q = {"ra": round(ce.ra, 5), "dec": round(ce.dec, 5), "fov": 18, "dmin": dmin, "dmax": dmax, "det": det, "bg": 1, "mjd": mjd}
+                body: dict[str, Any] = {}
+                for _ in range(720):  # at most an hour a search; it waits behind people's jobs
+                    r = await c.get(f"{API_PREFIX}/distant", params=q)
+                    body = r.json() if r.status_code == 200 else {}
+                    if body.get("state") in ("done", "failed", "error"):
+                        break
+                    await asyncio.sleep(5.0)
+                res = body.get("result") or {}
+                out[f"{dmin}-{dmax}au D{det}"] = len(res.get("candidates") or []) if body.get("state") == "done" else body.get("state")
+        return out
+
+    async def sweep_loop() -> None:
+        cpu.JOB.set(_Background())  # every compute call of the sweep gives way to a person's work
+        gdb = st.grid
+        if gdb is not None:  # a square left "searching" by a restart is searched again
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(
+                    lambda: gdb._conn().execute("UPDATE grid_cells SET state='new' WHERE state='searching' AND source='sweep'")
+                )
+        assert st.sweep is not None
+        await st.sweep.loop()
+
     async def warm_asteroid_search(f: WarmField, field_key: str) -> None:
         """The lab's own asteroid search of a field, at the key the lab asks for: the film of the middle pass, its known bodies, then
         the search for unknown movers in it."""
@@ -641,6 +740,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "warm": {**st.warm.snapshot(), "searches": st.warm_searches} if st.warm else None,
             "quarter_stock": {"target": quarters.STOCK, **st.quarter_stock} if st.quarters is not None else None,
             "bd_queue": {"done": len(st.bd_queue.done), **st.bd_queue_last} if st.bd_queue is not None else None,
+            "sweep": st.sweep.snapshot() if st.sweep is not None else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
             "cpu": cpu.stats(),
             "tiles": None if st.hips is None else {"cached": st.hips.count, "fetched": st.hips.fetched, "failed": st.hips.failed},
