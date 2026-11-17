@@ -229,6 +229,20 @@ missing, for example if the key is ever removed from /etc/sky/env.
   Then restart through `./deploy/push.sh` and check:
   - `/api/me` says `auth.email: true`;
   - one real sign-in mail arrives (test 6 in the list).
+**Google sign-in (hotfix release, 17 Nov):**
+- The OAuth web client is in project `spherex-space`: origin `https://www.spherex.space`, redirect
+  `https://www.spherex.space/api/auth/google/callback`.
+- Its JSON is on the release Mac at `~/.config/spherex/google_oauth_client.json` (mode 600, keys `web.client_id`, `web.client_secret`).
+- Copy without printing: the JSON is read on the Mac and both lines go straight into the ssh pipe:
+
+  ```bash
+  python3 -c 'import json,os;w=json.load(open(os.path.expanduser("~/.config/spherex/google_oauth_client.json")))["web"];print("SKY_GOOGLE_CLIENT_ID="+w["client_id"]);print("SKY_GOOGLE_CLIENT_SECRET="+w["client_secret"])' | ssh -i ~/.ssh/oci_spherex_ed25519 ubuntu@158.179.217.127 'sudo tee -a /etc/sky/env >/dev/null'
+  ```
+
+- The "Continue with Google" button stays hidden until the supervisor says the Google app is published: `SKY_GOOGLE_PUBLIC=1` in
+  /etc/sky/env, then a restart.
+- Then run a production test of a real Google sign-in.
+
 - **Alternative:** any SMTP server (`SKY_SMTP_HOST`, `SKY_SMTP_PORT` 587, `SKY_SMTP_USER`, `SKY_SMTP_PASSWORD`, `SKY_MAIL_FROM`).
   Resend wins when both are set.
 
