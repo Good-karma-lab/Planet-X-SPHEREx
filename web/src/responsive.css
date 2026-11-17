@@ -2362,3 +2362,18 @@
     min-width: 0;
   }
 }
+
+/* one pane at 600–999 px (and portrait up to 1279): a task's answers side by side in one row, "Mark something the machine missed"
+   under them, so that the sheet at rest leaves the picture most of the height */
+@media (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
+  :root .lab .taskpanel .tp-tree { flex-direction: row; flex-wrap: wrap; min-height: 0; }
+  :root .lab .taskpanel .tp-tree .tp-ans { flex: 1 1 0; min-width: 130px; min-height: 38px; }
+  :root .lab .taskpanel .tp-tree .tp-ex { width: 30px; height: 30px; }
+  :root .lab .taskpanel .tp-tree .tp-missed { flex: 1 1 100%; min-height: 30px; }
+  :root .lab .taskpanel .tp-done .tp-said { display: none; }
+  /* every step as tall as the next, so the picture never moves: the answers' row keeps its height, a step's extra line (which old
+     surveys play: the status line says it too) waits for the sheet pulled up, and the closing card takes the question's place */
+  :root .lab .taskpanel .tp-tree { min-height: 92px; align-content: flex-start; }
+  :root .lab .panel[data-detent='peek'] .taskpanel .tv-line { display: none; }
+  :root .lab .taskpanel .tp-done { min-height: 164px; }
+}

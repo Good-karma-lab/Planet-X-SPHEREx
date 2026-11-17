@@ -54,8 +54,6 @@ export interface TrackDraw {
   rings: boolean;
   /** a short trail: only the last three places behind the ring, fading (else every earlier place, as small dots) */
   trail?: boolean;
-  /** the selected track's visits flashed at their places at once, 0–1 (just after it was chosen) */
-  flash?: number;
   /** the selected track (-1 or out of range: none) */
   selected: number;
   /** the time of every frame (MJD): the place between two measured visits is interpolated in time; without it, in frame number */
@@ -135,21 +133,6 @@ export function drawTracks(c: CanvasRenderingContext2D, tracks: FilmTrack[], d: 
       c.fill();
     });
     c.globalAlpha = a0;
-    // just chosen: every visit of the track at its place at once, so the line of its motion is seen in one look
-    if (sel === i && d.flash && d.flash > 0) {
-      c.save();
-      c.globalAlpha = d.flash;
-      c.fillStyle = '#ffffff';
-      c.strokeStyle = col;
-      c.lineWidth = 1.4 * dpr;
-      for (const q of tr.pts) {
-        c.beginPath();
-        c.arc(X(q.x), Y(q.y), 4 * dpr, 0, 7);
-        c.fill();
-        c.stroke();
-      }
-      c.restore();
-    }
     c.globalAlpha = sel >= 0 && sel !== i ? 0.35 : 1;
     // the ring: solid on a measured visit, dashed between visits
     const x = X(here.x);

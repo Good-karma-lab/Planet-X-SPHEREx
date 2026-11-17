@@ -669,8 +669,7 @@ export function Lab({ route }: { route: Route }) {
   // the find picked in the Candidates list: it alone is bright on the picture until the picture is clicked
   const [candSel, setCandSel] = useState<string | null>(null);
   const candSelRef = useRef<string | null>(null);
-  // when a track was chosen (its visits flash at their places just after)
-  const trackSelAt = useRef(-1e9);
+
   candSelRef.current = candSel;
   const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
   const dwarfsRef = useRef<DwarfView | null>(null);
@@ -1553,6 +1552,14 @@ export function Lab({ route }: { route: Route }) {
       }
       const fts = ftRef.current;
       if (days && F && fts && st.opts.movers) {
+        // never over the 2′ zoom (a track under it was drawn on the zoom's picture)
+        ctx.save();
+        if (inset) {
+          const keep = new Path2D();
+          keep.rect(0, 0, wcss, hcss);
+          keep.rect(inset.x, inset.y, inset.w, inset.h);
+          ctx.clip(keep, 'evenodd');
+        }
         drawTracks(
           ctx,
           fts,
@@ -1561,13 +1568,12 @@ export function Lab({ route }: { route: Route }) {
             k: shownVisit,
             rings: true,
             trail: true,
-            // a track just chosen: its visits flash at their places for a second
-            flash: Math.max(0, 1 - (performance.now() - trackSelAt.current) / 1100),
             selected: trackSelRef.current,
             mjd: F.meta.frames.map((f) => f.mjd),
           },
           1,
         );
+        ctx.restore();
       }
       const sl = st.opts.marker ? selRef.current : null;
       // where a source with a proper motion stands at the reference epoch: the speed rings are centred there and nowhere else, so they never move
@@ -1941,9 +1947,16 @@ export function Lab({ route }: { route: Route }) {
       if (!wall && box0) {
         const sb = scaleBar(fovArc / 60, box0.w);
         const phone = box0.w < 520 && hcss > box0.w * 0.8 && typeof window !== 'undefined' && window.innerWidth < 600;
-        const x1 = box0.x + box0.w - 14;
-        const x0 = x1 - sb.px;
+        let x1 = box0.x + box0.w - 14;
         const y = phone ? 76 : hcss - 96;
+        // never under Mark and Ruler: where their strip reaches down to the bar, the bar stands left of it
+        const strip = overlay.current?.closest('.vsq')?.querySelector<HTMLElement>('.toolstrip');
+        const ovr = overlay.current?.getBoundingClientRect();
+        if (strip && ovr) {
+          const r = strip.getBoundingClientRect();
+          if (r.width && r.bottom - ovr.top > y - 22 && r.top - ovr.top < y + 6) x1 = Math.min(x1, r.left - ovr.left - 10);
+        }
+        const x0 = x1 - sb.px;
         ctx.save();
         ctx.lineCap = 'square';
         for (const [w, c] of [
@@ -2336,7 +2349,6 @@ export function Lab({ route }: { route: Route }) {
   /** a track found inside a pass: selected as an object (at its middle place in the film's grid) and its passport opened */
   const selectTrack = (i: number) => {
     setTrackSel(i);
-    trackSelAt.current = performance.now();
     const t = ft.state === 'ok' ? ft.tracks[i] : undefined;
     const g = filmData?.meta.grid;
     if (t && g && t.pts.length) {
@@ -4071,7 +4083,8 @@ export function Lab({ route }: { route: Route }) {
         </div>
         <aside class="panel">
           {/* phones and upright tablets: the panel is a bottom sheet pulled up by this grabber (not displayed on a desktop) */}
-          <SheetGrip peek=".taskpanel, .sqlook, :scope:not(:has(.taskpanel, .sqlook)) > .pcol > section:first-child > .psh" under=".lab .tbar" label="Lab panel" />
+          {/* at rest the free lab shows its tab bar, the same on every tab (a tab's own first line made the picture jump) */}
+          <SheetGrip peek=".taskpanel, .sqlook, .ptabs" under=".lab .tbar" label="Lab panel" />
           <div class="ptabs" role="tablist" aria-label="Panel" data-testid="panel-tabs">
             {(
               [
@@ -4571,6 +4584,12 @@ export function Lab({ route }: { route: Route }) {
               <section class="psec" id="sec-marks" data-testid="sec-marks">
                 <div class="psh">Marks</div>
                 {flow.marksList}
+                {/* never an empty heading: without marks of mine and without people's marks on show, it says so */}
+                {!flow.marksHere.length && !(opts.people && flow.peopleSearch.state === 'done') && (
+                  <div class="people-line faint" data-testid="marks-none">
+                    none yet
+                  </div>
+                )}
                 {opts.people && flow.peopleSearch.state === 'done' && (
                   <div class="people-line" data-testid="people-line">
                     {Number(flow.peopleSearch.count ?? 0) > 0 ? `People's marks here: ${flow.peopleSearch.count} places` : "People's marks here: none yet"}
