@@ -29,7 +29,7 @@ N_BANDS = 540  # 180° / 20′
 FIELD_FOV_ARCMIN = 20.0
 STATES = ("new", "queued", "searching", "searched", "failed")
 # people look through a square a quarter at a time (10′ × 10′): the halves of the square in RA and in Dec
-QUARTERS = ("NW", "NE", "SW", "SE")
+QUARTERS = ("NE", "NW", "SE", "SW")  # the picture's reading order: north up, east left
 QUARTER_FOV_ARCMIN = 10.0
 
 # Order of the background sweep. The Planet Nine band: Brown & Batygin (2021, AJ 162, 219) put the most likely sky position of
@@ -308,7 +308,7 @@ class GridDB:
         return out
 
     def quarters_viewed(self, ids: list[str]) -> dict[str, dict[str, int]]:
-        """For each square, how many signed-in people looked through each quarter ({NW: n, ...}; a whole-square view of before the
+        """For each square, how many signed-in people looked through each quarter ({NE: n, ...}; a whole-square view of before the
         quarters counts for all four)."""
         out: dict[str, dict[str, int]] = {}
         for i in range(0, len(ids), 500):
@@ -347,6 +347,13 @@ class GridDB:
             " updated=excluded.updated",
             (cid, state, *row.values(), time.time()),
         )
+
+    def quarters_of(self, cid: str, viewer: str) -> set[str]:
+        """The quarters of a square this viewer has looked through (all four for a whole-square view of before the quarters)."""
+        got: set[str] = set()
+        for r in self._conn().execute("SELECT quarter FROM grid_views WHERE cell_id=? AND viewer=?", (cid, viewer)):
+            got |= set(QUARTERS) if r[0] == "" else {r[0]}
+        return got
 
     def view(self, cid: str, viewer: str, result: str | None, quarter: str) -> int:
         """A signed-in person has looked through one quarter of a square (confirmed by them); returns the square's viewers."""
