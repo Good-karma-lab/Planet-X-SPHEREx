@@ -132,6 +132,8 @@ export interface FlowDrawEnv extends Omit<KnownDrawEnv, 'pointer' | 'match'> {
   wall: boolean;
   /** a task about one object: nothing else may draw the eye (no rings on sources without a match) */
   focus?: boolean;
+  /** a find opened in a wide field: its zoom (where it is drawn, and what part of the picture it shows) gets the rings too */
+  zoom?: { rect: { x: number; y: number; w: number; h: number }; cx: number; cy: number; s: number } | null;
   /** the picture of the pass on show and its noise (null in Days, on a wall, or before it has arrived) */
   picture: { pass: number; n: number; rgb: Uint16Array; bg: number; sigma: number; step: number } | null;
 }
@@ -375,6 +377,37 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // unmatched (the ring would appear and go when the catalogue arrives): the count on the status line says how many so far
     const noRings = env.focus || kn.deepPending.length > 0;
     drawKnown({ ...env, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
+    const z = env.zoom;
+    if (z && !wall) {
+      // the zoom on a find: the same rings and names at the zoom's scale (the sources without a match too: what is near the find)
+      const zm = (u: number, v: number): [number, number] => [(u - z.cx) / z.s + 0.5, (v - z.cy) / z.s + 0.5];
+      const inZoom = (q: { u: number; v: number }) => Math.abs(q.u - z.cx) < z.s / 2 && Math.abs(q.v - z.cy) < z.s / 2;
+      ctx.save();
+      drawKnown(
+        {
+          ...env,
+          rects: [z.rect],
+          uvOf: (ra, dec) => zm(...uv(ra, dec)),
+          fovArc: env.fovArc * z.s,
+          placed: [],
+          pointer: null,
+          hidden: () => false,
+          match: match
+            ? {
+                shown: match.shown,
+                noMatch: kn.deepPending.length
+                  ? []
+                  : match.noMatch.filter(inZoom).map((q) => {
+                      const [u, v] = zm(q.u, q.v);
+                      return { ...q, u, v };
+                    }),
+              }
+            : null,
+        },
+        kn,
+      );
+      ctx.restore();
+    }
     // a track's task: its path through the visits, the direction, a dot per visit (red when tapped as missing), the ring on the visit
     // shown, so that "does one dot step along the arrow?" has the arrow and the dot on the picture
     const tt = taskTrack.pts;

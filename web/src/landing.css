@@ -309,3 +309,36 @@
 .lp-disc-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 14px; color: var(--lp-muted); }
 .lp-disc-text b { color: var(--lp-text); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lp-disc-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lp-accent); }
+
+/* ---- the top bar at every width: one line always; below 1080 px the section links move into a small menu beside "Start searching" ---- */
+.lp-brand, .lp-nav > a, .lp-menu-list a { white-space: nowrap; }
+.lp-brand { flex: none; }
+.lp-nav { flex: none; }
+.lp-menu { position: relative; display: none; }
+.lp-menu-btn { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 999px; border: 1px solid rgba(230, 240, 243, 0.28); background: rgba(5, 10, 16, 0.6); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); color: var(--lp-text); cursor: pointer; }
+.lp-menu-btn:hover, .lp-menu-btn[aria-expanded='true'] { background: rgba(20, 28, 36, 0.75); border-color: rgba(230, 240, 243, 0.45); }
+.lp-menu-list { position: absolute; top: calc(100% + 10px); right: 0; min-width: 210px; display: flex; flex-direction: column; padding: 6px; border-radius: 14px; border: 1px solid var(--lp-line); background: rgba(9, 18, 26, 0.92); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5); }
+.lp-menu-list a { display: flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 9px; color: var(--lp-muted); font-size: 15px; }
+.lp-menu-list a:hover, .lp-menu-list a:focus-visible { color: var(--lp-text); background: rgba(95, 227, 214, 0.08); }
+@media (max-width: 1079.98px) {
+  .lp-top .lp-wrap { gap: 12px; }
+  .lp-nav { gap: 10px; }
+  /* :root raises these above the touch-window rule for the bar's links (responsive.css) */
+  :root .lp-nav > a:not(.lp-btn) { display: none; }
+  .lp-menu { display: block; }
+}
+@media (max-width: 420px) {
+  .lp-top .lp-wrap { gap: 8px; }
+  .lp-brand { gap: 8px; font-size: 16px; }
+  .lp-mark { width: 26px; height: 26px; }
+  .lp-nav { gap: 6px; }
+  .lp-nav .lp-btn-sm { padding: 0 13px; font-size: 14px; }
+}
+@media (max-width: 379.98px) {
+  .lp-brand { gap: 7px; font-size: 15px; }
+  .lp-mark { width: 24px; height: 24px; }
+  .lp-nav .lp-btn-sm { padding: 0 12px; font-size: 13.5px; }
+}
+/* the bar (and its menu) above the page's sections, which sit on the same layer */
+.lp > header.lp-top { z-index: 4; }
+:root .lp-nav .lp-menu-list a { justify-content: flex-start; min-width: 0; }

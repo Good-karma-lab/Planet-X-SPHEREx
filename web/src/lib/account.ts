@@ -273,6 +273,17 @@ export function recordHistory(kind: HistoryKind, ref: string = location.hash, ti
 }
 
 /** What a hash of the app is, for the history: null for a place not worth remembering (a bare screen). */
+/** A find's kind in words, for History and other titles (the id's kind prefix is not shown). */
+const FIND_NAME: Record<string, string> = {
+  mover: 'Moving object',
+  browndwarf: 'Brown dwarf candidate',
+  red: 'Red source',
+  anomaly: 'Spectral anomaly',
+  pair: 'Pair changing',
+  film: 'Time-lapse track',
+  peak: 'Planet X peak',
+};
+
 export function describeHash(hash: string): { kind: HistoryKind; title: string; key: string } | null {
   const [name = '', query = ''] = hash.replace(/^#\/?/, '').split('?');
   const p = new URLSearchParams(query);
@@ -286,7 +297,9 @@ export function describeHash(hash: string): { kind: HistoryKind; title: string; 
   }
   if (name === 'findings' && p.get('lead')) {
     const id = p.get('lead')!;
-    return { kind: 'finding', title: `Finding ${id}`, key: `finding:${id}` };
+    const [k = '', h = ''] = id.includes(':') ? id.split(':', 2) : ['', id];
+    const what = FIND_NAME[k] ?? 'A find';
+    return { kind: 'finding', title: h ? `${what} · ${h.slice(0, 6)}` : what, key: `finding:${id}` };
   }
   if ((name === 'explore' || name === 'globe') && p.get('cell')) {
     const id = p.get('cell')!;

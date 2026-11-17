@@ -32,6 +32,7 @@ from typing import Any
 
 from service import grid
 from service.jobs.scheduler import Priority
+from service.products.store import product_key
 from service.workers import fieldjob
 
 DISK_PAUSE_PCT = 80.0
@@ -39,6 +40,8 @@ ARCHIVE_BACKOFF_S = 600.0
 IDLE_S = 30.0  # how often a paused sweep looks again
 KEEP_DAYS = 7.0  # a square with a mover or brown-dwarf find keeps its 20′ field this long (people open it), then it is stripped
 SQUARE_LIMIT_S = 3600.0  # a square that takes longer is marked failed and left
+LAB_STOCK = 24  # the top finds (the Findings page's first screens) whose lab fields are kept built
+LAB_STOCK_EVERY_S = 600.0  # how often the list of the top finds' lab fields is read again
 RETRY_BURST = 20  # failed archive reads during one square (retried or not) that make the sweep wait; a few retries are normal
 
 
@@ -50,14 +53,54 @@ def disk_used_pct(path: Any) -> float:
     return 100.0 * u.used / u.total if u.total else 0.0
 
 
+def top_find_fields(st: Any) -> list[dict[str, Any]]:
+    """The lab fields of the top LAB_STOCK finds, in the Findings page's order, that are not built yet: a film opens on its own field,
+    every other find at 10′ on the object (as the page's "Open in the lab" does). A database read: call it in a thread."""
+    from service.findings import query
+    from service.routes_findings import flow_of
+
+    if getattr(st, "findings", None) is None or getattr(st, "index", None) is None or getattr(st, "store", None) is None:
+        return []
+    body = query(
+        st.findings.db,
+        None,
+        "all",
+        None,
+        LAB_STOCK,
+        0,
+        flow=flow_of(st),
+        sort="promise",
+        kinds=("mover", "browndwarf", "peak", "film", "pair"),
+    )
+    out: list[dict[str, Any]] = []
+    for f in body.get("finds") or []:
+        fp = (f.get("data") or {}).get("field_params") if f.get("kind") == "film" else None
+        if f.get("kind") == "film" and not fp:
+            continue
+        ra, dec, fov = (fp["ra"], fp["dec"], fp["fov"]) if fp else (f["ra"], f["dec"], 10.0)
+        params = fieldjob.canonical(float(ra), float(dec), float(fov))
+        key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
+        if st.store.is_complete(key) and not fieldjob.unread(st.store.read_meta(fieldjob.KIND, key)):
+            continue
+        if params not in out:
+            out.append(params)
+    return out
+
+
 class SweepRunner:
     def __init__(
         self,
         st: Any,
         searches: Callable[[str, grid.Cell], Awaitable[dict[str, Any]]],
         planetx: Callable[[grid.Cell, str], Awaitable[dict[str, Any]]] | None = None,
+        lab_fields: Callable[[], list[dict[str, Any]]] | None = None,
     ) -> None:
         self.st = st
+        # the lab fields of the top finds not built yet (the app's; a database read): one is built before each new square, so a
+        # find opened from Findings opens at once (explorer M1: a cold field took ~100 s)
+        self.lab_fields = lab_fields
+        self._lab_todo: list[dict[str, Any]] = []
+        self._lab_read = 0.0
         self.searches = searches
         self.planetx = planetx  # Find Planet X on the squares of the Planet Nine band, the same day as their other searches
         self._last_strip = 0.0
@@ -124,6 +167,29 @@ class SweepRunner:
             if row is None or row.get("state") not in ("searched", "failed", "searching"):
                 return ce
         return None
+
+    # ---- the top finds' lab fields ------------------------------------------------------------------------------------------------
+    def next_lab_field(self) -> dict[str, Any] | None:
+        """The next top find's lab field not built yet (a database read: call it in a thread)."""
+        if self.lab_fields is None:
+            return None
+        if not self._lab_todo and time.time() - self._lab_read > LAB_STOCK_EVERY_S:
+            self._lab_read = time.time()
+            try:
+                self._lab_todo = list(self.lab_fields())
+            except Exception:
+                self._lab_todo = []
+        return self._lab_todo.pop(0) if self._lab_todo else None
+
+    async def lab_field(self, params: dict[str, Any]) -> dict[str, Any]:
+        t0 = time.time()
+        self._say("warming a find's field", field=params)
+        key, job = self.st.submit_field(params, Priority.P2)
+        while job is not None and job.state not in ("done", "error", "cancelled") and time.time() - t0 < SQUARE_LIMIT_S:
+            await asyncio.sleep(5.0)
+        done = self.st.store.is_complete(key)
+        self.status["lab_fields_today"] = int(self.status.get("lab_fields_today") or 0) + int(done)
+        return {"state": "warmed" if done else "failed", "field": params, "seconds": round(time.time() - t0)}
 
     # ---- one square -------------------------------------------------------------------------------------------------------------
     async def square(self, ce: grid.Cell) -> dict[str, Any]:
@@ -208,6 +274,17 @@ class SweepRunner:
             if why is not None:
                 self._say("paused", why=why)
                 await asyncio.sleep(IDLE_S)
+                continue
+            lab = await asyncio.to_thread(self.next_lab_field)
+            if lab is not None:  # a top find's lab field first: people open those
+                before = self._s3_now()
+                try:
+                    got = await self.lab_field(lab)
+                except Exception as e:
+                    got = {"state": "failed", "error": f"{type(e).__name__}: {e}"[:200]}
+                if self._archive_troubled(before):
+                    self._backoff_until = time.time() + ARCHIVE_BACKOFF_S
+                self._say("idle", last_result=got)
                 continue
             ce = await asyncio.to_thread(self.next_square)
             if ce is None:

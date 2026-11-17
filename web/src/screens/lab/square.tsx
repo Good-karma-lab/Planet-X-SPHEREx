@@ -316,7 +316,7 @@ export function HereSquare({ ra, dec, open }: { ra: number; dec: number; open: (
   return (
     <section class="psec here-square" data-testid="here-square">
       <div class="psh">This place</div>
-      <div class="hs-line">
+      <div class="hs-line" title="The sky is cut into squares of 20′; a quarter is one 10′ part of a square, the size of this picture">
         square {here.cell.id} · {here.quarter} quarter · {mine.size} of 4 looked through
       </div>
       {done ? (

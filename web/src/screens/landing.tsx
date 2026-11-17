@@ -36,6 +36,63 @@ function jump(id: string) {
   };
 }
 
+/** The sections the top bar links to (id of the section, its name). */
+const SECTIONS: [string, string][] = [
+  ['how', 'How it works'],
+  ['finds', 'What moves'],
+  ['team', 'Team'],
+  ['challenge', 'The challenge'],
+];
+
+/** The section links in a small menu, for a window too narrow for them in the bar (landing.css shows the button below 1080 px). */
+function NavMenu() {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: Event) => !box.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('keydown', esc);
+    return () => {
+      document.removeEventListener('pointerdown', away);
+      document.removeEventListener('keydown', esc);
+    };
+  }, [open]);
+  const go = (id: string) => (e: Event) => {
+    setOpen(false);
+    jump(id)(e);
+  };
+  return (
+    <div class="lp-menu" ref={box}>
+      <button
+        type="button"
+        class="lp-menu-btn"
+        aria-label="Sections"
+        aria-expanded={open}
+        aria-controls="lp-menu-list"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+          {open ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
+        </svg>
+      </button>
+      {open && (
+        <div class="lp-menu-list" id="lp-menu-list">
+          {SECTIONS.map(([id, label]) => (
+            <a key={id} href={`#${id}`} onClick={go(id)}>
+              {label}
+            </a>
+          ))}
+          <a href={REPO} target="_blank" rel="noopener noreferrer" onClick={() => setOpen(false)}>
+            Source code
+          </a>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ the sky behind the page */
 
 const VS = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
@@ -380,24 +437,18 @@ export function Landing() {
             SPHEREx Space <small>by Good Karma Lab</small>
           </a>
           <nav class="lp-nav" aria-label="Sections">
-            <a href="#how" onClick={jump('how')}>
-              How it works
-            </a>
-            <a href="#finds" onClick={jump('finds')}>
-              What moves
-            </a>
-            <a href="#team" onClick={jump('team')}>
-              Team
-            </a>
-            <a href="#challenge" onClick={jump('challenge')}>
-              The challenge
-            </a>
+            {SECTIONS.map(([id, label]) => (
+              <a key={id} href={`#${id}`} onClick={jump(id)}>
+                {label}
+              </a>
+            ))}
             <a href={REPO} target="_blank" rel="noopener noreferrer" data-testid="landing-source">
               Source code
             </a>
             <a class="lp-btn lp-btn-primary lp-btn-sm" href={START} data-testid="landing-open">
               Start searching
             </a>
+            <NavMenu />
           </nav>
         </div>
       </header>

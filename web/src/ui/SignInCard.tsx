@@ -33,6 +33,9 @@ export function SignInCard({ next, reason, error: given, onClose }: SignInProps)
   const [sent, setSent] = useState<{ to: string; minutes: number; dev?: string } | null>(null);
   const [resent, setResent] = useState(false);
   const field = useRef<HTMLInputElement>(null);
+  const card = useRef<HTMLDivElement>(null);
+  // the card's height while the form was on it: "Check your inbox" keeps it, so the card does not jump when the link is sent
+  const [held, setHeld] = useState(0);
   useEffect(() => {
     if (sent) return;
     // now and once the popup has settled: the click that opened it may still move the focus (a tap on a phone)
@@ -44,6 +47,7 @@ export function SignInCard({ next, reason, error: given, onClose }: SignInProps)
     if (!EMAIL.test(to)) return setError('Enter an e-mail address like name@example.org');
     setBusy(true);
     setError('');
+    if (!sent) setHeld(card.current?.offsetHeight ?? 0);
     try {
       const r = await signInByEmail(to, next);
       setSent({ to, minutes: r.minutes, dev: r.dev_link });
@@ -56,7 +60,11 @@ export function SignInCard({ next, reason, error: given, onClose }: SignInProps)
     }
   };
   return (
-    <div class="sx-card" role={onClose ? 'dialog' : undefined} aria-modal={onClose ? 'true' : undefined} aria-labelledby="sx-title" data-testid="signin">
+    <div
+      ref={card}
+      class="sx-card"
+      style={sent && held ? { minHeight: `${held}px` } : undefined}
+      role={onClose ? 'dialog' : undefined} aria-modal={onClose ? 'true' : undefined} aria-labelledby="sx-title" data-testid="signin">
       {onClose && (
         <button class="sx-close" aria-label="Close" onClick={onClose} data-testid="signin-later">
           ×
@@ -112,7 +120,11 @@ export function SignInCard({ next, reason, error: given, onClose }: SignInProps)
               noValidate
               onSubmit={(e) => {
                 e.preventDefault();
-                if (!busy) void send(email.trim());
+                if (busy) return;
+                // what the field shows is what is sent (a browser's autofill may not tell the form), and it stays shown while the link goes out
+                const to = (field.current?.value ?? email).trim();
+                setEmail(to);
+                void send(to);
               }}
             >
               <label class="sx-label" for="sx-email">
@@ -131,6 +143,7 @@ export function SignInCard({ next, reason, error: given, onClose }: SignInProps)
                 aria-invalid={error ? 'true' : undefined}
                 aria-describedby={error ? 'sx-email-err' : undefined}
                 value={email}
+                readOnly={busy}
                 onInput={(e) => (setEmail((e.target as HTMLInputElement).value), error && setError(''))}
                 data-testid="signin-email"
               />
@@ -139,7 +152,8 @@ export function SignInCard({ next, reason, error: given, onClose }: SignInProps)
                   {error}
                 </p>
               )}
-              <button class="sx-submit" type="submit" disabled={busy} data-testid="signin-send">
+              <button class={`sx-submit${busy ? ' busy' : ''}`} type="submit" disabled={busy} aria-busy={busy} data-testid="signin-send">
+                {busy && <span class="sx-spin" aria-hidden="true" />}
                 {busy ? 'Sending…' : 'Continue with e-mail'}
               </button>
             </form>

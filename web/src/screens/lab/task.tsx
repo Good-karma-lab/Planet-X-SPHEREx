@@ -309,6 +309,15 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   const [path, setPath] = useState<string[]>([]);
   const [missing, setMissing] = useState<number[]>([]);
   const [taps, setTaps] = useState<Tap[]>([]);
+  // a closed task: what was answered and what it led to, until the person opens the next one (never a silent jump)
+  const [done, setDone] = useState<{
+    said: [string, string][];
+    got: string[];
+    points: number | null;
+    pending: boolean;
+    next: Record<string, string> | null;
+    none: string;
+  } | null>(null);
   // how the task was looked at: seconds with the lab visible, and which passes were on show
   const look = useRef({ seconds: 0, passes: new Set<number>() });
   if (a.pass != null) look.current.passes.add(a.pass);
@@ -327,6 +336,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     setPath([]);
     setMissing([]);
     setTaps([]);
+    setDone(null);
     if (!task) return;
     let stop = false;
     const ref = task.kind === 'cell' ? task.cell_id : task.kind === 'bad_picture' ? (a.params['exposure'] ?? null) : task.finding_id;
@@ -392,6 +402,9 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     // a square task's answer counts the look only for a signed-in person after 60 s and every pass (lab/square.tsx); a guest's
     // answer counts nothing, and the next task opens all the same
     if (task.kind === 'cell' && a.square?.canCount) await a.square.confirm(result === 'marks' ? 'marks' : 'nothing');
+    let gotWords: string[] = [];
+    let points: number | null = null;
+    let pending = false;
     if (id) {
       const r = await post(`/api/me/tasks/${encodeURIComponent(id)}/done`, {
         // a series: the path of answers and the pictures tapped as missing; the service says what it leads to
@@ -409,6 +422,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         achievements?: { name?: string }[];
         result?: { label?: string };
         class?: { label?: string };
+        agreement?: { answers?: number; needed?: number; settled?: boolean; points_when_agreed?: number };
       };
       const items = [
         ...((got.result?.label ?? got.class?.label) ? [`Your answers say: ${got.result?.label ?? got.class?.label}`] : []),
@@ -416,16 +430,42 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         ...(typeof got.points === 'number' && got.points > 0 ? [`+${got.points} points`] : []),
       ];
       if (items.length) award = { text: items.join(' · '), until: Date.now() + 12000 };
+      // a check is scored when enough people agree (service/routes_me.py agreement_of): say where it stands, not a bare 0 points
+      const ag = got.agreement;
       if (!r.ok && r.status !== 401) {
         setBusy(false);
         return setLine(r.status === 422 ? 'The service did not take the answer' : 'The service did not answer');
       }
+      gotWords = [
+        ...((got.result?.label ?? got.class?.label) ? [`Your answers say: ${got.result?.label ?? got.class?.label}`] : []),
+        ...(got.achievements ?? []).map((x) => `Achievement: ${x.name ?? ''}`),
+        ...(ag && !ag.settled && !(got.points ?? 0)
+          ? [`Points come when people agree: ${ag.answers ?? 1} of ${ag.needed ?? 3} answers so far, +${ag.points_when_agreed ?? 10} if yours matches`]
+          : []),
+      ];
+      points = typeof got.points === 'number' ? got.points : null;
+      pending = !!ag && !ag.settled && !points;
     }
+    // what was said, in the words of the answers
+    const said: [string, string][] =
+      answers && steps
+        ? answers.map((x, k) => {
+            const st = stepAt(steps, answers.slice(0, k));
+            return [st?.question ?? '', st?.answers.find((q) => q.id === x)?.label ?? x];
+          })
+        : [[body?.question ?? T.ask, body?.answers?.find((q) => q.id === result)?.label ?? T.answers.find(([q]) => q === result)?.[1] ?? result]];
     const next = await takeTask(task.kind as Takeable);
     setBusy(false);
+    setLine('');
     const to = next && next !== 'failed' && next.id !== id ? taskParams(next) : null;
-    if (to) a.open(to);
-    else setLine(next === 'failed' ? 'Tasks did not answer' : 'No more tasks of this kind');
+    setDone({
+      said,
+      got: gotWords,
+      points,
+      pending,
+      next: to,
+      none: next === 'failed' ? 'Tasks did not answer' : 'No more tasks of this kind',
+    });
   }
   const n = a.marksHere.length;
   const T = TASKS[task.kind];
@@ -450,11 +490,59 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           </label>
         )}
       </div>
-      <div class="tp-ask" data-testid="task-ask">
-        {step ? step.question : (body?.question ?? T.ask)}
-      </div>
-      {a.view?.(step ? step.show : null, body)}
-      {step?.tap && (
+      {done && (
+        <div class="tp-done" data-testid="task-done">
+          <div class="tp-ask">Recorded</div>
+          <ol class="tp-said">
+            {done.said.map(([q, x], k) => (
+              <li key={k}>
+                <span title={q}>{q}</span>
+                <b>{x}</b>
+              </li>
+            ))}
+          </ol>
+          {done.got.map((g) => (
+            <div key={g} class="tp-got">
+              {g}
+            </div>
+          ))}
+          <div class="mono-s tp-points">
+            {done.pending ? 'points when people agree' : done.points == null ? 'not counted' : done.points > 0 ? `+${done.points} points` : '0 points'}{' '}
+            ·{' '}
+            <a class="cb-link" href="#/me">
+              Cabinet
+            </a>
+          </div>
+          {done.next ? (
+            <button class="btn sm primary tp-next" onClick={() => a.open(done.next!)} data-testid="task-next">
+              Next: {T.title.toLowerCase()}
+            </button>
+          ) : (
+            <div class="mono-s">{done.none}</div>
+          )}
+        </div>
+      )}
+      {!done && (
+        <div class="tp-ask" data-testid="task-ask">
+          {step ? step.question : (body?.question ?? T.ask)}
+        </div>
+      )}
+      {!done && task.kind === 'cell' && (
+        // what the rings of the picture are, at a glance: known (a catalogue has it), no catalogue match, a mark of mine
+        <div class="tp-key mono-s" data-testid="task-key">
+          <span title="A catalogue (Gaia, SIMBAD, JPL) has an object here">
+            <i class="k-known" /> known
+          </span>
+          <span title="A source in this picture that no catalogue has at this place">
+            <i class="k-lone" /> no catalogue match
+          </span>
+          <span title="Your mark: Mark something the machine missed, then click the picture">
+            <i class="k-mark" /> your mark
+          </span>
+        </div>
+      )}
+      {!done && a.view?.(step ? step.show : null, body)}
+      {!done && step?.tap && (
         <div class="tp-pics" data-testid="task-pictures">
           {pictures.map((q) => (
             <button
@@ -473,12 +561,12 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           {!pictures.length && <span class="tp-none">The pictures of this track are not given</span>}
         </div>
       )}
-      {task.kind === 'cell' && a.square && !a.square.canCount && a.square.why !== 'Sign in to count your look' && (
+      {!done && task.kind === 'cell' && a.square && !a.square.canCount && a.square.why !== 'Sign in to count your look' && (
         <i class="lookbar" aria-hidden="true" title="Your look: a minute with every pass shown">
           <b style={{ width: `${Math.round((a.square.frac ?? 0) * 100)}%` }} />
         </i>
       )}
-      <div class="tp-line" data-testid="task-line">
+      <div class="tp-line" data-testid="task-line" style={done ? { display: 'none' } : undefined}>
         {step && (
           <button
             class="tp-back"
@@ -500,7 +588,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
                 ? `${taps.length} tapped`
                 : '')}
       </div>
-      {step ? (
+      {done ? null : step ? (
         <div
           class="tp-tree"
           data-testid="task-tree"
@@ -546,6 +634,13 @@ export function useLabTask(a: TaskArgs): LabTaskView {
                 // a tap task's "Done" needs a tap
                 (tapping && (result === 'seen' || result === 'done') && !taps.length)
               }
+              title={
+                task.kind === 'cell' && result === 'marks' && n === 0
+                  ? 'No marks yet: Mark something the machine missed, then click the picture'
+                  : task.kind === 'cell' && a.square && !a.square.canCount
+                    ? a.square.why
+                    : undefined
+              }
               onClick={() => void close(result)}
               data-testid={`task-${result}`}
             >
@@ -554,8 +649,13 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           ))}
         </div>
       )}
-      {!step && (
-        <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
+      {!step && !done && (
+        <button
+          class="mini tp-missed"
+          onClick={a.markMissed}
+          title="Put a mark on something that moves or looks odd and has no ring"
+          data-testid="task-missed"
+        >
           Mark something the machine missed
         </button>
       )}
