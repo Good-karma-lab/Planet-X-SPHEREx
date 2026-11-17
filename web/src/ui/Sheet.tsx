@@ -102,7 +102,11 @@ export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string
     let from: { y: number; h: number; t: number; lastY: number; lastT: number; v: number; moved: boolean } | null = null;
     const down = (e: PointerEvent) => {
       if (e.button !== 0) return;
-      g.setPointerCapture(e.pointerId);
+      try {
+        g.setPointerCapture(e.pointerId);
+      } catch {
+        /* a pointer that cannot be captured still moves the sheet while it stays on the grabber */
+      }
       from = { y: e.clientY, h: live.current.heights[live.current.detent], t: e.timeStamp, lastY: e.clientY, lastT: e.timeStamp, v: 0, moved: false };
     };
     const move = (e: PointerEvent) => {
