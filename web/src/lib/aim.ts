@@ -10,7 +10,7 @@ type Listener = (a: AimState, source: string) => void;
 
 const listeners = new Set<Listener>();
 // Barnard's Star, where SIMBAD places it (J2000)
-let current: AimState = { ra: 269.452077, dec: 4.693365, fov: 5 };
+let current: AimState = { ra: 269.452077, dec: 4.693365, fov: 10 }; // the lab's field: people look 10′ at a time
 
 export const aim = {
   get: (): AimState => current,

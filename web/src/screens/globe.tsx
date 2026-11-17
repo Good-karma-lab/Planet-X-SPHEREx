@@ -13,7 +13,7 @@ import {
   KIND_WORD,
   barText,
   cellBox,
-  cellCentre,
+  firstQuarter,
   quarterAt,
   quarterBox,
   coverageNow,
@@ -178,7 +178,7 @@ const DEMOS: { n: string; what: string; ra: number; dec: number; fov: number; fi
   { n: '3I/ATLAS', what: 'interstellar comet · time-lapse of 14 Dec 2025', ra: 166.8274, dec: 5.2787, fov: 60, film: 61023.6 },
   {
     n: 'Asteroids near the ecliptic',
-    what: 'film of the 14–20 Dec 2025 pass · known bodies ringed',
+    what: 'time-lapse of the 14–20 Dec 2025 pass · known bodies ringed',
     ra: 169.8917,
     dec: 4.3514,
     fov: 60,
@@ -489,7 +489,12 @@ export function Globe() {
     setCell(null);
     if (!cellId) return;
     let on = true;
-    void loadCell(cellId).then((c) => on && setCell(c));
+    void loadCell(cellId).then((c) => {
+      if (!on) return;
+      setCell(c);
+      // the aim frame on the quarter the lab will open (the first one this person has not looked through)
+      if (c?.open?.quarter) aim.set({ ra: c.open.ra, dec: c.open.dec, fov: 10 }, 'map');
+    });
     return () => {
       on = false;
     };
@@ -1062,12 +1067,13 @@ export function Globe() {
         } else {
           const s = unproject(px, py);
           if (s && live.current.covOn) {
-            // the Coverage layer is on: the click opens the card of the square under it, and the aim frame takes the square (20′)
+            // the Coverage layer is on: the click opens the card of the square under it, and the aim frame takes its first quarter
+            // (10′: people look a quarter at a time); the card then says which quarter this person has not looked through
             const id = pickCell(coverageNow(), s[0], s[1], cellPx());
-            const p = parseId(id)!;
             setSel(null);
             setCellId(id);
-            aim.set({ ...cellCentre(p.band, p.col), fov: 20 }, 'map');
+            const q = firstQuarter(id, { ra: s[0], dec: s[1] });
+            aim.set({ ra: q.ra, dec: q.dec, fov: 10 }, 'map');
           } else if (s) {
             setSel(null);
             aim.set({ ra: s[0], dec: s[1] }, 'map');
@@ -1276,7 +1282,7 @@ export function Globe() {
   const select = (o: Obj, zoom = false) => {
     setSel(o);
     const [ra, dec] = epochPlace(o);
-    aim.set({ ra, dec }, 'catalog');
+    aim.set({ ra, dec, fov: 10 }, 'catalog'); // an object of the catalogue opens at 10′, the size people look at
     if (zoom && proj === 'moll') {
       // a map has no zoom: the globe shows the object
       live.current.proj = 'globe';
@@ -1305,8 +1311,8 @@ export function Globe() {
   /** The lab at the object's place during the SPHEREx survey (where it is in the pictures the lab shows). */
   const openObj = (o: Obj) => {
     const [ra, dec] = epochPlace(o);
-    aim.set({ ra, dec }, 'catalog');
-    openLab(ra, dec, a.fov);
+    aim.set({ ra, dec, fov: 10 }, 'catalog');
+    openLab(ra, dec, 10);
   };
   /** Show area: the field under the aim frame. When the aim is on a catalogue object (its J2000 place, its place on the backdrop,
    *  or its survey-epoch place) the field opens where the object is during the survey, as "Open in lab" does. */
@@ -1527,6 +1533,7 @@ export function Globe() {
                           fov: String(cell.open.fov),
                           task: 'cell',
                           cell: cell.id,
+                          ...(cell.open.quarter ? { quarter: cell.open.quarter } : {}),
                         },
                       });
                     }}
@@ -1797,7 +1804,7 @@ export function Globe() {
                     onClick={() => {
                       location.hash = formatHash({
                         screen: 'lab',
-                        params: { ra: named.ra.toFixed(5), dec: named.dec.toFixed(5), fov: '5' },
+                        params: { ra: named.ra.toFixed(5), dec: named.dec.toFixed(5), fov: '10' },
                       });
                     }}
                   >

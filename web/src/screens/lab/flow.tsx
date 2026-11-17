@@ -2,15 +2,40 @@
 // calls; it returns what the lab draws on its overlay, what it puts over the picture and in the Controls panel, and its status line.
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { addMark, allMarks, fieldKey, MARK_LEVELS, marksSyncNote, onMarks, removeMark, updateMark, type Mark, type MarkLevel } from '../../lib/marks';
-import { catalogueAt, drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, matchKnown, type KnownDrawEnv, type KnownMatch, type KnownObject, type KnownState } from './known';
+import {
+  addMark,
+  allMarks,
+  fieldKey,
+  MARK_LEVELS,
+  marksSyncNote,
+  onMarks,
+  removeMark,
+  updateMark,
+  type Mark,
+  type MarkLevel,
+} from '../../lib/marks';
+import {
+  catalogueAt,
+  drawKnown,
+  followKnown,
+  KNOWN_OFF,
+  knownStatus,
+  knownUrl,
+  matchKnown,
+  type KnownDrawEnv,
+  type KnownMatch,
+  type KnownObject,
+  type KnownState,
+} from './known';
 import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, useLabTask } from './task';
 import { AnomalyView, FindingClip, MoverView, RedView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
-import { placeAt } from './known';
+import { KNOWN_SOURCES, placeAt } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
+import { clearDo, pendingDo, useSignIn } from './signin';
+import { useRetry, type SearchInfo } from './progress';
 import './flow.css';
 
 export interface FlowGrid {
@@ -49,7 +74,13 @@ export interface FlowArgs {
   /** the passes are being blinked (Months scale, Blink mode): the two pass pickers of the playback bar act */
   blinkable: boolean;
   /** the field is a grid square or one of its quarters (lab/square.tsx): its outline, its status words, the count for a task */
-  square: { outline: [number, number][] | null; line: string; canCount: boolean; why: string; confirm: (result?: 'nothing' | 'marks') => Promise<boolean> } | null;
+  square: {
+    outline: [number, number][] | null;
+    line: string;
+    canCount: boolean;
+    why: string;
+    confirm: (result?: 'nothing' | 'marks') => Promise<boolean>;
+  } | null;
   /** the lab's selected object (in a task: the object in question) */
   sel: Source | null;
   /** the mover tracks the search of the field found: places per pass */
@@ -128,6 +159,8 @@ export interface LabFlow {
   focus: boolean;
   /** Known objects is on and a catalogue is still being asked */
   knownBusy: boolean;
+  /** the Known objects lookup as the switch and the row say it: asking, how many, or who did not answer and the next try */
+  knownSearch: SearchInfo;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -135,6 +168,17 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const knownRef = useRef(known);
   knownRef.current = known;
   const epochsKey = a.epochs.map((e) => e.toFixed(4)).join(',');
+  // a lookup that did not answer (or a catalogue that did not) is asked again by itself (lab/progress.tsx)
+  const [knownTry, setKnownTry] = useState(0);
+  // a catalogue that did not answer, Gaia, SIMBAD, JPL or a deeper one, once nothing is being asked any more: asked again on the retry
+  // schedule with its countdown (the lookup itself never asks a silent one again)
+  const knownSilent =
+    known.state === 'failed' ||
+    (known.state === 'ok' &&
+      !known.pending.length &&
+      !known.deepPending.length &&
+      (KNOWN_SOURCES.some((c) => !known.answered[c]) || known.deepSilent.length > 0));
+  const knownRetry = useRetry(knownSilent, () => setKnownTry((x) => x + 1), `${a.ra},${a.dec},${a.fov}`);
   useEffect(() => {
     if (!a.epochs.length || !Number.isFinite(a.ra) || !Number.isFinite(a.dec)) {
       setKnown(KNOWN_OFF);
@@ -142,7 +186,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
     // asked when the field opens, switch on or off: the card of a selected object reads the same answer as the picture's rings
     return followKnown(knownUrl(a.ra, a.dec, a.fov, a.epochs), setKnown);
-  }, [a.ra, a.dec, a.fov, epochsKey]);
+  }, [a.ra, a.dec, a.fov, epochsKey, knownTry]);
 
   const [, tick] = useState(0);
   useEffect(() => onMarks(() => tick((x) => x + 1)), []);
@@ -198,7 +242,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       let peaks = peaksRef.current.get(pk);
       if (!peaks) peaksRef.current.set(pk, (peaks = findPeaks(pic.rgb, pic.n, pic.bg, pic.sigma)));
       const mk = `${pk}:${kn.objects.length}:${kn.deep.length}:${env.year.toFixed(4)}`;
-      if (matchRef.current?.key !== mk) matchRef.current = { key: mk, m: matchKnown(kn.objects, peaks, pic.n, pic.step, uv, env.year, kn.deep) };
+      if (matchRef.current?.key !== mk)
+        matchRef.current = { key: mk, m: matchKnown(kn.objects, peaks, pic.n, pic.step, uv, env.year, kn.deep) };
       match = matchRef.current.m;
     }
     const ck = match ? `${match.shown.size}:${match.noMatch.length}` : '';
@@ -350,6 +395,17 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       return true;
     }
     if (tool === 'mark') {
+      // a guest's first mark: the popup offers to keep the marks under a name (the mark is put all the same, in this browser)
+      if (!si.signedIn) {
+        try {
+          if (!sessionStorage.getItem('spherex.marks.asked')) {
+            sessionStorage.setItem('spherex.marks.asked', '1');
+            si.ask('marks', '');
+          }
+        } catch {
+          /* no store: no popup */
+        }
+      }
       const [ra, dec] = skyOf(x / a.side, y / a.side);
       const n = marksRef.current.length + 1;
       const m = addMark({
@@ -411,8 +467,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   }, [a.ra, a.dec, a.fov, open, a.sel?.ra, a.sel?.dec]);
   // the chip is the investigation of the field it was added from: another field has none until something is added there
   useEffect(() => setInv(null), [a.ra, a.dec, a.fov]);
+  const si = useSignIn();
   const openInvList = async () => {
     if (invList) return setInvList(null);
+    if (!si.signedIn) return si.ask('add', 'add'); // a guest: the popup; the link comes back with the list open
     setInvLine('');
     try {
       const r = await fetch('/api/me/investigations');
@@ -448,11 +506,22 @@ export function useLabFlow(a: FlowArgs): LabFlow {
               rate: Number(rl.rate.toFixed(3)),
               pa: Number(rl.pa.toFixed(1)),
               shift: Number(rl.shift.toFixed(2)),
-              ...(cat?.object?.pm_total != null ? { catalogue_rate: Number((cat.object.pm_total / 1000).toFixed(3)), object: cat.object.simbad || cat.object.name } : {}),
+              ...(cat?.object?.pm_total != null
+                ? { catalogue_rate: Number((cat.object.pm_total / 1000).toFixed(3)), object: cat.object.simbad || cat.object.name }
+                : {}),
             },
           }
         : {}),
-      ...(cat?.object ? { catalogue: { source: cat.object.source, name: cat.object.simbad || cat.object.name || cat.object.id, sep: Number((cat.sep ?? 0).toFixed(2)), ...(cat.object.type ? { type: cat.object.type } : {}) } } : {}),
+      ...(cat?.object
+        ? {
+            catalogue: {
+              source: cat.object.source,
+              name: cat.object.simbad || cat.object.name || cat.object.id,
+              sep: Number((cat.sep ?? 0).toFixed(2)),
+              ...(cat.object.type ? { type: cat.object.type } : {}),
+            },
+          }
+        : {}),
       ref: location.hash.slice(0, 600),
       thumb: a.thumb(),
       ...(target === 'new' ? { title } : {}),
@@ -575,7 +644,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         <MoverView
           blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'all passes' : 'waits for the search of the field'}
           ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
-          search={track ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes` : 'no track at this place yet'}
+          search={
+            track
+              ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes`
+              : 'no track at this place yet'
+          }
         />
       );
     if (task?.kind === 'finding') return <FindingClip id={task.finding_id} />;
@@ -649,7 +722,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   // Blink of two chosen passes: two compact pass pickers in the playback bar, next to Blink (they keep their place when Blink is
   // not the mode, so nothing in the bar moves)
   const blinkPick = (
-    <span class="blinkpick" style={{ visibility: a.blinkable && idx.length > 1 ? 'visible' : 'hidden' }} role="group" aria-label="Blink of two passes">
+    <span
+      class="blinkpick"
+      style={{ visibility: a.blinkable && idx.length > 1 ? 'visible' : 'hidden' }}
+      role="group"
+      aria-label="Blink of two passes"
+    >
       {([0, 1] as const).map((k) => (
         <select
           key={k}
@@ -677,7 +755,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
 
   // ---- the card of what is selected (Object tab): a mark, or the lab's selected source. Note, "Add to investigation" and
   // "Check and submit" exist only here: with nothing selected there is nothing to note or submit.
-  const matchAt = (ra: number, dec: number): string => (a.epochNow != null ? catalogueAt(known, ra, dec, a.epochNow).word : 'asking the catalogues…');
+  const matchAt = (ra: number, dec: number): string =>
+    a.epochNow != null ? catalogueAt(known, ra, dec, a.epochNow).word : 'asking the catalogues…';
   // where the selected source is on the date shown: a moving one carries its J2000 place and its motion
   const selNow = (): { ra: number; dec: number } | null => {
     if (!a.sel) return null;
@@ -718,6 +797,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       </div>
     </>
   );
+  // after a sign-in link that came from "Add to investigation": the list opens once the selection is back
+  useEffect(() => {
+    if (pendingDo(a.params) === 'add' && si.signedIn && (a.sel || open)) {
+      clearDo();
+      void openInvList();
+    }
+  }, [si.signedIn, !!a.sel, open]);
   const card =
     cur || a.sel || marksHere.length ? (
       <div class="objcard" data-testid="flow-card">
@@ -748,7 +834,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
             </div>
             <div class="seg sm oc-levels" role="group" aria-label="Level">
               {MARK_LEVELS.map((l) => (
-                <button key={l} class={cur.level === l ? 'on' : ''} aria-pressed={cur.level === l} onClick={() => updateMark(cur.id, { level: l })} data-testid={`mark-level-${l}`}>
+                <button
+                  key={l}
+                  class={cur.level === l ? 'on' : ''}
+                  aria-pressed={cur.level === l}
+                  onClick={() => updateMark(cur.id, { level: l })}
+                  data-testid={`mark-level-${l}`}
+                >
                   <i style={{ background: LEVEL_COLOUR[l] }} />
                   {LEVEL_WORD[l]}
                 </button>
@@ -808,7 +900,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
 
   // the investigation of the field is seen on the picture's status line: a chip that opens it in the Cabinet
   const chip = inv ? (
-    <a class="invchip" href={`#/me?tab=investigations&inv=${encodeURIComponent(inv.id)}`} title={`Open “${inv.title}” in the Cabinet`} data-testid="inv-chip">
+    <a
+      class="invchip"
+      href={`#/me?tab=investigations&inv=${encodeURIComponent(inv.id)}`}
+      title={`Open “${inv.title}” in the Cabinet`}
+      data-testid="inv-chip"
+    >
       Investigation · {inv.marks} mark{inv.marks === 1 ? '' : 's'}
     </a>
   ) : null;
@@ -821,7 +918,15 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       : ruler.length === 2
         ? `Ruler: ${rulerWord(rulerOf(ruler[0]!, ruler[1]!))}`
         : '';
-  const status = [a.square?.line ?? '', a.known ? knownStatus(known, counts) : '', tool === 'mark' ? 'Mark: click a place' : '', rulerStatus, marksSyncNote()].filter(Boolean).join(' · ');
+  const status = [
+    a.square?.line ?? '',
+    a.known ? knownStatus(known, counts, knownSilent ? knownRetry.nextIn : null) : '',
+    tool === 'mark' ? 'Mark: click a place' : '',
+    rulerStatus,
+    marksSyncNote(),
+  ]
+    .filter(Boolean)
+    .join(' · ');
   // what a closed task earned stays on the line for a few seconds
   const [awardNow, setAwardNow] = useState('');
   useEffect(() => {
@@ -838,7 +943,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     status: [status, awardNow].filter(Boolean).join(' · '),
     floats: strip,
     blinkPick,
-    card,
+    card: (
+      <>
+        {card}
+        {si.popup}
+      </>
+    ),
     chip,
     markOpen: !!cur,
     catalogueAt: (ra, dec, year) => catalogueAt(knownRef.current, ra, dec, year).object,
@@ -850,6 +960,20 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     blink,
     taskPanel,
     focus: !!task && focusKind(task.kind) && !others,
-    knownBusy: a.known && (known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0))),
+    knownSearch: {
+      name: 'known objects',
+      state:
+        known.state === 'off'
+          ? 'idle'
+          : known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0))
+            ? 'running'
+            : knownSilent
+              ? 'failed'
+              : 'done',
+      count: known.state === 'ok' ? String(known.objects.length) : undefined,
+      retry: knownSilent ? knownRetry : null,
+    },
+    knownBusy:
+      a.known && (known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0))),
   };
 }

@@ -45,7 +45,8 @@ export interface CellCard {
   bar: Record<string, unknown> | null;
   searched_at: string | null;
   field_key: string | null;
-  open: { ra: number; dec: number; fov: number };
+  /** where the lab opens the square: its first quarter not looked through by this person, at 10′ */
+  open: { ra: number; dec: number; fov: number; quarter?: string | null };
 }
 
 /** Python's round(): halves go to the even number (the service counts the columns with it). */
@@ -214,7 +215,7 @@ export async function loadCell(id: string): Promise<CellCard | null> {
       bar: (j['bar'] as Record<string, unknown> | null) ?? null,
       searched_at: (j['searched_at'] as string | null) ?? null,
       field_key: (j['field_key'] as string | null) ?? null,
-      open: (j['open'] as CellCard['open']) ?? { ra: c.ra, dec: c.dec, fov: 20 },
+      open: (j['open'] as CellCard['open']) ?? firstQuarter(id, c),
     };
   }
   const k = data?.cells.get(id);
@@ -229,8 +230,16 @@ export async function loadCell(id: string): Promise<CellCard | null> {
     bar: null,
     searched_at: null,
     field_key: null,
-    open: { ra: c.ra, dec: c.dec, fov: 20 },
+    open: firstQuarter(id, c),
   };
+}
+
+/** The first quarter of a square (NE), at 10′: where the lab opens it before the service has said which quarter is next. */
+export function firstQuarter(id: string, c: { ra: number; dec: number }): CellCard['open'] {
+  const p = parseId(id);
+  if (!p) return { ra: c.ra, dec: c.dec, fov: 10, quarter: null };
+  const b = quarterBox(p.band, p.col, 'NE');
+  return { ra: ((((b.ra0 + b.ra1) / 2) % 360) + 360) % 360, dec: (b.dec0 + b.dec1) / 2, fov: 10, quarter: 'NE' };
 }
 
 /** The bar of a square's search in plain words (the measured depth of the search), or '' when the service kept none. */

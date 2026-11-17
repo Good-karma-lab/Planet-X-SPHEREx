@@ -82,7 +82,7 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         out["finds"] = json.loads((row or {}).get("find_ids") or "[]") or finds_in(st, ce)
         out["n_finds"] = int((row or {}).get("finds") or 0)
         out["field_key"] = (row or {}).get("field_key") or field_key_of(st, ce)
-        out["open"] = {"ra": round(ce.ra, 5), "dec": round(ce.dec, 5), "fov": grid.FIELD_FOV_ARCMIN}
+        out["open"] = {"ra": round(ce.ra, 5), "dec": round(ce.dec, 5), "fov": grid.QUARTER_FOV_ARCMIN, "quarter": None}
         out["error"] = (row or {}).get("error")
         seen = D().quarters_viewed([cid]).get(cid, dict.fromkeys(grid.QUARTERS, 0))
         u = user_of(request)
@@ -99,6 +99,9 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
             }
             for q, qc in ((q, grid.quarter(ce, q)) for q in grid.QUARTERS)
         ]
+        # the lab opens a square at its first quarter this person has not looked through, at 10′ (people look a quarter at a time)
+        first = next((q for q in out["quarters"] if not q["mine"]), out["quarters"][0])
+        out["open"] = {"ra": round(first["ra"], 5), "dec": round(first["dec"], 5), "fov": grid.QUARTER_FOV_ARCMIN, "quarter": first["id"]}
         return out
 
     @router.get("/api/grid/cell/{cid}")

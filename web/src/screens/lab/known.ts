@@ -58,7 +58,15 @@ export interface KnownState {
 const DEEP: Record<string, string> = { gaia: 'Gaia G 21', catwise: 'CatWISE', allwise: 'AllWISE', twomass: '2MASS' };
 const DEEP_NAMES = Object.values(DEEP);
 
-export const KNOWN_OFF: KnownState = { state: 'off', objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [], deep: [], deepSilent: [...DEEP_NAMES], deepPending: [] };
+export const KNOWN_OFF: KnownState = {
+  state: 'off',
+  objects: [],
+  answered: { gaia: false, simbad: false, jpl: false },
+  pending: [],
+  deep: [],
+  deepSilent: [...DEEP_NAMES],
+  deepPending: [],
+};
 
 /** the service takes at most this many dates in one question */
 export const MAX_EPOCHS = 40;
@@ -71,7 +79,10 @@ export function knownUrl(ra: number, dec: number, sizeArcmin: number, mjds: numb
     ra: ra.toFixed(5),
     dec: dec.toFixed(5),
     size_arcmin: String(sizeArcmin),
-    epochs: mjds.slice(0, MAX_EPOCHS).map((e) => e.toFixed(4)).join(','),
+    epochs: mjds
+      .slice(0, MAX_EPOCHS)
+      .map((e) => e.toFixed(4))
+      .join(','),
     compact: '1', // objects without a name carry only what a ring needs
   });
   return `/api/known?${q.toString()}`;
@@ -133,11 +144,20 @@ export function parseKnown(raw: unknown): KnownReply {
 }
 
 /** The service answers within about a second with what it has; while a catalogue is still being asked the lab asks again
- *  this far apart, and what has arrived is drawn at once. After this long without everything it stops and says who is silent. */
+ *  this far apart, and what has arrived is drawn at once. After this long a catalogue still being asked counts as one that did not
+ *  answer: the lookup ends, and the lab's retry (15 s, 30 s, 60 s, then every 2 min, with its countdown and "try now") asks again. */
 const ASK_AGAIN_MS = 1500;
-const GIVE_UP_MS = 180000;
-const ASK_SILENT_MS = 15000;
-const ASK_SILENT_TIMES = 4;
+export const GIVE_UP_MS = 60000;
+
+/** A reply whose catalogues still being asked are now counted as not answering (the lookup has waited long enough). */
+export function giveUp(reply: KnownReply): KnownReply {
+  return {
+    ...reply,
+    pending: [],
+    deepPending: [],
+    deepSilent: Array.from(new Set([...reply.deepSilent, ...reply.deepPending])),
+  };
+}
 
 /** Ask the service for the known objects of a field; `on` gets every state: loading, then each partial reply as catalogues arrive. */
 export function followKnown(url: string, on: (s: KnownState) => void): () => void {
@@ -147,8 +167,7 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
   void (async () => {
     const t0 = Date.now();
     let had = false;
-    let again = 0;
-    for (let fails = 0; !stop; ) {
+    for (let fails = 0; !stop;) {
       let reply: KnownReply | null = null;
       try {
         const r = await fetch(url, { signal: ctl.signal });
@@ -162,16 +181,11 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
         had = true;
         fails = 0;
         const waiting = reply.pending.length > 0 || reply.deepPending.length > 0;
-        on({ state: 'ok', ...reply, ...(late && waiting ? { pending: [], deepPending: [], gaveUp: true } : {}) });
-        if (late) return;
-        if (!waiting) {
-          // nothing is being asked any more. A catalogue that did not answer (its server was away for a moment) is asked again a
-          // few times, further apart, before the status settles on "did not answer"
-          const silent = KNOWN_SOURCES.some((c) => !reply!.answered[c]) || reply.deepSilent.length > 0;
-          if (!silent || ++again > ASK_SILENT_TIMES) return;
-          await new Promise((res) => setTimeout(res, ASK_SILENT_MS));
-          continue;
-        }
+        // settled: every catalogue answered or said it could not. Those that could not are asked again by the lab's retry
+        // (flow.tsx, useRetry), which shows when; this lookup ends here
+        if (!waiting) return on({ state: 'ok', ...reply });
+        if (late) return on({ state: 'ok', ...giveUp(reply), gaveUp: true });
+        on({ state: 'ok', ...reply });
       } else if (++fails >= 3 || late) {
         if (!had) on({ ...KNOWN_OFF, state: 'failed' });
         return;
@@ -186,7 +200,7 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
 }
 
 /** The status line of the overlay: the counts on the picture so far, who is still being asked, and who did not answer. */
-export function knownStatus(k: KnownState, counts?: { known: number; noMatch: number } | null): string {
+export function knownStatus(k: KnownState, counts?: { known: number; noMatch: number } | null, nextIn?: number | null): string {
   if (k.state === 'off') return '';
   if (k.state === 'loading') return 'asking Gaia, SIMBAD and JPL…';
   const parts: string[] = [];
@@ -200,7 +214,7 @@ export function knownStatus(k: KnownState, counts?: { known: number; noMatch: nu
     ...KNOWN_SOURCES.filter((c) => (!ok || !k.answered[c]) && !(ok && k.pending.includes(c))).map((c) => SOURCE_WORD[c]),
     ...(ok ? k.deepSilent.filter((c) => !k.deepPending.includes(c)) : []),
   ];
-  if (silent.length) parts.push(`${silent.join(', ')} did not answer`);
+  if (silent.length) parts.push(`${silent.join(', ')} did not answer${nextIn != null ? ` · next try in ${nextIn} s` : ''}`);
   return parts.join(' · ');
 }
 
@@ -319,7 +333,8 @@ export function matchKnown(
     const hit = cat.near(p.x, p.y, r);
     if (hit) shown.add(hit.o.id);
     // a bump in a diffuse glow is the halo of a bright star (which may lie outside the frame), not a source without a match
-    else if (p.snr >= NOMATCH_SIGMA && !p.glow && !dcat.near(p.x, p.y, rd) && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r)) noMatch.push({ u: p.x / n, v: p.y / n, snr: p.snr });
+    else if (p.snr >= NOMATCH_SIGMA && !p.glow && !dcat.near(p.x, p.y, rd) && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r))
+      noMatch.push({ u: p.x / n, v: p.y / n, snr: p.snr });
   }
   return { shown, noMatch };
 }
@@ -356,7 +371,13 @@ function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, fi
 export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null {
   if (k.state !== 'ok' || !k.objects.length) return null;
   const { ctx, rects, wall, uvOf, year, fovArc, placed, pointer, hidden, match } = env;
-  const objs = k.objects.length > MAX_RINGS ? k.objects.slice().sort((a, b) => (a.mag ?? 99) - (b.mag ?? 99)).slice(0, MAX_RINGS) : k.objects;
+  const objs =
+    k.objects.length > MAX_RINGS
+      ? k.objects
+          .slice()
+          .sort((a, b) => (a.mag ?? 99) - (b.mag ?? 99))
+          .slice(0, MAX_RINGS)
+      : k.objects;
   let hover: { o: KnownObject; x: number; y: number; r: number; box: (typeof rects)[number]; d: number } | null = null;
   const named: { o: KnownObject; x: number; y: number; r: number; box: (typeof rects)[number] }[] = [];
   ctx.save();
@@ -486,7 +507,12 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
 /** What the catalogues of `/api/known` have at a place on a date: the nearest drawn object within 8″, said as the picture's
  *  ring says it ("known: Gaia DR3 4472832130942575872 · SIMBAD Barnard's star · 10.39″/yr"), else a deeper-catalogue entry
  *  within 3″, else that no catalogue has it (or which ones have not answered yet). One source of truth with the picture. */
-export function catalogueAt(k: KnownState, ra: number, dec: number, year: number): { word: string; object: KnownObject | null; sep: number | null } {
+export function catalogueAt(
+  k: KnownState,
+  ra: number,
+  dec: number,
+  year: number,
+): { word: string; object: KnownObject | null; sep: number | null } {
   if (k.state === 'off' || k.state === 'loading') return { word: 'asking the catalogues…', object: null, sep: null };
   if (k.state === 'failed') return { word: 'the catalogues did not answer', object: null, sep: null };
   const cosd = Math.cos((dec * Math.PI) / 180);
@@ -509,10 +535,18 @@ export function catalogueAt(k: KnownState, ra: number, dec: number, year: number
     const p = placeAt(o, year);
     if (p && away(p) < DEEP_ARCSEC) {
       const cat = o.id.split(':')[0];
-      return { word: `known: in ${cat === 'gaia' ? 'Gaia DR3 (fainter than G 19)' : cat === 'catwise' ? 'CatWISE2020' : cat === 'allwise' ? 'AllWISE' : '2MASS'}`, object: null, sep: null };
+      return {
+        word: `known: in ${cat === 'gaia' ? 'Gaia DR3 (fainter than G 19)' : cat === 'catwise' ? 'CatWISE2020' : cat === 'allwise' ? 'AllWISE' : '2MASS'}`,
+        object: null,
+        sep: null,
+      };
     }
   }
   const silent = [...KNOWN_SOURCES.filter((c) => !k.answered[c]).map((c) => SOURCE_WORD[c]), ...k.deepSilent];
   const asked = k.pending.length > 0 || k.deepPending.length > 0;
-  return { word: silent.length ? `no match so far · ${silent.join(', ')} ${asked ? 'being asked' : 'did not answer'}` : 'in no catalogue', object: null, sep: null };
+  return {
+    word: silent.length ? `no match so far · ${silent.join(', ')} ${asked ? 'being asked' : 'did not answer'}` : 'in no catalogue',
+    object: null,
+    sep: null,
+  };
 }

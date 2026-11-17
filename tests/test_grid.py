@@ -77,7 +77,7 @@ def test_db_and_routes(tmp_path: Path) -> None:
     cells = c.get("/api/grid/cells", params={"ra": 50, "dec": 8, "radius": 0.5}).json()["cells"]
     assert cells[0]["id"] == cid and cells[0]["state"] == "searched" and len(cells[0]["corners"]) == 4
     one = c.get(f"/api/grid/cell/{cid}").json()
-    assert one["field_key"] == "k" and one["bar"]["partial"] is True and one["open"]["fov"] == 20
+    assert one["field_key"] == "k" and one["bar"]["partial"] is True and one["open"]["fov"] == 10 and one["open"]["quarter"] == "NE"
     assert [q["id"] for q in one["quarters"]] == ["NE", "NW", "SE", "SW"] and one["quarters"][0]["fov"] == 10
     nw = one["quarters"][1]
     assert nw["dec"] > one["dec"] and nw["ra"] < one["ra"]  # north is larger Dec, west smaller RA
