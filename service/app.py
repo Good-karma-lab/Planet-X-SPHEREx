@@ -77,6 +77,8 @@ SERVICE_NAME = "spherex-sky"
 API_PREFIX = "/api/v1"
 # a second instance that takes over while the main one restarts (deploy/push.sh): it builds nothing new
 STANDBY = os.environ.get("SKY_STANDBY", "0") == "1"
+HEAVY_SLOTS = 6  # field builds at once (17 Nov 2026: 3 before; the builds wait on the archive more than they compute)
+MEMORY_BUDGET_MB = 24000  # of the VM's 48 GB
 # a local run on a snapshot of the production finds (tools/findings_snapshot.py): Findings only reads its database and the Find Planet X
 # identifier does not ask JPL, while every field and search is built as usual (a standby would build nothing new)
 FINDINGS_READONLY = os.environ.get("SKY_FINDINGS_READONLY", "0") == "1"
@@ -196,8 +198,11 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
             st.executor = new_pool()
             cpu.configure(st.executor, workers, new_pool)  # a pool a dying worker broke is replaced by a new one
-            # two heavy jobs on 4 cores, more on a larger machine (each field build itself spreads over the pool)
-            st.scheduler = Scheduler(executor=st.executor, slots={"light": 8, "heavy": max(2, workers // 4)})
+            # heavy jobs at once: a field build mostly waits on the archive, so more run side by side than there are cores for them
+            # (6 by default, SKY_HEAVY_SLOTS overrides); their memory together stays within SKY_MEMORY_BUDGET_MB (24 GB by default)
+            heavy = int(os.environ.get("SKY_HEAVY_SLOTS", str(HEAVY_SLOTS)))
+            budget = int(os.environ.get("SKY_MEMORY_BUDGET_MB", str(MEMORY_BUDGET_MB)))
+            st.scheduler = Scheduler(executor=st.executor, slots={"light": 8, "heavy": max(2, heavy)}, memory_budget_mb=budget)
         else:
             st.scheduler = scheduler
         st.scheduler.start()
