@@ -263,6 +263,9 @@ def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any]) ->
         out["result"] == {"id": "partial", "label": "A dot steps along the arrow, not in every picture"}
         and out["task"]["result"] == "partial"
     )
+    # the answer is recorded and says where the agreement stands: points come when people agree
+    ag = out["agreement"]
+    assert ag["answers"] == 1 and ag["needed"] == 3 and ag["settled"] is False and ag["points_when_agreed"] == 10 and out["points"] == 0
     for name in ("bob", "cid"):
         c = user(name)
         tt = c.get("/api/tasks/next", params={"kind": "moves", "finding_id": "film:2"}).json()["task"]
