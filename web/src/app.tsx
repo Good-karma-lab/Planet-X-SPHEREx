@@ -10,6 +10,7 @@ import { icon } from './ui/icons';
 import { Cabinet } from './screens/cabinet/Cabinet';
 import { FindingPage } from './screens/findings/page';
 import { Leaders } from './screens/cabinet/Score';
+import { ProfilePage, StoryPage } from './screens/cabinet/Share'; // flow-accounts: #/u/<slug> and #/findings/<id>/story
 import { useUnread } from './lib/account';
 import { MoreTab } from './ui/BottomNav';
 
@@ -100,6 +101,8 @@ export function App() {
           <PlanetXPage />
         ) : route.screen === 'me' ? (
           <Cabinet route={route} />
+        ) : route.screen === 'findings' && (route.params['id'] ?? '').endsWith('/story') ? (
+          <StoryPage id={(route.params['id'] ?? '').slice(0, -'/story'.length)} />
         ) : route.screen === 'findings' && route.params['id'] ? (
           <div class="screen">
             <div class="ipage">
@@ -108,6 +111,8 @@ export function App() {
           </div>
         ) : route.screen === 'leaders' ? (
           <Leaders route={route} />
+        ) : route.screen === 'u' ? (
+          <ProfilePage slug={route.params['id'] ?? ''} badge={route.params['badge']} />
         ) : (
           <InfoPage screen={route.screen} health={health} />
         )}
