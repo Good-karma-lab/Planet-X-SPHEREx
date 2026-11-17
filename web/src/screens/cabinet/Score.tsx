@@ -91,7 +91,7 @@ export const badgeSrc = (id: string) => `/badges/${id}.webp`;
 
 /** A badge: the achievement's picture, lit when earned and greyed when not (the same file); the ring around it is cut into the
  *  tiers of its family and shows which tier this is; a hidden one that is not earned shows the "?" picture. */
-export function Badge({ a, tiers = 1, size = 56 }: { a: Pick<Achievement, 'id' | 'name' | 'tier' | 'hidden'> & Partial<Achievement>; tiers?: number; size?: number }) {
+export function Badge({ a, tiers = 1, size = 56 }: { a: Pick<Achievement, 'id' | 'name' | 'tier'> & Partial<Achievement>; tiers?: number; size?: number }) {
   const earned = a.earned_at !== null && a.earned_at !== undefined;
   const secret = a.name === '?';
   const r = 26.5;
@@ -118,6 +118,10 @@ export function Badge({ a, tiers = 1, size = 56 }: { a: Pick<Achievement, 'id' |
 export function ScorePanel() {
   const [s, setS] = useState<MyScore | null>(null);
   const [error, setError] = useState('');
+  const [slug, setSlug] = useState('');
+  useEffect(() => {
+    void api<{ slug: string }>('/api/me/profile').then((p) => setSlug(p.slug), () => undefined);
+  }, []);
   useEffect(() => {
     let stop = false;
     api<MyScore>('/api/me/score').then(
@@ -161,6 +165,11 @@ export function ScorePanel() {
         <a class="btn sm" href="#/leaders" data-testid="to-leaders">
           Leaderboard
         </a>
+        {slug && (
+          <a class="btn sm" href={`#/u/${slug}`} data-testid="to-profile">
+            My public page
+          </a>
+        )}
       </div>
       {s.waiting > 0 && (
         <p class="cb-status" data-testid="score-waiting">
@@ -180,10 +189,10 @@ export function ScorePanel() {
               <div class="cb-famname">{fam}</div>
               <div class="cb-badges">
                 {list.map((a) => (
-                  <span key={a.id} class={`cb-ach ${a.earned_at ? 'on' : a === next ? 'next' : ''}`} data-testid={`ach-${a.id}`} data-earned={a.earned_at ? '1' : '0'} title={`${a.line}${a.earned_at ? ` · earned ${when(a.earned_at)}` : ''}${a.rarity != null ? ` · ${a.rarity}% of searchers have it` : ''}`}>
+                  <a key={a.id} href={a.earned_at && slug ? `#/u/${slug}?badge=${a.id}` : undefined} class={`cb-ach ${a.earned_at ? 'on' : a === next ? 'next' : ''}`} data-testid={`ach-${a.id}`} data-earned={a.earned_at ? '1' : '0'} title={`${a.line}${a.earned_at ? ' · open to share it' : ''}${a.earned_at ? ` · earned ${when(a.earned_at)}` : ''}${a.rarity != null ? ` · ${a.rarity}% of searchers have it` : ''}`}>
                     <Badge a={a} tiers={list.length} />
                     <span class="cb-achname">{a.name}</span>
-                  </span>
+                  </a>
                 ))}
               </div>
               {next && (

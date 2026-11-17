@@ -1,7 +1,7 @@
 // Hash routes hold the whole state of a screen so that any view opens by a link (docs/plan/04-ui.md, 4.1 rule 9).
 
 // 'me' is the cabinet, 'leaders' the public leaderboard (#/leaders)
-export const SCREENS = ['landing', 'globe', 'lab', 'planetx', 'findings', 'index', 'method', 'about', 'me', 'leaders'] as const;
+export const SCREENS = ['landing', 'globe', 'lab', 'planetx', 'findings', 'index', 'method', 'about', 'me', 'leaders', 'u'] as const; // 'u' is a public profile, #/u/<slug> (flow-accounts)
 export type Screen = (typeof SCREENS)[number];
 
 export interface Route {
@@ -24,7 +24,7 @@ export function parseHash(hash: string): Route {
   const screen = (SCREENS as readonly string[]).includes(name) ? (name as Screen) : DEFAULT_SCREEN;
   const params: Record<string, string> = {};
   for (const [k, v] of new URLSearchParams(query)) params[k] = v;
-  if (screen === 'findings' && slash >= 0 && path.length > slash + 1) {
+  if ((screen === 'findings' || screen === 'u') && slash >= 0 && path.length > slash + 1) {
     try {
       params['id'] = decodeURIComponent(path.slice(slash + 1));
     } catch {

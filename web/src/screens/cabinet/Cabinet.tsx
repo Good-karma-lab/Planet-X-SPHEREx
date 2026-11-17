@@ -249,6 +249,37 @@ function HideFromBoard() {
   );
 }
 
+/** The public page #/u/<slug>: off until the user turns it on (sharing an achievement turns it on too). */
+function PublicProfile() {
+  const [p, setP] = useState<{ slug: string; public: boolean } | null>(null);
+  const [status, setStatus] = useState('');
+  useEffect(() => {
+    void api<{ slug: string; public: boolean }>('/api/me/profile').then(setP, () => undefined);
+  }, []);
+  const set = (v: boolean) => {
+    if (p) setP({ ...p, public: v });
+    api('/api/me', { method: 'PATCH', body: { public_profile: v } }).then(
+      () => setStatus(''),
+      (e: Error) => setStatus(e.message),
+    );
+  };
+  return (
+    <div class="cb-line">
+      <label class="chk">
+        <input type="checkbox" checked={p?.public === true} disabled={!p} onChange={(e) => set((e.target as HTMLInputElement).checked)} data-testid="public-profile" />
+        Public profile page
+      </label>
+      {p && (
+        <a class="btn sm" href={`#/u/${p.slug}`} data-testid="open-profile">
+          Open my page
+        </a>
+      )}
+      <span class="mono-s">name, points, badges and findings; never the e-mail</span>
+      {status && <span class="cb-status bad">{status}</span>}
+    </div>
+  );
+}
+
 function Who({ user }: { user: User }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
@@ -421,6 +452,11 @@ export function Cabinet({ route }: { route: Route }) {
                             </span>
                           </span>
                           <span class="cb-side">
+                            {f.role === 'submitted' && (
+                              <button class="btn sm" onClick={(e) => (e.preventDefault(), (location.hash = `#/findings/${f.finding_id}/story`))} data-testid="to-story">
+                                Story and share
+                              </button>
+                            )}
                             <span class={`badge st-${f.status}`}>{words(f.status)}</span>
                           </span>
                         </a>
@@ -538,6 +574,7 @@ export function Cabinet({ route }: { route: Route }) {
                         <span class="mono-s">{user.email}</span>
                       </div>
                       <HideFromBoard />
+                      <PublicProfile />
                       <div class="cb-line">
                         <a class="btn sm" href="/api/me/export" download="spherex-space-my-data.json" data-testid="download-data">
                           Download my data
