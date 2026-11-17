@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from service import jsonsafe
 from service.context import CatalogueContext
 from service.movers import Movers, motion_grade, year_of
 from service.products.store import Store, product_key
@@ -328,7 +329,7 @@ class BrownDwarfs:
         }
         self.dir.mkdir(parents=True, exist_ok=True)
         tmp = self.dir / f"{run.key}.part"
-        tmp.write_text(json.dumps(run.result, separators=(",", ":")))
+        tmp.write_text(jsonsafe.dumps(run.result, separators=(",", ":")))
         tmp.replace(self.dir / f"{run.key}.json")
 
     async def _simbad(self, c: dict[str, Any]) -> dict[str, Any]:

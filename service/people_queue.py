@@ -16,6 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from service import jsonsafe
 from service.jobs.scheduler import Priority
 from service.products.store import product_key
 from service.workers import fieldjob
@@ -43,7 +44,7 @@ class BDQueue:
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             tmp = self.path.with_suffix(".part")
-            tmp.write_text(json.dumps(self.done, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps(self.done, separators=(",", ":")))
             tmp.replace(self.path)
         except OSError:
             pass

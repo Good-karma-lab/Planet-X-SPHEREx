@@ -22,7 +22,7 @@ from engine.grid import Grid, grid_for_fov
 from engine.passes import common_detectors, detectors_per_pass, seasons_with_common_detectors, split_passes, split_visits
 from engine.register import register, stars
 from indexer.store import Exposure, Index
-from service import cpu
+from service import cpu, exposure_flags
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
 from service.workers.native import read_native
@@ -78,7 +78,9 @@ async def build_field(
     t0 = time.time()
     grid = grid_for_fov(ra, dec, fov_arcmin)
     radius = fov_arcmin / 60.0 / 2.0 * 2**0.5
-    found = index.overlapping(ra, dec, radius)
+    # the exposures people agreed are broken are left out of every stack (service/exposure_flags.py)
+    left_out = exposure_flags.bad()
+    found = [e for e in index.overlapping(ra, dec, radius) if e.key not in left_out]
     exps = thin(found)
     bands = bands if bands is not None else load_bands()
     passes = seasons_with_common_detectors(split_passes([e.mjd0 for e in exps]), [e.det for e in exps])

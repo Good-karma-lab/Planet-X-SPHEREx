@@ -21,6 +21,7 @@ from typing import Any
 
 import httpx
 
+from service import jsonsafe
 from service.bodies import HORIZONS, SB_IDENT, _iso, _jd, _sexa_dec, _sexa_ra, horizons_command
 from service.upstream import jpl
 
@@ -323,7 +324,7 @@ class FpxIdentifier:
     def _keep(self, kind: str, key: str, found: dict[int, dict[str, Any]]) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
         tmp = self.path(kind, key).with_suffix(".part")
-        tmp.write_text(json.dumps({str(i): v for i, v in sorted(found.items())}, separators=(",", ":")))
+        tmp.write_text(jsonsafe.dumps({str(i): v for i, v in sorted(found.items())}, separators=(",", ":")))
         tmp.replace(self.path(kind, key))
 
     async def identify_result(self, kind: str, key: str, result: dict[str, Any]) -> bool:
