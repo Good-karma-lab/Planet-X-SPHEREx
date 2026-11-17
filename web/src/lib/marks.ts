@@ -32,6 +32,8 @@ export interface Mark {
   kind?: MarkKind | null;
   /** an artefact: what it looks like */
   look?: MarkLook | null;
+  /** the same mover seen on another pass: the id of its first mark (one mark in the list, one label on the picture) */
+  link?: string | null;
   note: string;
   /** ISO time, UTC */
   created: string;

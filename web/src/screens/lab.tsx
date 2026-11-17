@@ -451,7 +451,7 @@ export function Lab({ route }: { route: Route }) {
     mono: p['blend'] === 'mono',
     artifacts: p['art'] === '1',
     motion: p['mot'] === '1',
-    known: inTask ? p['known'] !== '0' : p['known'] === '1',
+    known: p['known'] !== '0', // the rings on known objects are on unless turned off (the lookup starts by itself)
     people: inTask ? p['people'] !== '0' : p['people'] === '1',
   };
   squareTaskRef.current = squareTask;
@@ -523,9 +523,15 @@ export function Lab({ route }: { route: Route }) {
   const colRef = useRef<HTMLDivElement>(null);
   const setTab = (t: Tab) => {
     if (t === 'spec') return setSpecOpen(true);
-    const id = t === 'obj' ? 'sec-obj' : t === 'cand' ? 'sec-look' : 'sec-show';
-    // after the render that shows the section
-    setTimeout(() => colRef.current?.querySelector(`#${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 60);
+    if (t === 'ctl') return; // the controls are the column itself: nothing to scroll to
+    const id = t === 'obj' ? 'sec-obj' : 'sec-look';
+    // after the render that shows the section; only the panel's column scrolls (never the page), and the section starts whole
+    setTimeout(() => {
+      const col = colRef.current;
+      const el = col?.querySelector(`#${id}`) as HTMLElement | null;
+      if (!col || !el) return;
+      col.scrollTo({ top: Math.max(0, col.scrollTop + el.getBoundingClientRect().top - col.getBoundingClientRect().top), behavior: 'smooth' });
+    }, 60);
   };
   const [sel, setSel] = useState<Source | null>(null);
   const pictures = useRef(new Map<number, { n: number; rgb: Uint16Array }>());
@@ -683,7 +689,8 @@ export function Lab({ route }: { route: Route }) {
   const findShown = useRef('');
   useEffect(() => {
     const key = `${findId}|${ra},${dec},${fov}`;
-    if (!findId || !meta || findShown.current === key) return;
+    // the meta must be this field's (right after a move the old field's is still in the state)
+    if (!findId || !meta || findShown.current === key || state.current.meta !== meta) return;
     findShown.current = key;
     const kind = findId.split(':')[0] ?? '';
     const name =
@@ -694,6 +701,7 @@ export function Lab({ route }: { route: Route }) {
         red: 'Red source',
         pair: 'Pair',
         brown_dwarf: 'Brown dwarf',
+        browndwarf: 'Brown dwarf',
         film: 'Moving object',
         peak: 'Find Planet X lead',
       }[kind] ?? 'Find';
@@ -805,6 +813,9 @@ export function Lab({ route }: { route: Route }) {
     artMap.current.clear();
     artRef.current = null;
     setSel(null);
+    // a new field: the task's (or the link's) object is selected again once this field's meta is here, and the panel starts at its top
+    findShown.current = '';
+    colRef.current?.scrollTo({ top: 0 });
     const pending: { name: string; part: SxpPart }[] = [];
     let diffPart: SxpPart | null = null;
     const balanced = new Set<number>();
@@ -1514,7 +1525,8 @@ export function Lab({ route }: { route: Route }) {
       let selMark: Mark | null = null;
       if (sl) {
         const [sra, sdec] = sl.pmra || sl.pmdec ? atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, year) : [sl.ra, sl.dec];
-        const k = near(sra, sdec, 8);
+        // a task about this object: its own bright ring, never folded into a known star's thin one nearby
+        const k = flowRef.current?.focus ? null : near(sra, sdec, 8);
         if (k) k.selected = true;
         else
           selMark = {
@@ -4432,7 +4444,7 @@ export function Lab({ route }: { route: Route }) {
                       'Known objects',
                       'Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame, at its place on the date shown. What moves and has no ring is unknown',
                       opts.known,
-                      (v) => set({ known: v ? '1' : inTask ? '0' : null }),
+                      (v) => set({ known: v ? null : '0' }),
                       undefined,
                       '',
                       false,

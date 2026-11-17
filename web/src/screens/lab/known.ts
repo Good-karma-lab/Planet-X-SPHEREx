@@ -526,7 +526,7 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
 }
 
 /** What the catalogues of `/api/known` have at a place on a date: the nearest drawn object within 8″, said as the picture's
- *  ring says it ("known: Gaia DR3 4472832130942575872 · SIMBAD Barnard's star · 10.39″/yr"), else a deeper-catalogue entry
+ *  ring says it ("known · SIMBAD Barnard's star · 10.39″/yr"), else a deeper-catalogue entry
  *  within 3″, else that no catalogue has it (or which ones have not answered yet). One source of truth with the picture. */
 export function catalogueAt(
   k: KnownState,
@@ -550,14 +550,15 @@ export function catalogueAt(
     const gaia = o.source === 'gaia' ? `Gaia DR3 ${o.id.replace(/^gaia:/, '')}` : '';
     const name = o.source === 'gaia' ? (o.simbad ? `SIMBAD ${o.simbad}` : '') : `${SOURCE_WORD[o.source]} ${o.name}`.trim();
     const rate = o.source === 'jpl' ? speedWord(o) : o.pm_total != null && o.pm_total >= 50 ? `${(o.pm_total / 1000).toFixed(2)}″/yr` : '';
-    return { word: `known: ${[gaia, name, rate].filter(Boolean).join(' · ')}`, object: o, sep: best.d };
+    // one short line (the passport below has the rows): the name it is known by, else its Gaia id; a fast one's rate
+    return { word: `known · ${[name || gaia, rate].filter(Boolean).join(' · ')}`, object: o, sep: best.d };
   }
   for (const o of k.deep) {
     const p = placeAt(o, year);
     if (p && away(p) < DEEP_ARCSEC) {
       const cat = o.id.split(':')[0];
       return {
-        word: `known: in ${cat === 'gaia' ? 'Gaia DR3 (fainter than G 19)' : cat === 'catwise' ? 'CatWISE2020' : cat === 'allwise' ? 'AllWISE' : '2MASS'}`,
+        word: `known · in ${cat === 'gaia' ? 'Gaia DR3 (fainter than G 19)' : cat === 'catwise' ? 'CatWISE2020' : cat === 'allwise' ? 'AllWISE' : '2MASS'}`,
         object: null,
         sep: null,
       };

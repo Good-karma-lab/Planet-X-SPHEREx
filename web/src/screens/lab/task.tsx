@@ -503,7 +503,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           class="tp-tree"
           data-testid="task-tree"
           // as tall as the longest step of this series (its answers and their example pictures), so no step jumps and none leaves a gap
-          style={{ minHeight: `${Math.max(...(steps ?? [step]).map((x) => x.answers.reduce((h, y) => h + ((EXAMPLES[`${seriesId}.${x.id}.${y.id}`] ?? []).length ? 52 : 38) + 6, 0)))}px` }}
+          // with "Mark something the machine missed" at its end, so a shorter step's spare room is under the button, not between
+          style={{ minHeight: `${44 + Math.max(...(steps ?? [step]).map((x) => x.answers.reduce((h, y) => h + ((EXAMPLES[`${seriesId}.${x.id}.${y.id}`] ?? []).length ? 52 : 38) + 6, 0)))}px` }}
         >
           {step.answers.map((x, k) => (
             <button
@@ -526,6 +527,9 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               ))}
             </button>
           ))}
+          <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
+            Mark something the machine missed
+          </button>
         </div>
       ) : (
         <div class={`tp-btns n${answers.length}`}>
@@ -549,9 +553,11 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           ))}
         </div>
       )}
-      <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
-        Mark something the machine missed
-      </button>
+      {!step && (
+        <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
+          Mark something the machine missed
+        </button>
+      )}
     </div>
   );
   return view;

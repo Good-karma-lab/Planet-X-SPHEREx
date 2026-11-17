@@ -386,7 +386,58 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           ctx.fillStyle = taskTrack.missing.includes(tt[k]!.i) ? '#ff6b6b' : 'rgba(255,200,110,0.95)';
           ctx.fill();
         });
+        // a visit outside the picture: where the path leaves it, an arrow at the edge and its number (never cut silently)
+        const inside = ([x, y]: readonly [number, number]) => x >= box.x && x <= box.x + box.w && y >= box.y && y <= box.y + box.h;
+        const edgeOf = (from: readonly [number, number], to: readonly [number, number]): [number, number] => {
+          // the last point of the segment from→to inside the box (from inside, to outside)
+          let lo = 0;
+          let hi = 1;
+          for (let k = 0; k < 24; k++) {
+            const t = (lo + hi) / 2;
+            if (inside([from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t])) lo = t;
+            else hi = t;
+          }
+          return [from[0] + (to[0] - from[0]) * lo, from[1] + (to[1] - from[1]) * lo];
+        };
+        const firstIn = xy.findIndex(inside);
+        if (firstIn >= 0) {
+          const outs: { k: number; at: [number, number]; dir: number }[] = [];
+          let lastIn = firstIn;
+          xy.forEach((p, k) => inside(p) && (lastIn = k));
+          if (firstIn > 0) {
+            const at = edgeOf(xy[firstIn]!, xy[firstIn - 1]!);
+            outs.push({ k: 0, at, dir: Math.atan2(xy[firstIn - 1]![1] - at[1], xy[firstIn - 1]![0] - at[0]) });
+          }
+          if (lastIn < xy.length - 1) {
+            const at = edgeOf(xy[lastIn]!, xy[lastIn + 1]!);
+            outs.push({ k: xy.length - 1, at, dir: Math.atan2(xy[lastIn + 1]![1] - at[1], xy[lastIn + 1]![0] - at[0]) });
+          }
+          for (const o of outs) {
+            const [ex, ey] = [o.at[0] - 6 * Math.cos(o.dir), o.at[1] - 6 * Math.sin(o.dir)];
+            ctx.beginPath();
+            ctx.moveTo(ex + 9 * Math.cos(o.dir), ey + 9 * Math.sin(o.dir));
+            ctx.lineTo(ex + 9 * Math.cos(o.dir + 2.4), ey + 9 * Math.sin(o.dir + 2.4));
+            ctx.lineTo(ex + 9 * Math.cos(o.dir - 2.4), ey + 9 * Math.sin(o.dir - 2.4));
+            ctx.closePath();
+            ctx.fillStyle = '#ffd08a';
+            ctx.fill();
+            const lab = o.k === 0 ? `from visit 1` : `to visit ${tt.length}`;
+            ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+            const tw = ctx.measureText(lab).width;
+            const lx = Math.min(box.x + box.w - tw - 6, Math.max(box.x + 6, ex - tw / 2 - 18 * Math.cos(o.dir)));
+            // never on the title row or the band chips and status line at the bottom
+            const ly = Math.min(box.y + box.h - 84, Math.max(box.y + 52, ey - 16 * Math.sin(o.dir) + 4));
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#000';
+            ctx.strokeText(lab, lx, ly);
+            ctx.fillStyle = '#ffd08a';
+            ctx.fillText(lab, lx, ly);
+          }
+        }
         const [rx, ry] = xy[near]!;
+        // the ring only when the picture shows one of the track's own visits (within a few hours)
+        const onVisit = Math.abs(yr(tt[near]!.mjd) - env.year) < 0.25 / 365.25;
+        if (onVisit) {
         ctx.beginPath();
         ctx.arc(rx, ry, 13, 0, 2 * Math.PI);
         ctx.lineWidth = 3;
@@ -402,6 +453,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ctx.strokeText(lab, rx + 17, ry + 4);
         ctx.fillStyle = '#ffd08a';
         ctx.fillText(lab, rx + 17, ry + 4);
+        }
         ctx.restore();
       }
       ctx.restore();
@@ -537,6 +589,25 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         const x = box.x + u * box.w;
         const y = box.y + v * box.h;
         const r = wall ? 4 : 6;
+        const head = m.link ? ms.find((q) => q.id === m.link) : null;
+        if (head) {
+          // the same mover on another pass: a dot, a thin line to where it was first marked
+          const [hu, hv] = uv(head.ra, head.dec);
+          ctx.beginPath();
+          ctx.moveTo(box.x + hu * box.w, box.y + hv * box.h);
+          ctx.lineTo(x, y);
+          ctx.lineWidth = 2.6;
+          ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+          ctx.stroke();
+          ctx.lineWidth = 1;
+          ctx.strokeStyle = markColour(head);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(x, y, 2.8, 0, 2 * Math.PI);
+          ctx.fillStyle = head.id === openRef.current ? '#ffffff' : markColour(head);
+          ctx.fill();
+          continue;
+        }
         const sel = m.id === openRef.current;
         // a mark: a small diamond with an open middle (the source stays seen), in the colour of its level
         ctx.beginPath();
@@ -639,9 +710,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       setRuler((r) => (r.length === 1 ? [r[0]!, p] : [p]));
       return true;
     }
-    if (hit) {
-      setOpen(hit.id === open ? null : hit.id);
-      if (hit.id !== open) a.setTab('obj'); // its card
+    // "tap it here": the click is the mover's place on this pass, even right beside its first mark
+    if (hit && !(tool === 'mark' && tapHere)) {
+      // a linked dot opens its mover's one mark
+      const id = (hit.link && marksRef.current.some((q) => q.id === hit.link) ? hit.link : hit.id)!;
+      setOpen(id === open ? null : id);
+      if (id !== open) a.setTab('obj'); // its card
       return true;
     }
     if (tool === 'mark') {
@@ -667,12 +741,15 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         pass: a.pass,
         label: tapHere ? tapHere.label : `Mark ${n}`,
         level: tapHere ? LEVEL_OF_KIND.moves : 'suspicious',
-        ...(tapHere ? { kind: 'moves' as const } : {}),
+        ...(tapHere ? { kind: 'moves' as const, link: tapHere.id } : {}),
         note: '',
       });
       if (tapHere) {
         setTapHere(null);
         setTool(null);
+        setOpen(tapHere.id); // one mark: its card stays the first one's
+        a.setTab('obj');
+        return true;
       }
       setOpen(m.id);
       a.setTab('obj'); // its card
@@ -823,11 +900,15 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const found = useRef<{ key: string; track: number; anomaly: number }>({ key: '', track: -1, anomaly: -1 });
   if (found.current.key !== taskKey) found.current = { key: taskKey, track: -1, anomaly: -1 };
   const trackIx = useMemo(() => {
-    if (found.current.track >= 0 && found.current.track < a.tracks.length) return found.current.track;
+    const dOf = (t: FlowTrack) => Math.min(nearSpot(t.ra_2025_9, t.dec_2025_9), ...t.ra.map((r, k) => nearSpot(r, t.dec[k]!)));
+    // a kept track must still be at the object (right after a move the old field's tracks and selection are still in the state)
+    const kept = a.tracks[found.current.track];
+    if (found.current.track >= 0 && kept && dOf(kept) < 20 && sep(kept.ra_2025_9, kept.dec_2025_9, a.ra, a.dec) < a.fov * 60) return found.current.track;
     let best = -1;
     let bd = 20;
     a.tracks.forEach((t, i) => {
-      const d = Math.min(nearSpot(t.ra_2025_9, t.dec_2025_9), ...t.ra.map((r, k) => nearSpot(r, t.dec[k]!)));
+      if (sep(t.ra_2025_9, t.dec_2025_9, a.ra, a.dec) > a.fov * 60) return; // not in this field
+      const d = dOf(t);
       if (d < bd) {
         bd = d;
         best = i;
@@ -1118,6 +1199,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
                 class="mini"
                 title="Remove this mark"
                 onClick={() => {
+                  for (const q of marks) if (q.link === cur.id) removeMark(q.id);
                   removeMark(cur.id);
                   setOpen(null);
                 }}
@@ -1201,13 +1283,19 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         {marksHere.length > 0 && (
           <div class="oc-marks" data-testid="marks-list">
             <div class="psub">Marks in this field</div>
-            {marksHere.map((m) => (
-              <button key={m.id} class={`ft-mark ${m.id === open ? 'on' : ''}`} onClick={() => setOpen(m.id === open ? null : m.id)}>
-                <i style={{ background: markColour(m) }} />
-                <b>{m.label || 'Mark'}</b>
-                <span>{m.kind ? KIND_SHORT[m.kind] : 'no kind yet'}</span>
-              </button>
-            ))}
+            {marksHere
+              .filter((m) => !m.link || !marksHere.some((q) => q.id === m.link))
+              .map((m) => {
+                // a mover marked on more passes is one row: "It moves · 2 passes"
+                const seen = 1 + marks.filter((q) => q.link === m.id).length;
+                return (
+                  <button key={m.id} class={`ft-mark ${m.id === open ? 'on' : ''}`} onClick={() => setOpen(m.id === open ? null : m.id)}>
+                    <i style={{ background: markColour(m) }} />
+                    <b>{m.label || 'Mark'}</b>
+                    <span>{m.kind ? `${KIND_SHORT[m.kind]}${seen > 1 ? ` · ${seen} passes` : ''}` : 'no kind yet'}</span>
+                  </button>
+                );
+              })}
           </div>
         )}
       </div>
@@ -1242,7 +1330,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
   }, [eff, tapHere?.id]);
   const status = [
-    tapHere ? `It moves · tap it here in ${tapHere.passLabel}` : open && eff && eff.id === open ? effectWord(eff) : '',
+    tapHere ? `It moves · tap it here in ${tapHere.passLabel}` : open && eff && (eff.id === open || marks.some((m) => m.id === eff.id && m.link === open)) ? effectWord(eff) : '',
     a.square?.line ?? '',
     a.known ? knownStatus(known, counts, knownSilent ? knownRetry.nextIn : null) : '',
     tool === 'mark' && !tapHere ? 'Mark: click a place' : '',
