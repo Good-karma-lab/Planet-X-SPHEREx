@@ -170,7 +170,7 @@ class AccountsDB:
             # what the lab adds to an investigation: the objects gathered (`items`), the ruler's result, the old-survey match
             self._conn().execute("ALTER TABLE acc_investigations ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'")
         cols = {r[1] for r in self._conn().execute("PRAGMA table_info(acc_marks)")}
-        for col, typ in (("kind", "TEXT"), ("look", "TEXT"), ("exposures", "TEXT NOT NULL DEFAULT '[]'")):
+        for col, typ in (("kind", "TEXT"), ("look", "TEXT"), ("exposures", "TEXT NOT NULL DEFAULT '[]'"), ("link", "TEXT")):
             if col not in cols:  # added on 17 Nov 2026 (spec §5g): what kind of mark, what an artefact looks like, its exposures
                 self._conn().execute(f"ALTER TABLE acc_marks ADD COLUMN {col} {typ}")
         if "mjd" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_marks)")}:
@@ -264,7 +264,7 @@ class AccountsDB:
         return {
             "id": r["id"], "field_key": r["field_key"], "cell_id": r["cell_id"], "ra": r["ra"], "dec": r["dec"], "pass": r["pass"],
             "label": r["label"], "level": r["level"], "note": r["note"], "created": r["created"], "mjd": r["mjd"],
-            "kind": r["kind"], "look": r["look"], "exposures": json.loads(r["exposures"] or "[]"),
+            "kind": r["kind"], "look": r["look"], "exposures": json.loads(r["exposures"] or "[]"), "link": r["link"],
         }  # fmt: skip
 
     def marks(self, user_id: str, field_key: str | None = None) -> list[dict[str, Any]]:
@@ -280,13 +280,13 @@ class AccountsDB:
         if have is None and c.execute("SELECT COUNT(*) FROM acc_marks WHERE user_id=?", (user_id,)).fetchone()[0] >= MAX_MARKS:
             raise LimitReachedError
         c.execute(
-            "INSERT INTO acc_marks(id,user_id,field_key,cell_id,ra,dec,pass,label,level,note,created,updated,mjd,kind,look,exposures)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+            "INSERT INTO acc_marks(id,user_id,field_key,cell_id,ra,dec,pass,label,level,note,created,updated,mjd,kind,look,exposures,link)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
             " ON CONFLICT(id) DO UPDATE SET field_key=excluded.field_key, cell_id=excluded.cell_id, ra=excluded.ra, dec=excluded.dec,"
             " pass=excluded.pass, label=excluded.label, level=excluded.level, note=excluded.note, updated=excluded.updated, mjd=excluded.mjd,"
-            " kind=excluded.kind, look=excluded.look, exposures=excluded.exposures",
+            " kind=excluded.kind, look=excluded.look, exposures=excluded.exposures, link=excluded.link",
             (m["id"], user_id, m["field_key"], m["cell_id"], m["ra"], m["dec"], m["pass"], m["label"], m["level"], m["note"], m["created"],
-             time.time(), m.get("mjd"), m.get("kind"), m.get("look"), json.dumps(m.get("exposures") or [])),
+             time.time(), m.get("mjd"), m.get("kind"), m.get("look"), json.dumps(m.get("exposures") or []), m.get("link")),
         )  # fmt: skip
         return self._mark(c.execute("SELECT * FROM acc_marks WHERE id=?", (m["id"],)).fetchone())
 

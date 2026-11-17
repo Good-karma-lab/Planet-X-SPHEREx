@@ -158,7 +158,7 @@ def test_public_server_needs_its_address_and_a_secure_cookie(site: tuple[FastAPI
 def test_marks_are_kept_per_user_and_seen_from_a_second_browser(site: tuple[FastAPI, _State, _Mail]) -> None:
     app, _, mail = site
     a = _sign_in(app, mail)
-    assert a.post("/api/me/marks", json=MARK).json() == {**MARK, "mjd": None, "kind": None, "look": None, "exposures": []}
+    assert a.post("/api/me/marks", json=MARK).json() == {**MARK, "mjd": None, "kind": None, "look": None, "exposures": [], "link": None}
     dated = a.post("/api/me/marks", json={**MARK, "mjd": 61118.31214}).json()  # the lab's date of the frame is kept and given back
     assert dated["mjd"] == 61118.31214 and a.get("/api/me/marks").json()["marks"][0]["mjd"] == 61118.31214
     assert a.post("/api/me/marks", json={**MARK, "mjd": 12.0}).status_code == 422
@@ -390,7 +390,7 @@ def test_download_and_delete_my_data(site: tuple[FastAPI, _State, _Mail]) -> Non
     data = r.json()
     assert (
         data["user"]["email"] == "ann@example.org"
-        and data["marks"] == [{**MARK, "mjd": None, "kind": None, "look": None, "exposures": []}]
+        and data["marks"] == [{**MARK, "mjd": None, "kind": None, "look": None, "exposures": [], "link": None}]
         and len(data["history"]) == 1
     )
     other = _sign_in(app, mail)
