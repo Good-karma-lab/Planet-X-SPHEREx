@@ -322,7 +322,7 @@ export function Leaders({ route }: { route: Route }) {
           )}
         </div>
         <p class="fmethod">
-          <a href="#/me?tab=score">My score → Cabinet</a>
+          <a href="#/me?view=badges">My badges → Cabinet</a>
         </p>
       </div>
     </div>

@@ -616,16 +616,33 @@ class CatalogueContext:
         pos = f"{ra:.4f}_{dec:.4f}_{epoch:.1f}_{radius:.1f}"
         return await self._kept("simbad_" + pos, lambda: self._simbad(ra, dec, epoch, radius))
 
-    async def context(self, ra: float, dec: float, epoch: float = 2025.9, radius: float = 6.0) -> dict[str, Any]:
+    async def context(
+        self,
+        ra: float,
+        dec: float,
+        epoch: float = 2025.9,
+        radius: float = 6.0,
+        skip: frozenset[str] = frozenset(),
+        pm: tuple[float, float] | None = None,
+    ) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        await self._context(ra, dec, epoch, radius, out)
+        await self._context(ra, dec, epoch, radius, out, skip, pm)
         return out
 
-    async def context_within(self, ra: float, dec: float, epoch: float, radius: float, deadline: float) -> dict[str, Any]:
+    async def context_within(
+        self,
+        ra: float,
+        dec: float,
+        epoch: float,
+        radius: float,
+        deadline: float,
+        skip: frozenset[str] = frozenset(),
+        pm: tuple[float, float] | None = None,
+    ) -> dict[str, Any]:
         """`context`, but at most `deadline` seconds: the catalogues that have not answered are `pending` (still being asked; they keep
         running and the next call finds their answers kept)."""
         out: dict[str, Any] = {}
-        work = asyncio.create_task(self._context(ra, dec, epoch, radius, out))
+        work = asyncio.create_task(self._context(ra, dec, epoch, radius, out, skip, pm))
         self._background.add(work)
         work.add_done_callback(self._background.discard)
         done, _ = await asyncio.wait({work}, timeout=deadline)
@@ -634,12 +651,23 @@ class CatalogueContext:
             return out
         snap = dict(out)
         for k in CONTEXT_PARTS:
-            if k not in snap:
+            if k not in snap and k not in skip:
                 snap[k] = {"state": "pending", "error": "still being asked"}
         snap["complete"] = False
         return snap
 
-    async def _context(self, ra: float, dec: float, epoch: float, radius: float, out: dict[str, Any]) -> None:
+    async def _context(
+        self,
+        ra: float,
+        dec: float,
+        epoch: float,
+        radius: float,
+        out: dict[str, Any],
+        skip: frozenset[str] = frozenset(),
+        held_pm: tuple[float, float] | None = None,
+    ) -> None:
+        """`skip`: catalogues the page already holds (the lab's field lookup answered them): not asked, left out of the reply. `held_pm`:
+        the motion the page holds (mas/yr), used to place the infrared surveys when Gaia and SIMBAD are not asked."""
         t0 = time.time()
         pos = f"{ra:.4f}_{dec:.4f}_{epoch:.1f}_{radius:.1f}"
         out.update({"ra": ra, "dec": dec, "epoch": epoch, "radius": radius})
@@ -654,17 +682,23 @@ class CatalogueContext:
 
             t.add_done_callback(land)
 
-        start("simbad", asyncio.create_task(self._kept("simbad_" + pos, lambda: self._simbad(ra, dec, epoch, radius))))
-        start("gaia", asyncio.create_task(self._kept("gaia_" + pos, lambda: self._gaia(ra, dec, epoch, radius))))
-        start("vsx", asyncio.create_task(self._kept("vsx_" + pos, lambda: self._vsx(ra, dec, radius))))
-        start("ned", asyncio.create_task(self._kept("ned_" + pos, lambda: self._ned(ra, dec, radius))))
-        gaia = await tasks["gaia"]
+        if "simbad" not in skip:
+            start("simbad", asyncio.create_task(self._kept("simbad_" + pos, lambda: self._simbad(ra, dec, epoch, radius))))
+        if "gaia" not in skip:
+            start("gaia", asyncio.create_task(self._kept("gaia_" + pos, lambda: self._gaia(ra, dec, epoch, radius))))
+        if "vsx" not in skip:
+            start("vsx", asyncio.create_task(self._kept("vsx_" + pos, lambda: self._vsx(ra, dec, radius))))
+        if "ned" not in skip:
+            start("ned", asyncio.create_task(self._kept("ned_" + pos, lambda: self._ned(ra, dec, radius))))
+        gaia = await tasks["gaia"] if "gaia" in tasks else {}
         pm: tuple[float | None, float | None] = (None, None)
-        sm = await tasks["simbad"]
+        sm = await tasks["simbad"] if "simbad" in tasks else {}
         if gaia.get("state") == "ok":
             pm = (gaia.get("pmra"), gaia.get("pmdec"))
         elif sm.get("state") == "ok":
             pm = (sm.get("pmra"), sm.get("pmdec"))
+        elif held_pm is not None:
+            pm = held_pm
         # a bright (saturated) star: the infrared surveys' own places for it are uncertain too, so they are asked in the wide cone
         bright = any(a.get("state") == "ok" and a.get("note") == BRIGHT_NOTE for a in (gaia, sm))
 
@@ -672,6 +706,8 @@ class CatalogueContext:
             return (ra, dec) if pm[0] is None else moved(ra, dec, pm[0], pm[1], year - epoch)
 
         for part, (_, _, year, _) in IRSA_PARTS.items():
+            if part in skip:
+                continue
             a, d = at(year)
             alt = at(2010.5)
 

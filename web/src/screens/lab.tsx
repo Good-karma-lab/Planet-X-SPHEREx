@@ -4362,11 +4362,11 @@ export function Lab({ route }: { route: Route }) {
                             sel,
                             sel.name ?? 'selected source',
                             <>
-                              <ObjectGuess src={sel} />
+                              <ObjectGuess src={sel} held={flow.selHeld} />
                               {seenText(sel) && <div class="obj-seen">{seenText(sel)}</div>}
                             </>,
                           )}
-                        <ObjectTab src={sel} onSpectrum={() => setTab('spec')} />
+                        <ObjectTab src={sel} onSpectrum={() => setTab('spec')} held={flow.selHeld} />
                         {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
                         {sel && (
                           <ContextRows
@@ -4375,6 +4375,7 @@ export function Lab({ route }: { route: Route }) {
                             epoch={sel.pmra || sel.pmdec ? 2000 : 2025.9}
                             pmra={sel.pmra ?? 0}
                             pmdec={sel.pmdec ?? 0}
+                            held={flow.selHeld}
                           />
                         )}
                         {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}

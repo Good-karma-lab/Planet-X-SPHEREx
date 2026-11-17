@@ -271,7 +271,8 @@ class KnownField:
                 if (g is None or g > GAIA_MAG_LIMIT) and pa * pa + pd * pd < fast2:
                     continue
                 plx = _num(r.get("parallax")) or 0.0
-                out.append([str(r.get("source_id")), a, d, pa, pd, max(plx, 0.0), g])
+                # BP−RP and RUWE ride in the same request: the passport shows them for a ringed star without asking Gaia again
+                out.append([str(r.get("source_id")), a, d, pa, pd, max(plx, 0.0), g, _num(r.get("bp_rp")), _num(r.get("ruwe"))])
             out.sort(key=lambda s: 99.0 if s[6] is None else s[6])
             return {"state": "ok", "via": via, "truncated": len(out) > GAIA_MAX_ROWS, "rows": out[:GAIA_MAX_ROWS]}
 
@@ -279,7 +280,7 @@ class KnownField:
             err: Exception | None = None
             for url, table, label in GAIA_TAPS:
                 adql = (
-                    f"SELECT TOP {GAIA_MAX_ROWS + 1} source_id, ra, dec, pmra, pmdec, parallax, phot_g_mean_mag FROM {table} "
+                    f"SELECT TOP {GAIA_MAX_ROWS + 1} source_id, ra, dec, pmra, pmdec, parallax, phot_g_mean_mag, bp_rp, ruwe FROM {table} "
                     f"WHERE 1=CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {radius:.6f})) "
                     f"AND (phot_g_mean_mag <= {GAIA_MAG_LIMIT} OR pmra*pmra + pmdec*pmdec >= {fast2:.0f}) ORDER BY phot_g_mean_mag"
                 )
@@ -571,6 +572,8 @@ def assemble(
                     "pmra": round(r[3], 1),
                     "pmdec": round(r[4], 1),
                     "parallax": round(r[5], 2),
+                    **({"bp_rp": round(r[7], 3)} if len(r) > 7 and r[7] is not None else {}),
+                    **({"ruwe": round(r[8], 2)} if len(r) > 8 and r[8] is not None else {}),
                     "positions": places(pr, pd, int(i)),
                     "label": bool(pm >= FAST_MAS or (r[6] is not None and r[6] <= BRIGHT_MAG)),
                     **({"simbad": name} if name else {}),

@@ -13,7 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from engine.filmsearch import match_known
-from service.context import CatalogueContext
+from service.context import CONTEXT_PARTS, CatalogueContext
 from service.jobs.scheduler import Priority
 from service.products.store import product_key
 from service.workers import filmjob, filmsearchjob
@@ -33,15 +33,23 @@ def make_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         epoch: float = Query(2025.9, ge=1900, le=2100),
         radius: float = Query(6.0, gt=0, le=60),
         deadline: float = Query(4.0, ge=0, le=120),
+        skip: str = Query("", max_length=80),
+        pmra: float | None = Query(None, ge=-20000, le=20000),
+        pmdec: float | None = Query(None, ge=-20000, le=20000),
     ) -> Any:
         """What SIMBAD, Gaia DR3, 2MASS, AllWISE, CatWISE, VSX and NED know about the place at the epoch (ok / none / unavailable each).
-        A catalogue that has not answered within `deadline` seconds is `pending` (ask again: it keeps running); 0 waits for all."""
+        A catalogue that has not answered within `deadline` seconds is `pending` (ask again: it keeps running); 0 waits for all.
+        `skip`: catalogues the page already holds from the field's lookup (comma list): not asked again, left out of the reply.
+        `pmra`/`pmdec`: the held motion (mas/yr) that places the infrared surveys when Gaia and SIMBAD are skipped."""
         cat: CatalogueContext | None = getattr(st, "catalogue", None)
         if cat is None:
             raise HTTPException(503, "the catalogue client is not running")
+        held = frozenset(x for x in skip.split(",") if x in CONTEXT_PARTS)
+        pm = (pmra, pmdec) if pmra is not None and pmdec is not None else None
+        more: dict[str, Any] = {"skip": held, "pm": pm} if held or pm else {}
         if deadline <= 0:
-            return await cat.context(ra, dec, epoch, radius)
-        return await cat.context_within(ra, dec, epoch, radius, deadline)
+            return await cat.context(ra, dec, epoch, radius, **more)
+        return await cat.context_within(ra, dec, epoch, radius, deadline, **more)
 
     def film_track_view(film_key: str) -> dict[str, Any]:
         """The found tracks of a finished film, the job that finds them, or why not yet."""

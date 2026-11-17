@@ -2,6 +2,7 @@
 // findings stream), or of a place. Nothing is asked for until the row is on screen; a clip still being rendered is asked again.
 
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { cutout, tiles } from '../../lib/hips';
 
 /** The clip of a place (ra, dec) from the findings stream: 3′ around the place, one frame per pass, made only from a finished field
  *  (404 when none holds the place: the frame then stays empty). */
@@ -17,7 +18,37 @@ export function clipUrl(p: { findingId?: string | null; ra?: number | null; dec?
 
 const seen = new Map<string, 'ready' | 'none'>();
 
-export function Pic({ findingId, ra, dec, size = 96, label }: { findingId?: string | null; ra?: number | null; dec?: number | null; size?: number; label: string }) {
+/** A place with no SPHEREx time-lapse yet: the 2MASS colour picture of the same 3′, from the survey's HiPS tiles (lib/hips.ts),
+ *  drawn again as tiles arrive. Never an empty frame. */
+function SurveyStamp({ ra, dec, size }: { ra: number; dec: number; size: number }) {
+  const cv = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const px = Math.min(256, Math.round(size * 2));
+    let done = false;
+    const draw = () => {
+      const c = cv.current;
+      if (!c || done) return;
+      const r = cutout('2mass', 9, ra, dec, 3 / 60, px);
+      c.getContext('2d')?.putImageData(r.data, 0, 0);
+      done = r.complete;
+    };
+    draw();
+    const off = tiles.onTile(draw);
+    return off;
+  }, [ra, dec, size]);
+  const px = Math.min(256, Math.round(size * 2));
+  return (
+    <>
+      <canvas ref={cv} width={px} height={px} style={{ width: `${size}px`, height: `${size}px` }} aria-hidden="true" />
+      <svg class="cb-ring" viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="50" cy="50" r="9" />
+      </svg>
+      <span class="cb-src">2MASS</span>
+    </>
+  );
+}
+
+export function Pic({ findingId, ra, dec, size = 96, label, thumb }: { findingId?: string | null; ra?: number | null; dec?: number | null; size?: number; label: string; thumb?: string | null }) {
   const url = clipUrl({ findingId, ra, dec }, size >= 200 ? 320 : 170);
   const box = useRef<HTMLSpanElement>(null);
   const [near, setNear] = useState(false);
@@ -87,8 +118,10 @@ export function Pic({ findingId, ra, dec, size = 96, label }: { findingId?: stri
       }}
       onMouseLeave={() => setBig(false)}
       onClick={toggle}
-      title={state === 'ready' ? 'Time-lapse of this place: one frame per SPHEREx pass' : undefined}
+      title={state === 'ready' ? 'Time-lapse of this place: one frame per SPHEREx pass' : state === 'none' && (thumb || ra != null) ? 'No SPHEREx time-lapse here yet' : undefined}
     >
+      {state === 'none' && thumb && <img src={thumb} alt={label} width={size} height={size} />}
+      {state === 'none' && !thumb && ra != null && dec != null && <SurveyStamp ra={ra} dec={dec} size={size} />}
       {state === 'ready' && url && <img src={url} alt={`Time-lapse of ${label}`} width={size} height={size} decoding="async" />}
       {big && state === 'ready' && bigUrl && <img class="cb-pic-big" src={bigUrl} alt={`Larger time-lapse of ${label}`} width={320} height={320} data-testid="row-pic-big" />}
     </span>

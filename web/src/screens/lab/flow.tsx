@@ -35,7 +35,7 @@ import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, taskTrack, useLabTask, type NextTask } from './task';
 import { FindingClip, MoverView, StampsView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
-import { KNOWN_SOURCES, placeAt } from './known';
+import { heldAt, KNOWN_SOURCES, placeAt, type Held } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
 import { clearDo, pendingDo, useSignIn } from './signin';
 import { useRetry, type SearchInfo } from './progress';
@@ -177,6 +177,8 @@ export interface LabFlow {
   knownBusy: boolean;
   /** the Known objects lookup as the switch and the row say it: asking, how many, or who did not answer and the next try */
   knownSearch: SearchInfo;
+  /** what the field's lookup already holds about the selected source (a ringed known object or a deeper match), null when nothing */
+  selHeld: Held | null;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -1115,7 +1117,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     return () => clearInterval(t);
   }, []);
 
+  // the selected source as the field's lookup knows it, on the date shown (a moving one from its J2000 place and motion)
+  const heldPlace = a.sel ? selNow() : null;
+  const selHeld = heldPlace && a.epochNow != null ? heldAt(known, heldPlace.ra, heldPlace.dec, a.epochNow) : null;
   return {
+    selHeld,
     draw,
     pointer: (p) => {
       ptr.current = p;
