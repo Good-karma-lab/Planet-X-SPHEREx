@@ -220,6 +220,16 @@ export function declaredWord(inv: DeclaredInv | null, status = 200): string {
   return `Submit declared · checking${inv.progress ? `: ${inv.progress}` : '…'}`;
 }
 
+/** The same state as the investigation chip says it: "checking 7 of 8", "submitted", "blocked". */
+export function chipWord(inv: DeclaredInv | null): string {
+  if (!inv) return '';
+  if (inv.state === 'submitted' || inv.submitted) return 'submitted';
+  if (inv.state === 'blocked') return 'a check failed';
+  if (inv.state === 'needs_comment') return 'needs a comment';
+  const m = (inv.progress ?? '').match(/(\d+) of (\d+)/);
+  return m ? `checking ${m[1]} of ${m[2]}` : 'checking';
+}
+
 /** Declare the submit of an investigation with its checks job (`POST /api/me/investigations/{id}/submit`). */
 export async function declareSubmit(invId: string, job: string, note = ''): Promise<{ inv: DeclaredInv | null; status: number }> {
   const r = await post(`/api/me/investigations/${encodeURIComponent(invId)}/submit`, { checks_job: job, ...(note ? { note } : {}) });

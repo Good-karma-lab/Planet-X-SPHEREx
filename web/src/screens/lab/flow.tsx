@@ -6,7 +6,8 @@ import { addMark, allMarks, fieldKey, MARK_LEVELS, marksSyncNote, onMarks, remov
 import { drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, matchKnown, type KnownDrawEnv, type KnownMatch, type KnownState } from './known';
 import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
-import { awardLine, ChecksList, checksStatus, declaredWord, declareSubmit, focusKind, followDeclared, taskOfParams, useChecks, useLabTask } from './task';
+import { awardLine, ChecksList, checksStatus, chipWord, declaredWord, declareSubmit, focusKind, followDeclared, taskOfParams, useChecks, useLabTask, type DeclaredInv } from './task';
+import { SOURCE_WORD } from './known';
 import { AnomalyView, MoverView, RedView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
 import { motionOf } from './known';
@@ -47,6 +48,8 @@ export interface FlowArgs {
   passes: { index: number; label: string }[];
   /** a small JPEG of the picture as it is now (a data URL), null when it cannot be made */
   thumb: () => string | null;
+  /** the passes are being blinked (Months scale, Blink mode): the two pass pickers of the playback bar act */
+  blinkable: boolean;
   /** the lab's selected object (in a task: the object in question) */
   sel: Source | null;
   /** the mover tracks the search of the field found: places per pass */
@@ -59,6 +62,11 @@ export interface FlowArgs {
   pickAnomaly: (n: number) => void;
   pickTrack: (i: number) => void;
 }
+
+const ICON_MARK =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l8 8-8 8-8-8z"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/></svg>';
+const ICON_RULER =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16.5L16.5 4l3.5 3.5L7.5 20z"/><path d="M8 12.5l1.8 1.8M11 9.5l1.8 1.8M14 6.5l1.8 1.8"/></svg>';
 
 export interface FlowTrack {
   passes: number[];
@@ -94,10 +102,16 @@ export interface LabFlow {
   click(x: number, y: number): boolean;
   /** the status line on the picture ('' when there is nothing to say) */
   status: string;
-  /** over the picture: the editor of the open mark */
+  /** over the picture: the strip of its tools (Mark, Ruler) */
   floats: ComponentChildren;
-  /** the Tools section of the Controls panel */
-  tools: ComponentChildren;
+  /** in the playback bar, next to Blink: the two pass pickers of a Blink of two passes */
+  blinkPick: ComponentChildren;
+  /** in the Object tab: the card of what is selected (a mark or a source) with its note and the two actions, and the field's marks */
+  card: ComponentChildren;
+  /** on the picture's status line: the investigation of the field, opening it in the Cabinet */
+  chip: ComponentChildren;
+  /** a mark's card is open: the Object tab is the mark's alone */
+  markOpen: boolean;
   tool: FlowTool;
   marks: Mark[];
   /** the marks inside the frame on show */
@@ -314,6 +328,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
     if (hit) {
       setOpen(hit.id === open ? null : hit.id);
+      if (hit.id !== open) a.setTab('obj'); // its card
       return true;
     }
     if (tool === 'mark') {
@@ -331,12 +346,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         note: '',
       });
       setOpen(m.id);
+      a.setTab('obj'); // its card
       return true;
     }
-    if (open) {
-      setOpen(null);
-      return true;
-    }
+    if (open) setOpen(null); // the click goes on to the lab: a source under it is selected
     return false;
   };
 
@@ -361,22 +374,25 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   };
 
   // Blink of two chosen passes
-  const [pair, setPair] = useState<[number, number]>([0, 1]);
-  const [blinkOn, setBlinkOn] = useState(false);
+  const [pair, setPair] = useState<[number | null, number | null]>([null, null]);
   const idx = a.passes.map((q) => q.index);
-  const pa = idx.includes(pair[0]) ? pair[0] : (idx[0] ?? 0);
-  const pb = idx.includes(pair[1]) && pair[1] !== pa ? pair[1] : (idx.find((i) => i !== pa) ?? pa);
-  const blink: [number, number] | null = blinkOn && a.pass !== null && idx.length > 1 && pa !== pb ? [pa, pb] : null;
+  const pa = pair[0] != null && idx.includes(pair[0]) ? pair[0] : null;
+  const pb = pair[1] != null && idx.includes(pair[1]) && pair[1] !== pa ? pair[1] : null;
+  const blink: [number, number] | null = a.blinkable && pa != null && pb != null ? [pa, pb] : null;
+  useEffect(() => setPair([null, null]), [a.ra, a.dec, a.fov]);
 
   // the investigation of this field: saved frames and notes, the checks, the submit
   const [inv, setInv] = useState<string | null>(a.params['inv'] ?? null);
   const [invNote, setInvNote] = useState('');
   const [invLine, setInvLine] = useState('');
+  /** the investigation's state as the chip says it: "checking 7 of 8", "submitted" */
+  const [invState, setInvState] = useState('');
   const [showChecks, setShowChecks] = useState(false);
   const checks = useChecks();
   useEffect(() => {
     setInv(a.params['inv'] ?? null);
     setInvLine('');
+    setInvState('');
     setShowChecks(false);
     checks.reset();
   }, [a.ra, a.dec, a.fov, a.params['inv']]);
@@ -388,9 +404,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       return { status: 0, json: null };
     }
   };
+  // a mark's own note is the note of what is added; a source has a note field of its own in its card
+  const noteNow = (open ? marks.find((m) => m.id === open)?.note : null) ?? invNote;
   const saveFrame = async () => {
     setInvLine('saving…');
-    const frame = { ref: location.hash.slice(0, 600), title: `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`, note: invNote, thumb: a.thumb() };
+    const frame = { ref: location.hash.slice(0, 600), title: `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`, note: noteNow, thumb: a.thumb() };
     let r;
     if (inv) r = await call(`/api/me/investigations/${encodeURIComponent(inv)}/frames`, frame);
     else
@@ -398,7 +416,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         title: marksHere[0]?.label || frame.title,
         finding_id: a.params['finding'] ?? null,
         mark_ids: marksHere.map((m) => m.id),
-        notes: invNote ? [{ text: invNote }] : [],
+        notes: noteNow ? [{ text: noteNow }] : [],
         frames: [frame],
         checks_job: checks.view.job,
       });
@@ -426,7 +444,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         title: at?.label || `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`,
         finding_id: a.params['finding'] ?? null,
         mark_ids: real.map((m) => m.id),
-        notes: invNote ? [{ text: invNote }] : [],
+        notes: noteNow ? [{ text: noteNow }] : [],
         frames: [{ ref: location.hash.slice(0, 600), title: `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`, note: '', thumb: a.thumb() }],
         checks_job: job,
       });
@@ -435,9 +453,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       setInv(id);
     }
     const d = await declareSubmit(id, job);
-    setInvLine(declaredWord(d.inv, d.status));
+    const say = (x: DeclaredInv | null, status = 200) => {
+      setInvLine(declaredWord(x, status));
+      setInvState(chipWord(x));
+    };
+    say(d.inv, d.status);
     followStop.current();
-    if (d.inv?.state === 'checking') followStop.current = followDeclared(id, (x) => setInvLine(declaredWord(x)));
+    if (d.inv?.state === 'checking') followStop.current = followDeclared(id, (x) => say(x));
   };
   // "Measurer": a ruler rate on an object with a catalogue motion goes to the investigation, once per measurement
   const measured = useRef('');
@@ -541,7 +563,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         }
       const yr = (mjd: number) => 2000 + (mjd - 51544.5) / 365.25;
       setPair([track.passes[i0]!, track.passes[i1]!]);
-      setBlinkOn(true);
       setRuler([
         { ra: track.ra[i0]!, dec: track.dec[i0]!, epoch: yr(track.mjd[i0]!), pass: track.passes[i0]! },
         { ra: track.ra[i1]!, dec: track.dec[i1]!, epoch: yr(track.mjd[i1]!), pass: track.passes[i1]! },
@@ -587,178 +608,251 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   });
 
   const cur = open ? (marks.find((m) => m.id === open) ?? null) : null;
-  let floats: ComponentChildren = null;
-  if (cur && g && a.single && inFrame(cur)) {
-    const [u, v] = uvOf(cur.ra, cur.dec);
-    const W = 272;
-    const x = u * a.side;
-    const y = v * a.side;
-    // right of the mark, else left; below it, else above: always inside the picture
-    const left = x + 14 + W > a.side - 6 ? Math.max(6, x - 14 - W) : x + 14;
-    const top = Math.max(50, Math.min(a.side - 262, y - 20)); // clear of the status line and the band chips at the bottom
-    floats = (
-      <div class="float markedit" style={{ left: `${left}px`, top: `${top}px`, width: `${W}px` }} data-testid="mark-editor">
-        <div class="me-row">
-          <input
-            class="inp"
-            value={cur.label}
-            maxLength={60}
-            aria-label="Label of the mark"
-            spellcheck={false}
-            onInput={(e) => updateMark(cur.id, { label: (e.target as HTMLInputElement).value })}
-            onKeyDown={(e) => e.key === 'Enter' && setOpen(null)}
-            data-testid="mark-label"
-          />
-          <button class="mini" title="Close" aria-label="Close" onClick={() => setOpen(null)}>
-            ×
-          </button>
-        </div>
-        <div class="seg sm me-levels" role="group" aria-label="Level">
-          {MARK_LEVELS.map((l) => (
-            <button
-              key={l}
-              class={cur.level === l ? 'on' : ''}
-              aria-pressed={cur.level === l}
-              onClick={() => updateMark(cur.id, { level: l })}
-              data-testid={`mark-level-${l}`}
-            >
-              <i style={{ background: LEVEL_COLOUR[l] }} />
-              {LEVEL_WORD[l]}
-            </button>
-          ))}
-        </div>
-        <input
-          class="inp"
-          value={cur.note}
-          maxLength={400}
-          placeholder="Note"
-          aria-label="Note"
-          onInput={(e) => updateMark(cur.id, { note: (e.target as HTMLInputElement).value })}
-          data-testid="mark-note"
-        />
-        <div class="me-hint" data-testid="mark-hint">
-          {hintOf(cur)}
-        </div>
-        <div class="me-row">
-          <span class="me-meta">{cur.pass != null ? `pass ${cur.pass + 1}` : 'no pass'}</span>
-          <button
-            class="mini"
-            onClick={() => {
-              removeMark(cur.id);
-              setOpen(null);
-            }}
-            data-testid="mark-remove"
-          >
-            Remove
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // Esc leaves a tool, then closes the open mark
+  const toolRef = useRef(tool);
+  toolRef.current = tool;
+  useEffect(() => {
+    const on = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (toolRef.current) {
+        setTool(null);
+        setRuler([]);
+      } else if (openRef.current) setOpen(null);
+    };
+    window.addEventListener('keydown', on);
+    return () => window.removeEventListener('keydown', on);
+  }, []);
+  // the lab's selected source changed: the card is that source's, not the mark's
+  useEffect(() => setOpen(null), [a.sel?.ra, a.sel?.dec]);
 
   const pick = (t: FlowTool) => {
     setTool((c) => (c === t ? null : t));
     if (t !== 'ruler') setRuler([]);
   };
-  const tools = (
-    <section class="psec flowtools" data-testid="flow-tools">
-      <div class="psh">Tools</div>
-      <div class="ft-row">
+  // Mark and Ruler are modes of the picture: a small strip on its edge
+  const strip =
+    a.single && g ? (
+      <div class="float toolstrip" role="group" aria-label="Picture tools" data-testid="tool-strip">
         <button
-          class={`mini ${tool === 'mark' ? 'on' : ''}`}
+          class={tool === 'mark' ? 'on' : ''}
           aria-pressed={tool === 'mark'}
-          disabled={!a.single || !g}
+          aria-label="Mark"
+          title="Mark (Esc leaves): click the picture to put a point; click a mark to open its card"
           onClick={() => pick('mark')}
-          title="Mark: click the picture to put a point; click a mark to change or remove it"
           data-testid="tool-mark"
-        >
-          Mark
-        </button>
+          dangerouslySetInnerHTML={{ __html: ICON_MARK }}
+        />
         <button
-          class={`mini ${tool === 'ruler' ? 'on' : ''}`}
+          class={tool === 'ruler' ? 'on' : ''}
           aria-pressed={tool === 'ruler'}
-          disabled={!a.single || !g}
+          aria-label="Ruler"
+          title="Ruler (Esc leaves): click two places, two marks, or the same source on two passes: the shift, the rate, the direction"
           onClick={() => pick('ruler')}
-          title="Ruler: click two places (or two marks, or the same source on two passes): the shift, the rate and the direction"
           data-testid="tool-ruler"
-        >
-          Ruler
-        </button>
+          dangerouslySetInnerHTML={{ __html: ICON_RULER }}
+        />
       </div>
-      <div class="ft-row ft-blink" role="group" aria-label="Blink of two passes">
-        <button
-          class={`mini ${blink ? 'on' : ''}`}
-          aria-pressed={!!blink}
-          disabled={a.pass === null || idx.length < 2}
-          onClick={() => setBlinkOn((v) => !v)}
-          title="Blink: only the two chosen passes play, one after the other"
-          data-testid="tool-blink"
+    ) : null;
+
+  // Blink of two chosen passes: two compact pass pickers in the playback bar, next to Blink (they keep their place when Blink is
+  // not the mode, so nothing in the bar moves)
+  const blinkPick = (
+    <span class="blinkpick" style={{ visibility: a.blinkable && idx.length > 1 ? 'visible' : 'hidden' }} role="group" aria-label="Blink of two passes">
+      {([0, 1] as const).map((k) => (
+        <select
+          key={k}
+          class="inp"
+          aria-label={k ? 'Second pass of the Blink' : 'First pass of the Blink'}
+          title="Blink of two passes: choose two and only those play"
+          value={String((k ? pb : pa) ?? '')}
+          onChange={(e) => {
+            const raw = (e.target as HTMLSelectElement).value;
+            const v = raw === '' ? null : Number(raw);
+            setPair(k ? [pa, v] : [v, pb]);
+          }}
+          data-testid={`blink-${k ? 'b' : 'a'}`}
         >
-          Blink
-        </button>
-        {([0, 1] as const).map((k) => (
-          <select
-            key={k}
-            class="inp"
-            aria-label={k ? 'Second pass' : 'First pass'}
-            disabled={a.pass === null || idx.length < 2}
-            value={String(k ? pb : pa)}
-            onChange={(e) => {
-              const v = Number((e.target as HTMLSelectElement).value);
-              setPair(k ? [pa, v] : [v, pb]);
-            }}
-            data-testid={`blink-${k ? 'b' : 'a'}`}
-          >
-            {a.passes.map((q) => (
-              <option key={q.index} value={String(q.index)} disabled={q.index === (k ? pa : pb)}>
-                {q.label}
-              </option>
-            ))}
-          </select>
-        ))}
-      </div>
-      <div class="ft-row">
+          <option value="">{k ? 'all' : 'all'}</option>
+          {a.passes.map((q) => (
+            <option key={q.index} value={String(q.index)} disabled={q.index === (k ? pa : pb)}>
+              {q.label}
+            </option>
+          ))}
+        </select>
+      ))}
+    </span>
+  );
+
+  // ---- the card of what is selected (Object tab): a mark, or the lab's selected source. Note, "Add to investigation" and
+  // "Check and submit" exist only here: with nothing selected there is nothing to note or submit.
+  /** what the catalogues have at a place on the date shown: the nearest drawn object within 8″, else a deeper-catalogue entry within 3″ */
+  const matchAt = (ra: number, dec: number): string => {
+    if (known.state !== 'ok' || a.epochNow == null) return a.known ? 'asking…' : 'Known objects is off';
+    let best: { o: (typeof known.objects)[number]; d: number } | null = null;
+    for (const o of known.objects) {
+      const p = placeAt(o, a.epochNow);
+      if (!p) continue;
+      const d = sep(p[0], p[1], ra, dec);
+      if (d < 8 && (!best || d < best.d)) best = { o, d };
+    }
+    if (best) {
+      const o = best.o;
+      const mo = o.source === 'jpl' ? null : motionOf(o);
+      return [
+        `${SOURCE_WORD[o.source]}${o.name ? ` · ${o.name}` : ''}`,
+        o.mag != null ? `mag ${o.mag.toFixed(1)}` : '',
+        mo && mo.rate >= 0.05 ? `${mo.rate.toFixed(2)}″/yr` : '',
+        `${best.d.toFixed(1)}″ away`,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    }
+    for (const o of known.deep) {
+      const p = placeAt(o, a.epochNow);
+      if (p && sep(p[0], p[1], ra, dec) < 3) return `In a deeper catalogue (${o.id.split(':')[0] === 'gaia' ? 'Gaia to G 21' : o.id.split(':')[0] === 'catwise' ? 'CatWISE2020' : o.id.split(':')[0] === 'allwise' ? 'AllWISE' : '2MASS'})`;
+    }
+    return known.deepSilent.length ? `No match so far · ${known.deepSilent.join(', ')} ${known.deepPending.length ? 'being asked' : 'did not answer'}` : 'In no catalogue';
+  };
+  const selPlace = cur ? { ra: cur.ra, dec: cur.dec } : a.sel ? at : null;
+  const rulerNow = ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '';
+  const actions = (
+    <>
+      <div class="oc-row" style={{ display: cur ? 'none' : undefined }}>
         <input
-          class="inp ft-note"
+          class="inp oc-note"
           value={invNote}
           maxLength={400}
-          placeholder="Note"
+          placeholder="Note for the investigation"
           aria-label="Note for the investigation"
           onInput={(e) => setInvNote((e.target as HTMLInputElement).value)}
           data-testid="inv-note"
         />
-        <button class="mini" onClick={() => void saveFrame()} title="Save to investigation: this frame and the note" data-testid="tool-save">
-          Save to investigation
-        </button>
       </div>
-      <div class="ft-row">
+      <div class="oc-row">
+        <button class="btn sm" onClick={() => void saveFrame()} title="Add to investigation: this frame, the marks of the field and the note" data-testid="tool-save">
+          Add to investigation
+        </button>
         <button
-          class="mini"
+          class="btn sm primary"
           disabled={checks.view.state === 'running'}
           onClick={() => void runChecks()}
-          title="Check and submit: every check runs first; the submit opens when all have answered and none failed"
+          title="Check and submit: every check starts and the submit is declared; the service submits by itself when all have answered and none failed"
           data-testid="tool-check"
         >
           Check and submit
         </button>
       </div>
-      <div class="ft-line" data-testid="tools-line">
+      <div class="oc-line" data-testid="tools-line">
         {invLine || (showChecks ? checksStatus(checks.view) : '')}
       </div>
       {showChecks && <ChecksList view={checks.view} />}
-      {marksHere.length > 0 && (
-        <div class="ft-marks" data-testid="marks-list">
-          {marksHere.map((m) => (
-            <button key={m.id} class={`ft-mark ${m.id === open ? 'on' : ''}`} onClick={() => setOpen(m.id === open ? null : m.id)}>
-              <i style={{ background: LEVEL_COLOUR[m.level] }} />
-              <b>{m.label || 'Mark'}</b>
-              <span>{LEVEL_WORD[m.level]}</span>
-            </button>
-          ))}
-        </div>
-      )}
-    </section>
+    </>
   );
+  const card =
+    cur || a.sel || marksHere.length ? (
+      <div class="objcard" data-testid="flow-card">
+        {cur ? (
+          <>
+            <div class="oc-head">
+              <i class="oc-glyph" style={{ borderColor: LEVEL_COLOUR[cur.level] }} />
+              <input
+                class="inp"
+                value={cur.label}
+                maxLength={60}
+                aria-label="Label of the mark"
+                spellcheck={false}
+                onInput={(e) => updateMark(cur.id, { label: (e.target as HTMLInputElement).value })}
+                data-testid="mark-label"
+              />
+              <button
+                class="mini"
+                title="Remove this mark"
+                onClick={() => {
+                  removeMark(cur.id);
+                  setOpen(null);
+                }}
+                data-testid="mark-remove"
+              >
+                Remove
+              </button>
+            </div>
+            <div class="seg sm oc-levels" role="group" aria-label="Level">
+              {MARK_LEVELS.map((l) => (
+                <button key={l} class={cur.level === l ? 'on' : ''} aria-pressed={cur.level === l} onClick={() => updateMark(cur.id, { level: l })} data-testid={`mark-level-${l}`}>
+                  <i style={{ background: LEVEL_COLOUR[l] }} />
+                  {LEVEL_WORD[l]}
+                </button>
+              ))}
+            </div>
+            <input
+              class="inp"
+              value={cur.note}
+              maxLength={400}
+              placeholder="Note on the mark"
+              aria-label="Note on the mark"
+              onInput={(e) => updateMark(cur.id, { note: (e.target as HTMLInputElement).value })}
+              data-testid="mark-note"
+            />
+            <dl class="oc-facts">
+              <dt>Put on</dt>
+              <dd>{cur.pass != null ? (a.passes.find((q) => q.index === cur.pass)?.label ?? `pass ${cur.pass + 1}`) : 'no pass'}</dd>
+              <dt>Catalogues</dt>
+              <dd data-testid="mark-match">{matchAt(cur.ra, cur.dec)}</dd>
+              {rulerNow && (
+                <>
+                  <dt>Ruler</dt>
+                  <dd>{rulerNow}</dd>
+                </>
+              )}
+              {hintOf(cur) && (
+                <>
+                  <dt>Hint</dt>
+                  <dd class="warn" data-testid="mark-hint">
+                    {hintOf(cur).replace(/^Artefact hint: /, '')}
+                  </dd>
+                </>
+              )}
+            </dl>
+            {actions}
+          </>
+        ) : a.sel && selPlace ? (
+          <>
+            <dl class="oc-facts">
+              <dt>Catalogues</dt>
+              <dd data-testid="sel-match">{matchAt(selPlace.ra, selPlace.dec)}</dd>
+              {rulerNow && (
+                <>
+                  <dt>Ruler</dt>
+                  <dd>{rulerNow}</dd>
+                </>
+              )}
+            </dl>
+            {actions}
+          </>
+        ) : null}
+        {marksHere.length > 0 && (
+          <div class="oc-marks" data-testid="marks-list">
+            <div class="psub">Marks in this field</div>
+            {marksHere.map((m) => (
+              <button key={m.id} class={`ft-mark ${m.id === open ? 'on' : ''}`} onClick={() => setOpen(m.id === open ? null : m.id)}>
+                <i style={{ background: LEVEL_COLOUR[m.level] }} />
+                <b>{m.label || 'Mark'}</b>
+                <span>{LEVEL_WORD[m.level]}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    ) : null;
+
+  // the investigation of the field is seen on the picture's status line: a chip that opens it in the Cabinet
+  const realMarks = marksHere.filter((m) => m.level !== 'artefact').length;
+  const chip = inv ? (
+    <a class="invchip" href={`#/me?tab=investigations&inv=${encodeURIComponent(inv)}`} title="Open the investigation in the Cabinet" data-testid="inv-chip">
+      Investigation · {realMarks} mark{realMarks === 1 ? '' : 's'}
+      {invState ? ` · ${invState}` : ''}
+    </a>
+  ) : null;
 
   const rulerStatus =
     tool === 'ruler' && ruler.length < 2
@@ -776,13 +870,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     return () => clearInterval(t);
   }, []);
 
-  // the flow's own status line, over the picture above the date (nothing else on the page moves when it appears)
-  const all = (
-    <>
-      {floats}
-    </>
-  );
-
   return {
     draw,
     pointer: (p) => {
@@ -790,8 +877,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     },
     click,
     status: [status, awardNow].filter(Boolean).join(' · '),
-    floats: all,
-    tools,
+    floats: strip,
+    blinkPick,
+    card,
+    chip,
+    markOpen: !!cur,
     tool,
     marks,
     marksHere,

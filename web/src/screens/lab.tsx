@@ -2307,6 +2307,7 @@ export function Lab({ route }: { route: Route }) {
     single: film !== null || view === 'picture',
     side,
     known: opts.known,
+    blinkable: film === null && time === 'loop',
     sel,
     tracks: mv?.result?.tracks ?? [],
     anomalies: an?.result?.anomalies ?? [],
@@ -3226,6 +3227,7 @@ export function Lab({ route }: { route: Route }) {
                           ? daysShort
                           : dateLabel)}
                 {!note && flow.status && <span data-testid="flow-status"> · {flow.status}</span>}
+                {flow.chip}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
                     <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter
@@ -3331,6 +3333,7 @@ export function Lab({ route }: { route: Route }) {
                 </button>
               ))}
             </div>
+            {flow.blinkPick}
             <div class="tl-mid">
               {film === null && archStep !== null ? (
                 <>
@@ -3752,11 +3755,11 @@ export function Lab({ route }: { route: Route }) {
                   'Months scale only',
                 )}
               </section>
-              {flow.tools}
             </div>
           )}
           {tab === 'obj' && (
-            <div class="pbody pobj">
+            <div class={`pbody pobj${flow.markOpen ? ' mark-open' : ''}`}>
+              {flow.card}
               {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                 <>
                   {(() => {
