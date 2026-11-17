@@ -13,7 +13,7 @@ import numpy as np
 
 from engine.grid import Grid
 from engine.red import red_sources
-from service import cpu
+from service import cpu, jsonsafe
 from service.products.store import Store, product_key
 from service.products.sxp import decode
 from service.workers import fieldjob
@@ -131,6 +131,6 @@ def red_result(field_key: str, meta: dict[str, Any], raws: list[tuple[bytes, byt
 def keep(result: dict[str, Any], out_dir: Path, key: str) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     tmp = out_dir / f"{key}.{secrets.token_hex(4)}.part"  # its own file: two writers never share one
-    tmp.write_text(json.dumps(result, separators=(",", ":")))
+    tmp.write_text(jsonsafe.dumps(result, separators=(",", ":")))
     tmp.replace(out_dir / f"{key}.json")
     return result

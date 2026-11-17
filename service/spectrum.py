@@ -28,6 +28,7 @@ from engine.spx import psf as spxpsf
 from engine.spx import wave as spxwave
 from engine.spx import wcs as spxwcs
 from indexer.store import Exposure, Index
+from service import jsonsafe
 from service.products.store import product_key
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
@@ -172,10 +173,10 @@ class Spectra:
             run.state = "done"
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{run.key}.part"
-            tmp.write_text(json.dumps({"params": run.params, "total": run.total, "points": run.points}, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps({"params": run.params, "total": run.total, "points": run.points}, separators=(",", ":")))
             tmp.replace(self.dir / f"{run.key}.json")
             tmp = self.dir / f"{run.key}.stamps.part"
-            tmp.write_text(json.dumps({str(k): v for k, v in run.stamps.items()}, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps({str(k): v for k, v in run.stamps.items()}, separators=(",", ":")))
             tmp.replace(self.dir / f"{run.key}.stamps.json")
         except Exception as e:  # the place could not be measured: say so; the next request starts again
             run.state, run.error = "failed", str(e)[:300]

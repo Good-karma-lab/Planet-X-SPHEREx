@@ -24,6 +24,7 @@ import numpy as np
 
 from engine.grid import Grid
 from indexer.store import Index
+from service import jsonsafe
 from service.upstream import jpl
 from service.upstream.breaker import Breaker
 
@@ -275,7 +276,7 @@ class KnownBodies:
             }
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{key}.part"
-            tmp.write_text(json.dumps(result, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps(result, separators=(",", ":")))
             tmp.replace(self.dir / f"{key}.json")
             return result
         except Exception as e:  # JPL not reachable: said, and asked again next time

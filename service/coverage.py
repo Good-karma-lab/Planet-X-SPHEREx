@@ -13,6 +13,8 @@ import os
 import sqlite3
 from pathlib import Path
 
+from service import jsonsafe
+
 ORDER = 3
 
 
@@ -89,7 +91,7 @@ def coverage_payload(index_path: Path) -> tuple[bytes, str, str]:
     body = json.dumps(coverage_map(index_path), separators=(",", ":")).encode()
     tmp = disk.with_name(disk.name + f".{os.getpid()}.tmp")
     try:
-        tmp.write_text(json.dumps({"key": key, "body": body.decode()}))
+        tmp.write_text(jsonsafe.dumps({"key": key, "body": body.decode()}))
         os.replace(tmp, disk)
     except OSError:
         pass

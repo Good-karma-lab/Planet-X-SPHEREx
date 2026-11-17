@@ -26,6 +26,7 @@ import numpy as np
 from scipy.interpolate import CubicSpline
 
 from indexer.store import Index
+from service import jsonsafe
 from service.storage import digest
 from service.upstream import jpl
 from service.upstream.breaker import Breaker, BreakerOpenError
@@ -223,7 +224,7 @@ class Known:
                 self.memory.pop(next(iter(self.memory)))
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".part")
-            tmp.write_text(json.dumps(val, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps(val, separators=(",", ":")))
             tmp.replace(path)
             return val
 

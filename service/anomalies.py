@@ -28,7 +28,7 @@ from engine.spx import flags as spxflags
 from engine.spx import psf as spxpsf
 from engine.spx import wcs as spxwcs
 from indexer.store import Exposure, Index
-from service import cpu
+from service import cpu, jsonsafe
 from service.movers import covering_passes
 from service.products.store import Store, product_key
 from service.products.sxp import decode
@@ -158,7 +158,7 @@ class Anomalies:
             run.state, run.phase = "done", "done"
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{run.key}.part"
-            tmp.write_text(json.dumps(result, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps(result, separators=(",", ":")))
             tmp.replace(self.dir / f"{run.key}.json")
         except Exception as e:  # say why; the button starts it again
             run.state, run.error = "failed", str(e)[:300]

@@ -2347,7 +2347,9 @@ input[type='range']::-moz-range-thumb {
 .sbar .tray-line { flex-wrap: wrap; white-space: normal; gap: 2px 10px; }
 .sbar .sline { grid-template-columns: minmax(0, 1fr) 64px minmax(0, auto); }
 .sbar .sline b { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.2; }
-@media (max-width: 860px), (max-aspect-ratio: 1/1) { .panel { width: 100%; } }
+/* the lab's panel spans the page only where the lab is one pane (responsive.css: below 840 px, or upright): from 840 px it is the
+   right-hand column, and a full-width panel there left the picture no room at all (853 × 798: a 0 × 0 picture) */
+@media (max-width: 839.98px), (max-aspect-ratio: 1/1) { .panel { width: 100%; } }
 
 /* the picture sits at whole pixels (its offsets are set in the page), so its frame has one width in every state */
 .lab .vstage { align-items: flex-start; justify-content: flex-start; }
@@ -2403,7 +2405,7 @@ input[type='range']::-moz-range-thumb {
 .tl-labels span.restart::before { content: '↻'; margin-right: 3px; color: var(--accent); font-size: 10px; }
 
 /* the Object tab keeps the room its content will fill (portrait, catalogue rows, light curves), so that what follows it in a single column (the scans tray) does not jump when they arrive */
-@media (max-width: 860px), (max-aspect-ratio: 1/1) {
+@media (max-width: 839.98px), (max-aspect-ratio: 1/1) {
   .lab .pbody.pobj { min-height: 700px; }
 }
 

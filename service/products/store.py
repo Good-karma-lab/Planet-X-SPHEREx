@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from service import jsonsafe
 from service.products.versions import VERSIONS, lineage
 from service.storage import atomic_write_bytes, digest
 
@@ -76,7 +77,7 @@ class Store:
             self._db.execute("UPDATE products SET bytes = bytes + ? WHERE key = ?", (len(data), key))
 
     def write_meta(self, kind: str, key: str, meta: dict[str, Any]) -> None:
-        self.write_part(kind, key, "meta.json", json.dumps(meta, separators=(",", ":")).encode())
+        self.write_part(kind, key, "meta.json", jsonsafe.dumps(meta, separators=(",", ":")).encode())
 
     def complete(self, key: str) -> None:
         with self._lock:
@@ -102,7 +103,7 @@ class Store:
 
     def read_meta(self, kind: str, key: str) -> dict[str, Any] | None:
         b = self.read_part(kind, key, "meta.json")
-        return json.loads(b) if b is not None else None
+        return jsonsafe.loads(b) if b is not None else None  # a meta written before may carry NaN
 
     def pin(self, key: str, pinned: bool = True) -> None:
         with self._lock:

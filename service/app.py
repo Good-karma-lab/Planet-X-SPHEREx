@@ -18,11 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__, cpu, quarters
+from service import __version__, cpu, jsonsafe, quarters
 from service.accounts import get as accounts_get
 from service.accounts import register_accounts
 from service.anomalies import Anomalies
@@ -36,6 +35,7 @@ from service.findings import Findings
 from service.fpx_known import FpxIdentifier
 from service.grid import GridDB, import_searched
 from service.jobs.scheduler import Priority, Scheduler
+from service.jsonsafe import SafeJSONResponse as JSONResponse
 from service.known import Known
 from service.lightcurves import neowise as lc_neowise
 from service.lightcurves import ztf as lc_ztf
@@ -523,6 +523,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             await asyncio.sleep(60.0 if st.warm.state != "done" else 600.0)
 
     app = FastAPI(
+        default_response_class=jsonsafe.SafeJSONResponse,  # never a bare NaN in a reply (service/jsonsafe.py)
         title="SPHEREx Sky API",
         version=__version__,
         docs_url=None,
@@ -923,7 +924,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if filled < 0.5 * len(out["flux"]):
             out["note"] = "most planes of the all-sky cube are empty at this pixel (a saturated core or a gap of the map)"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(out, separators=(",", ":")))
+        path.write_text(jsonsafe.dumps(out, separators=(",", ":")))
         return out
 
     @app.get(f"{API_PREFIX}/spectrum")
