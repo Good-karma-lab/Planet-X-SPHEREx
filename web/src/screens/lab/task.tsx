@@ -314,6 +314,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     said: [string, string][];
     got: string[];
     points: number | null;
+    pending: boolean;
     next: Record<string, string> | null;
     none: string;
   } | null>(null);
@@ -403,6 +404,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     if (task.kind === 'cell' && a.square?.canCount) await a.square.confirm(result === 'marks' ? 'marks' : 'nothing');
     let gotWords: string[] = [];
     let points: number | null = null;
+    let pending = false;
     if (id) {
       const r = await post(`/api/me/tasks/${encodeURIComponent(id)}/done`, {
         // a series: the path of answers and the pictures tapped as missing; the service says what it leads to
@@ -420,6 +422,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         achievements?: { name?: string }[];
         result?: { label?: string };
         class?: { label?: string };
+        agreement?: { answers?: number; needed?: number; settled?: boolean; points_when_agreed?: number };
       };
       const items = [
         ...((got.result?.label ?? got.class?.label) ? [`Your answers say: ${got.result?.label ?? got.class?.label}`] : []),
@@ -427,6 +430,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         ...(typeof got.points === 'number' && got.points > 0 ? [`+${got.points} points`] : []),
       ];
       if (items.length) award = { text: items.join(' · '), until: Date.now() + 12000 };
+      // a check is scored when enough people agree (service/routes_me.py agreement_of): say where it stands, not a bare 0 points
+      const ag = got.agreement;
       if (!r.ok && r.status !== 401) {
         setBusy(false);
         return setLine(r.status === 422 ? 'The service did not take the answer' : 'The service did not answer');
@@ -434,8 +439,12 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       gotWords = [
         ...((got.result?.label ?? got.class?.label) ? [`Your answers say: ${got.result?.label ?? got.class?.label}`] : []),
         ...(got.achievements ?? []).map((x) => `Achievement: ${x.name ?? ''}`),
+        ...(ag && !ag.settled && !(got.points ?? 0)
+          ? [`Points come when people agree: ${ag.answers ?? 1} of ${ag.needed ?? 3} answers so far, +${ag.points_when_agreed ?? 10} if yours matches`]
+          : []),
       ];
       points = typeof got.points === 'number' ? got.points : null;
+      pending = !!ag && !ag.settled && !points;
     }
     // what was said, in the words of the answers
     const said: [string, string][] =
@@ -453,6 +462,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       said,
       got: gotWords,
       points,
+      pending,
       next: to,
       none: next === 'failed' ? 'Tasks did not answer' : 'No more tasks of this kind',
     });
@@ -497,7 +507,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
             </div>
           ))}
           <div class="mono-s tp-points">
-            {done.points == null ? 'not counted' : done.points > 0 ? `+${done.points} points` : '0 points'} ·{' '}
+            {done.pending ? 'points when people agree' : done.points == null ? 'not counted' : done.points > 0 ? `+${done.points} points` : '0 points'}{' '}
+            ·{' '}
             <a class="cb-link" href="#/me">
               Cabinet
             </a>
