@@ -122,6 +122,7 @@ def register_accounts(app: FastAPI, st: Any) -> None:
     """Sign-in, the user's data, tasks and submit: every route of the accounts stream."""
     from service.routes_auth import make_auth_router
     from service.routes_me import make_me_router
+    from service.routes_share import make_share_router
     from service.routes_tasks import make_tasks_router
 
     st.current_user = lambda request: get(st).current_user(request)
@@ -132,6 +133,7 @@ def register_accounts(app: FastAPI, st: Any) -> None:
     app.include_router(make_auth_router(st))
     app.include_router(make_me_router(st))
     app.include_router(make_tasks_router(st))
+    app.include_router(make_share_router(st))  # public profiles, stories, share links and their pictures
 
 
 __all__ = ["COOKIE", "Accounts", "AccountsDB", "MailSender", "get", "register_accounts"]

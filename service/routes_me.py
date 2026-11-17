@@ -31,6 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from service import accounts
 from service.accounts import agreement
 from service.accounts import score as scoring
+from service.accounts import share as sharing
 from service.accounts import submit as auto
 from service.accounts.db import LimitReachedError, iso
 
@@ -44,6 +45,7 @@ MAX_NOTES, MAX_FRAMES, MAX_THUMB = 200, 60, 200_000
 class NameIn(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=60)
     hide_from_board: bool | None = None
+    public_profile: bool | None = None  # the public page #/u/<slug>: off until the user turns it on (or shares)
 
 
 class MarkIn(BaseModel):
@@ -207,6 +209,8 @@ def make_me_router(st: Any) -> APIRouter:
         if body.hide_from_board is not None:
             score_of(acc)  # the column is made with the score's tables
             acc.db._conn().execute("UPDATE acc_users SET hide_board=? WHERE id=?", (int(body.hide_from_board), u["id"]))
+        if body.public_profile is not None:
+            sharing.get(st, acc.db).set_public(u["id"], body.public_profile)
         return {"user": acc.db.user(u["id"])}
 
     @router.get("/api/me/score")

@@ -562,7 +562,15 @@ class AccountsDB:
         c.execute("UPDATE acc_submissions SET status=?, updated=? WHERE finding_id=?", (status, time.time(), finding_id))
         users = {r[0] for r in c.execute("SELECT DISTINCT user_id FROM acc_credits WHERE finding_id=?", (finding_id,))}
         for u in users:
-            self.notify(u, "status", f"Finding {finding_id}: the status is now “{status.replace('_', ' ')}”.", finding_id)
+            if status == "confirmed":  # the big moment: every person credited is told, and sent to the discovery page
+                self.notify(
+                    u,
+                    "status",
+                    f"Finding {finding_id} is confirmed as a new object. The status is now “confirmed”.",
+                    f"#/findings/{finding_id}/story",
+                )
+            else:
+                self.notify(u, "status", f"Finding {finding_id}: the status is now “{status.replace('_', ' ')}”.", finding_id)
         return len(users)
 
     def notify_once(self, user_id: str, key: str, kind: str, text: str, ref: str | None = None) -> bool:
