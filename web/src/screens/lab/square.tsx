@@ -261,12 +261,20 @@ export function useSquareLook(a: SquareArgs): SquareLook {
 /** The free lab on a place that is not exactly a square or a quarter: which square and quarter it is in, how many of its quarters
  *  I looked through, and the one thing that makes sense here: look through this quarter (as a task: its card, the minute's look,
  *  then the square's next quarter). Another square is offered only once this one is looked through. */
+const hereCache = new Map<string, { cell: GridCell; quarter: Quarter } | 'none'>();
+
 export function HereSquare({ ra, dec, open }: { ra: number; dec: number; open: (params: Record<string, string>) => void }) {
-  const [here, setHere] = useState<{ cell: GridCell; quarter: Quarter } | null | 'none'>(null);
+  // the answer is kept for the place: coming back to the Task tab shows it at once (no row appearing late, no jump)
+  const hk = `${ra.toFixed(4)},${dec.toFixed(4)}`;
+  const [here, setHereRaw] = useState<{ cell: GridCell; quarter: Quarter } | null | 'none'>(() => hereCache.get(hk) ?? null);
+  const setHere = (v: { cell: GridCell; quarter: Quarter } | 'none' | null) => {
+    if (v) hereCache.set(hk, v);
+    setHereRaw(v);
+  };
   const [line, setLine] = useState('');
   useEffect(() => {
     let stop = false;
-    setHere(null);
+    setHereRaw(hereCache.get(hk) ?? null);
     void (async () => {
       try {
         const r = await fetch(`/api/grid/cells?ra=${ra.toFixed(5)}&dec=${dec.toFixed(5)}&radius=0.3`);
