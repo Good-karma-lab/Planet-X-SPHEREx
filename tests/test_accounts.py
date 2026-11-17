@@ -539,3 +539,50 @@ def test_two_requests_settling_the_same_submit_at_once_submit_it_once(site: tupl
         "Your finding “Raced” is submitted and waits for the verdict.",
         "Your finding “Twice” is submitted and waits for the verdict.",
     ]
+
+
+def test_the_lab_adds_objects_to_a_new_or_an_existing_investigation(site: tuple[FastAPI, _State, _Mail]) -> None:
+    app, st, mail = site
+    c = _sign_in(app, mail)
+    for i in (1, 2, 3):
+        c.post("/api/me/marks", json={**MARK, "id": f"m-000{i}-abcdef", "pass": i})
+    item = {
+        "label": "Dot north of Barnard", "ra": 269.45, "dec": 4.74, "field_key": "269.45,+4.74,20", "mark_ids": ["m-0001-abcdef", "m-0002-abcdef"],
+        "ruler": {"rate": 10.1, "catalogue_rate": 10.39, "pa": 356.0, "shift": 5.2, "object": "Barnard's star"},
+        "catalogue": {"source": "gaia", "name": "Gaia DR3 4472832130942575872", "sep": 1.1},
+        "ref": "#/lab?ra=269.45&dec=4.74&fov=20",
+    }  # fmt: skip
+    assert _client(app).post("/api/me/investigations/new/items", json=item).status_code == 401
+    inv = c.post("/api/me/investigations/new/items", json={**item, "title": "Around Barnard"}).json()
+    assert inv["title"] == "Around Barnard" and inv["mark_ids"] == ["m-0001-abcdef", "m-0002-abcdef"] and inv["notes"] == []
+    got = inv["items"][0]
+    assert (
+        got["label"] == "Dot north of Barnard"
+        and got["ruler"]["rate"] == 10.1
+        and got["catalogue"]["name"].startswith("Gaia DR3")
+        and got["at"]
+    )
+    iid, first = inv["id"], got["id"]
+    # a second object in the same investigation; its marks join the investigation's marks
+    two = c.post(
+        f"/api/me/investigations/{iid}/items",
+        json={"label": "Second", "ra": 269.5, "dec": 4.8, "mark_ids": ["m-0003-abcdef", "m-0002-abcdef"]},
+    ).json()
+    assert [x["label"] for x in two["items"]] == ["Dot north of Barnard", "Second"] and len(two["mark_ids"]) == 3
+    # the same object sent again replaces the earlier one
+    again = c.post(f"/api/me/investigations/{iid}/items", json={**item, "id": first, "label": "Renamed"}).json()
+    assert sorted(x["label"] for x in again["items"]) == ["Renamed", "Second"]
+    assert c.post(f"/api/me/investigations/{iid}/items", json={**item, "ref": "https://evil.example"}).status_code == 422
+    assert c.post("/api/me/investigations/nope/items", json=item).status_code == 404
+    # taking an object out takes the marks that came only with it
+    less = c.delete(f"/api/me/investigations/{iid}/items/{first}").json()
+    assert [x["label"] for x in less["items"]] == ["Second"] and less["mark_ids"] == ["m-0002-abcdef", "m-0003-abcdef"]
+    assert c.delete(f"/api/me/investigations/{iid}/items/{first}").status_code == 404
+    # the ruler of an object within 20% of the catalogue: "Measurer"
+    c.post(f"/api/me/investigations/{iid}/items", json=item)
+    assert any(a["id"] == "measurer" and a["earned_at"] for a in c.get("/api/me/score").json()["achievements"])
+    # a submit exists only on an investigation; a submitted one takes no more objects
+    assert c.post("/api/findings/submit", json={"investigation_id": "none", "checks_job": "j"}).status_code == 404
+    st.checks_status = lambda job: {"job": job, "state": "done", "can_submit": True, "checks": []}  # type: ignore[attr-defined]
+    assert c.post(f"/api/me/investigations/{iid}/submit", json={"checks_job": "j"}).json()["state"] == "submitted"
+    assert c.post(f"/api/me/investigations/{iid}/items", json=item).status_code == 409

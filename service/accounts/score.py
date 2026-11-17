@@ -621,12 +621,12 @@ class Score:
         for r in c.execute("SELECT notes, extra, submitted FROM acc_investigations WHERE user_id=?", (user_id,)):
             s.inv_notes = s.inv_notes or bool(json.loads(r["notes"]))
             extra = json.loads(r["extra"] or "{}")
-            ruler = extra.get("ruler") or {}
-            try:
-                rate, cat = float(ruler["rate"]), float(ruler["catalogue_rate"])
-                s.measurer = s.measurer or (cat > 0 and abs(rate - cat) / cat <= 0.2)
-            except (KeyError, TypeError, ValueError):
-                pass
+            for ruler in [extra.get("ruler") or {}, *[x.get("ruler") or {} for x in extra.get("items", [])]]:
+                try:  # the ruler's result of the investigation, or of any object gathered in it
+                    rate, cat = float(ruler["rate"]), float(ruler["catalogue_rate"])
+                    s.measurer = s.measurer or (cat > 0 and abs(rate - cat) / cat <= 0.2)
+                except (KeyError, TypeError, ValueError):
+                    pass
             s.time_traveller = s.time_traveller or bool(extra.get("old_survey"))
             s.closed += int(bool(r["submitted"]) and self.stage_of(r["submitted"], {}) is not None)
         # days in a row, and weekends with both days
