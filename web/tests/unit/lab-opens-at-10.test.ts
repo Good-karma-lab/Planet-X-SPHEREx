@@ -5,6 +5,7 @@ import { firstQuarter } from '../../src/screens/globe/coverage';
 // Every way into the lab opens at 10′ (people look a quarter at a time). Kept on purpose: time-lapse tracks at their own size
 // ('60'), and the named demo fields of the globe (the Eris field) as they are.
 const FILES = [
+  'src/lib/aim.ts',
   'src/screens/globe.tsx',
   'src/screens/globe/coverage.ts',
   'src/screens/index/IndexV2.tsx',
@@ -18,7 +19,7 @@ describe('the lab opens at 10′', () => {
       const lines = readFileSync(f, 'utf8')
         .split('\n')
         .filter((l) => !/Eris|demo/i.test(l));
-      const bad = lines.filter((l) => /fov:\s*20\b|fov:\s*'20'|:\s*'20'[,\s}]/.test(l));
+      const bad = lines.filter((l) => /fov:\s*(20|5)\b|fov:\s*'(20|5)'|:\s*'20'[,\s}]/.test(l));
       expect(bad, f).toEqual([]);
     }
   });

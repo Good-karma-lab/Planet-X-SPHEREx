@@ -178,7 +178,7 @@ const DEMOS: { n: string; what: string; ra: number; dec: number; fov: number; fi
   { n: '3I/ATLAS', what: 'interstellar comet · time-lapse of 14 Dec 2025', ra: 166.8274, dec: 5.2787, fov: 60, film: 61023.6 },
   {
     n: 'Asteroids near the ecliptic',
-    what: 'film of the 14–20 Dec 2025 pass · known bodies ringed',
+    what: 'time-lapse of the 14–20 Dec 2025 pass · known bodies ringed',
     ra: 169.8917,
     dec: 4.3514,
     fov: 60,
@@ -1282,7 +1282,7 @@ export function Globe() {
   const select = (o: Obj, zoom = false) => {
     setSel(o);
     const [ra, dec] = epochPlace(o);
-    aim.set({ ra, dec }, 'catalog');
+    aim.set({ ra, dec, fov: 10 }, 'catalog'); // an object of the catalogue opens at 10′, the size people look at
     if (zoom && proj === 'moll') {
       // a map has no zoom: the globe shows the object
       live.current.proj = 'globe';
@@ -1311,8 +1311,8 @@ export function Globe() {
   /** The lab at the object's place during the SPHEREx survey (where it is in the pictures the lab shows). */
   const openObj = (o: Obj) => {
     const [ra, dec] = epochPlace(o);
-    aim.set({ ra, dec }, 'catalog');
-    openLab(ra, dec, a.fov);
+    aim.set({ ra, dec, fov: 10 }, 'catalog');
+    openLab(ra, dec, 10);
   };
   /** Show area: the field under the aim frame. When the aim is on a catalogue object (its J2000 place, its place on the backdrop,
    *  or its survey-epoch place) the field opens where the object is during the survey, as "Open in lab" does. */
@@ -1804,7 +1804,7 @@ export function Globe() {
                     onClick={() => {
                       location.hash = formatHash({
                         screen: 'lab',
-                        params: { ra: named.ra.toFixed(5), dec: named.dec.toFixed(5), fov: '5' },
+                        params: { ra: named.ra.toFixed(5), dec: named.dec.toFixed(5), fov: '10' },
                       });
                     }}
                   >
