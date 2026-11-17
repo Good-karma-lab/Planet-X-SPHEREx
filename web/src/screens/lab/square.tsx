@@ -15,7 +15,8 @@ export interface GridCell {
   ra: number;
   dec: number;
   corners: [number, number][];
-  quarters?: { id: string; ra?: number; dec?: number; viewers?: number; mine?: boolean }[];
+  /** the service's quarters (named `id`, or `q` in an earlier shape), with how many people looked and whether I did */
+  quarters?: { id?: string; q?: string; ra?: number; dec?: number; viewers?: number; mine?: boolean }[];
 }
 
 const wrap = (d: number) => ((d + 540) % 360) - 180;
@@ -155,18 +156,29 @@ export function useSquareLook(a: SquareArgs): SquareLook {
     ? [`square ${cell.id}`, quarter ? `${quarter} quarter` : '', quarter && mine != null ? `${mine} of 4 looked through` : ''].filter(Boolean).join(' · ')
     : '';
 
+  // a look is counted per quarter (the service takes no look at a whole square): a 20′ square looked through counts its four
+  // quarters. Only from the person's own click, and `confirm: true` says so
   const confirm = async (result?: 'nothing' | 'marks'): Promise<boolean> => {
     if (!cell || !canCount) return false;
-    try {
-      const r = await fetch(`/api/grid/cell/${encodeURIComponent(cell.id)}/viewed`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...(result ? { result } : {}), ...(quarter ? { quarter } : {}) }),
-      });
-      return r.ok;
-    } catch {
-      return false;
+    let ok = true;
+    for (const q of quarter ? [quarter] : QUARTERS) {
+      try {
+        const r = await fetch(`/api/grid/cell/${encodeURIComponent(cell.id)}/viewed`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ quarter: q, confirm: true, ...(result ? { result } : {}) }),
+        });
+        if (r.status === 401) {
+          setLine2('Sign in to count your look');
+          return false;
+        }
+        ok = ok && r.ok;
+      } catch {
+        ok = false;
+      }
     }
+    setTick((x) => x + 1); // the square again, with my quarters
+    return ok;
   };
 
   // the free lab's button; after a quarter, the next one of the square not yet looked through opens
@@ -174,12 +186,12 @@ export function useSquareLook(a: SquareArgs): SquareLook {
   const done = async () => {
     setLine2('saving…');
     const ok = await confirm();
-    if (!ok) return setLine2('Not counted: the service did not answer');
+    if (!ok) return setLine2((l) => l || 'Not counted: the service did not answer');
     if (!quarter || !cell) {
       setLine2('Counted');
       return setTick((x) => x + 1);
     }
-    const seen = new Set((cell.quarters ?? []).filter((q) => q.mine).map((q) => q.id));
+    const seen = new Set((cell.quarters ?? []).filter((q) => q.mine).map((q) => q.id ?? q.q));
     seen.add(quarter);
     const next = QUARTERS.slice(QUARTERS.indexOf(quarter) + 1).concat(QUARTERS).find((q) => !seen.has(q));
     const at = next ? quarterCentre(cell, next) : null;
