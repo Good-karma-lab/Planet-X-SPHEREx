@@ -19,11 +19,11 @@ from service.routes_known_field import make_known_field_router
 
 # Barnard's Star as Gaia DR3 has it (2016.0) and a faint slow neighbour; a far star outside the frame; one fainter than the limit
 GAIA_CSV = (
-    "source_id,ra,dec,pmra,pmdec,parallax,phot_g_mean_mag\n"
-    "4472832130942575872,269.44850252543836,4.739420051112412,-801.551,10362.394,546.9759,8.19\n"
-    "111,269.4600,4.7300,1.0,-2.0,0.5,15.5\n"
-    "222,269.9000,4.7300,1.0,-2.0,0.5,12.0\n"
-    "333,269.4500,4.7400,0.0,0.0,,20.4\n"
+    "source_id,ra,dec,pmra,pmdec,parallax,phot_g_mean_mag,bp_rp,ruwe\n"
+    "4472832130942575872,269.44850252543836,4.739420051112412,-801.551,10362.394,546.9759,8.19,2.834,1.1\n"
+    "111,269.4600,4.7300,1.0,-2.0,0.5,15.5,1.2,0.98\n"
+    "222,269.9000,4.7300,1.0,-2.0,0.5,12.0,,\n"
+    "333,269.4500,4.7400,0.0,0.0,,20.4,,\n"
 )
 SIMBAD = {
     "data": [
@@ -122,6 +122,8 @@ async def test_objects_of_a_frame(tmp_path: Path) -> None:
     assert sep_arcsec(p0["ra"], p0["dec"], p1["ra"], p1["dec"]) == pytest.approx(10.39 * (2026.6 - kf.epoch_year(61026.5)), abs=0.6)
     # the slow faint neighbour: a ring without a label; the far star and the one below the magnitude limit are left out
     assert by["gaia:111"]["label"] is False
+    # BP−RP and RUWE come in the same Gaia request (the passport shows them without asking Gaia again)
+    assert star["bp_rp"] == 2.834 and star["ruwe"] == 1.1 and by["gaia:111"]["bp_rp"] == 1.2
     assert "gaia:222" not in by and "gaia:333" not in by
     assert by["simbad:LEDA 1"]["type"] == "G" and by["simbad:LEDA 1"]["mag_band"] == "J"
     body = by["jpl:9078 (1994 PB2)"]
@@ -202,7 +204,14 @@ def test_route(tmp_path: Path) -> None:
         assert r.headers.get("content-encoding") == "gzip"
         small = c.get("/api/known", params={"ra": 269.449, "dec": 4.741, "size_arcmin": 6, "epochs": "2025.9,2026.6", "compact": 1}).json()
         thin = next(x for x in small["objects"] if not x["label"])
-        assert set(thin) == {"id", "source", "positions", "mag", "label"} and len(small["objects"]) == len(r.json()["objects"])
+        # a thin ring keeps the identity the passport takes from it: motion, parallax (and a SIMBAD name when it has one)
+        assert (
+            {"id", "source", "positions", "mag", "label"}
+            <= set(thin)
+            <= {"id", "source", "positions", "mag", "label", "pmra", "pmdec", "parallax", "bp_rp", "ruwe", "name", "type", "simbad"}
+        )
+        assert "pm_total" not in thin and len(small["objects"]) == len(r.json()["objects"])
+        assert all(("simbad" in x) == ("simbad" in y) for x, y in zip(small["objects"], r.json()["objects"], strict=True))
         assert c.get("/api/known", params={"ra": 1, "dec": 1, "size_arcmin": 6, "epochs": "x"}).status_code == 400
         assert c.get("/api/known", params={"ra": 1, "dec": 1, "size_arcmin": 600, "epochs": "2026"}).status_code == 422
 

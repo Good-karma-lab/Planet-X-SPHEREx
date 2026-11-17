@@ -6,6 +6,7 @@ import { quickPoints, useQuicklook, type QuickPoint } from './spectrum/quicklook
 import { StampPanels, useStamps } from './spectrum/stamps';
 import { guessObject } from './spectrum/classify';
 import type { Source, SpecPoint } from './spectrum/types';
+import type { Held } from './lab/known';
 import './spectrum/extra.css';
 
 export type { Source, SpecPoint };
@@ -535,18 +536,48 @@ interface Identified {
   };
 }
 
-/** What SIMBAD and Gaia DR3 call a place, asked once per selection. */
-function useIdentify(src: Source | null): Identified | null | 'asking' {
+/** What the field's lookup already holds, in the passport's terms (the catalogues it did not cover are left out: they are asked). */
+export function heldIdentified(h: Held | null | undefined): Identified {
+  if (!h) return {};
+  return {
+    simbad: h.simbad === 'none' ? { state: 'none' } : h.simbad ? { state: 'ok', name: h.simbad.name, type: h.simbad.type ?? undefined, sp: null } : undefined,
+    gaia: h.gaia
+      ? { state: 'ok', source_id: h.gaia.source_id, g: h.gaia.g, parallax: h.gaia.parallax, bp_rp: h.gaia.bp_rp, ruwe: h.gaia.ruwe }
+      : h.covered.includes('gaia')
+        ? { state: 'none' }
+        : undefined,
+  };
+}
+
+/** What the passport asks /api/v1/context for a source: null when the field's lookup already answered both SIMBAD and Gaia (nothing to
+ *  ask), else the catalogues to skip (those it did answer). */
+export function identifySkip(held: Held | null | undefined): string[] | null {
+  const covered = held?.covered ?? [];
+  return covered.includes('gaia') && covered.includes('simbad') ? null : [...covered];
+}
+
+/** What SIMBAD and Gaia DR3 call a place, asked once per selection. `held`: what the field's lookup already answered for it (a ringed
+ *  known star): taken as it is, and only the catalogues it did not cover are asked; nothing is asked when it covered both. */
+export function useIdentify(src: Source | null, held?: Held | null): Identified | null | 'asking' {
   const [v, setV] = useState<Identified | null | 'asking'>(null);
+  const covered = held?.covered ?? [];
+  const heldKey = held ? `${held.name}|${covered.join(',')}` : '';
   useEffect(() => {
     setV(null);
     if (!src) return;
-    setV('asking');
+    const base = heldIdentified(held);
+    const skip = identifySkip(held);
+    if (skip === null) {
+      setV(base);
+      return;
+    }
+    setV(held ? base : 'asking');
     const ctl = new AbortController();
     // a place on the picture is where the thing is in 2025.9: ask the catalogues at that epoch (they move their stars); a catalogue object
     // that carries a proper motion has its J2000 place, so epoch 2000
     const moving = !!(src.pmra || src.pmdec);
     const cq = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6), epoch: moving ? '2000' : '2025.9', radius: '6' });
+    if (skip.length) cq.set('skip', skip.join(','));
     const old = new URLSearchParams({ ra: src.ra.toFixed(6), dec: src.dec.toFixed(6) });
     if (moving) {
       old.set('pmra', String(src.pmra ?? 0));
@@ -556,8 +587,8 @@ function useIdentify(src: Source | null): Identified | null | 'asking' {
       simbad?: { state: string; name?: string; otype?: string; sptype?: string | null; sep?: number };
       gaia?: Identified['gaia'];
     }): Identified => ({
-      simbad: c.simbad && { state: c.simbad.state, name: c.simbad.name, type: c.simbad.otype, sp: c.simbad.sptype ?? null, sep: c.simbad.sep },
-      gaia: c.gaia,
+      simbad: base.simbad ?? (c.simbad && { state: c.simbad.state, name: c.simbad.name, type: c.simbad.otype, sp: c.simbad.sptype ?? null, sep: c.simbad.sep }),
+      gaia: base.gaia ?? c.gaia,
     });
     // a catalogue not in yet comes back `pending`: ask again every 2 s, up to 20 s, showing each answer as it lands
     const pendingIn = (c: { simbad?: { state: string }; gaia?: { state: string } }) => c.simbad?.state === 'pending' || c.gaia?.state === 'pending';
@@ -578,18 +609,18 @@ function useIdentify(src: Source | null): Identified | null | 'asking' {
         void e;
         fetch(`/api/v1/identify?${old}`, { signal: ctl.signal })
           .then((r) => (r.ok ? r.json() : null))
-          .then((d: Identified | null) => setV(d))
+          .then((d: Identified | null) => setV(d ? { simbad: base.simbad ?? d.simbad, gaia: base.gaia ?? d.gaia } : held ? base : null))
           .catch(() => {});
       });
     return () => ctl.abort();
-  }, [src?.ra, src?.dec, src?.pmra, src?.pmdec]);
+  }, [src?.ra, src?.dec, src?.pmra, src?.pmdec, heldKey]);
   return v;
 }
 
 /** What the object probably is, read from its spectrum: the same words as the Spectrum tab's header (one function behind both). Shown in the passport beside the portrait. */
-export function ObjectGuess({ src }: { src: Source | null }) {
+export function ObjectGuess({ src, held }: { src: Source | null; held?: Held | null }) {
   const { view, points } = useSpectrum(src);
-  const id = useIdentify(src);
+  const id = useIdentify(src, held);
   const bins = useMemo(() => binSpectrum(points), [points]);
   if (!src) return null;
   const usable = points.filter((p) => p.ok).length;
@@ -600,7 +631,7 @@ export function ObjectGuess({ src }: { src: Source | null }) {
     usable,
     saturated,
     running: !view || view.state === 'running',
-    name: src.name ?? (sb?.state === 'ok' ? sb.name : null),
+    name: src.name ?? (sb?.state === 'ok' ? sb.name : (held?.name ?? null)),
     type: sb?.state === 'ok' ? sb.type : null,
     sp: sb?.state === 'ok' ? sb.sp : null,
   });
@@ -612,8 +643,26 @@ export function ObjectGuess({ src }: { src: Source | null }) {
   );
 }
 
-export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum: () => void }) {
-  const id = useIdentify(src);
+/** A source that some catalogue knows: Gaia, SIMBAD's other answer or the field's lookup (a ringed star, a deeper match). */
+function knownElsewhere(ga: Identified['gaia'] | { state: string } | undefined, held: Held | null | undefined): boolean {
+  return ga?.state === 'ok' || !!held;
+}
+
+/** The name of a source: its own, SIMBAD's, else the catalogue id the field's lookup or Gaia gives; "no catalogue name here" only for
+ *  a source no catalogue knows. */
+export function nameOf(src: Source, id: Identified | null | 'asking', held: Held | null | undefined): string {
+  if (src.name) return src.name;
+  const sb = id && id !== 'asking' ? id.simbad : undefined;
+  const ga = id && id !== 'asking' ? id.gaia : undefined;
+  if (sb?.state === 'ok' && sb.name) return sb.name;
+  if (held?.name) return held.name;
+  if (ga?.state === 'ok' && ga.source_id) return `Gaia DR3 ${ga.source_id}`;
+  if (id === 'asking' || sb?.state === 'pending' || ga?.state === 'pending') return 'asking the catalogues…';
+  return 'no catalogue name here';
+}
+
+export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpectrum: () => void; held?: Held | null }) {
+  const id = useIdentify(src, held);
   if (!src) return <div class="mono-s">Click a source in the picture</div>;
   const pm = src.pmra || src.pmdec ? Math.hypot(src.pmra ?? 0, src.pmdec ?? 0) : 0;
   const sb = id && id !== 'asking' ? id.simbad : undefined;
@@ -628,7 +677,7 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
     <div class="okv">
       <div class="orow">
         <span class="faint">Name</span>
-        <span>{src.name ?? (sb?.state === 'ok' ? sb.name : id === 'asking' || sb?.state === 'pending' ? 'asking SIMBAD…' : 'no catalogue name here')}</span>
+        <span data-testid="obj-name">{nameOf(src, id, held)}</span>
       </div>
       <div class="orow">
         <span class="faint">Position</span>
@@ -654,9 +703,11 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
           {id === 'asking'
             ? 'asking…'
             : sb?.state === 'ok'
-              ? `${sb.name}${sb.type ? ` · ${sb.type}` : ''}${sb.sp ? ` · ${sb.sp}` : ''} (${sb.sep}″)`
+              ? `${sb.name}${sb.type ? ` · ${sb.type}` : ''}${sb.sp ? ` · ${sb.sp}` : ''}${sb.sep != null ? ` (${sb.sep}″)` : ''}`
               : sb?.state === 'none'
-                ? 'nothing within 6″'
+                ? knownElsewhere(ga, held)
+                  ? 'no entry'
+                  : 'nothing within 6″'
                 : sb?.state === 'pending'
                   ? 'asking…'
                   : 'not reachable'}
@@ -668,8 +719,10 @@ export function ObjectTab({ src, onSpectrum }: { src: Source | null; onSpectrum:
           {id === 'asking'
             ? 'asking…'
             : ga?.state === 'ok'
-              ? gaiaLine(ga)
-              : ga?.state === 'none'
+              ? `${gaiaLine(ga)}${held?.gaia ? ' · from the field’s lookup' : ''}`
+              : ga?.state === 'none' && held && !held.gaia && held.name
+                ? 'no entry'
+                : ga?.state === 'none'
                 ? neighbour
                   ? `no match: the Gaia source within 6″ (G ${ga0?.g != null ? ga0.g.toFixed(1) : '?'}) has no parallax that fits a ${(pmMas / 1000).toFixed(1)} ″/yr mover`
                   : 'nothing within 6″'
@@ -838,9 +891,11 @@ export function Passport({ a, f }: { a: Anomaly; f: AnomalyField }) {
           <span class="faint">SIMBAD</span>
           <span>
             {sb?.state === 'ok'
-              ? `${sb.name}${sb.type ? ` · ${sb.type}` : ''}${sb.sp ? ` · ${sb.sp}` : ''} (${sb.sep}″)`
+              ? `${sb.name}${sb.type ? ` · ${sb.type}` : ''}${sb.sp ? ` · ${sb.sp}` : ''}${sb.sep != null ? ` (${sb.sep}″)` : ''}`
               : sb?.state === 'none'
-                ? 'nothing within 6″'
+                ? ga?.state === 'ok'
+                  ? 'no entry'
+                  : 'nothing within 6″'
                 : 'not reachable'}
           </span>
         </div>

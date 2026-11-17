@@ -245,7 +245,8 @@ export function taskHash(t: Task): string {
     q.set('ra', t.ra.toFixed(5));
     q.set('dec', t.dec.toFixed(5));
   }
-  q.set('fov', t.kind === 'cell' ? String(t.fov ?? 20) : '5'); // a square is looked through a quarter (10′) at a time
+  // every task opens at 10′ (a square a quarter at a time); a time-lapse keeps its own size
+  q.set('fov', t.kind === 'cell' ? String(t.fov ?? 10) : t.finding_id?.startsWith('film:') ? '60' : '10');
   q.set('task', t.id);
   q.set('kind', t.kind); // the lab of a guest cannot look a task up by its id
   if (t.kind === 'cell' && t.cell_id) q.set('cell', t.cell_id);
@@ -273,7 +274,7 @@ export function describeHash(hash: string): { kind: HistoryKind; title: string; 
     const ra = Number(p.get('ra'));
     const dec = Number(p.get('dec'));
     if (!Number.isFinite(ra) || !Number.isFinite(dec)) return null;
-    const fov = p.get('fov') ?? '5';
+    const fov = p.get('fov') ?? '10';
     const place = `RA ${ra.toFixed(3)}° Dec ${dec >= 0 ? '+' : ''}${dec.toFixed(3)}° · ${fov}′`;
     return { kind: 'lab', title: `Lab · ${place}`, key: `lab:${ra.toFixed(3)},${dec.toFixed(3)},${fov}` };
   }

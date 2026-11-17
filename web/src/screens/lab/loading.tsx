@@ -56,7 +56,7 @@ export const STALL_S = 20;
 const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 /** The overlay over the picture while a field is made or loaded: a looping video of a telescope building the sky (generated with
- *  Gemini, marked so), dimmed under the step, a real progress bar with its numbers, the list of steps, the time since the start.
+ *  Gemini, marked so) whole and at full brightness at the top of the card, under it the step, a real progress bar with its numbers, the list of steps, the time since the start.
  *  It fades out when the picture is ready. `step` null: nothing is loading. */
 export function LoadOverlay({ step, field }: { step: LoadStep | null; field: string }) {
   const [last, setLast] = useState<LoadStep | null>(step);
@@ -115,16 +115,17 @@ export function LoadOverlay({ step, field }: { step: LoadStep | null; field: str
   const elapsed = (Date.now() - started.current) / 1000;
   return (
     <div class={`loadov${fading ? ' fading' : ''}${shown.failed ? ' failed' : ''}`} role="status" aria-live="polite" data-testid="load-block">
-      {reduced ? (
-        <img class="lo-video" src="/loading/telescope_poster.jpg" alt="" />
-      ) : (
-        <video ref={video} class="lo-video" autoplay muted loop playsInline poster="/loading/telescope_poster.jpg" aria-hidden="true">
-          <source src="/loading/telescope_loop.webm" type="video/webm" />
-          <source src="/loading/telescope_loop.mp4" type="video/mp4" />
-        </video>
-      )}
-      <div class="lo-dim" />
-      <span class="lo-ai" title="The video was generated with Google Gemini">AI-generated</span>
+      <div class="lo-media">
+        {reduced ? (
+          <img class="lo-video" src="/loading/telescope_poster.jpg" alt="" />
+        ) : (
+          <video ref={video} class="lo-video" autoplay muted loop playsInline poster="/loading/telescope_poster.jpg" aria-hidden="true">
+            <source src="/loading/telescope_loop.webm" type="video/webm" />
+            <source src="/loading/telescope_loop.mp4" type="video/mp4" />
+          </video>
+        )}
+        <span class="lo-ai" title="The video was generated with Google Gemini">AI-generated</span>
+      </div>
       <div class="lo-body">
         <b class="lo-step">{shown.title}</b>
         <span class="lo-bar" aria-hidden="true">

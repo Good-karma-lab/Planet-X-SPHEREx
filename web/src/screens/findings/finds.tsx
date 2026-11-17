@@ -18,6 +18,11 @@ export interface Ident {
   raw?: unknown;
   note?: string;
 }
+
+/** A find some catalogue knows (not the halo check): a miss in another catalogue is then a quiet "no entry", not the word of an unknown. */
+export function knownIn(idents: Ident[]): boolean {
+  return idents.some((i) => i.catalogue !== 'halo' && i.state === 'ok');
+}
 export interface Find {
   id: string;
   kind: string;
@@ -352,13 +357,14 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
   }, [inline, onClose]);
   // the Lab opens the FIELD the searches ran on (its own centre and size: the warm one), with the find's id and place to highlight
   const fp = f.data.field_params as { ra: number; dec: number; fov: number } | undefined;
+  const labField = f.kind === 'film' ? fp : undefined; // a time-lapse keeps its field; every other find opens at 10' on the object
   const lab = formatHash({
     screen: 'lab',
-    params: fp
+    params: labField
       ? {
-          ra: fp.ra.toFixed(5),
-          dec: fp.dec.toFixed(5),
-          fov: String(fp.fov),
+          ra: labField.ra.toFixed(5),
+          dec: labField.dec.toFixed(5),
+          fov: String(labField.fov),
           find: f.id,
           find_ra: f.ra.toFixed(5),
           find_dec: f.dec.toFixed(5),
@@ -472,7 +478,9 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
                   : i.state === 'none'
                     ? i.catalogue === 'halo'
                       ? 'no bright star within 60″'
-                      : 'nothing within 6″'
+                      : knownIn(f.idents)
+                        ? 'no entry'
+                        : 'nothing within 6″'
                     : i.state === 'unavailable'
                       ? 'did not answer'
                       : 'not asked yet'}
