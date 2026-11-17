@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { nextTask, taskHash } from '../lib/account';
 import { aim, type AimState } from '../lib/aim';
 import { formatHash } from '../lib/route';
 import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVEY_EPOCH } from '../lib/sky';
@@ -1485,6 +1486,7 @@ export function Globe() {
               <span class="lbl">Coverage</span>
             </button>
           </div>
+          <GiveSquare />
         </div>
         {covOn && cellId && (
           <div class="cov-card dark-glass" data-testid="cov-card" role="dialog" aria-label={`Square ${cellId}`}>
@@ -1895,6 +1897,46 @@ export function Globe() {
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** "Give me a square": the next square task (a quarter, 10′, of a searched square: a built one first, service/quarters.py), opened in
+ *  the lab at once. A guest gets one too (trying needs no account); the look counts once they sign in. */
+function GiveSquare() {
+  const [busy, setBusy] = useState(false);
+  const [why, setWhy] = useState('');
+  const go = () => {
+    setBusy(true);
+    setWhy('');
+    nextTask('cell').then(
+      (t) => {
+        setBusy(false);
+        if (t) location.hash = taskHash(t);
+        else setWhy('No searched square is waiting for a look');
+      },
+      (e: Error) => {
+        setBusy(false);
+        setWhy(e.message || 'The service did not answer');
+      },
+    );
+  };
+  return (
+    <div class="give-square">
+      <button
+        class="btn sm primary"
+        onClick={go}
+        disabled={busy}
+        title="Look through a quarter of a square the machine has searched: the lab opens on it with the question"
+        data-testid="give-square"
+      >
+        {busy ? 'Finding a square…' : 'Give me a square'}
+      </button>
+      {why && (
+        <span class="mono-s give-why" role="status">
+          {why}
+        </span>
+      )}
     </div>
   );
 }
