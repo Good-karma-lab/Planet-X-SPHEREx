@@ -198,8 +198,11 @@ class Spectra:
         px, py = spxwcs.sky2pix(w, [ra_t], [dec_t])
         x, y = float(px[0]), float(py[0])
         nx, ny = lay.image.nx, lay.image.ny
+        # where the source falls on its detector (file pixels) and how far from the nearest edge: the lab's anomaly task asks it
+        edge = min(x, y, nx - 1 - x, ny - 1 - y) if np.isfinite(x) and np.isfinite(y) else None
+        place = {} if edge is None else {"x": round(x, 2), "y": round(y, 2), "edge": round(float(edge), 1)}
         if not (np.isfinite(x) and np.isfinite(y)) or x < HALF or y < HALF or x > nx - 1 - HALF or y > ny - 1 - HALF:
-            return {"ok": False, "why": "at the edge of the detector"}
+            return {"ok": False, "why": "at the edge of the detector", **place}
         xi, yi = round(x), round(y)
         # the 15 × 15 file pixels around the source (no value beyond the detector's edge), for the page; the fit uses the inner 7 × 7
         ry0, ry1, rx0, rx1 = max(0, yi - RAW), min(ny, yi + RAW + 1), max(0, xi - RAW), min(nx, xi + RAW + 1)
@@ -229,7 +232,7 @@ class Spectra:
         omega = abs(dx[0] * dy[1] - dx[1] * dy[0]) * (math.pi / 180.0) ** 2
         lam = await self._wavelength(e.key, lay.detector, xi, yi)
         pt = photometry.fit(img, var, usable, saturated, psf, fx, fy, omega)
-        out: dict[str, Any] = {"lam": round(lam, 5), "ok": pt.ok, "why": pt.why, "x": round(x, 2), "y": round(y, 2)}
+        out: dict[str, Any] = {"lam": round(lam, 5), "ok": pt.ok, "why": pt.why, **place}
         stamp: dict[str, Any] = {"status": 1, "raw": _arr(raw)}
         if pt.ok and pt.flux_mjy is not None and pt.err_mjy is not None:
             out.update(flux=round(pt.flux_mjy, 5), err=round(pt.err_mjy, 5), chi2=None if pt.chi2 is None else round(pt.chi2, 2))
