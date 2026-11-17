@@ -9,12 +9,12 @@ Things in the sky move at very different speeds, and one picture cannot show all
 | What moves | Speed | View | Search |
 |---|---|---|---|
 | nearby stars, brown dwarfs | arcseconds per year | the blink of pass stacks (months) | movers between passes |
-| asteroids, comets | arcminutes per day | the film of the visits of one pass (days) | film search |
+| asteroids, comets | arcminutes per day | the time-lapse of the visits of one pass (days) | time-lapse search |
 | bodies beyond Neptune | a few arcseconds per day, a parallax jump between passes | the distance slider | Find Planet X |
 
 ## The questions we answer
 
-- **What moves here?** The blink and the film show it to a person, and the searches mark tracks that no person pointed out.
+- **What moves here?** The blink and the time-lapse show it to a person, and the searches mark tracks that no person pointed out.
 - **What is it?** Every track is checked against catalogues after the search: Gaia for stars, JPL's Small-Body Identification and Horizons for asteroids and comets, SIMBAD for other objects. A track that no catalogue explains is a lead, never a discovery.
 - **Could it be chance?** Every search has a chance control: it runs the same search on data where the true motion has been destroyed and says how many tracks chance alone makes.
 - **What colour is it?** Click any source for its spectrum, measured in every exposure that covers it, and for its check against 2MASS and WISE.
@@ -23,7 +23,7 @@ Things in the sky move at very different speeds, and one picture cannot show all
 
 ## What we offer
 
-- **A blink and a film** for any place of the sky, with a record of what the visitor looks at in the address, so a view can be shared as a link.
+- **A blink and a time-lapse** for any place of the sky, with a record of what the visitor looks at in the address, so a view can be shared as a link.
 - **Searches for movers** at three speeds: between passes, inside a pass and for bodies beyond Neptune.
 - **Spectra** with their checks, brown dwarf candidates, red sources and the anomaly map.
 - **Context:** the globe with the coverage of the survey, archive images from 1985 to 2010 on the timeline, and the NEOWISE and ZTF light curves of a source.

@@ -32,9 +32,9 @@ A star's colour in the picture is the colour it has in the infrared. Each exposu
 
 ## The motion layer
 
-For the film of the visits of a pass we make one picture per visit and subtract the static sky, the median of the same detector's frames, then divide by the scatter. What remains is the change: a moving body shows as a point in a different place in each frame, and the stars do not appear at all. The Difference view does the same between passes and shows the change as a pair of colours.
+For the time-lapse of the visits of a pass we make one picture per visit and subtract the static sky, the median of the same detector's frames, then divide by the scatter. What remains is the change: a moving body shows as a point in a different place in each frame, and the stars do not appear at all. The Difference view does the same between passes and shows the change as a pair of colours.
 
-[figure: film-ecliptic-dec2025 | The ecliptic field of December 2025 as a film of visits, asteroid tracks numbered]
+[figure: film-ecliptic-dec2025 | The ecliptic field of December 2025 as a time-lapse of visits, asteroid tracks numbered]
 
 ## What a video is
 

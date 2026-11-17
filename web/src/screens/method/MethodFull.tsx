@@ -106,7 +106,7 @@ function Validation() {
               ['ε Indi B motion', '4.59 ± 0.49″/yr', 'Gaia DR3 4.684″/yr · /movers, 5′'],
               ['WISE 0855−0714 motion', '7.93 ± 0.61″/yr', 'SIMBAD 8.15″/yr · /browndwarfs'],
               ['Known asteroids, blind', '6 of 8', 'JPL sb_ident + Horizons · /film, 60′, 24 visits'],
-              ['Chance tracks', `${NUM.chance} / field`, '20 shuffled trials · film: 0.0 at ≥ 4 visits, 12 trials'],
+              ['Chance tracks', `${NUM.chance} / field`, '20 shuffled trials · time-lapse: 0.0 at ≥ 4 visits, 12 trials'],
               ["Barnard's Star motion, 20′", '10.7 ± 0.8″/yr', 'Gaia DR3 10.4″/yr · /movers, 20′'],
             ].map(([a, b, c]) => (
               <tr key={a}>
@@ -151,7 +151,7 @@ function Hero({ go }: { go: (id: string) => void }) {
       <div class="k">Method</div>
       <h1>How we turn SPHEREx files into a sky you can watch move.</h1>
       <p class="lede">
-        The whole account in one place: the challenge, the telescope, the idea that found Pluto, every step from a raw exposure to a film, every search with its numbers,
+        The whole account in one place: the challenge, the telescope, the idea that found Pluto, every step from a raw exposure to a time-lapse, every search with its numbers,
         and how we checked each one against another telescope.
       </p>
       <div class="paths">
@@ -188,7 +188,7 @@ function Hero({ go }: { go: (id: string) => void }) {
           ['08', 'passes added, coloured', 'barnard_coadd.jpg'],
           ['09', 'named bands', 'barnard_wall_of_bands.jpg'],
           ['09', 'difference of passes', 'barnard_difference.jpg'],
-          ['11', 'film and searches', 'film/sky_06.jpg'],
+          ['11', 'Time-lapse and searches', 'film/sky_06.jpg'],
           ['15', 'checked', 'spectrum-crop.jpg'],
         ].map(([n, s, f]) => (
           <a key={s} href={`#m-${n}`} onClick={link(n!)} style={`background-image:url('/method/${f}')`}>

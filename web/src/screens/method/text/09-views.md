@@ -1,6 +1,6 @@
 # Views: how we show change
 
-We show every field as a blink comparator: the same sky, on the same grid, drawn with one fixed brightness law, so the static background stays put and only what changed between two looks can catch the eye. Every view is computed in your browser by WebGL2 fragment shaders from stacks already on the page (half-precision textures), so switching view, band, pass or display option asks for nothing new. Only the films of the visits and the archive images are products of their own.
+We show every field as a blink comparator: the same sky, on the same grid, drawn with one fixed brightness law, so the static background stays put and only what changed between two looks can catch the eye. Every view is computed in your browser by WebGL2 fragment shaders from stacks already on the page (half-precision textures), so switching view, band, pass or display option asks for nothing new. Only the time-lapses of the visits and the archive images are products of their own.
 
 ## Display law
 
@@ -12,7 +12,7 @@ lo = −0.05,  hi = 400,  soft = 0.4                          the defaults; samp
 ```
 
 - A pixel saturated in more than half of the exposures that make it is drawn white, never as a hole (switch: White cores).
-- A pixel with no data inside the field is a flat blue-grey; outside the coverage of a wall panel or of a film frame it is black.
+- A pixel with no data inside the field is a flat blue-grey; outside the coverage of a wall panel or of a time-lapse frame it is black.
 - The Stretch slider changes `soft` (0.05 to 4.5): left shows faint light, right keeps bright stars apart. Brighten lowers `hi` to 40. Trim sets `hi` to the field's own 99.9th or 99.5th percentile of white light (adaptive: 1.5 times the 99.9th), always between 0.8 and 400.
 - Whatever the setting, it is the same for every pass and every panel on screen.
 
@@ -153,7 +153,7 @@ w_sat    = 1 − smoothstep(0.2, 0.6, saturated share on the taps)      # nothin
 w_bright = 1 − smoothstep(0.12, 0.40, law(L))                          # fades out as the stretched value rises
 ```
 
-## Film of a pass: days
+## Time-lapse of a pass: days
 
 A body that crosses the field in days is in no pass stack: at each place it is in one visit of a few exposures out of many. So the Days scale shows the visits of one pass in time order, drawn by the same renderer as Months (same law, Sharpen, Brighten and Stretch). A visit is a run of exposures of one detector with gaps under 30 minutes; each frame is tinted by the hue of its detector, and a core saturated in a visit is drawn white. Days plays one visit per 700 ms.
 
@@ -176,7 +176,7 @@ mask:    static > 5 robust sigma above its median, grown by 1 grid point;
 
 ### Motion only
 
-The static background is what a blink comparator keeps still, so the film can drop it altogether. Motion only (Days scale) draws the motion map instead of the sky: dark, with amber only where the change connects, above 3σ, to a place a search found on that visit or where JPL predicts a known body that the visit shows; the amber is full from 8σ. Elsewhere the map stays dark, because the raw map's specks and a bright star's halo are not motion. Known bodies are ringed where JPL predicts them and solid when the motion map shows them there.
+The static background is what a blink comparator keeps still, so the time-lapse can drop it altogether. Motion only (Days scale) draws the motion map instead of the sky: dark, with amber only where the change connects, above 3σ, to a place a search found on that visit or where JPL predicts a known body that the visit shows; the amber is full from 8σ. Elsewhere the map stays dark, because the raw map's specks and a bright star's halo are not motion. Known bodies are ringed where JPL predicts them and solid when the motion map shows them there.
 
 ## Archive images
 

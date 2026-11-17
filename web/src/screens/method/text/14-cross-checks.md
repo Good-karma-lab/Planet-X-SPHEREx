@@ -28,9 +28,9 @@ The Gaia release is one setting. The environment variables `SKY_GAIA_TABLE` (def
 
 A track that no star explains may be a known asteroid or comet. We ask JPL, never a copy of ours, and a JPL that does not answer is said to be unavailable, never an empty list.
 
-For a film (the visits of one pass) we ask JPL Small-Body Identification (`sb_ident`) for the bodies that cross the field during the pass, at the middle of the pass, over the field widened by how far a fast main-belt body (40″/h) moves in half the pass, up to 3°, with V ≤ 20.5 (SPHEREx sees about V 20 in one visit). We keep the bodies whose straight-line track comes within 0.15° of the field and the 200 brightest. For each we ask JPL Horizons for the geocentric place at the time of every frame (SPHEREx is about 7000 km from the Earth's centre, so the parallax of a body 2 au away is about 5″, under a detector pixel). Three tries, then the body is left out. Comets are asked with their nearest apparition's orbit. The interstellar comet 3I/ATLAS, which Small-Body Identification does not list, is always asked of Horizons directly and kept when it is in the field.
+For a time-lapse (the visits of one pass) we ask JPL Small-Body Identification (`sb_ident`) for the bodies that cross the field during the pass, at the middle of the pass, over the field widened by how far a fast main-belt body (40″/h) moves in half the pass, up to 3°, with V ≤ 20.5 (SPHEREx sees about V 20 in one visit). We keep the bodies whose straight-line track comes within 0.15° of the field and the 200 brightest. For each we ask JPL Horizons for the geocentric place at the time of every frame (SPHEREx is about 7000 km from the Earth's centre, so the parallax of a body 2 au away is about 5″, under a detector pixel). Three tries, then the body is left out. Comets are asked with their nearest apparition's orbit. The interstellar comet 3I/ATLAS, which Small-Body Identification does not list, is always asked of Horizons directly and kept when it is in the field.
 
-A body's expected visits are the frames whose grid holds its predicted place. The film's own motion map shows a body on a visit when z reaches 4 within two grid pixels of the predicted place. The visits stacked along the track give the body's significance (the sum of z over the square root of the number of visits at the predicted pixels), and the same stack at four places 20 grid pixels aside gives the chance level.
+A body's expected visits are the frames whose grid holds its predicted place. The time-lapse's own motion map shows a body on a visit when z reaches 4 within two grid pixels of the predicted place. The visits stacked along the track give the body's significance (the sum of z over the square root of the number of visits at the predicted pixels), and the same stack at four places 20 grid pixels aside gives the chance level.
 
 On the globe we use JPL's Small-Body Database (SBDB) for the catalogue, the orbit, H and diameter of an object by name, and Horizons for its geocentric ephemeris, with the SPHEREx spacecraft (`500@-163182`) as an observer where the position from the satellite matters. The crossings of a body's path with SPHEREx exposures are found from a Horizons ephemeris every 3 hours over the mission: exposures within 0.6 days of each other are one visit, and a field of 12′ is used. SBDB pages are kept one day, ephemerides and objects one week, in memory and on disk.
 
@@ -38,7 +38,7 @@ A track found by our own search is matched to a known body only after the search
 
 ## Counting planes like MOST
 
-For the detector images that hold a moving body we count, with Horizons positions every 30 minutes (geocentric), every exposure of our index whose footprint holds the body at the exposure's mid-time, interpolated between the ephemeris points. That is the quantity IRSA's Moving Object Search Tool (MOST) calls planes. The film's known-body list counts planes this way for every body brighter than V 19.5. For four main-belt bodies on 14–20 December 2025 the counts equal MOST's plane for plane; the table is in Validation and dated measurements.
+For the detector images that hold a moving body we count, with Horizons positions every 30 minutes (geocentric), every exposure of our index whose footprint holds the body at the exposure's mid-time, interpolated between the ephemeris points. That is the quantity IRSA's Moving Object Search Tool (MOST) calls planes. The time-lapse's known-body list counts planes this way for every body brighter than V 19.5. For four main-belt bodies on 14–20 December 2025 the counts equal MOST's plane for plane; the table is in Validation and dated measurements.
 
 ## Light curves from ZTF and NEOWISE
 
@@ -57,7 +57,7 @@ Each part answers `ok`, `none` or `unavailable` (never cached), at most 3000 poi
 
 **Result:** the comet is found 5.6″ from JPL Horizons' predicted place (RA 167.10477°, Dec +5.18231°), at G = 12.37 with S/N 154. Source: `web/public/neossat/3i-2025-12-14.json`, measured with `tools/neossat_card.py`.
 
-The card is shown on the film of 3I/ATLAS with the frame ringed at the predicted place, north up and east left.
+The card is shown on the time-lapse of 3I/ATLAS with the frame ringed at the predicted place, north up and east left.
 
 ## The all-sky cube quick look
 
@@ -79,12 +79,12 @@ The same reader serves `GET /api/v1/cube/spectrum` with a choice of flag handlin
 
 `GET /api/v1/reference/deep` finds deep static optical stacks of CADC that cover a place: processing level 3 or higher and at least 300 s of exposure, from CFHT MegaPipe and HST. The search is a CAOM2 TAP query by position, and cutouts (FITS or PNG, up to 300″ across) come from the archive's SODA service, resolved through DataLink; a 60″ cutout takes about ten seconds the first time.
 
-`GET /api/v1/ssois` lists the archival images (CFHT, Subaru, Pan-STARRS, DECam, HST and others) of CADC's Solar System Object Image Search that contain a named small body in a date range, and `/api/v1/ssois/orbit` does the same for an orbit given by elements: precovery and a way to confirm an orbit. Radio footprints (ALMA, VLA and others) are footprint matches, not images of the object, and are left out unless asked for. The lab links every known body of a film to its SSOIS search.
+`GET /api/v1/ssois` lists the archival images (CFHT, Subaru, Pan-STARRS, DECam, HST and others) of CADC's Solar System Object Image Search that contain a named small body in a date range, and `/api/v1/ssois/orbit` does the same for an orbit given by elements: precovery and a way to confirm an orbit. Radio footprints (ALMA, VLA and others) are footprint matches, not images of the object, and are left out unless asked for. The lab links every known body of a time-lapse to its SSOIS search.
 
 ## Exports and further tools
 
 **ADES export.** `POST /api/v1/export/ades` writes the positions of a mover lead as an MPC ADES file (pipe-separated, version 2022). SPHEREx is a spacecraft with MPC observatory code 288, so the MPC wants the spacecraft's position for every observation; we take it from Horizons (target −163182, geocentric ICRF, km) when asked. The file lists what the MPC's validator would refuse and answers "ready" only when nothing is missing: a tracklet of at least two observations in time order, submitter, observers and measurers named, a mode from the ADES list, the astrometric catalogue named (not `UNK`), positive uncertainties, a band for every magnitude, the spacecraft position. Nothing is sent anywhere.
 
-**Tracked stack.** `GET /api/v1/film/{key}/tracked` shifts and adds the motion maps of a finished film along a grid of velocities: a body too faint in any one frame adds up along its path as about A·√n. The velocity grid is spaced so that a body smears at most 2 pixels over the window; windows of 6 hours and a speed limit of 20″/h are the defaults, at least 4 frames are needed, and a grid above 300 pixels is binned 2 × 2 first. The answer lists the strongest peaks per window.
+**Tracked stack.** `GET /api/v1/film/{key}/tracked` shifts and adds the motion maps of a finished time-lapse along a grid of velocities: a body too faint in any one frame adds up along its path as about A·√n. The velocity grid is spaced so that a body smears at most 2 pixels over the window; windows of 6 hours and a speed limit of 20″/h are the defaults, at least 4 frames are needed, and a grid above 300 pixels is binned 2 × 2 first. The answer lists the strongest peaks per window.
 
 **R Draconis regression field.** The deep collections repeat a few fields many times. `GET /api/v1/regression/r-dra` compares a fixed list of about 2000 Level-2 files that IRSA's SIA service returns for R Draconis (RA 248.1676°, Dec +66.7550°, radius 0.05°) with the exposure index and names any file the archive lists and the index lacks.

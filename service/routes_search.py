@@ -49,7 +49,7 @@ def make_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             raise HTTPException(503, "the exposure index is not loaded")
         fmeta = st.store.read_meta(filmjob.KIND, film_key)
         if fmeta is None or not st.store.is_complete(film_key):
-            return {"state": "running", "phase": "the film is not finished", "error": None, "tracks": [], "control": None}
+            return {"state": "running", "phase": "the time-lapse is not finished", "error": None, "tracks": [], "control": None}
         params = fmeta["params"]
         key = product_key(filmsearchjob.KIND, params, extra=(film_key,))
         if st.store.is_complete(key):
