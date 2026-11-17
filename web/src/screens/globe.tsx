@@ -885,6 +885,8 @@ export function Globe() {
           setSel(near);
           const [ra, dec] = epochPlace(near);
           aim.set({ ra, dec }, 'map');
+          // with the Coverage layer on, a click on a target's pin also opens the card of the square it stands in
+          if (live.current.covOn) setCellId(pickCell(coverageNow(), ra, dec, cellPx()));
         } else {
           const s = unproject(px, py);
           if (s && live.current.covOn) {
