@@ -4,8 +4,8 @@
 Every constant and every achievement is in this file (the Method page lists them from here).
 
 Points (signed-in users; each thing counts once per user; nothing is ever taken away):
-  square     5     a square looked through: the lab open on it for at least MIN_LOOK_S seconds and every pass shown; at most
-                   DAILY_SQUARES squares a day (UTC) earn points
+  square     5     a quarter (10′) of a square looked through: the lab open on it for at least MIN_LOOK_S seconds and every pass
+                   shown; a whole square is worth 20; at most DAILY_SQUARES squares' worth (400 quarters) a day (UTC) earn points
   check      10    a machine finding answered, paid when the finding's stage is final and the answer agrees with it (0 otherwise)
   control    25    a known mover marked in a control square without being told (within CONTROL_RADIUS_ARCSEC of its place)
   submit     100   a finding the server submitted (it passed every check)
@@ -35,7 +35,8 @@ from service.accounts.db import AccountsDB, iso
 
 POINTS = {"square": 5, "check": 10, "control": 25, "submit": 100, "candidate": 500, "confirmed": 5000}
 MIN_LOOK_S = 60  # a real look at a square: the lab open on it at least this long …
-DAILY_SQUARES = 100  # … and at most this many squares a day (UTC) earn points
+DAILY_SQUARES = 100  # … and at most this many squares' worth a day (UTC) earn points: 400 quarters
+QUARTER_DEG = 1.0 / 6.0  # a quarter of a square: 10′; people look through a square a quarter at a time
 CONTROL_RADIUS_ARCSEC = 60.0  # a mark this close to the known mover's place (at the survey's epoch) catches it
 CONTROL_MIN_PM_ARCSEC_YR = 1.0  # a test target is a control mover when it moves at least this fast
 CONTROL_EPOCH = 2025.9  # the middle of the SPHEREx passes: where the control mover is put
@@ -113,14 +114,14 @@ def galactic_lat(ra: float, dec: float) -> float:
     return math.degrees(math.asin(max(-1.0, min(1.0, math.sin(d) * math.sin(d0) + math.cos(d) * math.cos(d0) * math.cos(a - a0)))))
 
 
-def in_square(ra: float, dec: float, place: tuple[float, float]) -> bool:
-    """True when `place` lies in the 20′ square centred on (ra, dec)."""
-    half = CELL_DEG / 2 + 1e-6
+def in_square(ra: float, dec: float, place: tuple[float, float], size: float = CELL_DEG) -> bool:
+    """True when `place` lies in the square of side `size` (degrees; a 20′ square by default) centred on (ra, dec)."""
+    half = size / 2 + 1e-6
     dra = abs((place[0] - ra + 180.0) % 360.0 - 180.0) * math.cos(math.radians(dec))
     return abs(place[1] - dec) <= half and dra <= half
 
 
-def place_facts(ra: float | None, dec: float | None) -> dict[str, Any]:
+def place_facts(ra: float | None, dec: float | None, size: float = CELL_DEG) -> dict[str, Any]:
     """What the place rules need to know about a square's centre."""
     if ra is None or dec is None:
         return {}
@@ -133,8 +134,8 @@ def place_facts(ra: float | None, dec: float | None) -> dict[str, Any]:
         "galactic": abs(galactic_lat(ra, dec)) <= GALACTIC_PLANE_DEG,
         "polar": abs(dec) > POLAR_DEC,
         "hour": int(ra // 15) % 24,
-        "tombaugh": in_square(ra, dec, PLUTO_1930),
-        "far_world": next((n for n, p in FAR_WORLDS.items() if in_square(ra, dec, p)), None),
+        "tombaugh": in_square(ra, dec, PLUTO_1930, size),
+        "far_world": next((n for n, p in FAR_WORLDS.items() if in_square(ra, dec, p, size)), None),
     }
 
 
@@ -165,7 +166,8 @@ def control_movers(targets_file: Path | None = None) -> list[dict[str, Any]]:
 class Stats:
     """Everything the achievement rules look at, counted from the user's events."""
 
-    squares: int = 0
+    squares: int = 0  # whole squares: all four quarters looked through (or one look of before the quarters)
+    quarters: int = 0
     marks: int = 0
     answers: int = 0  # findings answered (settled or not)
     named: bool = False
@@ -243,7 +245,7 @@ def _a(id_: str, family: str, tier: int, name: str, line: str, rule: Rule, hidde
 
 #: every achievement, as data: adding one is one entry (id, family, tier, name, line, rule)
 ACHIEVEMENTS: tuple[Achievement, ...] = (
-    _a("first_light", "First steps", 1, "First light", "Looked through a first square", count("squares", 1)),
+    _a("first_light", "First steps", 1, "First light", "Looked through a first quarter of a square", count("quarters", 1)),
     _a("first_mark", "First steps", 2, "First mark", "Put a first mark on the sky", count("marks", 1)),
     _a("first_check", "First steps", 3, "First check", "Answered a first machine finding", count("answers", 1)),
     _a("named", "First steps", 4, "Named", "Chose a public name", flag("named")),
@@ -420,39 +422,50 @@ class Score:
     def renamed(self, user_id: str) -> None:
         self.db._conn().execute("UPDATE acc_users SET named=1 WHERE id=?", (user_id,))
 
-    def control_in(self, ra: float | None, dec: float | None) -> dict[str, Any] | None:
+    def control_in(self, ra: float | None, dec: float | None, size: float = CELL_DEG) -> dict[str, Any] | None:
         if ra is None or dec is None:
             return None
-        return next((m for m in self.controls if in_square(ra, dec, (m["ra"], m["dec"]))), None)
+        return next((m for m in self.controls if in_square(ra, dec, (m["ra"], m["dec"]), size)), None)
 
     def square_done(self, user_id: str, task: dict[str, Any], look: dict[str, Any], marks: list[dict[str, Any]]) -> int:
-        """A task "Look through a square" was closed. `look` is what the lab says about the look: seconds, passes_shown,
-        passes_total, local_hour. Returns the points paid now."""
+        """A task "Look through a square" was closed: a quarter (10′) of it, or the whole square for a task of before the quarters.
+        `look` is what the lab says about the look: seconds, passes_shown, passes_total, local_hour. 5 points a quarter (a whole
+        square is worth 20), with the 60 s / every-pass rule applied to each look. Returns the points paid now."""
         cell = str(task.get("cell_id") or "")
         if not cell:
             return 0
+        q = task.get("quarter") or ""
         seconds, shown, total = look.get("seconds"), look.get("passes_shown"), look.get("passes_total")
         real = seconds is not None and seconds >= MIN_LOOK_S and shown is not None and total is not None and total >= 1 and shown >= total
         if not real:
             return 0  # not a real look: nothing is counted, right or wrong
         c = self.db._conn()
         paid = 0
-        facts = place_facts(task.get("ra"), task.get("dec"))
+        size = QUARTER_DEG if q else CELL_DEG
+        facts = place_facts(task.get("ra"), task.get("dec"), size)
         day0 = period_start("day")
         today = c.execute(
-            "SELECT COUNT(*) FROM acc_score_events WHERE user_id=? AND kind='square' AND points>0 AND at>=?", (user_id, day0)
-        ).fetchone()[0]
+            "SELECT COALESCE(SUM(CASE WHEN ref LIKE '%:%' THEN 1 ELSE 4 END),0) FROM acc_score_events"
+            " WHERE user_id=? AND kind='square' AND points>0 AND at>=?",
+            (user_id, day0),
+        ).fetchone()[0]  # in quarters: a whole square of before counts as four
         try:
-            others = c.execute("SELECT COUNT(*) FROM grid_views WHERE cell_id=? AND viewer!=?", (cell, f"user:{user_id}")).fetchone()[0]
-        except Exception:  # the grid stream's table may not exist: nobody is known to have viewed it
+            others = c.execute(
+                "SELECT COUNT(DISTINCT viewer) FROM grid_views WHERE cell_id=? AND viewer LIKE 'user:%' AND viewer!=?"
+                + (" AND COALESCE(quarter,'') IN ('', ?)" if q else ""),
+                (cell, f"user:{user_id}", *([q] if q else [])),
+            ).fetchone()[0]
+        except Exception:  # the grid stream's table (or its quarter column) may not exist: nobody is known to have viewed it
             others = 0
         hour = look.get("local_hour")
-        detail = {**facts, "first": others == 0, "marked": task.get("result") == "marks", "local_hour": hour, "seconds": seconds}
-        points = POINTS["square"] if today < DAILY_SQUARES else 0
-        if self._event(user_id, "square", cell, points, None, detail):
+        detail = {**facts, "cell": cell, "quarter": q or None, "first": others == 0, "marked": task.get("result") == "marks", "local_hour": hour,
+                  "seconds": seconds}  # fmt: skip
+        worth = POINTS["square"] if q else POINTS["square"] * 4
+        points = worth if today + (1 if q else 4) <= DAILY_SQUARES * 4 else 0
+        if self._event(user_id, "square", f"{cell}:{q}" if q else cell, points, None, detail):
             paid += points
-        mover = self.control_in(task.get("ra"), task.get("dec"))
-        if mover is not None:  # a control square: was the known mover marked without being told?
+        mover = self.control_in(task.get("ra"), task.get("dec"), size)
+        if mover is not None:  # a control quarter: was the known mover marked without being told?
             near = [m for m in marks if sep_arcsec(m["ra"], m["dec"], mover["ra"], mover["dec"]) <= CONTROL_RADIUS_ARCSEC]
             caught = bool(near)
             if self._event(user_id, "control", cell, POINTS["control"] if caught else 0, caught, {"target": mover["name"]}):
@@ -579,22 +592,29 @@ class Score:
             run = run + 1 if e["right"] else 0
             s.run = max(s.run, run)
             s.right += int(e["right"])
+        quarters_of: dict[str, set[str]] = {}
+        places: dict[str, set[str]] = {}
         for e in ev:
             d, kind = e["detail"], e["kind"]
             if kind == "mark":
                 s.marks = 1
             elif kind == "square":
-                s.squares += 1
+                quarters_of.setdefault(str(d.get("cell") or e["ref"].split(":")[0]), set()).update(
+                    {d["quarter"]} if d.get("quarter") else {"NW", "NE", "SW", "SE"}
+                )
+                s.quarters += 1
                 days.add(int(e["at"] // 86400))
-                s.p9 += int(bool(d.get("p9")))
-                s.ecliptic += int(bool(d.get("ecliptic")))
-                s.galactic += int(bool(d.get("galactic")))
+                sq = str(d.get("cell") or e["ref"].split(":")[0])
+                for flag in ("p9", "ecliptic", "galactic"):  # the place families count squares, not quarters
+                    if d.get(flag):
+                        places.setdefault(flag, set()).add(sq)
                 s.polar = s.polar or bool(d.get("polar"))
                 if d.get("dec") is not None:
                     s.north, s.south = s.north or d["dec"] > 0, s.south or d["dec"] < 0
                 if d.get("hour") is not None:
                     s.hours.add(int(d["hour"]))
-                s.first_eyes += int(bool(d.get("first")))
+                if d.get("first"):
+                    places.setdefault("first", set()).add(sq)
                 s.tombaugh = s.tombaugh or bool(d.get("tombaugh"))
                 s.far_world = s.far_world or bool(d.get("far_world") and d.get("marked"))
                 h = d.get("local_hour")
@@ -618,6 +638,9 @@ class Score:
                 s.candidates += 1
             elif kind == "confirmed":
                 s.confirmed += 1
+        s.squares = sum(1 for qs in quarters_of.values() if len(qs) >= 4)  # whole squares: all four quarters
+        s.p9, s.ecliptic, s.galactic = (len(places.get(k, ())) for k in ("p9", "ecliptic", "galactic"))
+        s.first_eyes = len(places.get("first", ()))
         for r in c.execute("SELECT notes, extra, submitted FROM acc_investigations WHERE user_id=?", (user_id,)):
             s.inv_notes = s.inv_notes or bool(json.loads(r["notes"]))
             extra = json.loads(r["extra"] or "{}")
@@ -716,9 +739,9 @@ class Score:
         return {
             "points": points, "level": level, "next_level_at": nxt, "levels": [{"at": at, "name": n} for at, n in LEVELS],
             "accuracy": None if s.accuracy is None else round(s.accuracy, 3), "right": s.right, "answered": s.settled, "waiting": int(waiting),
-            "squares": s.squares, "hide_from_board": bool(hide and hide["hide_board"]),
+            "squares": s.squares, "quarters": s.quarters, "hide_from_board": bool(hide and hide["hide_board"]),
             "events": shown[:500], "achievements": self.achievements(user_id, s),
-            "rules": {"points": POINTS, "min_look_s": MIN_LOOK_S, "daily_squares": DAILY_SQUARES, "rank_min_answers": RANK_MIN_ANSWERS},
+            "rules": {"points": POINTS, "min_look_s": MIN_LOOK_S, "daily_squares": DAILY_SQUARES, "quarter_arcmin": 10, "rank_min_answers": RANK_MIN_ANSWERS},
         }  # fmt: skip
 
     def board(self, start: float, end: float | None = None) -> list[dict[str, Any]]:
@@ -727,7 +750,8 @@ class Score:
         c = self.db._conn()
         end = end or time.time() + 1
         rows = c.execute(
-            "SELECT e.user_id, u.name, u.hide_board, SUM(e.points) points, SUM(e.kind='square') squares, SUM(e.kind='confirmed') confirmed,"
+            "SELECT e.user_id, u.name, u.hide_board, SUM(e.points) points, SUM(CASE WHEN e.kind='square' THEN (CASE WHEN e.ref LIKE '%:%'"
+            " THEN 0.25 ELSE 1 END) ELSE 0 END) squares, SUM(e.kind='confirmed') confirmed,"
             " MAX(e.at) last FROM acc_score_events e JOIN acc_users u ON u.id=e.user_id WHERE e.at>=? AND e.at<? GROUP BY e.user_id",
             (start, end),
         ).fetchall()
@@ -740,7 +764,7 @@ class Score:
             n, right = judged.get(r["user_id"], (0, 0))
             out.append(
                 {
-                    "user_id": r["user_id"], "name": r["name"], "points": int(r["points"] or 0), "squares": int(r["squares"] or 0),
+                    "user_id": r["user_id"], "name": r["name"], "points": int(r["points"] or 0), "squares": int(r["squares"] or 0),  # squares' worth
                     "confirmed": int(r["confirmed"] or 0), "accuracy": None if n == 0 else round(right / n, 3), "answered": n,
                     "ranked": n >= RANK_MIN_ANSWERS and not r["hide_board"] and int(r["points"] or 0) > 0, "last": r["last"],
                 }

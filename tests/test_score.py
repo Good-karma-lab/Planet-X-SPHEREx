@@ -33,8 +33,14 @@ def _user(sc: Score, name: str = "ann") -> str:
     return uid
 
 
-def _square(cell: str, ra: float = 40.0, dec: float = 10.0, result: str = "nothing") -> dict[str, Any]:
-    return {"cell_id": cell, "ra": ra, "dec": dec, "result": result}
+def _square(cell: str, ra: float = 40.0, dec: float = 10.0, result: str = "nothing", quarter: str | None = "NW") -> dict[str, Any]:
+    """A task "Look through a square": one quarter of it (people look a quarter at a time), or the whole square with None."""
+    return {"cell_id": cell, "quarter": quarter, "ra": ra, "dec": dec, "result": result}
+
+
+def _whole(sc: Score, uid: str, cell: str, ra: float = 40.0, dec: float = 10.0, result: str = "nothing", look: Any = None) -> int:
+    """All four quarters of a square looked through."""
+    return sum(sc.square_done(uid, _square(cell, ra, dec, result, q), look or LOOK, []) for q in ("NW", "NE", "SW", "SE"))
 
 
 def _points(sc: Score, uid: str) -> int:
@@ -62,7 +68,7 @@ def test_a_square_pays_only_for_a_real_look_and_once(sc: Score) -> None:
     assert sc.square_done(uid, _square("c1"), {}, []) == 0  # the lab said nothing about the look
     assert _points(sc, uid) == 0 and sc.summary(uid)["squares"] == 0
     assert sc.square_done(uid, _square("c1"), LOOK, []) == POINTS["square"] == 5
-    assert sc.square_done(uid, _square("c1"), LOOK, []) == 0  # one count per user per square
+    assert sc.square_done(uid, _square("c1"), LOOK, []) == 0  # one count per user per quarter
     assert _points(sc, uid) == 5
     bob = _user(sc, "bob")
     assert sc.square_done(bob, _square("c1"), LOOK, []) == 5  # another person's look at the same square counts for them
@@ -70,10 +76,10 @@ def test_a_square_pays_only_for_a_real_look_and_once(sc: Score) -> None:
 
 def test_the_daily_cap_stops_the_points_not_the_count(sc: Score) -> None:
     uid = _user(sc)
-    for i in range(DAILY_SQUARES + 3):
-        sc.square_done(uid, _square(f"c{i}"), LOOK, [])
+    for i in range(DAILY_SQUARES * 4 + 3):  # in quarters: 100 squares' worth a day
+        sc.square_done(uid, _square(f"c{i // 4}", quarter=("NW", "NE", "SW", "SE")[i % 4]), LOOK, [])
     s = sc.summary(uid)
-    assert s["points"] == DAILY_SQUARES * 5 and s["squares"] == DAILY_SQUARES + 3
+    assert s["points"] == DAILY_SQUARES * 4 * 5 and s["squares"] == DAILY_SQUARES and s["quarters"] == DAILY_SQUARES * 4 + 3
     # the squares of yesterday do not count against today
     sc.db._conn().execute("UPDATE acc_score_events SET at = at - 86400 * 2")
     assert sc.square_done(uid, _square("next-day"), LOOK, []) == 5
@@ -98,7 +104,7 @@ def test_a_control_square_pays_for_the_marked_mover_and_counts_a_miss(sc: Score)
     assert sc.control_in(40.0, 10.0) is None and sc.control_in(BARNARD["ra"], BARNARD["dec"])["name"] == "Barnard's Star"  # type: ignore[index]
     assert sc.square_done(uid, sq, {**LOOK, "seconds": 10}, [near]) == 0  # no real look: nothing, right or wrong
     assert sc.summary(uid)["accuracy"] is None
-    assert sc.square_done(uid, sq, LOOK, [near]) == 5 + POINTS["control"]
+    assert sc.square_done(uid, sq, LOOK, [near]) == 5 + POINTS["control"]  # the quarter and the control mover
     s = sc.summary(uid)
     assert s["accuracy"] == 1.0 and {"sharp_eye", "barnards_runner"} <= _earned(sc, uid)
     bob = _user(sc, "bob")
@@ -192,26 +198,30 @@ def test_every_achievement_is_one_entry_with_a_rule() -> None:
 
 def test_square_families_places_and_first_eyes(sc: Score) -> None:
     uid = _user(sc)
+    sc.square_done(uid, _square("p0", 40.0, 12.0), LOOK, [])
+    got = _earned(sc, uid)
+    assert "first_light" in got and "stargazer" not in got  # a first quarter is the first light; ten whole squares are a Stargazer
     for i in range(10):
-        sc.square_done(uid, _square(f"p{i}", 40.0 + i * 0.4, 12.0), LOOK, [])  # in the Planet Nine band, north, nobody before
+        _whole(sc, uid, f"p{i}", 40.0 + i * 0.4, 12.0)  # in the Planet Nine band, north, nobody before
     got = _earned(sc, uid)
     assert {"first_light", "stargazer", "pioneer"} <= got and "both_skies" not in got and "surveyor" not in got
-    sc.square_done(uid, _square("s", 200.0, -85.0), {**LOOK, "local_hour": 2}, [])
+    assert sc.summary(uid)["points"] == 10 * 20  # a whole square is worth 20
+    _whole(sc, uid, "s", 200.0, -85.0, look={**LOOK, "local_hour": 2})
     got = _earned(sc, uid)
     assert {"both_skies", "polar_explorer", "night_owl"} <= got
     for i in range(10):
-        sc.square_done(uid, _square(f"g{i}", 266.4 + i * 0.4, -29.0), LOOK, [])  # the galactic centre
+        _whole(sc, uid, f"g{i}", 266.4 + i * 0.4, -29.0)  # the galactic centre
     assert "milky_way" in _earned(sc, uid)
     facts = place_facts(*PLUTO_1930)
     assert facts["tombaugh"] and facts["ecliptic"] and not facts["p9"] and facts["hour"] == 7
     assert place_facts(26.75, -0.41)["far_world"] == "Eris" and place_facts(40.0, 12.0)["p9"]
-    sc.square_done(uid, _square("pluto", *PLUTO_1930), LOOK, [])
+    _whole(sc, uid, "pluto", *PLUTO_1930)
     assert "tombaugh" in _earned(sc, uid)
     # Far world: the square must be looked through AND marked
-    sc.square_done(uid, _square("eris", 26.75, -0.41, "nothing"), LOOK, [])
+    _whole(sc, uid, "eris", 26.75, -0.41, "nothing")
     assert "far_world" not in _earned(sc, uid)
     bob = _user(sc, "bob")
-    sc.square_done(bob, _square("eris", 26.75, -0.41, "marks"), LOOK, [])
+    sc.square_done(bob, _square("eris", 26.75, -0.41, "marks"), LOOK, [])  # one quarter holding Eris, marked
     assert "far_world" in _earned(sc, bob)
     hidden = [a for a in sc.summary(bob)["achievements"] if a["hidden"]]
     assert [(a["name"], a["line"], a["progress"]) for a in hidden] == [("?", "A hidden achievement", 0.0)] * 3
@@ -222,13 +232,24 @@ def test_square_families_places_and_first_eyes(sc: Score) -> None:
 def test_first_eyes_needs_nobody_before(sc: Score) -> None:
     uid = _user(sc)
     sc.db._conn().executescript(
-        "CREATE TABLE grid_views (cell_id TEXT, viewer TEXT, result TEXT, at REAL);"
-        f"INSERT INTO grid_views VALUES ('seen','anon:x','nothing',1.0),('mine','user:{uid}','nothing',1.0);"
+        "CREATE TABLE grid_views (cell_id TEXT, viewer TEXT, result TEXT, at REAL, quarter TEXT NOT NULL DEFAULT '');"
+        "INSERT INTO grid_views VALUES ('seen','user:other','nothing',1.0,'NW'),('whole','user:other','nothing',1.0,''),"
+        f"('anon','anon:x','nothing',1.0,'NW'),('mine','user:{uid}','nothing',1.0,'NW'),('other_q','user:other','nothing',1.0,'SE');"
     )
-    for cell in ("seen", "mine"):
+    for cell in ("seen", "whole", "anon", "mine", "other_q"):
         sc.square_done(uid, _square(cell), LOOK, [])
     first = {e["ref"]: e["detail"]["first"] for e in sc.events(uid)}
-    assert first == {"seen": False, "mine": True}  # the lab records the user's own view before it closes the task
+    # another signed-in person on this quarter (or on the whole square, before the quarters) makes it not first; a guest does
+    # not count; the user's own view (recorded by the lab before it closes the task) does not either; another quarter does not
+    assert first == {"seen:NW": False, "whole:NW": False, "anon:NW": True, "mine:NW": True, "other_q:NW": True}
+
+
+def test_a_task_of_before_the_quarters_is_a_whole_square(sc: Score) -> None:
+    uid = _user(sc)
+    assert sc.square_done(uid, _square("old", quarter=None), LOOK, []) == 20
+    s = sc.summary(uid)
+    assert (s["squares"], s["quarters"], s["points"]) == (1, 1, 20)
+    assert sc.square_done(uid, _square("old", quarter="NW"), LOOK, []) == 5  # a different thing: counted apart
 
 
 def test_accuracy_and_catalogue_achievements(sc: Score) -> None:

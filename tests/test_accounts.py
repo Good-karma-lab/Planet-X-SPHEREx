@@ -211,34 +211,50 @@ def _fake_grid(st: _State) -> None:
     db = accounts.get(st).db._conn()
     db.executescript(
         "CREATE TABLE grid_cells (id TEXT PRIMARY KEY, state TEXT, finds INTEGER, field_key TEXT, searched_at TEXT);"
-        "CREATE TABLE grid_views (cell_id TEXT, viewer TEXT, result TEXT, at REAL);"
+        "CREATE TABLE grid_views (cell_id TEXT, viewer TEXT, result TEXT, at REAL, quarter TEXT NOT NULL DEFAULT '');"
         "INSERT INTO grid_cells VALUES ('294-0148','searched',0,'k1','2026-11-16'),('294-0149','searched',3,'k2','2026-11-16'),"
         "('294-0150','searched',0,'k3','2026-11-16'),('294-0151','queued',0,NULL,NULL);"
-        "INSERT INTO grid_views VALUES ('294-0149','anon:x','nothing',1.0);"
+        # 294-0149 was looked through whole by a signed-in person before the quarters; a guest's row never counts
+        "INSERT INTO grid_views VALUES ('294-0149','user:someone','nothing',1.0,''),('294-0150','anon:x','nothing',1.0,'NW');"
     )
 
 
 def test_cell_tasks_walk_the_least_viewed_squares(site: tuple[FastAPI, _State, _Mail]) -> None:
+    """People look through a square a quarter (10′) at a time: the least-looked square, then its least-looked quarter this user
+    has not taken, ties NW, NE, SW, SE."""
     app, st, mail = site
     guest = _client(app)
     assert guest.get("/api/tasks/next", params={"kind": "cell"}).status_code == 503  # no grid yet
     _fake_grid(st)
     t = guest.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
-    assert t["kind"] == "cell" and t["cell_id"] == "294-0148" and t["field_key"] == "k1"
+    assert (t["kind"], t["cell_id"], t["quarter"], t["fov"], t["field_key"]) == ("cell", "294-0148", "NW", 10.0, "k1")
+    from service import grid
+
+    nw = grid.quarter(grid.by_id("294-0148"), "NW")
+    assert (t["ra"], t["dec"]) == (pytest.approx(nw.ra), pytest.approx(nw.dec))  # the quarter's centre, not the square's
     assert guest.post(f"/api/me/tasks/{t['id']}/done", json={"result": "nothing", "mark_ids": []}).status_code == 401
     c = _sign_in(app, mail)
     t1 = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
-    assert t1["cell_id"] == "294-0148"
+    assert (t1["cell_id"], t1["quarter"]) == ("294-0148", "NW")
     assert c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]["id"] == t1["id"]  # the open task comes back
     assert c.post(f"/api/me/tasks/{t1['id']}/done", json={"result": "moves", "mark_ids": []}).status_code == 422
     done = c.post(f"/api/me/tasks/{t1['id']}/done", json={"result": "marks", "mark_ids": ["m1"]}).json()["task"]
     assert done["state"] == "done" and done["result"] == "marks" and done["mark_ids"] == ["m1"] and done["done_at"]
-    t2 = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
-    assert t2["cell_id"] == "294-0150"  # c2 has a viewer already, so it comes last
-    c.post(f"/api/me/tasks/{t2['id']}/done", json={"result": "nothing", "mark_ids": []})
+    walked = [(t1["cell_id"], t1["quarter"])]
+    for _ in range(4):
+        t2 = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+        walked.append((t2["cell_id"], t2["quarter"]))
+        c.post(f"/api/me/tasks/{t2['id']}/done", json={"result": "nothing", "mark_ids": []})
+    # the rest of 294-0148 first (nobody has looked at it), then 294-0150 (a guest's row does not count); 294-0149 comes last
+    assert walked == [("294-0148", q) for q in ("NW", "NE", "SW", "SE")] + [("294-0150", "NW")]
+    # a quarter somebody signed in has looked through comes after the ones nobody has
+    accounts.get(st).db._conn().execute("INSERT INTO grid_views VALUES ('294-0150','user:x','nothing',2.0,'NE')")
+    assert c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]["quarter"] == "SW"
     t3 = c.get("/api/tasks/next", params={"kind": "cell", "cell_id": "294-0151"}).json()["task"]  # "Take this square" on the globe
-    assert t3["cell_id"] == "294-0151" and t3["field_key"] is None
-    assert [x["cell_id"] for x in c.get("/api/me/tasks").json()["tasks"]] == ["294-0151", "294-0150", "294-0148"]
+    assert (t3["cell_id"], t3["quarter"], t3["field_key"]) == ("294-0151", "NW", None)
+    t4 = c.get("/api/tasks/next", params={"kind": "cell", "cell_id": "294-0151", "quarter": "SE"}).json()["task"]
+    assert (t4["cell_id"], t4["quarter"]) == ("294-0151", "SE") and t4["id"] != t3["id"]
+    assert c.get("/api/tasks/next", params={"kind": "cell", "quarter": "XX"}).status_code == 422
     bob = _sign_in(app, mail, "bob@example.org")
     assert bob.post(f"/api/me/tasks/{t3['id']}/done", json={"result": "nothing", "mark_ids": []}).status_code == 404
     # a task taken as a guest is closed after signing in

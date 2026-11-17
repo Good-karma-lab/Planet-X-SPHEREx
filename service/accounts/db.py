@@ -163,6 +163,9 @@ class AccountsDB:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._conn().executescript(SCHEMA)
+        if "quarter" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_tasks)")}:
+            # added on 17 Nov 2026: people look through a square a quarter (10′) at a time; NULL = the whole square (before)
+            self._conn().execute("ALTER TABLE acc_tasks ADD COLUMN quarter TEXT")
         if "extra" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_investigations)")}:
             # what the lab adds to an investigation: the objects gathered (`items`), the ruler's result, the old-survey match
             self._conn().execute("ALTER TABLE acc_investigations ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'")
@@ -288,7 +291,8 @@ class AccountsDB:
     @staticmethod
     def _task(r: sqlite3.Row) -> dict[str, Any]:
         return {
-            "id": r["id"], "kind": r["kind"], "cell_id": r["cell_id"], "finding_id": r["finding_id"], "field_key": r["field_key"],
+            "id": r["id"], "kind": r["kind"], "cell_id": r["cell_id"], "quarter": r["quarter"], "fov": 10.0 if r["quarter"] else None,
+            "finding_id": r["finding_id"], "field_key": r["field_key"],
             "ra": r["ra"], "dec": r["dec"], "state": r["state"], "result": r["result"], "mark_ids": json.loads(r["mark_ids"]),
             "created": iso(r["created"]), "done_at": iso(r["done_at"]),
         }  # fmt: skip
@@ -309,6 +313,14 @@ class AccountsDB:
         )
         return None if r is None else self._task(r)
 
+    def quarters_taken(self, user_id: str) -> dict[str, set[str]]:
+        """{square: quarters this user has a task for}. A task of before the quarters (no quarter) took all four."""
+        out: dict[str, set[str]] = {}
+        for r in self._conn().execute("SELECT cell_id, quarter FROM acc_tasks WHERE user_id=? AND kind='cell'", (user_id,)):
+            if r["cell_id"]:
+                out.setdefault(r["cell_id"], set()).update({r["quarter"]} if r["quarter"] else {"NW", "NE", "SW", "SE"})
+        return out
+
     def task_refs(self, user_id: str, kind: str) -> set[str]:
         """The squares (or findings) this user already has a task for."""
         col = "cell_id" if kind == "cell" else "finding_id"
@@ -320,14 +332,15 @@ class AccountsDB:
         col = "cell_id" if kind == "cell" else "finding_id"
         if user_id is not None:
             r = c.execute(
-                f"SELECT * FROM acc_tasks WHERE user_id=? AND kind=? AND {col}=? AND state='open'", (user_id, kind, ref[col])
+                f"SELECT * FROM acc_tasks WHERE user_id=? AND kind=? AND {col}=? AND COALESCE(quarter,'')=? AND state='open'",
+                (user_id, kind, ref[col], ref.get("quarter") or ""),
             ).fetchone()
             if r is not None:
                 return self._task(r)
         tid = new_id("t")
         c.execute("DELETE FROM acc_tasks WHERE user_id IS NULL AND created < ?", (time.time() - 7 * 86400,))  # guests' tasks are not kept
         c.execute(
-            "INSERT INTO acc_tasks(id,user_id,kind,cell_id,finding_id,field_key,ra,dec,created) VALUES(?,?,?,?,?,?,?,?,?)",
+            "INSERT INTO acc_tasks(id,user_id,kind,cell_id,finding_id,field_key,ra,dec,created,quarter) VALUES(?,?,?,?,?,?,?,?,?,?)",
             (
                 tid,
                 user_id,
@@ -338,6 +351,7 @@ class AccountsDB:
                 ref.get("ra"),
                 ref.get("dec"),
                 time.time(),
+                ref.get("quarter"),
             ),
         )
         return self._task(c.execute("SELECT * FROM acc_tasks WHERE id=?", (tid,)).fetchone())
