@@ -38,9 +38,18 @@ def _user(app: FastAPI, email: str) -> TestClient:
 
 def _submit(st: Any, c: TestClient, title: str = "A dot that moves") -> str:
     """A submitted finding of this user, through the real routes with a checks job that passed."""
-    st.checks_status = lambda job: {"job": job, "state": "done", "can_submit": True, "ra": 269.59, "dec": 4.8, "field_key": "",
-                                    "checks": [{"id": "gaia", "state": "pass", "detail": "No Gaia star within 4″."},
-                                               {"id": "neowise", "state": "pass", "detail": "NEOWISE has nothing on the path."}]}  # fmt: skip
+    st.checks_status = lambda job: {
+        "job": job,
+        "state": "done",
+        "can_submit": True,
+        "ra": 269.59,
+        "dec": 4.8,
+        "field_key": "",
+        "checks": [
+            {"id": "gaia", "state": "pass", "detail": "No Gaia star within 4″."},
+            {"id": "neowise", "state": "pass", "detail": "Nothing on the path."},
+        ],
+    }
     mark = {
         "id": f"mark-{title[:6].replace(' ', '')}-0001",
         "field_key": "269.59,+4.8,20",
@@ -62,7 +71,7 @@ def _submit(st: Any, c: TestClient, title: str = "A dot that moves") -> str:
 
 
 def test_profile_is_private_until_its_owner_turns_it_on_and_never_shows_the_email(site: tuple[FastAPI, Any]) -> None:
-    app, st = site
+    app = site[0]
     ann = _user(app, "ann.k@example.org")
     guest = TestClient(app, base_url="http://localhost", follow_redirects=False)
     ann.patch("/api/me", json={"name": "Ann K."})
@@ -85,7 +94,7 @@ def test_profile_is_private_until_its_owner_turns_it_on_and_never_shows_the_emai
 
 
 def test_sharing_an_achievement_makes_the_link_the_tags_and_the_picture(site: tuple[FastAPI, Any]) -> None:
-    app, st = site
+    app = site[0]
     ann = _user(app, "ann@example.org")
     guest = TestClient(app, base_url="http://localhost", follow_redirects=False)
     ann.patch("/api/me", json={"name": "Ann"})  # earns "Named"
