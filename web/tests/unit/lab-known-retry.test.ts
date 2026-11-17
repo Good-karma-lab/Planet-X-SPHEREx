@@ -43,7 +43,7 @@ describe('Known objects: catalogues that do not answer are asked again on the re
     const line = knownStatus(k, { known: 3, noMatch: 1 }, 15);
     expect(line).toMatch(/SIMBAD/);
     expect(line).toMatch(/JPL/);
-    expect(line).toMatch(/: no answer · retry 15 s/);
-    expect(knownStatus(k, { known: 3, noMatch: 1 }, null)).not.toMatch(/retry/);
+    expect(line).toMatch(/: asking again in 15 s/);
+    expect(knownStatus(k, { known: 3, noMatch: 1 }, null)).not.toMatch(/asking again/);
   });
 });

@@ -186,6 +186,7 @@ export function findOfRow(row: FindRow, finds: { id: string; kind: string; ra: n
 
 export function CandList({
   rows,
+  busy,
   also,
   selected,
   picture,
@@ -200,6 +201,8 @@ export function CandList({
   picture: () => HTMLCanvasElement | null;
   /** per-search statistics, exports and switches: folded away under "Details" */
   details: ComponentChildren;
+  /** a search of the field is still running: an empty list says so, not that nothing is there */
+  busy?: boolean;
   /** the field on show: its centre and size */
   field: { ra: number; dec: number; fov: number };
   /** starts the question task of a red source or an anomaly (the service's find id) */
@@ -245,7 +248,7 @@ export function CandList({
           {all ? 'Fewer' : `All ${list.length}`}
         </button>
       )}
-      {!list.length && <div class="cr-none">Nothing unexplained so far</div>}
+      {!list.length && <div class="cr-none">{busy ? 'Searching…' : 'Nothing unexplained here'}</div>}
       {folded.length > 0 && (
         <details class="cr-group" open={openGroup} onToggle={(e) => setOpenGroup((e.target as HTMLDetailsElement).open)} data-testid="cand-group">
           <summary>
