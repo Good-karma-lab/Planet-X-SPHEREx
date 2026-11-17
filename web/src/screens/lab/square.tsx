@@ -67,8 +67,11 @@ export interface SquareLook {
   line: string;
   /** a look can be counted now (signed in, 60 s, every pass) */
   canCount: boolean;
-  /** why it cannot ('' when it can): "Sign in to count your look", "Look at every pass · 0:42" */
+  /** why it cannot ('' when it can, or while only time is needed and more than 20 s are left): "Sign in to count your look",
+   *  "passes 2 of 4", "0:18" */
   why: string;
+  /** how far the look is, 0..1 (the time and the passes shown): the thin bar of the task card */
+  frac: number;
   /** count the look (POST …/viewed): the caller has checked canCount */
   confirm: (result?: 'nothing' | 'marks') => Promise<boolean>;
   /** the button of the free lab ("I have looked through this quarter"), null in a task or off a square */
@@ -162,8 +165,10 @@ export function useSquareLook(a: SquareArgs): SquareLook {
     : !user
       ? 'Sign in to count your look'
       : left > 0 || !allPasses
-        ? `Look at every pass${allPasses ? '' : ` · ${look.current.passes.size} of ${a.passesTotal} shown`}${left ? ` · 0:${String(left).padStart(2, '0')}` : ''}`
+        ? // quiet: the bar says how far; words only for the passes not yet shown and for the last 20 seconds
+          [allPasses ? '' : `passes ${look.current.passes.size} of ${a.passesTotal}`, left > 0 && left <= 20 ? `0:${String(left).padStart(2, '0')}` : ''].filter(Boolean).join(' · ')
         : '';
+  const frac = !cell ? 0 : Math.min(1, look.current.seconds / LOOK_SECONDS) * 0.7 + (a.passesTotal ? Math.min(1, look.current.passes.size / a.passesTotal) : 1) * 0.3;
   const mine = cell?.quarters?.filter((q) => q.mine).length;
   const line = cell
     ? [`square ${cell.id}`, quarter ? `${quarter} quarter` : '', quarter && mine != null ? `${mine} of 4 looked through` : '']
@@ -238,6 +243,11 @@ export function useSquareLook(a: SquareArgs): SquareLook {
         >
           {quarter ? 'I have looked through this quarter' : 'I have looked through this square'}
         </button>
+        {!!user && !canCount && !line2 && (
+          <i class="lookbar" aria-hidden="true">
+            <b style={{ width: `${Math.round(frac * 100)}%` }} />
+          </i>
+        )}
         <span class="sq-line" data-testid="square-look-line">
           {line2 || why}
         </span>
@@ -245,5 +255,5 @@ export function useSquareLook(a: SquareArgs): SquareLook {
       </div>
     ) : null;
 
-  return { cell, quarter, outline: cell?.corners ?? null, line, canCount, why, confirm, button };
+  return { cell, quarter, outline: cell?.corners ?? null, line, canCount, why, frac, confirm, button };
 }

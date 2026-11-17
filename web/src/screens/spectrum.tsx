@@ -661,7 +661,9 @@ export function nameOf(src: Source, id: Identified | null | 'asking', held: Held
   return 'no catalogue name here';
 }
 
-export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpectrum: () => void; held?: Held | null }) {
+export function ObjectTab({ src, onSpectrum, held, compact = false }: { src: Source | null; onSpectrum: () => void; held?: Held | null; compact?: boolean }) {
+  // compact: the lab's passport, whose card head already gives the name and "Open spectrum"
+
   const id = useIdentify(src, held);
   if (!src) return <div class="mono-s">Click a source in the picture</div>;
   const pm = src.pmra || src.pmdec ? Math.hypot(src.pmra ?? 0, src.pmdec ?? 0) : 0;
@@ -675,7 +677,7 @@ export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpe
   const plx = ga?.state === 'ok' && ga.parallax != null && ga.parallax >= 3 && (ga.ruwe ?? 9) <= 1.4 ? ga.parallax : null;
   return (
     <div class="okv">
-      <div class="orow">
+      <div class="orow" hidden={compact}>
         <span class="faint">Name</span>
         <span data-testid="obj-name">{nameOf(src, id, held)}</span>
       </div>
@@ -692,8 +694,8 @@ export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpe
           <span>
             {pm >= 1000 ? `${(pm / 1000).toFixed(2)} ″/yr` : `${pm.toFixed(0)} mas/yr`}
             {src.pmKind === 'measured'
-              ? `${src.pmErr ? ` ± ${src.pmErr >= 1000 ? (src.pmErr / 1000).toFixed(2) + ' ″/yr' : src.pmErr.toFixed(0) + ' mas/yr'}` : ''} measured by the search from the exposures (no catalogue gave it)`
-              : " from the catalogue; the picture follows it on each exposure's date"}
+              ? `${src.pmErr ? ` ± ${src.pmErr >= 1000 ? (src.pmErr / 1000).toFixed(2) + ' ″/yr' : src.pmErr.toFixed(0) + ' mas/yr'}` : ''} · measured in the exposures`
+              : ' · catalogue'}
           </span>
         </div>
       )}
@@ -739,7 +741,7 @@ export function ObjectTab({ src, onSpectrum, held }: { src: Source | null; onSpe
           </span>
         </div>
       )}
-      <div class="orow">
+      <div class="orow" hidden={compact}>
         <span class="faint">Spectrum</span>
         <span>
           <button class="lnk" onClick={onSpectrum}>

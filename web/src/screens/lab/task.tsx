@@ -267,7 +267,7 @@ export interface TaskArgs {
   pass: number | null;
   passesTotal: number;
   /** a square task: whether a look can be counted now, why not, and the count itself (lab/square.tsx) */
-  square?: { canCount: boolean; why: string; confirm: (result?: 'nothing' | 'marks') => Promise<boolean> } | null;
+  square?: { canCount: boolean; why: string; frac?: number; confirm: (result?: 'nothing' | 'marks') => Promise<boolean> } | null;
   /** what the lab shows with the task: for a series step its `show`, else null (the task's kind decides) */
   view?: (show: string | null, task: NextTask | null) => ComponentChildren;
   /** the other overlays are on show (off by default in a task about one object); and the switch for it */
@@ -470,6 +470,11 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           ))}
           {!pictures.length && <span class="tp-none">The pictures of this track are not given</span>}
         </div>
+      )}
+      {task.kind === 'cell' && a.square && !a.square.canCount && a.square.why !== 'Sign in to count your look' && (
+        <i class="lookbar" aria-hidden="true" title="Your look: a minute with every pass shown">
+          <b style={{ width: `${Math.round((a.square.frac ?? 0) * 100)}%` }} />
+        </i>
       )}
       <div class="tp-line" data-testid="task-line">
         {step && (

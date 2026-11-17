@@ -97,13 +97,24 @@ function newId(): string {
   return `m-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function push(job: Promise<unknown>): void {
+/** what the server did with the last mark it was sent (spec §5g: a search job, a lookup, an agreement), with the mark's id */
+export interface MarkEffect {
+  id: string;
+  effect: string;
+  state?: string;
+  people?: number;
+  [k: string]: unknown;
+}
+let lastEffect: MarkEffect | null = null;
+
+function push(job: Promise<unknown>, id?: string): void {
   job.then(
-    () => {
-      if (syncNote) {
-        syncNote = '';
-        for (const f of listeners) f();
-      }
+    (r) => {
+      const e = (r as { effect?: { effect?: string } } | null)?.effect;
+      const changed = !!syncNote || (!!id && !!e?.effect);
+      if (id && e?.effect) lastEffect = { ...(e as MarkEffect), id };
+      syncNote = '';
+      if (changed) for (const f of listeners) f();
     },
     () => {
       syncNote = 'Marks not saved to the account';
@@ -126,7 +137,7 @@ export function addMark(m: Omit<Mark, 'id' | 'created'> & Partial<Pick<Mark, 'id
   const mark: Mark = { ...m, id: m.id ?? newId(), created: m.created ?? new Date().toISOString() };
   load().push(mark);
   save();
-  if (remote) push(remote.put(mark));
+  if (remote) push(remote.put(mark), mark.id);
   return mark;
 }
 
@@ -137,7 +148,7 @@ export function updateMark(id: string, change: Partial<Omit<Mark, 'id' | 'create
   const mark = { ...list[i]!, ...change };
   list[i] = mark;
   save();
-  if (remote) push(remote.put(mark));
+  if (remote) push(remote.put(mark), mark.id);
   return mark;
 }
 
@@ -154,6 +165,11 @@ export function removeMark(id: string): void {
 export function onMarks(f: () => void): () => void {
   listeners.add(f);
   return () => listeners.delete(f);
+}
+
+/** the server's answer to the last mark sent, null before any (a guest's marks get none) */
+export function lastMarkEffect(): MarkEffect | null {
+  return lastEffect;
 }
 
 export function marksSyncNote(): string {

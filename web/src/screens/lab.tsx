@@ -172,6 +172,8 @@ interface Opts {
   motion: boolean;
   /** Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame */
   known: boolean;
+  /** People's marks (spec §5g): what people said on this field, where you have said something too */
+  people: boolean;
 }
 
 interface Track {
@@ -450,6 +452,7 @@ export function Lab({ route }: { route: Route }) {
     artifacts: p['art'] === '1',
     motion: p['mot'] === '1',
     known: inTask ? p['known'] !== '0' : p['known'] === '1',
+    people: inTask ? p['people'] !== '0' : p['people'] === '1',
   };
   squareTaskRef.current = squareTask;
 
@@ -2369,6 +2372,7 @@ export function Lab({ route }: { route: Route }) {
     single: film !== null || view === 'picture',
     side,
     known: opts.known,
+    people: opts.people,
     blinkable: film === null && time === 'loop',
     sel,
     tracks: mv?.result?.tracks ?? [],
@@ -4366,7 +4370,7 @@ export function Lab({ route }: { route: Route }) {
                               {seenText(sel) && <div class="obj-seen">{seenText(sel)}</div>}
                             </>,
                           )}
-                        <ObjectTab src={sel} onSpectrum={() => setTab('spec')} held={flow.selHeld} />
+                        <ObjectTab src={sel} onSpectrum={() => setSpecOpen(true)} held={flow.selHeld} compact />
                         {/* the same epoch rule as the heading's identification: a source with a motion carries its J2000 place, a place on the picture is where the thing is in 2025.9 */}
                         {sel && (
                           <ContextRows
@@ -4376,6 +4380,7 @@ export function Lab({ route }: { route: Route }) {
                             pmra={sel.pmra ?? 0}
                             pmdec={sel.pmdec ?? 0}
                             held={flow.selHeld}
+                            omit={['simbad', 'gaia']}
                           />
                         )}
                         {sel && <LightCurves src={sel} field={{ ra, dec, fov }} />}
@@ -4471,6 +4476,17 @@ export function Lab({ route }: { route: Route }) {
                       '',
                       false,
                       searchOf('anomalies'),
+                    )}
+                    {sw(
+                      'peopleChk',
+                      "People's marks",
+                      "People's marks: what people said on this field (it moves, an artefact, not in the catalogues), merged by place with a count and never a name; shown where you have marked or answered too",
+                      opts.people,
+                      (v) => set({ people: v ? (inTask ? null : '1') : inTask ? '0' : null }),
+                      undefined,
+                      '',
+                      false,
+                      flow.peopleSearch,
                     )}
                     {sw(
                       'trailChk',

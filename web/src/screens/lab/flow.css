@@ -318,3 +318,16 @@
 .objcard .oc-looks { display: flex; flex-wrap: wrap; gap: 4px; }
 .objcard .oc-looks button { height: 26px; padding: 0 9px; border-radius: 13px; border: 1px solid var(--edge-soft); background: none; color: var(--muted); font: 500 11.5px var(--font); cursor: pointer; }
 .objcard .oc-looks button.on { color: var(--ink); border-color: rgba(170, 180, 185, 0.8); background: rgba(170, 180, 185, 0.14); }
+/* lab v2: the look of a square, quiet: a thin bar; the seconds only in the last 20 */
+.lookbar { display: block; height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.08); overflow: hidden; }
+.lookbar b { display: block; height: 100%; border-radius: 2px; background: linear-gradient(90deg, rgba(95, 227, 214, 0.45), var(--accent)); transition: width 0.9s linear; }
+.sqlook .lookbar { margin: 2px 0; }
+/* lab v2: the passport (More about it) as one short list: the card head names it, the rows say each thing once */
+.panel .pcol #sec-obj .obj-seen { display: none; }
+.panel .pcol #sec-obj .obj-more[open] { display: flex; flex-direction: column; gap: 10px; }
+.panel .pcol #sec-obj .okv { display: flex; flex-direction: column; gap: 3px; }
+.panel .pcol #sec-obj .okv .orow { display: grid; grid-template-columns: 82px minmax(0, 1fr); gap: 8px; font-size: 12px; line-height: 1.4; }
+.panel .pcol #sec-obj .okv .orow[hidden] { display: none; }
+.panel .pcol #sec-obj .okv .orow > .faint { color: var(--muted); }
+.panel .pcol #sec-obj .ctxbox .search-h, .panel .pcol #sec-obj .lc-h, .panel .pcol #sec-obj .psub { font: 650 10px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); margin-top: 4px; }
+.panel .pcol #sec-obj .ctxbox > .mono-s { font-size: 10.5px; color: var(--faint); }

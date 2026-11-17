@@ -11,6 +11,8 @@ import {
   LEVEL_OF_KIND,
   type MarkKind,
   marksSyncNote,
+  lastMarkEffect,
+  type MarkEffect,
   onMarks,
   removeMark,
   updateMark,
@@ -65,6 +67,8 @@ export interface FlowArgs {
   /** the picture's side in CSS px */
   side: number;
   known: boolean;
+  /** the People's marks layer is on */
+  people: boolean;
   /** the service's key of the field on show (null until it is known) */
   fieldKey: string | null;
   /** the lab's address parameters, and how another lab address is opened */
@@ -137,6 +141,41 @@ const KIND_COLOUR: Record<MarkKind, string> = { moves: '#ffd08a', not_in_catalog
 const KIND_WORD: Record<MarkKind, string> = { moves: 'It moves', not_in_catalogues: 'Not in catalogues', artefact: 'Artefact', odd: 'Something odd' };
 const KIND_SHORT: Record<MarkKind, string> = { moves: 'It moves', not_in_catalogues: 'Not in catalogues', artefact: 'Artefact', odd: 'Odd' };
 const LOOK_WORD: Record<string, string> = { blinks: 'Blinks on and off', glare: 'Glare or ghost', spike: 'Spike', edge: 'Picture edge', hot_dot: 'One hot dot' };
+/** what the server did with a mark, as the picture's status line says it (spec §5g) */
+export function effectWord(e: MarkEffect | null): string {
+  if (!e) return '';
+  const n = typeof e.people === 'number' ? e.people : 0;
+  const matches = Array.isArray(e['matches']) ? (e['matches'] as string[]) : [];
+  switch (`${e.effect}:${e.state ?? ''}`) {
+    case 'moves:needs_another_pass':
+      return '';
+    case 'moves:checking':
+    case 'moves:started':
+    case 'moves:running':
+      return 'It moves · checks running · in your investigation';
+    case 'moves:no_checks':
+      return 'It moves · in your investigation';
+    case 'not_in_catalogues:known':
+      return `Known: ${matches.slice(0, 2).join(', ') || 'in a catalogue'}`;
+    case 'not_in_catalogues:unknown':
+      return 'In no catalogue · a finding found by people';
+    case 'not_in_catalogues:no_answer':
+      return 'Catalogues asked · no answer yet';
+    case 'artefact:waiting':
+      return 'Artefact · waiting for a second person';
+    case 'artefact:agreed':
+      return `Artefact · ${n} people agree`;
+    case 'artefact:set_aside':
+      return `Artefact · ${n} people agree · the machine's find set aside`;
+    case 'odd:talk':
+      return 'Something odd · in the Talk of this place';
+    case 'odd:no_note':
+      return 'Something odd · add a note in the label';
+    default:
+      return e.effect === 'moves' ? 'It moves · checks running' : '';
+  }
+}
+
 /** a mark's colour: its kind's, else the level of before */
 const markColour = (m: Pick<Mark, 'kind' | 'level'>) => (m.kind ? KIND_COLOUR[m.kind] : LEVEL_COLOUR[m.level]);
 
@@ -177,6 +216,8 @@ export interface LabFlow {
   knownBusy: boolean;
   /** the Known objects lookup as the switch and the row say it: asking, how many, or who did not answer and the next try */
   knownSearch: SearchInfo;
+  /** the People's marks of the field as its switch says it: how many places people marked here */
+  peopleSearch: SearchInfo;
   /** what the field's lookup already holds about the selected source (a ringed known object or a deeper match), null when nothing */
   selHeld: Held | null;
 }
@@ -212,8 +253,33 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const marksRef = useRef(marks);
   marksRef.current = marks;
   const [tool, setTool] = useState<FlowTool>(null);
+  // spec §5g "It moves": after the first mark of a mover the lab shows the pass farthest from it and asks for the same thing there
+  const [tapHere, setTapHere] = useState<{ id: string; label: string; ra: number; dec: number; pass: number; passLabel: string } | null>(null);
+  const tapRef = useRef(tapHere);
+  tapRef.current = tapHere;
+  // the People's marks of this field (GET /api/field/{key}/people): places merged by kind with counts, words only where I said something
+  type PeoplePlace = { ra: number; dec: number; people: number; mine: boolean; seen: boolean; text?: string; kinds?: { kind: string }[] };
+  const [people, setPeople] = useState<{ key: string; state: 'running' | 'done' | 'failed'; places: PeoplePlace[] }>({ key: '', state: 'running', places: [] });
+  const peopleRef = useRef(people);
+  peopleRef.current = people;
+  const pKey = fieldKey(a.ra, a.dec, a.fov);
+  useEffect(() => {
+    if (!a.people) return;
+    let stop = false;
+    setPeople((x) => (x.key === pKey ? x : { key: pKey, state: 'running', places: [] }));
+    fetch(`/api/field/${encodeURIComponent(pKey)}/people`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then((d: { places?: PeoplePlace[] }) => !stop && setPeople({ key: pKey, state: 'done', places: d.places ?? [] }))
+      .catch(() => !stop && setPeople({ key: pKey, state: 'failed', places: [] }));
+    return () => {
+      stop = true;
+    };
+  }, [a.people, pKey, marks.length, marks.map((m) => m.kind ?? '').join(',')]);
   // another field (or the next task) starts with no tool: a Mark or Ruler left on would take the first click there
-  useEffect(() => setTool(null), [fieldKey(a.ra, a.dec, a.fov)]);
+  useEffect(() => {
+    setTool(null);
+    setTapHere(null);
+  }, [fieldKey(a.ra, a.dec, a.fov)]);
   const [open, setOpen] = useState<string | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
@@ -337,6 +403,55 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ctx.fillStyle = '#ffd08a';
         ctx.fillText(lab, rx + 17, ry + 4);
         ctx.restore();
+      }
+      ctx.restore();
+    }
+    // People's marks: a small square per place people marked, the words where I said something too (never a name)
+    const pp = argsRef.current.people && peopleRef.current.key === fieldKey(argsRef.current.ra, argsRef.current.dec, argsRef.current.fov) ? peopleRef.current.places : [];
+    if (pp.length && !wall) {
+      ctx.save();
+      ctx.font = '600 10.5px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+      for (const box of rects)
+        for (const q of pp) {
+          if (!q.seen || q.mine && q.people === 1) continue; // only what others said, where I said something too
+          const [u, v] = uv(q.ra, q.dec);
+          const x = box.x + u * box.w;
+          const y = box.y + v * box.h;
+          if (env.hidden(x, y)) continue;
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+          ctx.strokeRect(x - 7, y - 7, 14, 14);
+          ctx.lineWidth = 1.3;
+          ctx.strokeStyle = '#d7a6ff';
+          ctx.strokeRect(x - 7, y - 7, 14, 14);
+          if (q.text) {
+            ctx.lineWidth = 3;
+            ctx.strokeStyle = '#000';
+            ctx.strokeText(q.text, x + 11, y + 4);
+            ctx.fillStyle = '#e9d4ff';
+            ctx.fillText(q.text, x + 11, y + 4);
+          }
+        }
+      ctx.restore();
+    }
+    // "tap it here": where the first mark of the mover was, a dashed ring of half a minute of arc on the pass asked
+    const th = tapRef.current;
+    if (th && !wall) {
+      ctx.save();
+      for (const box of rects) {
+        const [u, v] = uv(th.ra, th.dec);
+        const x = box.x + u * box.w;
+        const y = box.y + v * box.h;
+        const r = Math.max(14, (30 / env.fovArc) * box.w);
+        ctx.beginPath();
+        ctx.arc(x, y, r, 0, 2 * Math.PI);
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.5)';
+        ctx.stroke();
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = '#ffd08a';
+        ctx.stroke();
       }
       ctx.restore();
     }
@@ -550,10 +665,15 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ra,
         dec,
         pass: a.pass,
-        label: `Mark ${n}`,
-        level: 'suspicious',
+        label: tapHere ? tapHere.label : `Mark ${n}`,
+        level: tapHere ? LEVEL_OF_KIND.moves : 'suspicious',
+        ...(tapHere ? { kind: 'moves' as const } : {}),
         note: '',
       });
+      if (tapHere) {
+        setTapHere(null);
+        setTool(null);
+      }
       setOpen(m.id);
       a.setTab('obj'); // its card
       return true;
@@ -1012,7 +1132,19 @@ export function useLabFlow(a: FlowArgs): LabFlow {
                   key={k}
                   class={cur.kind === k ? 'on' : ''}
                   aria-pressed={cur.kind === k}
-                  onClick={() => updateMark(cur.id, { kind: k, level: LEVEL_OF_KIND[k], look: k === 'artefact' ? (cur.look ?? null) : null })}
+                  onClick={() => {
+                    updateMark(cur.id, { kind: k, level: LEVEL_OF_KIND[k], look: k === 'artefact' ? (cur.look ?? null) : null });
+                    if (k !== 'moves' || cur.pass == null || a.passes.length < 2) return setTapHere(null);
+                    // a partner: a mover mark within a minute of arc on another pass
+                    const partner = marks.some(
+                      (m) => m.id !== cur.id && m.kind === 'moves' && m.pass != null && m.pass !== cur.pass && Math.hypot((m.ra - cur.ra) * Math.cos((cur.dec * Math.PI) / 180), m.dec - cur.dec) * 3600 < 60,
+                    );
+                    if (partner) return;
+                    const far = [...a.passes].sort((x, y) => Math.abs(y.index - cur.pass!) - Math.abs(x.index - cur.pass!))[0]!;
+                    a.showFrame(far.index);
+                    setTool('mark');
+                    setTapHere({ id: cur.id, label: cur.label, ra: cur.ra, dec: cur.dec, pass: far.index, passLabel: far.label });
+                  }}
                   data-testid={`mark-kind-${k}`}
                 >
                   <i style={{ background: KIND_COLOUR[k] }} />
@@ -1101,10 +1233,19 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       : ruler.length === 2
         ? `Ruler: ${rulerWord(rulerOf(ruler[0]!, ruler[1]!))}`
         : '';
+  const eff = lastMarkEffect();
+  // the server decides: a mover it already checks (linked to marks nearby) needs no second tap
+  useEffect(() => {
+    if (tapHere && eff && eff.id === tapHere.id && eff.effect === 'moves' && eff.state !== 'needs_another_pass') {
+      setTapHere(null);
+      setTool(null);
+    }
+  }, [eff, tapHere?.id]);
   const status = [
+    tapHere ? `It moves · tap it here in ${tapHere.passLabel}` : open && eff && eff.id === open ? effectWord(eff) : '',
     a.square?.line ?? '',
     a.known ? knownStatus(known, counts, knownSilent ? knownRetry.nextIn : null) : '',
-    tool === 'mark' ? 'Mark: click a place' : '',
+    tool === 'mark' && !tapHere ? 'Mark: click a place' : '',
     rulerStatus,
     marksSyncNote(),
   ]
@@ -1147,6 +1288,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     blink,
     taskPanel,
     focus: !!task && focusKind(task.kind) && !others,
+    peopleSearch: {
+      name: "people's marks",
+      state: !a.people ? 'idle' : people.key !== pKey || people.state === 'running' ? 'running' : people.state === 'failed' ? 'failed' : 'done',
+      count: people.key === pKey && people.state === 'done' ? String(people.places.filter((q) => !(q.mine && q.people === 1)).length) : undefined,
+      ours: true,
+    },
     knownSearch: {
       name: 'known objects',
       state:
