@@ -214,3 +214,13 @@ def test_the_top_finds_fields_are_the_labs_and_built_ones_are_left(tmp_path: Pat
     store.write_meta("field", key, {"passes": [{}, {}]})
     store.complete(key)
     assert film not in sweep_runner.top_find_fields(st)  # built: left
+
+
+def test_the_step_said_is_this_squares(tmp_path: Path) -> None:
+    r, _st, _ = make(tmp_path)
+    r._say("searching", square="a", step="Find Planet X")
+    r._say("idle", last="a", step=None)
+    assert r.snapshot()["step"] is None
+    ce = r.next_square()
+    asyncio.run(r.square(ce))
+    assert r.snapshot()["step"] in ("the searches", "Find Planet X")
