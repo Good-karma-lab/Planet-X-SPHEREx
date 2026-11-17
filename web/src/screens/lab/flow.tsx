@@ -3,14 +3,12 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import { addMark, allMarks, fieldKey, MARK_LEVELS, marksSyncNote, onMarks, removeMark, updateMark, type Mark, type MarkLevel } from '../../lib/marks';
-import { drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, matchKnown, type KnownDrawEnv, type KnownMatch, type KnownState } from './known';
+import { catalogueAt, drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, matchKnown, type KnownDrawEnv, type KnownMatch, type KnownObject, type KnownState } from './known';
 import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
-import { awardLine, ChecksList, checksStatus, chipWord, declaredWord, declareSubmit, focusKind, followDeclared, taskOfParams, useChecks, useLabTask, type DeclaredInv } from './task';
-import { SOURCE_WORD } from './known';
+import { awardLine, focusKind, taskOfParams, useLabTask } from './task';
 import { AnomalyView, MoverView, RedView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
-import { motionOf } from './known';
 import { placeAt } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
 import './flow.css';
@@ -112,6 +110,8 @@ export interface LabFlow {
   chip: ComponentChildren;
   /** a mark's card is open: the Object tab is the mark's alone */
   markOpen: boolean;
+  /** the catalogue object the picture's rings have at a place on a date (decimal year), null when none within 8″ */
+  catalogueAt(ra: number, dec: number, year: number): KnownObject | null;
   tool: FlowTool;
   marks: Mark[];
   /** the marks inside the frame on show */
@@ -140,15 +140,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       setKnown(KNOWN_OFF);
       return;
     }
-    if (!a.known) {
-      // the overlay is off: the question is asked once all the same when the field opens, so that the service has the
-      // catalogues by the time the switch is turned on (it goes on asking them in the background)
-      setKnown(KNOWN_OFF);
-      void fetch(knownUrl(a.ra, a.dec, a.fov, a.epochs)).catch(() => {});
-      return;
-    }
+    // asked when the field opens, switch on or off: the card of a selected object reads the same answer as the picture's rings
     return followKnown(knownUrl(a.ra, a.dec, a.fov, a.epochs), setKnown);
-  }, [a.known, a.ra, a.dec, a.fov, epochsKey]);
+  }, [a.ra, a.dec, a.fov, epochsKey]);
 
   const [, tick] = useState(0);
   useEffect(() => onMarks(() => tick((x) => x + 1)), []);
@@ -196,7 +190,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   }, [a.ra, a.dec, a.fov]);
   const draw = (env: FlowDrawEnv) => {
     const { ctx, rects, wall, uvOf: uv, placed } = env;
-    const kn = knownRef.current;
+    const kn = argsRef.current.known ? knownRef.current : KNOWN_OFF; // the switch decides what is drawn, not what is known
     let match: KnownMatch | null = null;
     const pic = env.picture;
     if (kn.state === 'ok' && pic) {
@@ -381,111 +375,79 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const blink: [number, number] | null = a.blinkable && pa != null && pb != null ? [pa, pb] : null;
   useEffect(() => setPair([null, null]), [a.ra, a.dec, a.fov]);
 
-  // the investigation of this field: saved frames and notes, the checks, the submit
-  const [inv, setInv] = useState<string | null>(a.params['inv'] ?? null);
-  const [invNote, setInvNote] = useState('');
+  // ---- the lab only collects: the one action on a selected object is "Add to investigation" (a new one, or one of mine).
+  // Notes, the checks and the submit are in the Investigation page of the Cabinet, nowhere in the lab.
+  const [inv, setInv] = useState<{ id: string; title: string; marks: number } | null>(null);
   const [invLine, setInvLine] = useState('');
-  /** the investigation's state as the chip says it: "checking 7 of 8", "submitted" */
-  const [invState, setInvState] = useState('');
-  const [showChecks, setShowChecks] = useState(false);
-  const checks = useChecks();
+  /** the user's investigations, asked for when the list is opened: null = closed */
+  const [invList, setInvList] = useState<{ id: string; title: string }[] | null>(null);
   useEffect(() => {
-    setInv(a.params['inv'] ?? null);
     setInvLine('');
-    setInvState('');
-    setShowChecks(false);
-    checks.reset();
-  }, [a.ra, a.dec, a.fov, a.params['inv']]);
-  const call = async (path: string, body: unknown): Promise<{ status: number; json: Record<string, unknown> | null }> => {
+    setInvList(null);
+  }, [a.ra, a.dec, a.fov, open, a.sel?.ra, a.sel?.dec]);
+  const openInvList = async () => {
+    if (invList) return setInvList(null);
+    setInvLine('');
     try {
-      const r = await fetch(path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-      return { status: r.status, json: r.ok ? ((await r.json().catch(() => null)) as Record<string, unknown> | null) : null };
+      const r = await fetch('/api/me/investigations');
+      if (r.status === 401) return setInvLine('Sign in to add to an investigation');
+      if (!r.ok) throw new Error(String(r.status));
+      const d = (await r.json()) as { investigations?: { id: string; title: string; submitted?: unknown }[] };
+      setInvList((d.investigations ?? []).filter((x) => !x.submitted).map((x) => ({ id: x.id, title: x.title })));
     } catch {
-      return { status: 0, json: null };
+      setInvLine('Investigations did not answer');
     }
   };
-  // a mark's own note is the note of what is added; a source has a note field of its own in its card
-  const noteNow = (open ? marks.find((m) => m.id === open)?.note : null) ?? invNote;
-  const saveFrame = async () => {
-    setInvLine('saving…');
-    const frame = { ref: location.hash.slice(0, 600), title: `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`, note: noteNow, thumb: a.thumb() };
-    let r;
-    if (inv) r = await call(`/api/me/investigations/${encodeURIComponent(inv)}/frames`, frame);
-    else
-      r = await call('/api/me/investigations', {
-        title: marksHere[0]?.label || frame.title,
-        finding_id: a.params['finding'] ?? null,
-        mark_ids: marksHere.map((m) => m.id),
-        notes: noteNow ? [{ text: noteNow }] : [],
-        frames: [frame],
-        checks_job: checks.view.job,
-      });
-    const id = r.json?.['id'];
-    if (r.status >= 200 && r.status < 300) {
-      if (typeof id === 'string') setInv(id);
-      setInvNote('');
-      setInvLine('Saved to the investigation');
-    } else setInvLine(r.status === 401 ? 'Sign in to save' : 'Not saved: the service did not answer');
-  };
-  const followStop = useRef<() => void>(() => {});
-  useEffect(() => () => followStop.current(), [a.ra, a.dec, a.fov]);
-  // "Check and submit", said once: every check starts, the investigation is made if there is none, the submit is declared; the
-  // slow checks go on on the server, which submits by itself when all have answered without a fail. The user may leave.
-  const runChecks = async () => {
-    setShowChecks(true);
-    setInvLine('starting the checks…');
-    const real = marksHere.filter((m) => m.level !== 'artefact');
-    const at = (open ? real.find((m) => m.id === open) : null) ?? real[0];
-    const job = await checks.start(fieldKey(a.ra, a.dec, a.fov), at?.ra ?? a.ra, at?.dec ?? a.dec, real);
-    if (!job) return setInvLine('Checks did not answer');
-    let id = inv;
-    if (!id) {
-      const r = await call('/api/me/investigations', {
-        title: at?.label || `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`,
-        finding_id: a.params['finding'] ?? null,
-        mark_ids: real.map((m) => m.id),
-        notes: noteNow ? [{ text: noteNow }] : [],
-        frames: [{ ref: location.hash.slice(0, 600), title: `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`, note: '', thumb: a.thumb() }],
-        checks_job: job,
-      });
-      id = typeof r.json?.['id'] === 'string' ? (r.json['id'] as string) : null;
-      if (!id) return setInvLine(r.status === 401 ? 'Sign in to submit' : 'Not saved: the service did not answer');
-      setInv(id);
-    }
-    const d = await declareSubmit(id, job);
-    const say = (x: DeclaredInv | null, status = 200) => {
-      setInvLine(declaredWord(x, status));
-      setInvState(chipWord(x));
+  /** the object as the investigation keeps it: its place, its marks, the ruler's result and the catalogue match, and this view */
+  const addTo = async (target: string, title: string) => {
+    const m = open ? (marks.find((x) => x.id === open) ?? null) : null;
+    const place = m ? { ra: m.ra, dec: m.dec } : a.sel ? at : null;
+    if (!place) return;
+    setInvList(null);
+    setInvLine('adding…');
+    const cat = a.epochNow != null ? catalogueAt(known, place.ra, place.dec, a.epochNow) : null;
+    const rl = ruler.length === 2 ? rulerOf(ruler[0]!, ruler[1]!) : null;
+    const body = {
+      id: m ? m.id : `src:${place.ra.toFixed(5)},${place.dec.toFixed(5)}`,
+      label: (m ? m.label : a.sel?.name) || `${place.ra.toFixed(5)} ${place.dec >= 0 ? '+' : ''}${place.dec.toFixed(5)}`,
+      ra: place.ra,
+      dec: place.dec,
+      field_key: fieldKey(a.ra, a.dec, a.fov),
+      ...(a.params['finding'] ? { finding_id: a.params['finding'] } : {}),
+      // a mark is the object itself; a source takes the marks put on it (within 15″)
+      mark_ids: m ? [m.id] : marksHere.filter((x) => x.level !== 'artefact' && sep(x.ra, x.dec, place.ra, place.dec) < 15).map((x) => x.id),
+      ...(rl && rl.rate != null && rl.dt != null && Math.abs(rl.dt) >= 0.1
+        ? {
+            ruler: {
+              rate: Number(rl.rate.toFixed(3)),
+              pa: Number(rl.pa.toFixed(1)),
+              shift: Number(rl.shift.toFixed(2)),
+              ...(cat?.object?.pm_total != null ? { catalogue_rate: Number((cat.object.pm_total / 1000).toFixed(3)), object: cat.object.simbad || cat.object.name } : {}),
+            },
+          }
+        : {}),
+      ...(cat?.object ? { catalogue: { source: cat.object.source, name: cat.object.simbad || cat.object.name || cat.object.id, sep: Number((cat.sep ?? 0).toFixed(2)), ...(cat.object.type ? { type: cat.object.type } : {}) } } : {}),
+      ref: location.hash.slice(0, 600),
+      thumb: a.thumb(),
+      ...(target === 'new' ? { title } : {}),
     };
-    say(d.inv, d.status);
-    followStop.current();
-    if (d.inv?.state === 'checking') followStop.current = followDeclared(id, (x) => say(x));
-  };
-  // "Measurer": a ruler rate on an object with a catalogue motion goes to the investigation, once per measurement
-  const measured = useRef('');
-  useEffect(() => {
-    if (!inv || ruler.length !== 2 || known.state !== 'ok') return;
-    const r = rulerOf(ruler[0]!, ruler[1]!);
-    if (r.rate == null || r.dt == null || Math.abs(r.dt) < 0.1) return;
-    const end = ruler[1]!;
-    let best: { name: string; rate: number; d: number } | null = null;
-    for (const o of known.objects) {
-      if (o.source === 'jpl' || end.epoch == null) continue;
-      const at = placeAt(o, end.epoch);
-      const mo = motionOf(o);
-      if (!at || !mo || mo.rate < 0.05) continue;
-      const d = Math.hypot((((at[0] - end.ra + 540) % 360) - 180) * Math.cos((end.dec * Math.PI) / 180), at[1] - end.dec) * 3600;
-      if (d < 8 && (!best || d < best.d)) best = { name: o.name, rate: mo.rate, d };
+    try {
+      const r = await fetch(`/api/me/investigations/${encodeURIComponent(target)}/items`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      if (r.status === 401) return setInvLine('Sign in to add to an investigation');
+      if (r.status === 409) return setInvLine('This investigation is closed or full');
+      if (!r.ok) throw new Error(String(r.status));
+      const got = (await r.json()) as { id?: string; title?: string; mark_ids?: string[] };
+      if (!got.id) throw new Error('no id');
+      setInv({ id: got.id, title: got.title ?? title, marks: got.mark_ids?.length ?? 0 });
+      setInvLine(`Added to “${got.title ?? title}”`);
+    } catch {
+      setInvLine('Not added: the service did not answer');
     }
-    const k = best ? `${inv}:${best.name}:${r.rate.toFixed(2)}` : '';
-    if (!best || measured.current === k) return;
-    measured.current = k;
-    void fetch(`/api/me/investigations/${encodeURIComponent(inv)}`, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ruler: { rate: Number(r.rate.toFixed(3)), catalogue_rate: Number(best.rate.toFixed(3)), object: best.name } }),
-    }).catch(() => {});
-  }, [inv, ruler, known.state]);
+  };
   // ---- a task about one object (spec §5b): what the lab sets up and shows for its question
   const task = taskOfParams(a.params);
   const taskKey = task ? `${task.kind}|${task.id}|${task.finding_id}|${a.ra}|${a.dec}|${a.fov}` : '';
@@ -580,21 +542,23 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   }, [taskKey, track, anomaly]);
   const labelOf = (i: number) => a.passes.find((q) => q.index === i)?.label ?? `pass ${i + 1}`;
   const taskSrc: Source | null = task && (task.kind === 'red' || task.kind === 'anomaly') && a.grid ? at : null;
-  const extra =
-    task?.kind === 'moves' ? (
-      <MoverView
-        blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'off' : 'waits for the search of the field'}
-        ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
-        search={track ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes` : 'no track at this place yet'}
-      />
-    ) : task?.kind === 'red' ? (
-      <RedView src={taskSrc} />
-    ) : task?.kind === 'anomaly' ? (
-      <AnomalyView src={taskSrc} anomaly={anomaly} />
-    ) : null;
+  // what the lab shows with the task's question, or with one step of a tree of questions (`show` of the step)
+  const view = (show: string | null): ComponentChildren => {
+    if (task?.kind === 'moves')
+      return (
+        <MoverView
+          blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'all passes' : 'waits for the search of the field'}
+          ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
+          search={track ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes` : 'no track at this place yet'}
+        />
+      );
+    if (task?.kind === 'red') return <RedView src={taskSrc} show={show} passes={a.passes.length} />;
+    if (task?.kind === 'anomaly') return <AnomalyView src={taskSrc} anomaly={anomaly} show={show} />;
+    return null;
+  };
   const others = a.params['others'] === '1';
   const taskPanel = useLabTask({
-    extra,
+    view,
     others,
     setOthers: (on) => a.set({ others: on ? '1' : null }),
     params: a.params,
@@ -685,67 +649,38 @@ export function useLabFlow(a: FlowArgs): LabFlow {
 
   // ---- the card of what is selected (Object tab): a mark, or the lab's selected source. Note, "Add to investigation" and
   // "Check and submit" exist only here: with nothing selected there is nothing to note or submit.
-  /** what the catalogues have at a place on the date shown: the nearest drawn object within 8″, else a deeper-catalogue entry within 3″ */
-  const matchAt = (ra: number, dec: number): string => {
-    if (known.state !== 'ok' || a.epochNow == null) return a.known ? 'asking…' : 'Known objects is off';
-    let best: { o: (typeof known.objects)[number]; d: number } | null = null;
-    for (const o of known.objects) {
-      const p = placeAt(o, a.epochNow);
-      if (!p) continue;
-      const d = sep(p[0], p[1], ra, dec);
-      if (d < 8 && (!best || d < best.d)) best = { o, d };
-    }
-    if (best) {
-      const o = best.o;
-      const mo = o.source === 'jpl' ? null : motionOf(o);
-      return [
-        `${SOURCE_WORD[o.source]}${o.name ? ` · ${o.name}` : ''}`,
-        o.mag != null ? `mag ${o.mag.toFixed(1)}` : '',
-        mo && mo.rate >= 0.05 ? `${mo.rate.toFixed(2)}″/yr` : '',
-        `${best.d.toFixed(1)}″ away`,
-      ]
-        .filter(Boolean)
-        .join(' · ');
-    }
-    for (const o of known.deep) {
-      const p = placeAt(o, a.epochNow);
-      if (p && sep(p[0], p[1], ra, dec) < 3) return `In a deeper catalogue (${o.id.split(':')[0] === 'gaia' ? 'Gaia to G 21' : o.id.split(':')[0] === 'catwise' ? 'CatWISE2020' : o.id.split(':')[0] === 'allwise' ? 'AllWISE' : '2MASS'})`;
-    }
-    return known.deepSilent.length ? `No match so far · ${known.deepSilent.join(', ')} ${known.deepPending.length ? 'being asked' : 'did not answer'}` : 'In no catalogue';
-  };
+  const matchAt = (ra: number, dec: number): string => (a.epochNow != null ? catalogueAt(known, ra, dec, a.epochNow).word : 'asking the catalogues…');
   const selPlace = cur ? { ra: cur.ra, dec: cur.dec } : a.sel ? at : null;
   const rulerNow = ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '';
+  const newTitle = (cur ? cur.label : a.sel?.name) || `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)}`;
   const actions = (
     <>
-      <div class="oc-row" style={{ display: cur ? 'none' : undefined }}>
-        <input
-          class="inp oc-note"
-          value={invNote}
-          maxLength={400}
-          placeholder="Note for the investigation"
-          aria-label="Note for the investigation"
-          onInput={(e) => setInvNote((e.target as HTMLInputElement).value)}
-          data-testid="inv-note"
-        />
-      </div>
-      <div class="oc-row">
-        <button class="btn sm" onClick={() => void saveFrame()} title="Add to investigation: this frame, the marks of the field and the note" data-testid="tool-save">
-          Add to investigation
-        </button>
+      <div class="oc-row oc-add">
         <button
           class="btn sm primary"
-          disabled={checks.view.state === 'running'}
-          onClick={() => void runChecks()}
-          title="Check and submit: every check starts and the submit is declared; the service submits by itself when all have answered and none failed"
-          data-testid="tool-check"
+          aria-expanded={!!invList}
+          onClick={() => void openInvList()}
+          title="Add to investigation: this object with its marks, the ruler's result, the catalogue match and this view"
+          data-testid="tool-add"
         >
-          Check and submit
+          Add to investigation
         </button>
+        {invList && (
+          <div class="oc-menu" role="menu" data-testid="inv-menu">
+            <button role="menuitem" onClick={() => void addTo('new', newTitle)} data-testid="inv-new">
+              New investigation
+            </button>
+            {invList.map((x) => (
+              <button key={x.id} role="menuitem" onClick={() => void addTo(x.id, x.title)}>
+                {x.title}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div class="oc-line" data-testid="tools-line">
-        {invLine || (showChecks ? checksStatus(checks.view) : '')}
+        {invLine}
       </div>
-      {showChecks && <ChecksList view={checks.view} />}
     </>
   );
   const card =
@@ -784,15 +719,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
                 </button>
               ))}
             </div>
-            <input
-              class="inp"
-              value={cur.note}
-              maxLength={400}
-              placeholder="Note on the mark"
-              aria-label="Note on the mark"
-              onInput={(e) => updateMark(cur.id, { note: (e.target as HTMLInputElement).value })}
-              data-testid="mark-note"
-            />
             <dl class="oc-facts">
               <dt>Put on</dt>
               <dd>{cur.pass != null ? (a.passes.find((q) => q.index === cur.pass)?.label ?? `pass ${cur.pass + 1}`) : 'no pass'}</dd>
@@ -846,11 +772,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     ) : null;
 
   // the investigation of the field is seen on the picture's status line: a chip that opens it in the Cabinet
-  const realMarks = marksHere.filter((m) => m.level !== 'artefact').length;
   const chip = inv ? (
-    <a class="invchip" href={`#/me?tab=investigations&inv=${encodeURIComponent(inv)}`} title="Open the investigation in the Cabinet" data-testid="inv-chip">
-      Investigation · {realMarks} mark{realMarks === 1 ? '' : 's'}
-      {invState ? ` · ${invState}` : ''}
+    <a class="invchip" href={`#/me?tab=investigations&inv=${encodeURIComponent(inv.id)}`} title={`Open “${inv.title}” in the Cabinet`} data-testid="inv-chip">
+      Investigation · {inv.marks} mark{inv.marks === 1 ? '' : 's'}
     </a>
   ) : null;
 
@@ -862,7 +786,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       : ruler.length === 2
         ? `Ruler: ${rulerWord(rulerOf(ruler[0]!, ruler[1]!))}`
         : '';
-  const status = [knownStatus(known, counts), tool === 'mark' ? 'Mark: click a place' : '', rulerStatus, marksSyncNote()].filter(Boolean).join(' · ');
+  const status = [a.known ? knownStatus(known, counts) : '', tool === 'mark' ? 'Mark: click a place' : '', rulerStatus, marksSyncNote()].filter(Boolean).join(' · ');
   // what a closed task earned stays on the line for a few seconds
   const [awardNow, setAwardNow] = useState('');
   useEffect(() => {
@@ -882,6 +806,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     card,
     chip,
     markOpen: !!cur,
+    catalogueAt: (ra, dec, year) => catalogueAt(knownRef.current, ra, dec, year).object,
     tool,
     marks,
     marksHere,
@@ -891,6 +816,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     blink,
     taskPanel,
     focus: !!task && focusKind(task.kind) && !others,
-    knownBusy: known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0)),
+    knownBusy: a.known && (known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0))),
   };
 }
