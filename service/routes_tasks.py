@@ -268,7 +268,7 @@ def make_tasks_router(st: Any) -> APIRouter:
     qs = Quarters(st, quarter_place)
     st.quarters = qs
 
-    def upcoming(acc: accounts.Accounts, limit: int = 60) -> list[tuple[str, str]]:
+    def upcoming(acc: accounts.Accounts, limit: int = 120) -> list[tuple[str, str]]:
         """The quarters a newcomer would be given next, in order (the stock of ready quarters follows it)."""
         rows = searched_cells(acc) or []
         viewed = quarters_viewed(acc, [r["cell_id"] for r in rows[:500]])

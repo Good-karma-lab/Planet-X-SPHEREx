@@ -31,7 +31,8 @@ from service.workers import fieldjob
 QUARTER_FOV = 10.0
 QUARTERS = ("NE", "NW", "SE", "SW")
 log = logging.getLogger("sky.quarters")
-STOCK = int(os.environ.get("SKY_QUARTER_STOCK", "6"))  # ready quarters kept ahead; 0 turns the stock off
+STOCK_PARALLEL = 2  # stock builds at once (the scheduler's own cap for background work is BG_HEAVY = 2)
+STOCK = int(os.environ.get("SKY_QUARTER_STOCK", "40"))  # ready quarters kept ahead (a launch-day crowd); 0 turns the stock off
 READY_TTL_S = 600.0  # a ready quarter is checked again after this (the disk keeper may have removed it)
 NOT_READY_TTL_S = 30.0
 
@@ -96,29 +97,40 @@ class Quarters:
     def prebuild(self, cell_id: str, q: str) -> bool:
         return self.build(cell_id, q, Priority.P1)
 
-    def building(self) -> int:
-        """Background builds of quarters queued or running (the stock adds one at a time)."""
+    def _jobs_building(self) -> list[Any]:
         sch = getattr(self.st, "scheduler", None)
         if sch is None:
-            return 0
-        return sum(
-            1
+            return []
+        return [
+            j
             for j in sch.jobs.values()
             if j.kind == fieldjob.KIND
             and j.priority == Priority.P2
             and j.state in ("queued", "running", "paused")
             and float(j.params.get("fov", 0)) == QUARTER_FOV
-        )
+        ]
+
+    def building(self) -> int:
+        """Background builds of quarters queued or running (the stock adds at most STOCK_PARALLEL)."""
+        return len(self._jobs_building())
 
     def stock_step(self, upcoming: Iterable[tuple[str, str]], stock: int = STOCK) -> str | None:
         """One step of the stock: when fewer than `stock` of the quarters people will be given next are ready, build the first one
         that is not (one at a time, never while a person's job waits). Returns what it started, as 'square/quarter'."""
         sch = getattr(self.st, "scheduler", None)
-        if stock <= 0 or sch is None or sch.person_waiting() or self.building():
+        if stock <= 0 or sch is None or sch.person_waiting() or self.building() >= STOCK_PARALLEL:
             return None
         ahead = list(islice(upcoming, stock * 2))  # the quarters people will be given next, in the order they get them
         ready = sum(1 for c, q in ahead if self.ready(c, q))
-        first_cold = next(((c, q) for c, q in ahead if not self.ready(c, q)), None)
+        building = {(str(j.params.get("ra")), str(j.params.get("dec"))) for j in self._jobs_building()}
+        first_cold = next(
+            (
+                (c, q)
+                for c, q in ahead
+                if not self.ready(c, q) and (lambda p: p is None or (str(p["ra"]), str(p["dec"])) not in building)(self._params(c, q))
+            ),
+            None,
+        )
         if ready >= stock or first_cold is None:
             return None
         return f"{first_cold[0]}/{first_cold[1]}" if self.build(*first_cold, Priority.P2) else None

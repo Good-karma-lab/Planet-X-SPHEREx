@@ -66,7 +66,7 @@ class _Sch:
         return self.waiting
 
 
-def test_the_stock_keeps_a_few_quarters_ready_one_build_at_a_time() -> None:
+def test_the_stock_keeps_quarters_ready_two_builds_at_a_time() -> None:
     sch = _Sch()
     asked: list[dict[str, Any]] = []
 
@@ -76,19 +76,20 @@ def test_the_stock_keeps_a_few_quarters_ready_one_build_at_a_time() -> None:
         return "k", object()
 
     st = SimpleNamespace(scheduler=sch, submit_field=submit, index=None, store=None)
-    qs = Quarters(st, lambda c, q: {"ra": 10.0 + len(c) * 0.01, "dec": {"NE": 1.0, "NW": 2.0, "SE": 3.0, "SW": 4.0}[q]})
+    qs = Quarters(st, lambda c, q: {"ra": 10.0 + ord(c) * 0.01, "dec": {"NE": 1.0, "NW": 2.0, "SE": 3.0, "SW": 4.0}[q]})
     ready = {("a", "NE")}
     qs.ready = lambda c, q: (c, q) in ready  # type: ignore[method-assign]
     order = [("a", "NE"), ("a", "NW"), ("b", "NE"), ("b", "NW")]
-    assert qs.stock_step(order, stock=2) == "a/NW" and asked[0]["priority"] == Priority.P2 and asked[0]["fov"] == QUARTER_FOV
-    assert qs.stock_step(order, stock=2) is None  # one build at a time
+    assert qs.stock_step(order, stock=4) == "a/NW" and asked[0]["priority"] == Priority.P2 and asked[0]["fov"] == QUARTER_FOV
+    assert qs.stock_step(order, stock=4) == "b/NE"  # a second one beside it, not the same quarter again
+    assert qs.stock_step(order, stock=4) is None  # two at a time
     sch.jobs["j1"].state = "done"
     ready.add(("a", "NW"))
     assert qs.stock_step(order, stock=2) is None  # two ready: enough
     sch.waiting = True
     assert qs.stock_step(order, stock=4) is None  # a person's job waits: the stock gives way
     sch.waiting = False
-    assert qs.stock_step(order, stock=4) == "b/NE"
+    assert qs.stock_step(order, stock=4) == "b/NW"  # b/NE is still building
     assert qs.stock_step(order, stock=0) is None
 
 

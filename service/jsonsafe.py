@@ -27,16 +27,27 @@ def finite(obj: Any) -> Any:
 
 
 def dumps(obj: Any, **kw: Any) -> str:
-    return json.dumps(finite(obj), allow_nan=False, **kw)
+    """The fast path first (almost nothing carries a NaN); only a structure that does is walked and cleaned."""
+    try:
+        return json.dumps(obj, allow_nan=False, **kw)
+    except (ValueError, TypeError):  # a NaN, or a numpy number finite turns into a float
+        return json.dumps(finite(obj), allow_nan=False, **kw)
 
 
 def loads(b: str | bytes) -> Any:
-    """Read JSON written before this module (it may carry NaN): the non-finite numbers come back as None."""
-    return finite(json.loads(b))
+    """Read JSON written before this module (it may carry NaN): the non-finite numbers come back as None. Text without NaN or
+    Infinity is read as it is (walking a large meta in Python held the event loop for seconds)."""
+    raw = b if isinstance(b, bytes) else b.encode()
+    if b"NaN" not in raw and b"Infinity" not in raw:
+        return json.loads(raw)
+    return finite(json.loads(raw))
 
 
 class SafeJSONResponse(JSONResponse):
     """The service's default response: never a bare NaN in a reply, whatever a stored result carries."""
 
     def render(self, content: Any) -> bytes:
-        return json.dumps(finite(content), ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        try:  # the fast path: a reply without a NaN is not walked
+            return json.dumps(content, ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
+        except (ValueError, TypeError):  # a NaN, or a numpy number finite turns into a float
+            return json.dumps(finite(content), ensure_ascii=False, allow_nan=False, separators=(",", ":")).encode("utf-8")
