@@ -70,7 +70,7 @@ def searched_cells(acc: accounts.Accounts) -> list[dict[str, Any]] | None:
     return [{"cell_id": r["id"], "field_key": r["field_key"]} for r in rows]
 
 
-QUARTERS = ("NW", "NE", "SW", "SE")  # the grid's order: ties go NW, NE, SW, SE
+QUARTERS = ("NE", "NW", "SE", "SW")  # the grid's and the lab's order (north up, east left): ties go NE, NW, SE, SW
 QUARTER_FOV = 10.0  # arcmin: people look through a square a quarter at a time
 
 
@@ -121,9 +121,27 @@ def quarter_place(cell_id: str, q: str) -> dict[str, Any]:
 
 
 def pick_quarter(viewed: dict[str, int], taken: set[str]) -> str | None:
-    """The least-looked quarter this user has not taken; ties go NW, NE, SW, SE."""
+    """The least-looked quarter this user has not taken; ties go NE, NW, SE, SW."""
     left = [q for q in QUARTERS if q not in taken]
     return min(left, key=lambda q: (viewed.get(q, 0), QUARTERS.index(q))) if left else None
+
+
+def quarters_looked(acc: accounts.Accounts, user_id: str) -> dict[str, set[str]]:
+    """{square: quarters this user has a task for, or has looked through (the grid's views; a whole-square view of before the
+    quarters counts for all four)}."""
+    out = acc.db.quarters_taken(user_id)
+    try:
+        rows = (
+            acc.db._conn().execute("SELECT cell_id, COALESCE(quarter,'') q FROM grid_views WHERE viewer=?", (f"user:{user_id}",)).fetchall()
+        )
+    except sqlite3.OperationalError:
+        try:
+            rows = acc.db._conn().execute("SELECT cell_id, '' q FROM grid_views WHERE viewer=?", (f"user:{user_id}",)).fetchall()
+        except sqlite3.OperationalError:
+            rows = []
+    for r in rows:
+        out.setdefault(r["cell_id"], set()).update(set(QUARTERS) if r["q"] == "" else {r["q"]})
+    return out
 
 
 def cell_field_key(acc: accounts.Accounts, cell_id: str) -> str | None:
@@ -200,9 +218,10 @@ def make_tasks_router(st: Any) -> APIRouter:
         return find_rows(st)
 
     def next_cell(acc: accounts.Accounts, user_id: str | None, cell_id: str | None, quarter: str | None = None) -> dict[str, Any] | None:
-        """A quarter (10′) of a searched square: the least-looked square first, then its least-looked quarter this user has not
-        taken (ties NW, NE, SW, SE). `cell_id` asks for one square ("Take this square"), `quarter` for one of its quarters."""
-        taken = acc.db.quarters_taken(user_id) if user_id else {}
+        """A quarter (10′) of a square. The next quarter of the square this user is looking through, while it has one they have
+        not looked at; then the least-looked searched square and its least-looked quarter (ties NE, NW, SE, SW). `cell_id` asks
+        for one square ("Take this square"), `quarter` for one of its quarters."""
+        taken = quarters_looked(acc, user_id) if user_id else {}
         if cell_id is not None:
             if cell_place(cell_id) is None:
                 raise HTTPException(404, "no such square")
@@ -214,6 +233,26 @@ def make_tasks_router(st: Any) -> APIRouter:
                 "field_key": cell_field_key(acc, cell_id),
                 **quarter_place(cell_id, q),
             }
+        if user_id:  # the same square first: the lab asks for the next task after each closing answer
+            last = (
+                acc.db._conn()
+                .execute(
+                    "SELECT cell_id FROM acc_tasks WHERE user_id=? AND kind='cell' AND quarter IS NOT NULL ORDER BY created DESC LIMIT 1",
+                    (user_id,),
+                )
+                .fetchone()
+            )
+            if last is not None:
+                here = str(last["cell_id"])
+                nxt = pick_quarter(quarters_viewed(acc, [here]).get(here, {}), taken.get(here, set()))
+                if nxt is not None:
+                    return {
+                        "cell_id": here,
+                        "quarter": nxt,
+                        "fov": QUARTER_FOV,
+                        "field_key": cell_field_key(acc, here),
+                        **quarter_place(here, nxt),
+                    }
         rows = searched_cells(acc)
         if rows is None:
             raise HTTPException(503, "the sky grid is not loaded")

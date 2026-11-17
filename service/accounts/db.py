@@ -673,14 +673,35 @@ class AccountsDB:
             "notifications": self.notifications(user_id, 100000),
         }
 
+    #: rows that are the person's own: deleted with the account
+    OWN_TABLES = (
+        "acc_sessions", "acc_marks", "acc_tasks", "acc_investigations", "acc_history", "acc_notifications", "acc_notified",
+        "acc_credits", "acc_answers", "acc_score_events", "acc_achievements", "acc_stories", "acc_comments", "acc_comment_reports",
+    )  # fmt: skip
+    #: rows whose counts other people's results stand on (answers that settled a find, flags of a picture, tapped places): kept,
+    #: but given an id made at random for the deletion, which nothing links to the person or to their other data
+    COUNTED_TABLES = ("acc_task_answers", "acc_series_answers", "acc_exposure_flags", "acc_taps")
+
     def delete_user(self, user_id: str) -> None:
-        """The account and everything in it. A finding the user submitted stays a finding, without a name."""
+        """The account and everything linked to it. Deleted: the person's own rows (OWN_TABLES), the e-mail and its sign-in links.
+        Made anonymous (the counts stay, the link to the person goes): answers and flags other results stand on (COUNTED_TABLES),
+        the squares they looked through (grid_views) and the looks at findings (finding_views, the name removed). A finding the
+        person submitted stays a finding, without a name."""
         c = self._conn()
+        have = {r[0] for r in c.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        gone = f"gone-{secrets.token_hex(8)}"
         c.execute("BEGIN")
         try:
-            for table in ("acc_sessions", "acc_marks", "acc_tasks", "acc_investigations", "acc_history", "acc_notifications",
-                          "acc_notified", "acc_credits"):  # fmt: skip
-                c.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+            for table in self.OWN_TABLES:
+                if table in have:
+                    c.execute(f"DELETE FROM {table} WHERE user_id=?", (user_id,))
+            for table in self.COUNTED_TABLES:
+                if table in have:
+                    c.execute(f"UPDATE OR REPLACE {table} SET user_id=? WHERE user_id=?", (gone, user_id))
+            if "grid_views" in have:  # the grid's table: one viewer per person, the id made anonymous
+                c.execute("UPDATE OR REPLACE grid_views SET viewer=? WHERE viewer=?", (f"user:{gone}", f"user:{user_id}"))
+            if "finding_views" in have:  # the findings' table: the look stays, the person and the name go
+                c.execute("UPDATE finding_views SET user_id=?, user_name=NULL WHERE user_id=?", (gone, user_id))
             c.execute("UPDATE acc_submissions SET user_id='' WHERE user_id=?", (user_id,))
             email = c.execute("SELECT email FROM acc_users WHERE id=?", (user_id,)).fetchone()
             if email is not None:
