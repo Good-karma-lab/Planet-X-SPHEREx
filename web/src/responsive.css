@@ -2320,3 +2320,18 @@
     min-height: 0;
   }
 }
+
+/* ----- every touch window: a fold's heading (Method's "What changed in …", the Cabinet's investigations) is a 44 px row ----- */
+@media (max-width: 1279.98px) {
+  :root .ipage summary,
+  :root .mv2-main summary {
+    display: flex;
+    align-items: center;
+    min-height: var(--hit);
+    cursor: pointer;
+  }
+  :root .cb-inv > summary {
+    display: block;
+    min-height: 0;
+  }
+}
