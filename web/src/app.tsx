@@ -8,6 +8,8 @@ import { Landing } from './screens/landing';
 import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
 import { Cabinet } from './screens/cabinet/Cabinet';
+import { FindingPage } from './screens/findings/page';
+import { Leaders } from './screens/cabinet/Score';
 import { useUnread } from './lib/account';
 import { MoreTab } from './ui/BottomNav';
 
@@ -71,7 +73,7 @@ export function App() {
           {NAV.map((n) => (
             <a
               key={n.screen}
-              class={`tab ${route.screen === n.screen ? 'on' : ''}`}
+              class={`tab ${route.screen === n.screen ? 'on' : ''} ${n.screen === 'me' ? 'tab-end' : ''}`}
               href={n.screen === 'lab' ? lastLab : n.screen === 'globe' ? '#/explore' : `#/${n.screen}`}
               title={n.tip}
               aria-current={route.screen === n.screen ? 'page' : undefined}
@@ -98,6 +100,14 @@ export function App() {
           <PlanetXPage />
         ) : route.screen === 'me' ? (
           <Cabinet route={route} />
+        ) : route.screen === 'findings' && route.params['id'] ? (
+          <div class="screen">
+            <div class="ipage">
+              <FindingPage id={route.params['id']} />
+            </div>
+          </div>
+        ) : route.screen === 'leaders' ? (
+          <Leaders route={route} />
         ) : (
           <InfoPage screen={route.screen} health={health} />
         )}

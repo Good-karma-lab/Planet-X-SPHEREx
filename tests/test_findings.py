@@ -555,6 +555,27 @@ def test_flow_fields_promise_first_and_the_looks_people_gave(tmp_path: Path) -> 
     # finds that can have no clip go to the end; within equal promise a ready clip comes first
     order = query(db, None, "all", None, 100, 0, flow=flow, sort="promise", clip_rank=lambda f: 2 if f["kind"] == "mover" else 0)
     assert order["finds"][-1]["kind"] == "mover" and order["count"] == again["count"]
+    # only the named finds; only the finds that carry a machine note (none of this test's finds does)
+    assert query(db, None, "all", None, 100, 0, only=frozenset({lead["id"]}))["count"] == 1
+    assert query(db, None, "all", None, 100, 0, noted=True)["count"] == 0 and again["noted"] == 0 and seen["note"] is None
+    # visible in its own picture or not: an empty ring cuts the promise to a twentieth and leaves the default view
+    red_id = next(f["id"] for f in again["finds"] if f["kind"] == "red")
+    vis = query(db, None, "all", None, 100, 0, flow=flow, sort="promise", seen=lambda f: (f["id"] != red_id, 7.0), visibility="seen")
+    hid = query(db, None, "all", None, 100, 0, flow=flow, sort="promise", seen=lambda f: (f["id"] != red_id, 7.0), visibility="unseen")
+    assert red_id not in {f["id"] for f in vis["finds"]} and [f["id"] for f in hid["finds"]] == [red_id]
+    assert hid["finds"][0]["promise"] <= 2 and hid["finds"][0]["visible"] is False and vis["visibility"]["in_view"]["not_visible"] == 1
+    assert vis["visibility"]["by_kind"]["red"] == {"visible": 0, "not_visible": 1, "not_measured": 0}
+    assert query(db, None, "all", None, 100, 0)["finds"][0]["visible"] is None  # not measured: nothing is assumed
+    # a find with a machine note (it looks like an artefact) goes below every clean find, whatever its promise
+    import service.findings as sf
+
+    top = again["finds"][0]["id"]
+    sf._NOTES = {top: "a blend that stands still"}
+    try:
+        noted_last = query(db, None, "all", None, 100, 0, flow=flow, sort="promise")
+        assert noted_last["finds"][-1]["id"] == top and noted_last["finds"][-1]["note"] and noted_last["noted"] == 1
+    finally:
+        sf._NOTES = None
     # the old call and the old fields stay as they were
     old = query(db, None, "all", None, 100, 0)
     assert old["total"] == 5 and {"status", "verdict", "idents"} <= set(old["finds"][0])

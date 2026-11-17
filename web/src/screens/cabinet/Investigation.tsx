@@ -68,6 +68,7 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
   const [note, setNote] = useState('');
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
+  const [declNote, setDeclNote] = useState('');
   const { checks, note: checksNote } = useChecks(inv.checks_job);
   const own = marks.filter((m) => inv.mark_ids.includes(m.id));
   const run = (job: Promise<unknown>) => {
@@ -92,17 +93,30 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
       const first = own[0];
       if (!body && first) {
         const key = /^[A-Za-z0-9_,.+-]*$/.test(first.field_key) ? first.field_key : ''; // a store key, or the lab's "ra,dec,fov"
-        body = { field_key: key, ra: first.ra, dec: first.dec, marks: own.map((m) => ({ pass: m.pass ?? 0, ra: m.ra, dec: m.dec })) };
+        body = { field_key: key, ra: first.ra, dec: first.dec, marks: own.map((m) => ({ pass: m.pass ?? 0, ra: m.ra, dec: m.dec, ...(m.mjd != null ? { mjd: m.mjd } : {}) })) };
       }
       if (!body) throw new Error('No marks in this investigation: put a mark in the lab first');
       const r = await api<{ job: string }>('/api/checks', { method: 'POST', body });
-      await api(`/api/me/investigations/${inv.id}`, { method: 'PATCH', body: { checks_job: r.job } });
+      // said once: from here the server finishes the submit by itself, whether this page stays open or not
+      await api(`/api/me/investigations/${inv.id}/submit`, { method: 'POST', body: { checks_job: r.job, note: declNote.trim() || undefined } });
+      setDeclNote('');
     };
     void run(start());
   };
-  const submit = () => void run(api('/api/findings/submit', { method: 'POST', body: { investigation_id: inv.id, checks_job: inv.checks_job } }));
-  const running = !!inv.checks_job && (!checks || checks.state !== 'done');
-  const warn = checks?.checks.some((c) => c.state === 'warn') ?? false;
+  const rows = checks?.checks ?? [];
+  const waiting = rows.filter((c) => ['running', 'queued', 'waiting'].includes(c.state));
+  const said = waiting.find((c) => c.state === 'running' && c.detail)?.detail ?? '';
+  // a job that ended with a check to ask again keeps the server's own line ("JPL did not answer and is asked again")
+  const progress = checks && checks.state !== 'done' ? `${rows.length - waiting.length} of ${rows.length} checks answered${said ? ` · ${said}` : ''}` : inv.progress;
+  const warns = rows.filter((c) => c.state === 'warn');
+  const need = Math.max(0, warns.length - inv.notes.length);
+  const failed = rows.find((c) => c.state === 'fail') ?? rows.find((c) => !['pass', 'warn'].includes(c.state));
+  // the server settles a declared submit when the job ends; the page then reads the investigation again
+  const jobDone = checks?.state === 'done';
+  const anyFail = rows.some((c) => c.state === 'fail'); // a fail is final at once, whatever the slower checks will say
+  useEffect(() => {
+    if ((jobDone || anyFail) && inv.state === 'checking') reload();
+  }, [jobDone, anyFail, inv.state]);
   const stage = inv.submitted ? (finding?.status ?? 'submitted') : null;
   return (
     <div class="cb-page" data-testid="investigation-page">
@@ -157,27 +171,34 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
           </div>
         ))}
       {!inv.submitted && (
-        <div class="cb-submit">
-          {!inv.checks_job || (checks?.state === 'done' && !checks.can_submit) ? (
-            <button class="btn primary" disabled={busy} onClick={startChecks} data-testid="check-submit">
-              {inv.checks_job ? 'Check again' : 'Check and submit'}
-            </button>
-          ) : (
-            <button class="btn primary" disabled={busy || running || !checks?.can_submit || (warn && inv.notes.length === 0)} onClick={submit} data-testid="check-submit">
-              Submit the finding
-            </button>
+        <div class="cb-submit" data-state={inv.state}>
+          {(inv.state === 'open' || inv.state === 'blocked') && (
+            <>
+              {inv.state === 'open' && (
+                <input
+                  class="inp cb-declnote"
+                  placeholder="Comment for the reviewers (optional)"
+                  aria-label="Comment for the reviewers"
+                  maxLength={4000}
+                  value={declNote}
+                  onInput={(e) => setDeclNote((e.target as HTMLInputElement).value)}
+                  data-testid="declare-note"
+                />
+              )}
+              <button class="btn primary" disabled={busy} onClick={startChecks} data-testid="check-submit" title="Every check runs first (JPL takes minutes, the NEOWISE archive up to twenty). You may leave: the finding is submitted by itself when all have answered and none failed">
+                {inv.state === 'blocked' ? 'Check again' : 'Check and submit'}
+              </button>
+            </>
           )}
-          <span class={`cb-status ${status || checksNote ? 'bad' : ''}`} role="status" data-testid="checks-status">
+          <span class={`cb-status ${status || checksNote || inv.state === 'blocked' ? 'bad' : ''}`} role="status" data-testid="checks-status">
             {status ||
               checksNote ||
-              (running
-                ? `Checks running: ${checks ? checks.checks.filter((c) => !['queued', 'running'].includes(c.state)).length : 0} of ${checks?.checks.length ?? 8} answered. The NEOWISE check is slow; the result waits here.`
-                : checks?.can_submit
-                  ? warn && inv.notes.length === 0
-                    ? 'A check gave a warning: add a note that explains it'
-                    : 'Every check has answered: ready to submit'
-                  : checks
-                    ? 'A check blocks the submit'
+              (inv.state === 'checking'
+                ? `Submit declared · ${progress || 'checks running'} · you may leave, it is submitted by itself`
+                : inv.state === 'needs_comment'
+                  ? `Every check has answered · ${need === 1 ? 'one comment' : `${need} comments`} needed for the warnings (${warns.map((c) => words(c.id)).join(', ')}) · then it is submitted by itself`
+                  : inv.state === 'blocked'
+                    ? `Not submitted · ${failed ? `${words(failed.id)}: ${words(failed.state)}` : 'a check blocks the submit'}`
                     : '')}
           </span>
         </div>

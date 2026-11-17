@@ -17,7 +17,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from service.findings import KINDS, LITE_KEYS, STAGES, VIEW_RESULTS, FlowDB, find_row, query
+from service.findings import KINDS, LITE_KEYS, PROMISING_KINDS, STAGES, VIEW_RESULTS, FlowDB, find_row, query
 
 
 def flow_of(st: Any) -> FlowDB:
@@ -86,6 +86,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
     async def every_find() -> list[dict[str, Any]]:
         f = need()
         body = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), sort="promise"))
+        body["finds"].sort(key=lambda x: x["kind"] not in PROMISING_KINDS)  # the pictures of the promising kinds are made first
         return list(body["finds"])
 
     async def findings(
@@ -98,6 +99,11 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         stage: str | None = Query(None),
         waiting: bool = Query(False),
         kinds: str | None = Query(None, description="several kinds, comma separated"),
+        ids: str | None = Query(None, max_length=4000, description="only these finds (comma separated ids)"),
+        visibility: str | None = Query(
+            None, pattern="^(seen|unseen)$", description="seen: only finds whose object is visible in their picture; unseen: the rest"
+        ),
+        noted: bool = Query(False, description="only the finds that carry a machine note (they look like an artefact)"),
         lite: bool = Query(False, description="only what a card shows (no data, spectrum, catalogue answers)"),
     ) -> Any:
         """{count, total, counts[kind]{all, unexplained, known}, stages{stage: n}, waiting, promising, identification{pending, unavailable, catalogues},
@@ -129,6 +135,10 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 waiting=waiting,
                 kinds=many or None,
                 clip_rank=rank,
+                only=frozenset(i for i in ids.split(",") if i) if ids is not None else None,
+                noted=noted,
+                seen=clips.seen if clips is not None else None,
+                visibility=visibility,
             )
         )
         body = enrich(body)
@@ -166,6 +176,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     for pre in dict.fromkeys((prefix, "/api")):
         router.add_api_route(f"{pre}/findings", findings, methods=["GET"], include_in_schema=pre == prefix)
-        router.add_api_route(f"{pre}/findings/{{find_id}}", one, methods=["GET"], include_in_schema=pre == prefix)
+        if pre == prefix:  # one find by id answers under /api/v1 only: /api/findings/submitted and its like belong to the accounts
+            router.add_api_route(f"{pre}/findings/{{find_id}}", one, methods=["GET"])
         router.add_api_route(f"{pre}/findings/{{find_id}}/viewed", viewed, methods=["POST"], include_in_schema=pre == prefix)
     return router

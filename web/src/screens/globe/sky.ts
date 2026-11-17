@@ -8,6 +8,7 @@
 import { D2R } from '../../lib/sky';
 import { EQUI_NOTHING, EquiSampler, equiFrame, equiOf } from '../../lib/equi';
 import { FROM_NOTHING, HIPS, bakedOf, facePt, orderFor, Sampler, tiles, type FacePt } from '../../lib/hips';
+import { GlSky } from './skygl';
 
 export interface SkyView {
   ra: number;
@@ -98,10 +99,10 @@ export function projectIn(v: SkyView, ra: number, dec: number): [number, number,
   const zc = x * b.c[0] + y * b.c[1] + z * b.c[2];
   if (v.inside) {
     if (zc < 0.05) return [0, 0, false];
-    return [v.W / 2 - ((x * b.e[0] + y * b.e[1]) / zc) * v.R, v.H / 2 - ((x * b.n[0] + y * b.n[1] + z * b.n[2]) / zc) * v.R, true];
+    return [v.W / 2 - ((x * b.e[0] + y * b.e[1] + z * b.e[2]) / zc) * v.R, v.H / 2 - ((x * b.n[0] + y * b.n[1] + z * b.n[2]) / zc) * v.R, true];
   }
   if (zc < 0.02) return [0, 0, false];
-  return [v.W / 2 - (x * b.e[0] + y * b.e[1]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
+  return [v.W / 2 - (x * b.e[0] + y * b.e[1] + z * b.e[2]) * v.R, v.H / 2 - (x * b.n[0] + y * b.n[1] + z * b.n[2]) * v.R, true];
 }
 
 interface Pass {
@@ -148,7 +149,22 @@ export const STAR_MAP_TO_VISIBLE = 12000;
 /** the black point (of 255) some baked layers need on top of what the manifest says: the faint colour of the empty sky of 2MASS */
 const EXTRA_BLACK: Record<string, number> = { '2mass': 16 };
 
+/** The GPU painter is asked for by gl=1 in the address (gl=0 takes it back); the choice holds until the page is loaded again. */
+let glAsked = false;
+export function glWanted(): boolean {
+  // the picture check switches the painter on one page, without a reload
+  const forced = (globalThis as { __skyGl?: boolean }).__skyGl;
+  if (forced !== undefined) return forced;
+  const m = /[?&]gl=([01])/.exec(location.hash);
+  if (m) glAsked = m[1] === '1';
+  return glAsked;
+}
+
 class SkyPainter {
+  private glSky: GlSky | null = null;
+  /** how the last frame was painted, for the tests and the frame-time reports: 'gpu', or 'cpu' with the reason the GPU painter left it */
+  painter = 'cpu';
+
   /** the picture on screen, W×H CSS pixels */
   canvas = document.createElement('canvas');
   private spare = document.createElement('canvas');
@@ -166,6 +182,11 @@ class SkyPainter {
   frame(view: SkyView, layer: SkyLayer[], moving: boolean): boolean {
     // the star map before the manifest has said where it is: nothing to paint yet
     if (layer[0]!.id === 'svs' && !equiOf('svs') && !HIPS['svs']) return false;
+    if (glWanted()) {
+      if (!moving && !this.stale && !this.pass) return false;
+      const done = this.glFrame(view, layer);
+      if (done !== null) return done;
+    } else this.painter = 'cpu';
     if (moving) {
       // every frame is painted at full resolution (one source pixel per screen pixel), with the same level selection as at rest: no coarse step while the view moves and
       // no re-painting when it stops. A slow machine gets a lower frame rate, never a change of quality.
@@ -188,6 +209,45 @@ class SkyPainter {
       return true;
     }
     return false;
+  }
+
+  /** One frame on the GPU (see skygl.ts); null when this view or layer is left to the CPU loop. */
+  private glFrame(view: SkyView, layer: SkyLayer[]): boolean | null {
+    const l0 = layer[0]!;
+    const cpu = (why: string): null => {
+      this.painter = `cpu: ${why}`;
+      return null;
+    };
+    if (view.proj !== 'globe') return cpu('the Mollweide map');
+    if (layer.length !== 1) return cpu('three surveys, one per colour');
+    if ((l0.id === 'dust' && !bakedOf('dust')) || equiOf(l0.id)) return cpu('a picture of the whole sky');
+    this.glSky ??= new GlSky();
+    const g = this.glSky;
+    if (!g.ok) return cpu('no WebGL2');
+    tiles.frame();
+    const sm = new Sampler(l0.id, orderFor(l0.id, view.R));
+    const sw = Math.ceil(view.W);
+    const sh = Math.ceil(view.H);
+    const b = basis(view);
+    const gal = HIPS[l0.id]?.frame === 'galactic';
+    const B0 = bakedOf(l0.id);
+    const blackLive = l0.black;
+    const gainLive = (l0.gain * 255) / (255 - l0.black);
+    const blackBaked = B0 ? Math.max(B0.black, EXTRA_BLACK[l0.id] ?? 0) : blackLive;
+    const gainBaked = B0 ? (B0.gain * 255) / (255 - blackBaked) : gainLive;
+    const r = g.paint({
+      sw, sh, R: view.R, inside: !!view.inside, c: b.c,
+      e: b.e,
+      n: b.n, gal, sampler: sm, blackBaked, gainBaked, blackLive, gainLive,
+      place: (i, j, f) => this.place(view, b, gal, 1, sw, sh, i, j, f),
+    });
+    if (!r) return cpu(g.why);
+    this.painter = 'gpu';
+    this.pass = null;
+    this.stale = false;
+    const shown0 = this.shown;
+    this.finish({ view: { ...view }, layer, s: 1, sw, sh, painted: r.painted, total: r.total }, g.canvas);
+    return this.shown !== shown0;
   }
 
   private begin(view: SkyView, layer: SkyLayer[], s: number): Pass {
@@ -245,7 +305,7 @@ class SkyPainter {
       }
       const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
       const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
-      z = zz * b.c[2] + sy * b.n[2];
+      z = zz * b.c[2] + sx * b.e[2] + sy * b.n[2]; // the east axis has a z part when the view is rolled
       ra = Math.atan2(vy, vx) / D2R;
     }
     let zc = z > 1 ? 1 : z < -1 ? -1 : z;
@@ -431,7 +491,7 @@ class SkyPainter {
           }
           const vx = zz * b.c[0] + sx * b.e[0] + sy * b.n[0];
           const vy = zz * b.c[1] + sx * b.e[1] + sy * b.n[1];
-          z = zz * b.c[2] + sy * b.n[2];
+          z = zz * b.c[2] + sx * b.e[2] + sy * b.n[2]; // the east axis has a z part when the view is rolled
           ra = Math.atan2(vy, vx) / D2R;
         }
         p.total++;
@@ -520,7 +580,7 @@ class SkyPainter {
   private switchKey = '';
   private switchSince = 0;
 
-  private finish(p: Pass): void {
+  private finish(p: Pick<Pass, 'view' | 'layer' | 's' | 'sw' | 'sh' | 'painted' | 'total'> & { img?: ImageData }, src?: HTMLCanvasElement): void {
     const v = p.view;
     const key = p.layer.map((l) => l.id).join('+');
     const same = key === this.shownKey;
@@ -536,10 +596,12 @@ class SkyPainter {
       }
     }
     this.shownKey = key;
-    const sc = this.scratch;
-    sc.width = p.sw;
-    sc.height = p.sh;
-    sc.getContext('2d')!.putImageData(p.img, 0, 0);
+    const sc = src ?? this.scratch;
+    if (!src) {
+      sc.width = p.sw;
+      sc.height = p.sh;
+      sc.getContext('2d')!.putImageData(p.img!, 0, 0);
+    }
     const nx = this.spare;
     nx.width = Math.max(1, Math.round(v.W));
     nx.height = Math.max(1, Math.round(v.H));
@@ -574,3 +636,6 @@ class SkyPainter {
 
 /** One painter for the page: the last picture survives a visit to another screen. */
 export const sky = new SkyPainter();
+// for the picture checks and the frame-time reports
+(globalThis as { __skyPainter?: () => string; __sky?: SkyPainter }).__skyPainter = () => sky.painter;
+(globalThis as { __sky?: SkyPainter }).__sky = sky;

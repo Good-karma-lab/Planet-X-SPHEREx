@@ -3,6 +3,7 @@ import { formatHash } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
 import { parseSxp, halfToFloat } from '../../lib/sxp';
 import { ATLAS_LEAD, LeadPanel } from './leads';
+import { api, useUser } from '../../lib/account';
 import { FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
 
 export interface Ident {
@@ -377,18 +378,20 @@ interface CardReply {
   waiting_promising: number;
   promising: number;
   promising_kinds: string[];
+  noted: number;
+  visibility: { by_kind: Record<string, { visible: number; not_visible: number; not_measured: number }>; in_view: { visible: number; not_visible: number; not_measured: number } };
   identification: { pending: number; unavailable_decisive?: number };
   finds: CardFind[];
 }
 type KindSel = 'submitted' | 'promising' | 'mover' | 'browndwarf' | 'peak' | 'film' | 'pair' | 'red' | 'anomaly';
-type StageSel = 'any' | 'waiting' | 'new' | 'in_review' | 'submitted' | 'candidate' | 'confirmed' | 'known';
+type StageSel = 'any' | 'mine' | 'noted' | 'waiting' | 'new' | 'in_review' | 'submitted' | 'candidate' | 'confirmed' | 'known';
 const PAGE = 48;
 const PROMISING = ['mover', 'browndwarf', 'peak', 'film', 'pair'];
 
 /** The cards of one filter, a page at a time: the next page is asked for when the end of the list comes on screen. */
-function useCards(kind: KindSel, stage: StageSel) {
+function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolean) {
   const [state, setState] = useState<{ key: string; head: CardReply | null; finds: CardFind[]; done: boolean; loading: boolean; failed: boolean }>({ key: '', head: null, finds: [], done: false, loading: false, failed: false });
-  const key = `${kind}|${stage}`;
+  const key = `${kind}|${stage}|${stage === 'mine' ? mine.length : 0}|${unseen}`;
   const busy = useRef(false);
   const load = (reset: boolean) => {
     if (busy.current && !reset) return;
@@ -409,7 +412,11 @@ function useCards(kind: KindSel, stage: StageSel) {
     const q = new URLSearchParams({ lite: '1', sort: 'promise', status: 'all', limit: String(PAGE), offset: String(offset) });
     if (kind === 'promising') q.set('kinds', PROMISING.join(','));
     else q.set('kind', kind);
-    if (stage === 'waiting') q.set('waiting', '1');
+    // the list shows the finds whose object the eye can see in the ring; the rest are behind "Not visible in the picture"
+    if (stage !== 'mine') q.set('visibility', unseen ? 'unseen' : 'seen');
+    if (stage === 'mine') q.set('ids', mine.join(',') || '-');
+    else if (stage === 'noted') q.set('noted', '1');
+    else if (stage === 'waiting') q.set('waiting', '1');
     else if (stage !== 'any') q.set('stage', stage);
     setState((s) => (reset ? { key, head: s.head, finds: [], done: false, loading: true, failed: false } : { ...s, loading: true }));
     fetch(`/api/v1/findings?${q}`)
@@ -458,7 +465,21 @@ function useFind(id: string | null): Find | null {
 export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void }) {
   const [kind, setKind] = useState<KindSel>('promising');
   const [stage, setStage] = useState<StageSel>('any');
-  const cards = useCards(kind, stage);
+  // the findings the signed-in user closed a task on (the accounts of the service): "Viewed by me"
+  const { user } = useUser();
+  const [mine, setMine] = useState<string[]>([]);
+  useEffect(() => {
+    if (!user) return setMine([]);
+    let stop = false;
+    void api<{ findings: { finding_id: string; role: string }[] }>('/api/me/findings')
+      .then((d) => !stop && setMine([...new Set(d.findings.filter((x) => x.role === 'checked').map((x) => x.finding_id))]))
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, [user?.id]);
+  const [unseen, setUnseen] = useState(false);
+  const cards = useCards(kind, stage, mine, unseen);
   const sel = useFind(leadId);
   // findings submitted by people: the button is there only when the service has accounts and somebody has submitted one
   const [people, setPeople] = useState(0);
@@ -493,10 +514,10 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
     ['red', KIND_SHORT.red!],
     ['anomaly', KIND_SHORT.anomaly!],
   ];
-  const stages: StageSel[] = ['any', 'waiting', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
+  const stages: StageSel[] = ['any', 'mine', 'waiting', 'noted', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
   // the numbers on the status buttons are of the whole list, so they are shown only where they are what the button gives
-  const stageTotal = (s: StageSel) => (!h || s === 'any' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0));
-  const stageCount = (s: StageSel) => (h && s === 'waiting' && kind === 'promising' ? h.waiting_promising : null);
+  const stageTotal = (s: StageSel) => (!h || s === 'any' || s === 'mine' || s === 'noted' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0));
+  const stageCount = (s: StageSel) => (s === 'mine' ? mine.length : h && s === 'noted' ? h.noted : h && s === 'waiting' && kind === 'promising' ? h.waiting_promising : null);
   const chip = (k: KindSel, label: string) =>
     (cnt(k) ?? 1) > 0 || k === 'promising' || k === kind ? (
       <button key={k} class={kind === k ? 'on' : ''} aria-pressed={kind === k} onClick={() => setKind(k)}>
@@ -518,14 +539,25 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
         </div>
         <div class="fkinds fstat" role="group" aria-label="Status">
           {stages
-            .filter((s) => s === 'any' || s === 'waiting' || s === 'new' || s === 'known' || s === stage || stageTotal(s) > 0)
+            .filter((s) => (s === 'mine' ? !!user : s === 'noted' ? (h?.noted ?? 0) > 0 || stage === 'noted' : false) || s === 'any' || s === 'waiting' || s === 'new' || s === 'known' || s === stage || stageTotal(s) > 0)
             .map((s) => (
               <button key={s} class={stage === s ? 'on' : ''} aria-pressed={stage === s} onClick={() => setStage(s)}>
-                {s === 'any' ? 'Any status' : s === 'waiting' ? 'Waiting for a look' : STAGE_LABEL[s]} {stageCount(s) != null && <span>{stageCount(s)}</span>}
+                {s === 'any' ? 'Any status' : s === 'mine' ? 'Viewed by me' : s === 'noted' ? 'Looks like an artefact (machine note)' : s === 'waiting' ? 'Waiting for a look' : STAGE_LABEL[s]} {stageCount(s) != null && <span>{stageCount(s)}</span>}
               </button>
             ))}
         </div>
+        {h && kind !== 'submitted' && stage !== 'mine' && (
+          <div class="fkinds fstat" role="group" aria-label="Visible in the picture">
+            <button class={!unseen ? 'on' : ''} aria-pressed={!unseen} onClick={() => setUnseen(false)}>
+              Visible in the picture <span>{h.visibility.in_view.visible}</span>
+            </button>
+            <button class={unseen ? 'on' : ''} aria-pressed={unseen} onClick={() => setUnseen(true)}>
+              Not visible in the picture <span>{h.visibility.in_view.not_visible + h.visibility.in_view.not_measured}</span>
+            </button>
+          </div>
+        )}
         <p class="hint leadcount">
+          <a href="#/leaders">Leaderboard</a>
           {kind === 'submitted' ? `${cards.finds.length} findings submitted by people` : h ? `${cards.finds.length} of ${h.count} shown · ${h.total} finds in the searched fields · a find is a lead, not a discovery` : 'reading the findings…'}
           {h && h.identification.pending > 0 && ` · identifying: ${h.identification.pending} catalogue answers to come`}
         </p>
@@ -533,7 +565,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
       <div class="fgrid-wrap">
         <ol class="fgrid" aria-busy={cards.loading}>
           {cards.finds.map((f) => (
-            <FindCard key={f.id} f={f} current={leadId === f.id} onOpen={setLeadId} />
+            <FindCard key={f.id} f={f} current={leadId === f.id} onOpen={setLeadId} mine={mine.includes(f.id)} />
           ))}
           {kind === 'promising' && (stage === 'any' || stage === 'known') && cards.done && (
             <li class={`fcard glass${atlas ? ' on' : ''}`}>

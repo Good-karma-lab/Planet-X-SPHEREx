@@ -230,7 +230,7 @@ export function matchKnown(
   // beside a bright star the picture shows its halo, spikes and ghosts: bumps there are not sources without a match
   const bright = pts
     .filter((q) => q.o.mag != null && q.o.mag <= 10)
-    .map((q) => ({ x: q.x, y: q.y, r: (q.o.mag! <= 6 ? 120 : q.o.mag! <= 8 ? 60 : 25) / step }));
+    .map((q) => ({ x: q.x, y: q.y, r: (q.o.mag! <= 6 ? 120 : q.o.mag! <= 9 ? 75 : 30) / step }));
   const shown = new Set<string>();
   const noMatch: KnownMatch['noMatch'] = [];
   for (const p of peaks) {

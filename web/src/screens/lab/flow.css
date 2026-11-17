@@ -42,3 +42,7 @@
 .taskpanel .tp-line { height: 16px; font: 500 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .taskpanel .tp-btns { display: flex; gap: 6px; flex-wrap: wrap; }
 .taskpanel .tp-btns .btn { flex: 1; white-space: nowrap; }
+/* the picture's Mark button exists for touch windows only: `.vsq .float` gives every float `display: flex`, which beat `.touch-only`, so
+   on a desktop it sat at the top left over the picture's title. button + class outweighs `.vsq .float` and stays below the phone layer's
+   `:root .vsq .fmark` (which shows it at the bottom right). */
+.vsq button.touch-only { display: none; }

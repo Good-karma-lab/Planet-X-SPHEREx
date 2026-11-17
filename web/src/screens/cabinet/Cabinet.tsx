@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 import { api, loadUser, nextTask, refreshUnread, renameUser, signInByEmail, signOut, taskHash, useUser, googleSignInUrl, type AccountMark, type Task, type User } from '../../lib/account';
 import { InvestigationPage } from './Investigation';
 import { Pic } from './pic';
+import { ScorePanel } from './Score';
 import type { Route } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
 import './cabinet.css';
@@ -24,6 +25,10 @@ export interface Investigation {
   checks_job: string | null;
   submitted: string | null;
   checks: { state: string; checks: Check[] | null; can_submit: boolean } | null;
+  /** open | checking | needs_comment | blocked | submitted: a declared submit finishes by itself on the server */
+  state: string;
+  /** what the running checks say they are doing */
+  progress: string;
   updated: string;
 }
 export interface MyFinding {
@@ -60,7 +65,7 @@ interface Mine {
   notifications: Notice[];
 }
 
-const TABS = ['squares', 'marks', 'findings', 'investigations', 'tasks', 'history', 'notifications', 'account'] as const;
+const TABS = ['squares', 'marks', 'findings', 'investigations', 'tasks', 'history', 'notifications', 'score', 'account'] as const;
 type Tab = (typeof TABS)[number];
 const TAB_NAME: Record<Tab, string> = {
   squares: 'My squares',
@@ -70,9 +75,11 @@ const TAB_NAME: Record<Tab, string> = {
   tasks: 'Tasks',
   history: 'View history',
   notifications: 'Notifications',
+  score: 'Score',
   account: 'Account',
 };
 const RESULT: Record<string, string> = { nothing: 'Nothing here', marks: 'Done, with marks', moves: 'It moves', artefact: 'Artefact', known: 'Known object' };
+const INV_STATE: Record<string, string> = { open: 'not submitted', checking: 'checking', needs_comment: 'comment needed', blocked: 'not submitted: a check failed', submitted: 'submitted' };
 const ROLE: Record<string, string> = { submitted: 'Submitted by me', checked: 'Checked by me', marked: 'Marked by me' };
 
 const when = (iso: string | null) => (iso ? `${iso.slice(0, 16).replace('T', ' ')} UTC` : '');
@@ -216,6 +223,32 @@ function TaskRow({ t }: { t: Task }) {
   );
 }
 
+/** "Hide me from the leaderboard": the points are still earned. */
+function HideFromBoard() {
+  const [hide, setHide] = useState<boolean | null>(null);
+  const [status, setStatus] = useState('');
+  useEffect(() => {
+    void api<{ hide_from_board: boolean }>('/api/me/score').then((s) => setHide(s.hide_from_board), () => setHide(false));
+  }, []);
+  const set = (v: boolean) => {
+    setHide(v);
+    api('/api/me', { method: 'PATCH', body: { hide_from_board: v } }).then(
+      () => setStatus(''),
+      (e: Error) => setStatus(e.message),
+    );
+  };
+  return (
+    <div class="cb-line">
+      <label class="chk">
+        <input type="checkbox" checked={hide === true} disabled={hide === null} onChange={(e) => set((e.target as HTMLInputElement).checked)} data-testid="hide-board" />
+        Hide me from the leaderboard
+      </label>
+      <span class="mono-s">points are still earned</span>
+      {status && <span class="cb-status bad">{status}</span>}
+    </div>
+  );
+}
+
 function Who({ user }: { user: User }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
@@ -268,15 +301,17 @@ export function Cabinet({ route }: { route: Route }) {
       (e: Error) => setStatus(e.message),
     );
   const squares = mine?.tasks.filter((t) => t.kind === 'cell') ?? [];
+  const inflight = mine?.investigations.filter((i) => ['checking', 'needs_comment', 'blocked'].includes(i.state)) ?? [];
   const unread = mine?.notifications.filter((n) => !n.read).length ?? 0;
   const count: Record<Tab, number> = {
     squares: squares.length,
     marks: mine?.marks.length ?? 0,
     findings: mine?.findings.length ?? 0,
     investigations: mine?.investigations.length ?? 0,
-    tasks: mine?.tasks.filter((t) => t.state === 'open').length ?? 0,
+    tasks: (mine?.tasks.filter((t) => t.state === 'open').length ?? 0) + inflight.length,
     history: mine?.history.length ?? 0,
     notifications: unread,
+    score: 0,
     account: 0,
   };
   return (
@@ -299,7 +334,7 @@ export function Cabinet({ route }: { route: Route }) {
               {TABS.map((t) => (
                 <button key={t} role="tab" aria-selected={tab === t} class={tab === t ? 'on' : ''} onClick={() => go(t)} data-testid={`tab-${t}`}>
                   {TAB_NAME[t]}
-                  {t !== 'account' && <span>{count[t]}</span>}
+                  {t !== 'account' && t !== 'score' && <span>{count[t]}</span>}
                 </button>
               ))}
               <span class={`cb-status ${error || status ? 'bad' : ''}`} role="status" data-testid="cabinet-status">
@@ -415,13 +450,8 @@ export function Cabinet({ route }: { route: Route }) {
                                 </span>
                               </span>
                               <span class="cb-side">
-                                {inv.submitted ? (
-                                  <span class="badge st-submitted">submitted</span>
-                                ) : c ? (
-                                  <span class={`badge ${c.can_submit ? 'st-pass' : c.state === 'done' ? 'st-fail' : 'st-open'}`}>{c.can_submit ? 'ready to submit' : c.state === 'done' ? 'checks block submit' : 'checks running'}</span>
-                                ) : (
-                                  <span class="badge">{inv.checks_job ? 'checks not answering' : 'not checked'}</span>
-                                )}
+                                <span class={`badge st-inv-${inv.state}`}>{INV_STATE[inv.state] ?? words(inv.state)}</span>
+                                {c && !inv.submitted && inv.state === 'open' && <span class="mono-s">{c.can_submit ? 'checks passed' : c.state === 'done' ? 'checks block submit' : 'checks running'}</span>}
                               </span>
                             </a>
                           );
@@ -442,7 +472,21 @@ export function Cabinet({ route }: { route: Route }) {
                         </button>
                       </span>
                     </h3>
-                    {mine.tasks.length === 0 && <Empty text="No tasks yet" />}
+                    {mine.tasks.length === 0 && inflight.length === 0 && <Empty text="No tasks yet" />}
+                    <div class="cb-list">
+                      {inflight.map((inv) => (
+                        <a key={inv.id} class="cb-row haspic" href={`#/me?tab=investigations&inv=${inv.id}`} data-testid="submit-row">
+                          <Pic findingId={inv.finding_id} ra={mine.marks.find((m) => inv.mark_ids.includes(m.id))?.ra} dec={mine.marks.find((m) => inv.mark_ids.includes(m.id))?.dec} label={inv.title} />
+                          <span class="cb-main">
+                            <b>Submit: {inv.title}</b>
+                            <span class="mono-s">{inv.state === 'checking' ? inv.progress || 'checks running' : inv.state === 'needs_comment' ? 'every check has answered · a comment is needed' : 'a check blocks the submit'}</span>
+                          </span>
+                          <span class="cb-side">
+                            <span class={`badge st-inv-${inv.state}`}>{INV_STATE[inv.state] ?? words(inv.state)}</span>
+                          </span>
+                        </a>
+                      ))}
+                    </div>
                     <div class="cb-list">
                       {mine.tasks.map((t) => (
                         <TaskRow key={t.id} t={t} />
@@ -479,6 +523,12 @@ export function Cabinet({ route }: { route: Route }) {
                     </div>
                   </>
                 )}
+                {tab === 'score' && (
+                  <>
+                    <h3>Score</h3>
+                    <ScorePanel />
+                  </>
+                )}
                 {tab === 'account' && (
                   <>
                     <h3>Account</h3>
@@ -487,6 +537,7 @@ export function Cabinet({ route }: { route: Route }) {
                         <b>{user.name}</b>
                         <span class="mono-s">{user.email}</span>
                       </div>
+                      <HideFromBoard />
                       <div class="cb-line">
                         <a class="btn sm" href="/api/me/export" download="spherex-space-my-data.json" data-testid="download-data">
                           Download my data

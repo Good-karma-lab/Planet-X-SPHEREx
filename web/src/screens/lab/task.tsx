@@ -71,13 +71,20 @@ export function parseChecks(raw: unknown, job: string | null): ChecksView {
 const POLL_MS = 3000;
 
 /** Runs the checks of a place and its marks (`POST /api/checks`), then follows the job until every check has answered. */
-export function useChecks(): { view: ChecksView; start: (fieldKey: string, ra: number, dec: number, marks: Mark[]) => void; reset: () => void } {
+export function useChecks(): {
+  view: ChecksView;
+  /** starts the checks; resolves with the job id once the service has taken them (null when it did not) */
+  start: (fieldKey: string, ra: number, dec: number, marks: Mark[]) => Promise<string | null>;
+  reset: () => void;
+} {
   const [view, setView] = useState<ChecksView>(CHECKS_IDLE);
   const run = useRef(0);
   useEffect(() => () => void run.current++, []);
   const start = (fieldKey: string, ra: number, dec: number, marks: Mark[]) => {
     const me = ++run.current;
     setView({ ...parseChecks(null, null), state: 'running' });
+    let taken: (job: string | null) => void = () => {};
+    const jobId = new Promise<string | null>((res) => (taken = res));
     void (async () => {
       try {
         const r = await fetch('/api/checks', {
@@ -94,6 +101,7 @@ export function useChecks(): { view: ChecksView; start: (fieldKey: string, ra: n
         });
         if (!r.ok) throw new Error(String(r.status));
         const job = String(((await r.json()) as { job?: string }).job ?? '');
+        taken(job || null);
         for (let fails = 0; run.current === me; ) {
           const g = await fetch(`/api/checks/${encodeURIComponent(job)}`).catch(() => null);
           if (run.current !== me) return;
@@ -107,9 +115,11 @@ export function useChecks(): { view: ChecksView; start: (fieldKey: string, ra: n
           await new Promise((res) => setTimeout(res, POLL_MS));
         }
       } catch {
+        taken(null);
         if (run.current === me) setView((v) => ({ ...v, state: 'failed' }));
       }
     })();
+    return jobId;
   };
   return {
     view,
@@ -158,6 +168,59 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; status:
   }
 }
 
+/** An investigation as the account gives it back after "Check and submit" was declared. */
+export interface DeclaredInv {
+  id: string;
+  state?: 'checking' | 'needs_comment' | 'blocked' | 'submitted' | string;
+  progress?: string;
+  submitted?: string | null;
+}
+
+/** The status of a declared submit: the slow checks run on the server, which submits by itself; the user may leave. */
+export function declaredWord(inv: DeclaredInv | null, status = 200): string {
+  if (!inv) return status === 401 ? 'Sign in to submit' : status === 404 ? 'No such investigation' : 'Submit did not answer';
+  if (inv.state === 'submitted' || inv.submitted) return `Submitted${typeof inv.submitted === 'string' ? `: ${inv.submitted}` : ''}`;
+  if (inv.state === 'blocked') return 'Not submitted: a check failed';
+  if (inv.state === 'needs_comment') return 'Submit declared · a warning needs a comment';
+  return `Submit declared · checking${inv.progress ? `: ${inv.progress}` : '…'}`;
+}
+
+/** Declare the submit of an investigation with its checks job (`POST /api/me/investigations/{id}/submit`). */
+export async function declareSubmit(invId: string, job: string, note = ''): Promise<{ inv: DeclaredInv | null; status: number }> {
+  const r = await post(`/api/me/investigations/${encodeURIComponent(invId)}/submit`, { checks_job: job, ...(note ? { note } : {}) });
+  return { inv: r.ok ? (r.json as DeclaredInv | null) : null, status: r.status };
+}
+
+/** Follow a declared submit while the server is still checking: `on` gets the investigation every few seconds. Returns the stop. */
+export function followDeclared(invId: string, on: (inv: DeclaredInv) => void): () => void {
+  let stop = false;
+  void (async () => {
+    while (!stop) {
+      await new Promise((res) => setTimeout(res, 5000));
+      if (stop) return;
+      try {
+        const r = await fetch('/api/me/investigations');
+        if (!r.ok) return;
+        const inv = ((await r.json()) as { investigations?: DeclaredInv[] }).investigations?.find((x) => x.id === invId);
+        if (!inv) return;
+        on(inv);
+        if (inv.state !== 'checking') return;
+      } catch {
+        return;
+      }
+    }
+  })();
+  return () => {
+    stop = true;
+  };
+}
+
+/** What a closed task earned, said on the lab's status line for a while (it outlives the task: the next one opens at once). */
+let award = { text: '', until: 0 };
+export function awardLine(): string {
+  return Date.now() < award.until ? award.text : '';
+}
+
 interface NextTask {
   id: string;
   kind: 'cell' | 'finding';
@@ -201,6 +264,9 @@ export interface TaskArgs {
   dec: number;
   fieldKey: string | null;
   marksHere: Mark[];
+  /** the pass on show (null in Days) and how many passes the field has: a square is looked through when every pass was shown */
+  pass: number | null;
+  passesTotal: number;
 }
 
 /** The Task panel, or null when the lab has no task. */
@@ -212,6 +278,18 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
   const [busy, setBusy] = useState(false);
   const [line, setLine] = useState('');
   const checks = useChecks();
+  // how the task was looked at: seconds with the lab visible, and which passes were on show
+  const look = useRef({ seconds: 0, passes: new Set<number>() });
+  if (a.pass != null) look.current.passes.add(a.pass);
+  useEffect(() => {
+    look.current = { seconds: 0, passes: new Set<number>() };
+    const t = setInterval(() => {
+      if (typeof document === 'undefined' || document.visibilityState === 'visible') look.current.seconds++;
+    }, 1000);
+    return () => clearInterval(t);
+  }, [key]);
+  const followStop = useRef<() => void>(() => {});
+  useEffect(() => () => followStop.current(), [key]);
   // a lab opened with the kind only (from Findings, from the globe): the lab takes the task itself
   useEffect(() => {
     setId(task?.id ?? null);
@@ -264,21 +342,45 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     const markIds = a.marksHere.map((m) => m.id);
     if (task.kind === 'cell' && refs.cell) await post(`/api/grid/cell/${encodeURIComponent(refs.cell)}/viewed`, { result });
     // closing needs an account; a guest's answer still counts the square as viewed, and the next task opens
-    if (id) await post(`/api/me/tasks/${encodeURIComponent(id)}/done`, { result, mark_ids: markIds });
+    if (id) {
+      const r = await post(`/api/me/tasks/${encodeURIComponent(id)}/done`, {
+        result,
+        mark_ids: markIds,
+        seconds: look.current.seconds,
+        passes_shown: look.current.passes.size,
+        passes_total: a.passesTotal,
+        local_hour: new Date().getHours(),
+      });
+      // what the answer earned: one status item each, on the lab's own status line
+      const got = (r.json ?? {}) as { points?: number; achievements?: { name?: string }[] };
+      const items = [
+        ...(got.achievements ?? []).map((x) => `Achievement: ${x.name ?? ''}`),
+        ...(typeof got.points === 'number' && got.points > 0 ? [`+${got.points} points`] : []),
+      ];
+      if (items.length) award = { text: items.join(' · '), until: Date.now() + 12000 };
+    }
     const next = await takeTask(task.kind as 'cell' | 'finding');
     setBusy(false);
     const to = next && next !== 'failed' && next.id !== id ? taskParams(next) : null;
     if (to) a.open(to);
     else setLine(next === 'failed' ? 'Tasks did not answer' : 'No more tasks of this kind');
   };
-  const submit = async () => {
-    if (!checks.view.can_submit || !checks.view.job || busy) return;
+  // "Check and submit", said once: the checks start, the submit is declared, the server finishes it; the user may leave
+  const declare = async () => {
+    if (!a.fieldKey || busy) return;
     if (!task.investigation_id) return setLine('Save to an investigation first');
     setBusy(true);
-    const r = await post('/api/findings/submit', { investigation_id: task.investigation_id, checks_job: checks.view.job });
+    setLine('starting the checks…');
+    const job = await checks.start(a.fieldKey, a.ra, a.dec, a.marksHere);
+    if (!job) {
+      setBusy(false);
+      return setLine('Checks did not answer');
+    }
+    const r = await declareSubmit(task.investigation_id, job);
     setBusy(false);
-    const fid = (r.json as { finding_id?: string } | null)?.finding_id;
-    setLine(r.ok && fid ? `Submitted: ${fid}` : r.status === 401 ? 'Sign in to submit' : 'Submit did not answer');
+    setLine(declaredWord(r.inv, r.status));
+    followStop.current();
+    if (r.inv?.state === 'checking') followStop.current = followDeclared(task.investigation_id, (inv) => setLine(declaredWord(inv)));
   };
 
   const btn = (text: string, onClick: () => void, off = false, primary = false, testid = '') => (
@@ -317,16 +419,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
             {btn('Known object', () => void close('known'), false, false, 'task-known')}
           </>
         )}
-        {task.kind === 'submit' &&
-          (checks.view.can_submit
-            ? btn('Submit', () => void submit(), false, true, 'task-submit')
-            : btn(
-                'Check and submit',
-                () => a.fieldKey && checks.start(a.fieldKey, a.ra, a.dec, a.marksHere),
-                !a.fieldKey || checks.view.state === 'running',
-                true,
-                'task-check',
-              ))}
+        {task.kind === 'submit' && btn('Check and submit', () => void declare(), !a.fieldKey || checks.view.state === 'running', true, 'task-check')}
       </div>
     </div>
   );

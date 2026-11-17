@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { nextTask, taskHash } from '../../lib/account';
 import { formatHash } from '../../lib/route';
 import { cleanName } from './finds';
 
@@ -19,8 +20,13 @@ export interface CardFind {
   promise: number;
   viewers: number;
   credit: { found_by: string; machine: boolean; first_marked_by: string | null; checked_by: string[]; looks: Record<string, number> };
-  clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string; still?: string } | null;
+  clip: { url: string; state: 'ready' | 'waiting' | 'building' | 'none'; reason?: string; still?: string; blink?: string[] | null; note?: string } | null;
   name: string | null;
+  /** is the object visible in its own picture (S/N in the ring of 3 or more)? null: the picture is not made yet */
+  visible?: boolean | null;
+  visible_sn?: number | null;
+  /** what the review of the clips saw, when it looks like an artefact (a note, not a status) */
+  note?: string | null;
   field: { ra: number; dec: number; fov: number } | null;
   group: string | null;
   passes: number | null;
@@ -80,17 +86,11 @@ export function checkHref(f: CardFind): string {
 
 /** "Check this finding": the task is taken from the service (it is kept for a signed-in user), then the lab opens with it. Without the
  *  accounts of the service, or when it does not answer in two seconds, the lab opens with the find alone. */
-async function takeTask(f: CardFind): Promise<void> {
+export async function takeTask(f: CardFind): Promise<void> {
   let href = checkHref(f);
   try {
-    const ctl = new AbortController();
-    const t = setTimeout(() => ctl.abort(), 2000);
-    const r = await fetch(`/api/tasks/next?kind=finding&finding_id=${encodeURIComponent(f.id)}`, { signal: ctl.signal, credentials: 'same-origin' });
-    clearTimeout(t);
-    if (r.ok) {
-      const b = (await r.json()) as { task?: { id?: string } | null };
-      if (b.task?.id) href += `&task_id=${encodeURIComponent(b.task.id)}`;
-    }
+    const t = await Promise.race([nextTask('finding', f.id), new Promise<null>((res) => setTimeout(() => res(null), 2500))]);
+    if (t) href = taskHash(t); // the lab's own address of the task (a guest gets one too; it is kept for a signed-in user)
   } catch {
     // no accounts here: the find alone
   }
@@ -231,7 +231,7 @@ export function Clip({ f }: { f: CardFind }) {
   );
 }
 
-export function FindCard({ f, onOpen, current }: { f: CardFind; onOpen: (id: string) => void; current: boolean }) {
+export function FindCard({ f, onOpen, current, mine = false }: { f: CardFind; onOpen: (id: string) => void; current: boolean; mine?: boolean }) {
   const looks = f.viewers;
   const by = f.credit.first_marked_by ? `Marked first by ${f.credit.first_marked_by}` : `Found by ${f.credit.found_by.replace(/^SPHEREx Space, /, '')}`;
   const checked = f.credit.checked_by.length ? ` · checked by ${f.credit.checked_by.slice(0, 2).join(', ')}${f.credit.checked_by.length > 2 ? ` +${f.credit.checked_by.length - 2}` : ''}` : '';
@@ -247,9 +247,9 @@ export function FindCard({ f, onOpen, current }: { f: CardFind; onOpen: (id: str
         )}
       </button>
       <div class="fcard-body">
-        <b class="fcard-title" title={cardTitle(f)}>
+        <a class="fcard-title" href={f.kind === 'submitted' ? checkHref(f) : `#/findings/${encodeURIComponent(f.id)}`} title="Open the page of this finding">
           {cardTitle(f)}
-        </b>
+        </a>
         <span class="mono-s fcard-sub">
           {KIND_ONE[f.kind] ?? f.kind} · {f.place}
         </span>
@@ -261,7 +261,19 @@ export function FindCard({ f, onOpen, current }: { f: CardFind; onOpen: (id: str
             </svg>
             {looks ? `${looks} ${looks === 1 ? 'look' : 'looks'}` : f.stage === 'new' ? 'waiting for a look' : 'no looks yet'}
           </span>
+          {mine && <span class="fcard-mine">viewed by me</span>}
+          {f.visible_sn != null && (
+            <span class={f.visible ? '' : 'wait'} title="How far the brightest point inside the ring stands above the noise of this picture">
+              S/N {f.visible_sn.toFixed(1)} in the ring
+            </span>
+          )}
         </span>
+        {f.kind === 'peak' && f.clip?.state === 'ready' && !f.clip.blink && <span class="mono-s fcard-sub">the sum along the orbit is not kept here: the passes alone are shown</span>}
+        {f.note && (
+          <span class="fcard-note" title="A machine note from the review of the clips. It sets no status: judge it in the lab.">
+            Machine note: {f.note}
+          </span>
+        )}
         <span class="mono-s fcard-credit" title={`${f.credit.found_by}${checked}`}>
           {by}
           {checked}

@@ -211,6 +211,10 @@ def test_the_routes_serve_the_clip_once_rendered_and_say_why_there_is_none(tmp_p
     info = client.get("/api/findings/mover:abc/clip").json()
     assert info["state"] == "ready" and info["frames"] == 3 and info["shows"]["window_arcmin"] == 3.0
     none = client.get("/api/findings/red:far/clip.webp")
+    for _ in range(40):  # on a busy machine the first answer may be "being built": the next one says there is nothing to build from
+        if none.status_code != 202:
+            break
+        none = client.get("/api/findings/red:far/clip.webp")
     assert none.status_code == 404 and none.json()["state"] == "none" and none.json()["reason"]
     assert client.get("/api/findings/nope/clip.webp").status_code == 404
     after = client.get("/api/findings?lite=1").json()
@@ -273,3 +277,93 @@ def test_a_track_inside_one_pass_is_shown_in_the_visits_of_one_detector(tmp_path
 
     alone, filled = film_picture(sky[2]), film_picture(sky[2], [sky[4]])
     assert float(alone[:20, :20].min()) > 0.05 and np.allclose(filled[:20, :20, 0], (sky[4][:20, :20].astype(float) - 1) / 254.0)
+
+
+def test_a_planet_x_peak_blinks_between_one_pass_and_the_sum_along_the_orbit(tmp_path: Path) -> None:
+    import asyncio
+
+    from engine import distant as edist
+    from service.clips import Clips
+
+    store = Store(tmp_path / "main")
+    _field(store, "f" * 24, 5.0)
+    # a distance search of the same place: 3 visits of differences, then the best-S/N map with a peak 20″ west and 10″ north of the centre
+    n, nvis = 120, 3
+    best = np.full((n, n), 30, np.uint8)
+    px, py = n // 2 + round(20.0 / edist.S), n // 2 + round(10.0 / edist.S)
+    best[py - 1 : py + 2, px - 1 : px + 2] = 255
+    blob = np.zeros((nvis, n, n), np.uint8).tobytes() + best.tobytes() + np.zeros((n, n), np.uint8).tobytes()
+    params = {"ra": RA0, "dec": DEC0, "fov": 6.0, "mjd": MJD[1], "det": [1, 2, 3], "dmin": 60.0, "dmax": 110.0}
+    meta = {"status": "ok", "params": params, "slider": {"n": n, "step": edist.S, "t": [0.0] * nvis}}
+    store.begin("distant", "d" * 24, params)
+    store.write_part("distant", "d" * 24, "bin", blob)
+    store.write_meta("distant", "d" * 24, meta)
+    store.complete("d" * 24)
+    ra = RA0 - 20.0 / 3600.0 / np.cos(np.radians(DEC0))
+    peak = {
+        "id": "peak:t",
+        "kind": "peak",
+        "ra": float(ra),
+        "dec": DEC0 + 10.0 / 3600.0,
+        "data": {"peak": {"ref_mjd": MJD[1], "d": 80.0, "sn": 10.9}},
+    }
+    clips = Clips(store, tmp_path / "clips")
+    assert clips.sum_for(peak) is not None and clips.sum_for({**peak, "data": {"peak": {"ref_mjd": MJD[1], "d": 500.0}}}) is None
+    path = asyncio.run(clips.get(peak))
+    fr = _frames(path.read_bytes())
+    info = clips.info("peak:t") or {}
+    assert len(fr) == 2 and info["blink"] == ["sum along the orbit", "one pass"] and info["sum_sn_at_place"] == 12.0
+    assert info["pass"]["pass"] == 1  # the pass of the search's date
+    c = SIZE // 2
+    assert float(fr[0][c - 6 : c + 7, c - 6 : c + 7].max()) > 230.0  # the peak stands in the middle of the ring in the sum
+    assert float(fr[0][20:60, 20:60].mean()) < 40.0  # and the noise round it is dark
+    assert clips.summary(peak)["blink"] == ["sum along the orbit", "one pass"]
+
+
+def test_a_faint_track_is_seen_only_when_the_visits_are_added_along_its_motion(tmp_path: Path) -> None:
+    from service.clips import VISIBLE_SN, render_track, ring_sn, track_places
+
+    store = Store(tmp_path / "main")
+    n, step, nfr = 200, 6.0, 9
+    rng = np.random.default_rng(11)
+    frames_meta, motion = [], []
+    for i in range(nfr):
+        z = rng.normal(0.0, 1.0, (n, n))
+        x, y = 40 + 14 * i, 60 + 9 * i  # the body: 2.5 sigma in one visit, invisible in any single frame
+        z[y - 1 : y + 2, x - 1 : x + 2] += 2.5
+        motion.append(np.clip(np.round(1 + 254 * np.clip((z + 5.0) / 20.0, 0, 1)), 1, 255).astype(np.uint8))
+        frames_meta.append({"visit": i, "det": 1 + i % 3, "mjd": 61000.0 + 0.1 * i, "exposures": 3})
+    key, params = "m" * 24, {"ra": RA0, "dec": DEC0, "fov": 20.0, "mjd": 61000.4}
+    meta = {"kind": "film", "params": params, "grid": {"ra0": RA0, "dec0": DEC0, "step_arcsec": step, "n": n}, "frames": frames_meta}
+    store.begin("film", key, params)
+    store.write_part("film", key, "film.sxp", encode({"sky": np.ones((nfr, n, n), np.uint8), "motion": np.stack(motion)}, meta))
+    store.write_meta("film", key, meta)
+    store.complete(key)
+    pts = [{"f": i, "x": 40.0 + 14 * i, "y": 60.0 + 9 * i, "z": 2.5, "how": "found"} for i in (0, 3, 8)]
+    find = {
+        "id": "film:f",
+        "kind": "film",
+        "ra": RA0,
+        "dec": DEC0,
+        "fov": 20.0,
+        "rate": 30.0,
+        "data": {"film": 61000.4, "track": {"pts": pts, "pa": 120.0}},
+    }
+    places = track_places(find, frames_meta)
+    assert len(places) == nfr and np.allclose(
+        places[5], (40 + 14 * 5, 60 + 9 * 5)
+    )  # between the measured places: the line from one to the next
+    data, info = render_track(find, store, key, meta)
+    assert len(_frames(data)) == 2 and info["blink"] == ["added along the motion", "added without motion"] and info["visits_added"] == nfr
+    assert info["visible_sn"] > 5.0 and info["still_sn"] < 4.0 and info["visible"] is True  # 2.5 sigma x sqrt(9) visits
+    # a track over empty sky: nothing in the ring either way
+    empty = {
+        **find,
+        "id": "film:e",
+        "data": {"film": 61000.4, "track": {"pts": [{"f": i, "x": 150.0 - 10 * i, "y": 30.0 + 2 * i} for i in (0, 4, 8)]}},
+    }
+    _, none = render_track(empty, store, key, meta)
+    assert none["visible"] is False and none["visible_sn"] < 4.5
+    img = rng.normal(0.0, 1.0, (41, 41))
+    img[20, 20] = 9.0
+    assert ring_sn(img, 20, 20, 3) > 6.0 > VISIBLE_SN > ring_sn(np.zeros((41, 41)), 20, 20, 3)

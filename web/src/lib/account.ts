@@ -27,6 +27,8 @@ export interface AccountMark {
   level: 'suspicious' | 'interesting' | 'artefact';
   note: string;
   created: string;
+  /** the date (MJD) of the frame the mark was put on, when the lab knows it */
+  mjd?: number | null;
 }
 /** What lib/marks.ts takes in `setMarksSync`. */
 export interface AccountMarksRemote {

@@ -42,7 +42,7 @@ from service.products.store import Store
 from service.products.sxp import decode
 from service.storage import atomic_write_bytes
 
-VERSION = "c2"
+VERSION = "c5"
 WINDOW_ARCMIN = 3.0  # the side of the clip on the sky
 SIZE = 320  # the side of the clip in pixels
 FRAME_MS = 1000  # one pass on screen
@@ -400,6 +400,8 @@ def render(
     frames: list[Image.Image] = []
     shown: list[dict[str, Any]] = []
     motion = motion_of(find) if with_ring else None
+    seen_sn = 0.0
+    ring_r = max(1.5, MEASURE_ARCSEC / grid.step_arcsec)
     for p in passes:
         if max_frames is not None and len(frames) >= max_frames:
             break
@@ -426,6 +428,16 @@ def render(
         rx, ry = (float(v) for v in grid.sky_to_grid(ra, dec))
         if with_ring and -0.5 <= rx - x0 <= w - 0.5 and -0.5 <= ry - y0 <= w - 0.5:
             ring = (rx - x0, ry - y0)
+        if ring is not None:
+            white = np.nanmean(c_rgb[:, margin:-margin, margin:-margin], axis=0) if np.isfinite(c_rgb).any() else None
+            if white is not None:
+                seen = ring_sn(
+                    np.where((c_sat[margin:-margin, margin:-margin] > 127) & ~np.isfinite(white), np.nanmax(white), white),
+                    ring[0],
+                    ring[1],
+                    ring_r,
+                )
+                seen_sn = max(seen_sn, seen)
         label = date_label(float(p["mjd0"]), float(p["mjd1"]))
         mot = motion if ring else None
         frames.append(draw_frame(pic, ring, RING_ARCSEC / grid.step_arcsec, label, f"{window_arcmin:g} arcmin", size, mot, labels))
@@ -450,6 +462,8 @@ def render(
         "frame_ms": FRAME_MS,
         "frames": shown,
         "bytes": len(data),
+        "visible_sn": round(seen_sn, 1),
+        "visible": bool(seen_sn >= VISIBLE_SN),
         "render_s": round(time.time() - t0, 3),
         "made": time.time(),
     }
@@ -484,6 +498,141 @@ def film_picture(sky: NDArray[np.uint8], fill: list[NDArray[np.uint8]] | None = 
     v = np.where(use > 0, (use.astype(np.float64) - 1.0) / 254.0, NO_VISIT_GREY)
     v[core] = 1.0
     return np.repeat(v[..., None], 3, axis=-1)
+
+
+# the S/N "in the ring" is taken within one detector pixel of the ring's centre: the whole ring would hold a 3 sigma noise peak by chance
+MEASURE_ARCSEC = 7.0
+VISIBLE_SN = 3.0  # an object whose ring holds less than this against the noise of its own picture is not visible in it
+TRACK_MIN_GAIN = 1.5  # S/N in the ring along the motion must exceed the S/N without motion by this much
+TRACK_WINDOW_ARCMIN = 6.0
+TRACK_FRAME_MS = 1400
+TRACK_SN_DARK, TRACK_SN_FULL = 1.5, 9.0  # the added picture: below 1.5 sigma black, 9 sigma white
+
+
+def ring_sn(img: F, cx: float, cy: float, radius: float, speckled: bool = False) -> float:
+    """How far the brightest pixel inside the ring stands above the picture: (peak in the ring - median outside) / (1.4826 x MAD
+    outside), on the pixels that have a value. 0 when the picture has too little to measure."""
+    h, w = img.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    inside = (xx - cx) ** 2 + (yy - cy) ** 2 <= radius * radius
+    ok = np.isfinite(img)
+    if not (inside & ok).any() or int((~inside & ok).sum()) < 50:
+        return 0.0
+    out = img[~inside & ok]
+    med = float(np.median(out))
+    sig = 1.4826 * float(np.median(np.abs(out - med)))
+    if speckled:  # a sum of residuals has bright specks all over (a crowded field): its scatter, not its quiet floor, is the noise
+        sig = max(sig, float(np.std(out)))
+    return float((float(img[inside & ok].max()) - med) / sig) if sig > 0 else 0.0
+
+
+def track_places(find: dict[str, Any], frames_meta: list[dict[str, Any]]) -> dict[int, tuple[float, float]]:
+    """Where the body of a time-lapse track stands in each visit frame from its first to its last measured one: the measured place in
+    the frames the search measured, and between them the straight line from one measured place to the next (never beyond the ends)."""
+    pts = sorted(
+        (p for p in ((find.get("data") or {}).get("track") or {}).get("pts") or [] if 0 <= int(p.get("f", -1)) < len(frames_meta)),
+        key=lambda p: float(frames_meta[int(p["f"])]["mjd"]),
+    )
+    if len(pts) < 2:
+        return {}
+    t = np.array([float(frames_meta[int(p["f"])]["mjd"]) for p in pts])
+    xs, ys = np.array([float(p["x"]) for p in pts]), np.array([float(p["y"]) for p in pts])
+    out: dict[int, tuple[float, float]] = {int(p["f"]): (float(p["x"]), float(p["y"])) for p in pts}
+    for i, fm in enumerate(frames_meta):
+        m = float(fm["mjd"])
+        if i not in out and t[0] <= m <= t[-1]:
+            out[i] = (float(np.interp(m, t, xs)), float(np.interp(m, t, ys)))
+    return out
+
+
+def _shifted(a: NDArray[Any], cx: float, cy: float, w: int) -> NDArray[Any]:
+    """The w x w window of `a` centred on (cx, cy), to the nearest pixel; beyond the frame: 0."""
+    return _window(a, round(cx) - w // 2, round(cy) - w // 2, w, 0)
+
+
+def render_track(find: dict[str, Any], store: Store, key: str, meta: dict[str, Any], size: int = SIZE) -> tuple[bytes, dict[str, Any]]:
+    """The picture of a time-lapse track. A body found at 5-6 sigma over several visits is 2-3 sigma in one visit: no single frame
+    shows it. So the visits are ADDED: the significance of the change in every visit (the `motion` layer of the visits product: what
+    differs from the static sky, in sigma) is shifted so that the body stays in the middle and summed, divided by sqrt(n).
+    A Blink of two pictures of the same size: "added along the motion" (a real body is a point in the ring) and "added without
+    motion" (the same visits added in place: nothing in the ring). The S/N measured inside the ring is printed on both."""
+    t0 = time.time()
+    g = meta["grid"]
+    step, n = float(g["step_arcsec"]), int(g["n"])
+    frames_meta = meta.get("frames") or []
+    places = track_places(find, frames_meta)
+    if len(places) < 2:
+        raise ClipUnavailable("the track has no measured places in the visits")
+    raw = store.read_part(FILM, key, "film.sxp")
+    if raw is None:
+        raise ClipUnavailable("the visits of this pass are not built here")
+    _, arr = decode(raw)
+    motion = arr["motion"]
+    w = max(16, round(TRACK_WINDOW_ARCMIN * 60.0 / step) // 2 * 2 + 1)
+    mx = float(np.mean([p[0] for p in places.values()]))
+    my = float(np.mean([p[1] for p in places.values()]))
+    along, still = np.zeros((w, w)), np.zeros((w, w))
+    n_along, n_still = np.zeros((w, w)), np.zeros((w, w))
+    used = []
+    for i, (x, y) in sorted(places.items()):
+        if not (0 <= x < n and 0 <= y < n):
+            continue
+        for acc, cnt, cx, cy in ((along, n_along, x, y), (still, n_still, mx, my)):
+            cut = _shifted(motion[i], cx, cy, w)
+            ok = cut > 0
+            acc += np.where(ok, (cut.astype(np.float64) - 1.0) / 254.0 * 20.0 - 5.0, 0.0)
+            cnt += ok
+        used.append(i)
+    if not used:
+        raise ClipUnavailable("no visit of the track holds its place")
+    c = (w - 1) / 2.0
+    ring_px = RING_ARCSEC / step
+    pics, sns = [], []
+    for acc, cnt in ((along, n_along), (still, n_still)):
+        sn = np.where(cnt > 0, acc / np.sqrt(np.maximum(cnt, 1)), np.nan)
+        sns.append(ring_sn(sn, c, c, max(1.5, MEASURE_ARCSEC / step), speckled=True))
+        grey = np.clip((np.nan_to_num(sn, nan=0.0) - TRACK_SN_DARK) / (TRACK_SN_FULL - TRACK_SN_DARK), 0.0, 1.0) ** 0.8
+        pics.append(np.repeat(grey[..., None], 3, axis=-1))
+    d0, d1 = _mjd_date(float(frames_meta[used[0]]["mjd"])), _mjd_date(float(frames_meta[used[-1]]["mjd"]))
+    dates = f"{len(used)} visits, {d0.day} {d0:%b} - {d1.day} {d1:%b %Y}"
+    motion_txt = motion_of(find)
+    frames = []
+    for pic, title, sn_here in zip(pics, ("added along the motion", "added without motion"), sns, strict=True):
+        arrow = (motion_txt[0], motion_txt[1]) if motion_txt is not None and title.endswith("the motion") else None
+        im = draw_frame(pic, (c, c), ring_px, "", "", size, arrow, False)
+        d = ImageDraw.Draw(im)
+        _text(d, (8, size - 42), title, 14, "ls")  # the top corners of a card carry its badges: the text stays at the bottom
+        _text(d, (8, size - 25), f"S/N {sn_here:.1f} in the ring", 13, "ls")
+        _text(d, (8, size - 8), dates, 12, "ls")
+        _text(d, (size - 8, size - 8), f"{TRACK_WINDOW_ARCMIN:g} arcmin", 12, "rs")
+        frames.append(im)
+    buf = io.BytesIO()
+    frames[0].save(
+        buf, "WEBP", save_all=True, append_images=frames[1:], duration=[TRACK_FRAME_MS, TRACK_FRAME_MS], loop=0, quality=QUALITY, method=4
+    )
+    data = buf.getvalue()
+    info = {
+        "version": VERSION,
+        "id": find["id"],
+        "kind": find.get("kind"),
+        "visits_product": key,
+        "blink": ["added along the motion", "added without motion"],
+        "visits_added": len(used),
+        "step_arcsec": step,
+        "window_arcmin": TRACK_WINDOW_ARCMIN,
+        "size": size,
+        "frame_ms": TRACK_FRAME_MS,
+        "frames": [{"label": "added along the motion", "sn": round(sns[0], 1)}, {"label": "added without motion", "sn": round(sns[1], 1)}],
+        "visible_sn": round(sns[0], 1),
+        "still_sn": round(sns[1], 1),
+        # visible as a MOVER: something in the ring along the motion, and clearly more than the same visits give added in place
+        # (light that is as strong without the motion stands still: a star's residual, not a body)
+        "visible": bool(sns[0] >= VISIBLE_SN and sns[0] - sns[1] >= TRACK_MIN_GAIN),
+        "bytes": len(data),
+        "render_s": round(time.time() - t0, 3),
+        "made": time.time(),
+    }
+    return data, info
 
 
 def render_film(find: dict[str, Any], store: Store, key: str, meta: dict[str, Any], size: int = SIZE) -> tuple[bytes, dict[str, Any]]:
@@ -562,6 +711,80 @@ def render_film(find: dict[str, Any], store: Store, key: str, meta: dict[str, An
     return data, info
 
 
+# ---------------------------------------------------------------- a Planet X peak: one pass, and the sum along the orbit
+
+DISTANT = "distant"
+PEAK_FRAME_MS = 1400
+PEAK_SN_FULL = 12.0  # the product keeps S/N × 255 / 12: this S/N is white
+PEAK_SN_DARK = 3.0  # below this S/N the sum is noise: black
+
+
+def render_peak(
+    find: dict[str, Any], src: Source, sum_meta: dict[str, Any], sum_bin: bytes, size: int = SIZE
+) -> tuple[bytes, dict[str, Any]]:
+    """The Blink of a Planet X peak: "one pass" (the stacked pass of the search's date: the ring is empty, the body is below what one
+    pass shows) and "sum along the orbit" (the best-S/N map of the distance search that covers the place: the visits of that pass
+    shifted along every tried orbit and added; the peak stands in the ring). The same window of the sky in both, north up, east left."""
+    from engine import distant as edist
+
+    t0 = time.time()
+    data, info = render(find, src, WINDOW_ARCMIN, size, True, False, None)
+    stack = Image.open(io.BytesIO(data))
+    peak = (find.get("data") or {}).get("peak") or {}
+    ref = float(peak.get("ref_mjd") or 0.0)
+    passes = info["frames"]
+    k = min(range(len(passes)), key=lambda i: abs(0.5 * (passes[i]["mjd0"] + passes[i]["mjd1"]) - ref)) if ref else 0
+    stack.seek(k)
+    one = stack.convert("RGB").copy()
+    d1 = ImageDraw.Draw(one)
+    _text(d1, (8, size - 26), "one pass", 14, "ls")
+    _text(d1, (8, size - 8), passes[k]["label"], 13, "ls")
+    _text(d1, (size - 8, size - 8), f"{WINDOW_ARCMIN:g} arcmin", 12, "rs")
+    # the sum: the best-S/N map, N × N, pixel (x, y) at u = (x - N/2) S to the west and v = (y - N/2) S to the north of the centre
+    sl = sum_meta["slider"]
+    n, step = int(sl["n"]), float(sl["step"])
+    nvis = len(sl["t"])
+    best = np.frombuffer(sum_bin, np.uint8, count=n * n, offset=nvis * n * n).reshape(n, n)
+    pr = sum_meta["params"]
+    tan = edist.Tangent(float(pr["ra"]), float(pr["dec"]))  # type: ignore[no-untyped-call]
+    u, v = tan.sky2uv(float(find["ra"]), float(find["dec"]))  # type: ignore[no-untyped-call]
+    cx, cy = float(u) / step + n / 2.0, float(v) / step + n / 2.0
+    w = round(WINDOW_ARCMIN * 60.0 / step)
+    x0, y0 = round(cx - w / 2.0), round(cy - w / 2.0)
+    cut = _window(best, x0, y0, w, 0)[::-1]  # row 0 to the north
+    sn_here = float(_window(best, round(cx) - 2, round(cy) - 2, 5, 0).max()) * PEAK_SN_FULL / 255.0
+    sn_map = cut.astype(np.float64) * PEAK_SN_FULL / 255.0
+    grey = np.clip((sn_map - PEAK_SN_DARK) / (PEAK_SN_FULL - PEAK_SN_DARK), 0.0, 1.0) ** 0.8  # noise (under 3 sigma) dark, 12 sigma white
+    pic = np.repeat(grey[..., None], 3, axis=-1)
+    ring = (cx - x0, (w - 1) - (cy - y0))
+    summed = draw_frame(pic, ring, RING_ARCSEC / step, "", "", size, None, False)
+    d2 = ImageDraw.Draw(summed)
+    _text(d2, (8, size - 26), "sum along the orbit", 14, "ls")
+    sn = peak.get("sn")
+    _text(d2, (8, size - 8), f"S/N {float(sn):.1f} in the search" if sn is not None else f"S/N {sn_here:.1f} here", 13, "ls")
+    _text(d2, (size - 8, size - 8), f"{WINDOW_ARCMIN:g} arcmin", 12, "rs")
+    buf = io.BytesIO()
+    # the picture that shows the object comes first: the first impression of a card is never an empty ring
+    summed.save(buf, "WEBP", save_all=True, append_images=[one], duration=[PEAK_FRAME_MS, PEAK_FRAME_MS], loop=0, quality=QUALITY, method=4)
+    out = buf.getvalue()
+    info.update(
+        {
+            "blink": ["sum along the orbit", "one pass"],
+            "pass": passes[k],
+            "sum_product": sum_meta.get("key"),
+            "sum_params": pr,
+            "sum_sn_at_place": round(sn_here, 1),
+            "visible_sn": round(sn_here, 1),
+            "visible": bool(sn_here >= VISIBLE_SN),
+            "frames": [{"label": "sum along the orbit"}, passes[k]],
+            "frame_ms": PEAK_FRAME_MS,
+            "bytes": len(out),
+            "render_s": round(time.time() - t0, 3),
+        }
+    )
+    return out, info
+
+
 # ---------------------------------------------------------------- the clips of the service
 
 
@@ -583,6 +806,7 @@ class Clips:
         self.building: dict[str, asyncio.Task[str | None]] = {}
         self.failed: dict[str, str] = {}
         self._fields: tuple[float, list[Source]] = (0.0, [])
+        self._seen: dict[str, tuple[bool | None, float | None]] = {}
         self._visits: tuple[float, list[tuple[str, dict[str, Any], dict[str, Any]]]] = (0.0, [])
         self.pre: dict[str, Any] = {"running": False, "rounds": 0, "made": 0, "left": None, "now": None}
         self._pre_task: asyncio.Task[None] | None = None
@@ -668,6 +892,51 @@ class Clips:
                 return key, meta
         return None
 
+    def sum_for(self, find: dict[str, Any]) -> tuple[dict[str, Any], bytes] | None:
+        """The distance search (one pass) whose map holds a Planet X peak: its field covers the place, its pass is the peak's, its
+        distances include the peak's; the smallest field first. (meta with its key, the binary part) or None."""
+        peak = (find.get("data") or {}).get("peak") or {}
+        ref, dist = peak.get("ref_mjd"), peak.get("d")
+        best: tuple[float, str] | None = None
+        for row in self.store.listing((DISTANT,)):
+            p = row["params"]
+            if not row["complete"] or list(p.get("det") or []) != [1, 2, 3]:
+                continue
+            half = float(p.get("fov", 0.0)) / 120.0 - WINDOW_ARCMIN / 120.0
+            dra = ((float(find["ra"]) - float(p["ra"]) + 540.0) % 360.0 - 180.0) * math.cos(math.radians(float(find["dec"])))
+            if abs(dra) > half or abs(float(find["dec"]) - float(p["dec"])) > half:
+                continue
+            if ref is not None and p.get("mjd") is not None and abs(float(p["mjd"]) - float(ref)) > 40.0:
+                continue
+            if dist is not None and not (float(p.get("dmin", 0)) <= float(dist) <= float(p.get("dmax", 1e9))):
+                continue
+            if best is None or float(p["fov"]) < best[0]:
+                best = (float(p["fov"]), row["key"])
+        if best is None:
+            return None
+        meta = self.store.read_meta(DISTANT, best[1])
+        blob = self.store.read_part(DISTANT, best[1], "bin")
+        if not meta or blob is None or meta.get("status") != "ok" or not meta.get("slider"):
+            return None
+        return {**meta, "key": best[1]}, blob
+
+    def seen(self, find: dict[str, Any]) -> tuple[bool | None, float | None]:
+        """Whether the object is visible in its own picture: (True / False, the S/N in the ring), or (None, None) while the picture is
+        not made. A find whose picture cannot be made at all (nothing covers the place, a track whose visits are not kept) is not
+        visible."""
+        fid = str(find["id"])
+        hit = self._seen.get(fid)
+        if hit is not None:
+            return hit
+        if self.ready(fid):
+            i = self.info(fid) or {}
+            hit = (bool(i["visible"]), float(i.get("visible_sn") or 0.0)) if "visible" in i else (None, None)
+            self._seen[fid] = hit
+            return hit
+        if self.rank(find) == 2:
+            return False, None
+        return None, None
+
     def rank(self, find: dict[str, Any]) -> int:
         """For the order of the page: 0 the clip is ready, 1 it can be made, 2 it cannot (nothing covers the place; a track whose visits
         are not kept)."""
@@ -750,7 +1019,16 @@ class Clips:
         async with self.gate:
             if not p.is_file():
                 try:
-                    data, info = await asyncio.to_thread(render, find, src)
+                    summed = await asyncio.to_thread(self.sum_for, find) if find.get("kind") == "peak" else None
+                    if summed is not None:
+                        data, info = await asyncio.to_thread(render_peak, find, src, summed[0], summed[1])
+                    else:
+                        data, info = await asyncio.to_thread(render, find, src)
+                        if find.get("kind") == "peak":
+                            # a peak exists only in the sum along its orbit: light at its place in ONE pass is a source that
+                            # stands still (a star's residual), so without the sum the peak is not visible in any picture made here
+                            info["note"] = "the sum along the orbit is not kept here: the passes alone are shown"
+                            info["pass_sn"], info["visible_sn"], info["visible"] = info.get("visible_sn"), None, False
                 except ClipUnavailable as e:
                     self.failed[fid] = str(e)
                     raise
@@ -807,7 +1085,7 @@ class Clips:
         async with self.gate:
             if not p.is_file():
                 try:
-                    data, info = await asyncio.to_thread(render_film, find, self.store, hit[0], hit[1])
+                    data, info = await asyncio.to_thread(render_track, find, self.store, hit[0], hit[1])
                 except ClipUnavailable as e:
                     self.failed[fid] = str(e)
                     raise
@@ -835,6 +1113,11 @@ class Clips:
         out: dict[str, Any] = {"url": f"/api/findings/{fid}/clip.webp?v={VERSION}", "state": st, "version": VERSION}
         if st != "ready" and self.source_for(find) is not None:
             out["still"] = f"/api/findings/{fid}/still.webp?v={VERSION}"  # a picture of the place while the clip is not there
+        if find.get("kind") == "peak" and st == "ready":
+            i0 = self.info(fid) or {}
+            out["blink"] = i0.get("blink")  # ["one pass", "sum along the orbit"], or None when the sum is not kept here
+            if i0.get("note"):
+                out["note"] = i0["note"]
         if st == "ready" and detail:
             i = self.info(fid) or {}
             out.update({"frames": len(i.get("frames") or []), "bytes": i.get("bytes"), "window_arcmin": i.get("window_arcmin")})

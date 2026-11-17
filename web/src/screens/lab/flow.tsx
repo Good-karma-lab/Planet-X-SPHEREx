@@ -6,7 +6,8 @@ import { addMark, allMarks, fieldKey, MARK_LEVELS, marksSyncNote, onMarks, remov
 import { drawKnown, followKnown, KNOWN_OFF, knownStatus, knownUrl, matchKnown, type KnownDrawEnv, type KnownMatch, type KnownState } from './known';
 import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
-import { ChecksList, checksStatus, useChecks, useLabTask } from './task';
+import { awardLine, ChecksList, checksStatus, declaredWord, declareSubmit, followDeclared, useChecks, useLabTask } from './task';
+import { motionOf } from './known';
 import { placeAt } from './known';
 import './flow.css';
 
@@ -367,20 +368,71 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       setInvLine('Saved to the investigation');
     } else setInvLine(r.status === 401 ? 'Sign in to save' : 'Not saved: the service did not answer');
   };
-  const runChecks = () => {
+  const followStop = useRef<() => void>(() => {});
+  useEffect(() => () => followStop.current(), [a.ra, a.dec, a.fov]);
+  // "Check and submit", said once: every check starts, the investigation is made if there is none, the submit is declared; the
+  // slow checks go on on the server, which submits by itself when all have answered without a fail. The user may leave.
+  const runChecks = async () => {
     setShowChecks(true);
+    setInvLine('starting the checks…');
     const real = marksHere.filter((m) => m.level !== 'artefact');
     const at = (open ? real.find((m) => m.id === open) : null) ?? real[0];
-    checks.start(fieldKey(a.ra, a.dec, a.fov), at?.ra ?? a.ra, at?.dec ?? a.dec, real);
+    const job = await checks.start(fieldKey(a.ra, a.dec, a.fov), at?.ra ?? a.ra, at?.dec ?? a.dec, real);
+    if (!job) return setInvLine('Checks did not answer');
+    let id = inv;
+    if (!id) {
+      const r = await call('/api/me/investigations', {
+        title: at?.label || `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`,
+        finding_id: a.params['finding'] ?? null,
+        mark_ids: real.map((m) => m.id),
+        notes: invNote ? [{ text: invNote }] : [],
+        frames: [{ ref: location.hash.slice(0, 600), title: `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)} · ${a.fov}′`, note: '', thumb: a.thumb() }],
+        checks_job: job,
+      });
+      id = typeof r.json?.['id'] === 'string' ? (r.json['id'] as string) : null;
+      if (!id) return setInvLine(r.status === 401 ? 'Sign in to submit' : 'Not saved: the service did not answer');
+      setInv(id);
+    }
+    const d = await declareSubmit(id, job);
+    setInvLine(declaredWord(d.inv, d.status));
+    followStop.current();
+    if (d.inv?.state === 'checking') followStop.current = followDeclared(id, (x) => setInvLine(declaredWord(x)));
   };
-  const submit = async () => {
-    if (!checks.view.job) return;
-    if (!inv) return setInvLine('Save to an investigation first');
-    const r = await call('/api/findings/submit', { investigation_id: inv, checks_job: checks.view.job });
-    const fid = r.json?.['finding_id'];
-    setInvLine(typeof fid === 'string' ? `Submitted: ${fid}` : r.status === 401 ? 'Sign in to submit' : 'Submit did not answer');
-  };
-  const taskPanel = useLabTask({ params: a.params, open: a.open, ra: a.ra, dec: a.dec, fieldKey: a.grid ? fieldKey(a.ra, a.dec, a.fov) : null, marksHere });
+  // "Measurer": a ruler rate on an object with a catalogue motion goes to the investigation, once per measurement
+  const measured = useRef('');
+  useEffect(() => {
+    if (!inv || ruler.length !== 2 || known.state !== 'ok') return;
+    const r = rulerOf(ruler[0]!, ruler[1]!);
+    if (r.rate == null || r.dt == null || Math.abs(r.dt) < 0.1) return;
+    const end = ruler[1]!;
+    let best: { name: string; rate: number; d: number } | null = null;
+    for (const o of known.objects) {
+      if (o.source === 'jpl' || end.epoch == null) continue;
+      const at = placeAt(o, end.epoch);
+      const mo = motionOf(o);
+      if (!at || !mo || mo.rate < 0.05) continue;
+      const d = Math.hypot((((at[0] - end.ra + 540) % 360) - 180) * Math.cos((end.dec * Math.PI) / 180), at[1] - end.dec) * 3600;
+      if (d < 8 && (!best || d < best.d)) best = { name: o.name, rate: mo.rate, d };
+    }
+    const k = best ? `${inv}:${best.name}:${r.rate.toFixed(2)}` : '';
+    if (!best || measured.current === k) return;
+    measured.current = k;
+    void fetch(`/api/me/investigations/${encodeURIComponent(inv)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ruler: { rate: Number(r.rate.toFixed(3)), catalogue_rate: Number(best.rate.toFixed(3)), object: best.name } }),
+    }).catch(() => {});
+  }, [inv, ruler, known.state]);
+  const taskPanel = useLabTask({
+    params: a.params,
+    open: a.open,
+    ra: a.ra,
+    dec: a.dec,
+    fieldKey: a.grid ? fieldKey(a.ra, a.dec, a.fov) : null,
+    marksHere,
+    pass: a.pass,
+    passesTotal: a.passes.length,
+  });
 
   const cur = open ? (marks.find((m) => m.id === open) ?? null) : null;
   let floats: ComponentChildren = null;
@@ -391,7 +443,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     const y = v * a.side;
     // right of the mark, else left; below it, else above: always inside the picture
     const left = x + 14 + W > a.side - 6 ? Math.max(6, x - 14 - W) : x + 14;
-    const top = Math.max(50, Math.min(a.side - 190, y - 20));
+    const top = Math.max(50, Math.min(a.side - 262, y - 20)); // clear of the status line and the band chips at the bottom
     floats = (
       <div class="float markedit" style={{ left: `${left}px`, top: `${top}px`, width: `${W}px` }} data-testid="mark-editor">
         <div class="me-row">
@@ -531,17 +583,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         <button
           class="mini"
           disabled={checks.view.state === 'running'}
-          onClick={runChecks}
+          onClick={() => void runChecks()}
           title="Check and submit: every check runs first; the submit opens when all have answered and none failed"
           data-testid="tool-check"
         >
           Check and submit
         </button>
-        {checks.view.can_submit && (
-          <button class="mini on" onClick={() => void submit()} data-testid="tool-submit">
-            Submit
-          </button>
-        )}
       </div>
       <div class="ft-line" data-testid="tools-line">
         {invLine || (showChecks ? checksStatus(checks.view) : '')}
@@ -570,6 +617,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ? `Ruler: ${rulerWord(rulerOf(ruler[0]!, ruler[1]!))}`
         : '';
   const status = [knownStatus(known, counts), tool === 'mark' ? 'Mark: click a place' : '', rulerStatus, marksSyncNote()].filter(Boolean).join(' · ');
+  // what a closed task earned stays on the line for a few seconds
+  const [awardNow, setAwardNow] = useState('');
+  useEffect(() => {
+    const t = setInterval(() => setAwardNow(awardLine()), 1000); // a new render only when the line changes
+    return () => clearInterval(t);
+  }, []);
 
   // the flow's own status line, over the picture above the date (nothing else on the page moves when it appears)
   const all = (
@@ -584,7 +637,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       ptr.current = p;
     },
     click,
-    status,
+    status: [status, awardNow].filter(Boolean).join(' · '),
     floats: all,
     tools,
     tool,

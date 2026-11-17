@@ -1390,6 +1390,8 @@ PROMISE_BASE = {"browndwarf": 70.0, "peak": 65.0, "mover": 60.0, "film": 50.0, "
 PROMISE_STATUS = {"unexplained": 1.0, "unchecked": 0.8, "known": 0.25}  # anything else (a residual, a galaxy, a halo, below the bar): 0.05
 PROMISE_SIGMA_MAX = 20.0
 PROMISE_UNSEEN = 5.0
+PROMISE_NOT_VISIBLE = 0.05  # the ring is empty in every picture that can be made (under 3 sigma): the promise is cut to a twentieth
+PROMISE_LESS_CERTAIN = 15  # a time-lapse track the search itself marks "less certain" stays below every verified, visible find
 PROMISING_KINDS = (
     "mover",
     "browndwarf",
@@ -1472,9 +1474,25 @@ def flow_fields(f: dict[str, Any], view: dict[str, Any] | None) -> dict[str, Any
     }
 
 
+_NOTES: dict[str, str] | None = None
+
+
+def machine_notes() -> dict[str, str]:
+    """{find id: note}: what the review of the rendered clips saw (data/finding_notes.json). A note sets no status: it only lets the page
+    show together the finds that look like an artefact, for a person to judge."""
+    global _NOTES
+    if _NOTES is None:
+        try:
+            raw = json.loads((Path(__file__).resolve().parent.parent / "data" / "finding_notes.json").read_text(encoding="utf-8"))
+            _NOTES = {str(k): str(v) for k, v in (raw.get("notes") or {}).items()}
+        except (OSError, ValueError):
+            _NOTES = {}
+    return _NOTES
+
+
 LITE_KEYS = (
     "id", "kind", "place", "fov", "ra", "dec", "rate", "snr", "score", "chance", "status", "verdict", "identity", "updated",
-    "stage", "promise", "viewers", "credit", "clip",
+    "stage", "promise", "viewers", "credit", "clip", "note", "visible", "visible_sn",
 )  # fmt: skip
 
 
@@ -1505,6 +1523,10 @@ def query(
     waiting: bool = False,
     kinds: tuple[str, ...] | None = None,
     clip_rank: Callable[[dict[str, Any]], int] | None = None,
+    only: frozenset[str] | None = None,
+    noted: bool = False,
+    seen: Callable[[dict[str, Any]], tuple[bool | None, float | None]] | None = None,
+    visibility: str | None = None,
 ) -> dict[str, Any]:
     """The finds with what the catalogues said. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
     stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
@@ -1548,6 +1570,13 @@ def query(
         f["idents"] = ids_
         f["verdict"] = verdict_of(f, ids_, st)
         f.update(flow_fields(f, views.get(f["id"])))
+        f["note"] = machine_notes().get(f["id"])
+        # is the object visible in its own picture (the peak inside the ring against the picture's noise)? None: not measured yet
+        f["visible"], f["visible_sn"] = seen(f) if seen is not None else (None, None)
+        if f["visible"] is False:
+            f["promise"] = round(f["promise"] * PROMISE_NOT_VISIBLE)  # below everything the eye can see in its ring
+        elif (f["data"] or {}).get("less_certain"):
+            f["promise"] = min(f["promise"], PROMISE_LESS_CERTAIN)  # the search itself calls the track less certain
         items.append(f)
     counts: dict[str, dict[str, int]] = {
         k: {"all": 0, "unexplained": 0, "unchecked": 0, "known": 0, "residual": 0, "galaxy": 0, "below": 0, "halo": 0, "leads": 0}
@@ -1576,14 +1605,42 @@ def query(
         and (not kinds or f["kind"] in kinds)
         and (not stage or f["stage"] == stage)
         and (not waiting or (f["viewers"] == 0 and f["stage"] == "new"))
+        and (only is None or f["id"] in only)
+        and (not noted or f["note"] is not None)
     ]
+
+    def vis_of(f: dict[str, Any]) -> str:
+        return "visible" if f["visible"] else "not_visible" if f["visible"] is False else "not_measured"
+
+    by_kind: dict[str, dict[str, int]] = {}
+    for f in items:
+        if f["status"] not in HIDDEN:
+            t = by_kind.setdefault(f["kind"], {"visible": 0, "not_visible": 0, "not_measured": 0})
+            t[vis_of(f)] += 1
+    in_view = {"visible": 0, "not_visible": 0, "not_measured": 0}
+    for f in sel:
+        in_view[vis_of(f)] += 1
+    if visibility == "seen":
+        sel = [f for f in sel if f["visible"]]
+    elif visibility == "unseen":
+        sel = [f for f in sel if not f["visible"]]
     rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6}
     sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
     if sort == "promise":
         # a find that can have no clip (a track whose visits are not kept, a place no field covers) goes below every find that can;
         # within equal promise the finds whose clip is ready come first: the first screen shows pictures, not empty cards
         cr = {f["id"]: clip_rank(f) for f in sel} if clip_rank is not None else {}
-        sel.sort(key=lambda f: (cr.get(f["id"], 0) == 2, -f["promise"], cr.get(f["id"], 0), -(f["score"] or f["snr"] or 0.0), f["id"]))
+        # ... and a find that carries a machine note (it looks like an artefact) goes below every clean find
+        sel.sort(
+            key=lambda f: (
+                cr.get(f["id"], 0) == 2,
+                f["note"] is not None,
+                -f["promise"],
+                cr.get(f["id"], 0),
+                -(f["score"] or f["snr"] or 0.0),
+                f["id"],
+            )
+        )
     shown = [f for f in items if f["status"] not in HIDDEN]
     stages = {s: sum(1 for f in items if f["stage"] == s) for s in STAGES}
     pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
@@ -1600,6 +1657,8 @@ def query(
         "waiting_promising": sum(1 for f in shown if f["viewers"] == 0 and f["stage"] == "new" and f["kind"] in PROMISING_KINDS),
         "promising": sum(1 for f in shown if f["kind"] in PROMISING_KINDS),
         "promising_kinds": list(PROMISING_KINDS),
+        "visibility": {"by_kind": by_kind, "in_view": in_view},
+        "noted": sum(1 for f in shown if f["note"] is not None),
         "identification": {
             "pending": pending,
             "unavailable": unavailable,
