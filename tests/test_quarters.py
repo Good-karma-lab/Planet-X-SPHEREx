@@ -8,6 +8,7 @@ import threading
 from types import SimpleNamespace
 from typing import Any
 
+import pytest
 from fastapi import FastAPI
 
 from service.jobs.scheduler import Priority
@@ -117,3 +118,25 @@ def test_a_build_asked_from_a_worker_thread_is_submitted_on_the_loop() -> None:
 
     asyncio.run(main())
     assert on == loop_thread  # submitted on the loop's own thread, not the worker's
+
+
+def test_people_are_spread_and_a_newcomer_never_gets_a_famous_square(
+    site: tuple[FastAPI, _State, Any], monkeypatch: pytest.MonkeyPatch
+) -> None:  # noqa: F811
+    """Two guests do not all get the same square: a random one of the first few (built ones first); and a newcomer's first square is
+    never one a famous test target stands in."""
+    import random
+
+    from service import routes_tasks
+
+    app, st, _mail = site
+    _fake_grid(st)
+    fake(st, set())
+    monkeypatch.setattr(routes_tasks, "famous_cells", lambda: {"294-0148"})
+    seen = set()
+    for seed in range(12):
+        monkeypatch.setattr(routes_tasks, "RNG", random.Random(seed))
+        t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+        seen.add((t["cell_id"], t["quarter"]))
+        assert t["cell_id"] != "294-0148"  # the famous square is not a newcomer's
+    assert len(seen) > 1  # spread

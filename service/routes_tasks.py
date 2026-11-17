@@ -19,9 +19,12 @@ Where the choices come from:
 from __future__ import annotations
 
 import importlib
+import json
 import math
+import random
 import re
 import sqlite3
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -141,6 +144,33 @@ def open_quarters(viewed: dict[str, int], taken: set[str]) -> list[str]:
 
 
 READY_SCAN = 40  # quarters looked at for a built one before a cold one is given
+SPREAD = 8  # people are given a random one of the first SPREAD quarters (built ones first), so not everyone gets the same square
+RNG = random.Random()
+
+
+_FAMOUS: set[str] | None = None
+
+
+def famous_cells() -> set[str]:
+    """The squares the five test targets stand in at 2025.9 (Barnard's Star, ε Indi B, WISE 0855, RW Aur, R Dra): not a newcomer's
+    first square."""
+    global _FAMOUS
+    if _FAMOUS is None:
+        g = _grid()
+        out: set[str] = set()
+        try:
+            data = json.loads((Path(__file__).resolve().parent.parent / "data" / "targets.json").read_text(encoding="utf-8"))
+            for t in data["targets"]:
+                dt = 2025.9 - float(t.get("epoch", 2000.0))
+                cosd = max(math.cos(math.radians(float(t["dec_deg"]))), 1e-6)
+                ra = float(t["ra_deg"]) + float(t.get("pmra_mas_yr") or 0) * dt / 3.6e6 / cosd
+                dec = float(t["dec_deg"]) + float(t.get("pmdec_mas_yr") or 0) * dt / 3.6e6
+                if g is not None:
+                    out.add(g.cell_at(ra % 360.0, dec).id)
+        except (OSError, ValueError, KeyError):
+            pass
+        _FAMOUS = out
+    return _FAMOUS
 
 
 def quarters_looked(acc: accounts.Accounts, user_id: str) -> dict[str, set[str]]:
@@ -361,11 +391,24 @@ def make_tasks_router(st: Any) -> APIRouter:
             ),
             key=lambda x: x[:3],
         )
-        for _, _, _, r, q in order[:READY_SCAN]:
-            if qs.ready(r["cell_id"], q):
-                return {**r, "quarter": q, "fov": QUARTER_FOV, **quarter_place(r["cell_id"], q)}
-        row, q = best[2], best[3]
+        # a newcomer's square is never one a famous test target dominates ("find something new"); and people are spread over the
+        # stock: a random one of the first SPREAD built quarters (else of the first SPREAD open ones), not everyone the same
+        if newcomer(acc, user_id):
+            order = [o for o in order if o[3]["cell_id"] not in famous_cells()] or order
+        ready = [(r, q) for _, _, _, r, q in order[:READY_SCAN] if qs.ready(r["cell_id"], q)]
+        pool = ready[:SPREAD] or [(r, q) for _, _, _, r, q in order[:SPREAD]]
+        if not pool:
+            row, q = best[2], best[3]
+            return {**row, "quarter": q, "fov": QUARTER_FOV, **quarter_place(row["cell_id"], q)}
+        row, q = RNG.choice(pool)
         return {**row, "quarter": q, "fov": QUARTER_FOV, **quarter_place(row["cell_id"], q)}
+
+    def newcomer(acc: accounts.Accounts, user_id: str | None) -> bool:
+        """A guest, or a person who has not had a square task yet."""
+        if not user_id:
+            return True
+        r = acc.db._conn().execute("SELECT 1 FROM acc_tasks WHERE user_id=? AND kind='cell' LIMIT 1", (user_id,)).fetchone()
+        return r is None
 
     def next_finding(acc: accounts.Accounts, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
         rows = findings()

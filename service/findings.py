@@ -1496,8 +1496,14 @@ def machine_notes() -> dict[str, str]:
     return _NOTES
 
 
+def rate_unit(kind: str) -> str:
+    """The unit of a find's `rate`: a time-lapse track moves within one pass (arcseconds an hour); everything else between passes
+    (arcseconds a year). The number alone was read as /yr in the lab and /h in Findings for the same track."""
+    return "″/h" if kind == "film" else "″/yr"
+
+
 LITE_KEYS = (
-    "id", "kind", "place", "fov", "ra", "dec", "rate", "snr", "score", "chance", "status", "verdict", "identity", "updated",
+    "id", "kind", "place", "fov", "ra", "dec", "rate", "rate_unit", "snr", "score", "chance", "status", "verdict", "identity", "updated",
     "stage", "promise", "viewers", "credit", "clip", "note", "visible", "visible_sn",
 )  # fmt: skip
 
@@ -1553,7 +1559,7 @@ def query(
     for r in rows:
         f = {
             "id": r["id"], "kind": r["kind"], "place": r["place"], "fov": r["fov"], "ra": r["ra"], "dec": r["dec"], "epoch": r["epoch"],
-            "rate": r["rate"], "snr": r["snr"], "score": r["score"], "chance": r["chance"],
+            "rate": r["rate"], "rate_unit": rate_unit(r["kind"]), "snr": r["snr"], "score": r["score"], "chance": r["chance"],
             "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "updated": r["updated"],
             "versions": json.loads(r["versions"] or "{}"), **rel[r["id"]],
         }  # fmt: skip

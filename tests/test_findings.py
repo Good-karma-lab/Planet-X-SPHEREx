@@ -620,3 +620,10 @@ def test_a_find_people_raised_comes_first(tmp_path: Path) -> None:
     known = next(f for f in base if f["status"] == "known")
     out2 = query(db, None, "all", None, 100, 0, sort="promise", raised={known["id"]: "candidate"})["finds"]
     assert "people_raised" not in next(f for f in out2 if f["id"] == known["id"])
+
+
+def test_every_find_says_the_unit_of_its_rate() -> None:
+    from service.findings import LITE_KEYS, rate_unit
+
+    assert rate_unit("film") == "″/h" and rate_unit("mover") == "″/yr" and rate_unit("browndwarf") == "″/yr"
+    assert "rate_unit" in LITE_KEYS
