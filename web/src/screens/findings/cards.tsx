@@ -276,6 +276,7 @@ export function Clip({ f }: { f: CardFind }) {
           onError={(e) => ((e.currentTarget as HTMLImageElement).style.display = 'none')}
         />
       )}
+      {state === 'idle' && near && url && <span class="mono-s">measuring…</span>}
       {state === 'asking' && <span class="mono-s">rendering the time-lapse…</span>}
       {state === 'building' && <span class="mono-s">building the field of this time-lapse…</span>}
       {state === 'none' && <span class="mono-s">no time-lapse: {why}</span>}
