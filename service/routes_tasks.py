@@ -343,7 +343,9 @@ def make_tasks_router(st: Any) -> APIRouter:
         acc = accounts.get(st)
         wanted = [i for i in ids.split(",") if i][:500]
         out = agreement.get(st, acc.db).people_say(wanted)  # the one-click answers of before
-        out.update(people.get(st, acc.db).results(wanted))  # the question series
+        p = people.get(st, acc.db)
+        out.update(p.set_aside_results(wanted))  # artefact marks of two people (spec §5g)
+        out.update(p.results(wanted))  # the question series
         return {"results": out}
 
     @router.get("/api/tasks/brown-dwarf-queue")

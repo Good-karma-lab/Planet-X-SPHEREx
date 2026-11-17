@@ -29,7 +29,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from service import accounts
-from service.accounts import agreement, people
+from service.accounts import agreement, field_people, people
 from service.accounts import score as scoring
 from service.accounts import share as sharing
 from service.accounts import submit as auto
@@ -58,7 +58,11 @@ class MarkIn(BaseModel):
     dec: float = Field(ge=-90, le=90)
     pass_: int | None = Field(None, alias="pass", ge=0, le=100000)
     label: str = Field("", max_length=80)
-    level: Literal["suspicious", "interesting", "artefact"]
+    level: Literal["suspicious", "interesting", "artefact"] | None = None  # the mark's level of before; from `kind` when not given
+    # spec §5g: the kind of the mark (one tap after clicking a point), what an artefact looks like, the exposures it lives in
+    kind: Literal["moves", "not_in_catalogues", "artefact", "odd"] | None = None
+    look: Literal["blinks", "glare", "spike", "edge", "hot_dot"] | None = None
+    exposures: list[str] = Field(default_factory=list, max_length=50)
     note: str = Field("", max_length=2000)
     created: str | None = Field(None, max_length=40)
     mjd: float | None = Field(None, ge=48000.0, le=90000.0)  # the date of the frame the mark was put on (the lab sends it)
@@ -294,11 +298,18 @@ def make_me_router(st: Any) -> APIRouter:
         return {"marks": acc.db.marks(u["id"], field_key)}
 
     @router.post("/api/me/marks")
-    def put_mark(body: MarkIn, request: Request) -> Any:
+    async def put_mark(body: MarkIn, request: Request) -> Any:
+        """Keep a mark; a mark of a kind acts (spec §5g): it moves → the checks; not in the catalogues → every catalogue again;
+        artefact → set aside with a second person; odd → the Talk of the place. What happened comes back as `effect`."""
         acc, u = me(request)
+        if body.kind == "odd" and not body.note.strip():
+            raise HTTPException(422, "say in a few words what is odd")
+        if body.kind != "artefact" and body.look is not None:
+            raise HTTPException(422, "what it looks like goes with an artefact mark")
         m = body.model_dump(by_alias=True)
         m["id"] = m["id"] or uuid.uuid4().hex
         m["created"] = m["created"] or _now()
+        m["level"] = m["level"] or ("artefact" if body.kind == "artefact" else "suspicious")
         try:
             out = acc.db.put_mark(u["id"], m)
         except LimitReachedError:
@@ -306,7 +317,16 @@ def make_me_router(st: Any) -> APIRouter:
         if out is None:
             raise HTTPException(409, "this mark id is taken")
         score_of(acc).mark_put(u["id"])
+        if body.kind:
+            out["effect"] = await field_people.get(st, acc.db).after_mark(u["id"], out)
         return out
+
+    @router.get("/api/field/{key}/people")
+    def field_layer(key: str, request: Request) -> Any:
+        """The layer "People's marks" (public): every person's marks on this field merged by place and kind, with counts and never
+        a name, and the people's answers on the machine finds here; what was said at a place only after you marked or answered there."""
+        u = accounts.get(st).current_user(request)
+        return field_people.get(st, accounts.get(st).db).field(key, u["id"] if u else None)
 
     @router.delete("/api/me/marks/{mark_id}", status_code=204)
     def delete_mark(mark_id: str, request: Request) -> Response:
@@ -411,7 +431,8 @@ def make_me_router(st: Any) -> APIRouter:
     @router.get("/api/people/counts")
     def counts() -> Any:
         """For the Method page: how often each answer was given, and the answers that go against a rule of the machine."""
-        return people.get(st, accounts.get(st).db).counts()
+        db = accounts.get(st).db
+        return {**people.get(st, db).counts(), "field": field_people.get(st, db).counts()}
 
     @router.post("/api/me/tasks/{task_id}/done")
     def done(task_id: str, body: DoneIn, request: Request) -> Any:

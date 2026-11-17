@@ -498,6 +498,19 @@ class People:
                                     "total": r["total"], "text": text, "at": iso(r["at"])}  # fmt: skip
         return out
 
+    def set_aside_results(self, finding_ids: list[str]) -> dict[str, dict[str, Any]]:
+        """Machine finds people set aside with their artefact marks (spec §5g): "people say: artefact, 2 of 2"."""
+        if not finding_ids:
+            return {}
+        q = f"SELECT finding_id, data, at FROM acc_people_actions WHERE action='set_aside' AND finding_id IN ({','.join('?' * len(finding_ids))})"
+        out = {}
+        for r in self.db._conn().execute(q, finding_ids):
+            d = json.loads(r["data"])
+            n, total = int(d.get("agree") or 2), int(d.get("total") or 2)
+            out[r["finding_id"]] = {"series": "marks", "kind": "artefact", "result": "artefact", "label": "Artefact", "agree": n, "total": total,
+                                    "look": d.get("look"), "set_aside": True, "text": f"people say: artefact, {n} of {total}", "at": iso(r["at"])}  # fmt: skip
+        return out
+
     # ----------------------------------------------------------------------------------------------- the other task kinds
 
     def flag(self, user_id: str, exposure: str, verdict: str, source: str, **where: Any) -> int:
@@ -587,7 +600,7 @@ class People:
             if not r["hidden"] or r["user_id"] == viewer
         ]
 
-    def add_comment(self, user_id: str, finding_id: str, text: str) -> dict[str, Any]:
+    def add_comment(self, user_id: str, finding_id: str, text: str, gap: bool = True) -> dict[str, Any]:
         text = re.sub(r"[ \t]+", " ", text.replace("\r", "")).strip()
         if not text:
             raise AnswerError("write something first")
@@ -601,7 +614,7 @@ class People:
             raise AnswerError(f"at most {COMMENT_LINKS} links in one comment")
         c = self.db._conn()
         last = c.execute("SELECT MAX(at) FROM acc_comments WHERE user_id=?", (user_id,)).fetchone()[0]
-        if last is not None and time.time() - float(last) < COMMENT_GAP_S:
+        if gap and last is not None and time.time() - float(last) < COMMENT_GAP_S:
             raise AnswerError("wait a few seconds before the next comment")
         cur = c.execute("INSERT INTO acc_comments(finding_id,user_id,text,at) VALUES(?,?,?,?)", (finding_id, user_id, text, time.time()))
         return next(x for x in self.comments(finding_id, user_id) if x["id"] == cur.lastrowid)
