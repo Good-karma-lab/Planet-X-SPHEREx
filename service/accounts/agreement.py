@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """The task kinds whose answers are judged (product spec §5b), next to "Look through a square" and "Check a machine finding":
 
   moves    "The machine says this moves. Does it?"   It moves · It stands still · It is an artefact · Can't tell
@@ -5,6 +6,8 @@
            mover does move); It stands still and It is an artefact ↔ artefact (the stage does not tell the two apart).
   red      "Why is it red?"       Cold brown dwarf · Dusty or reddened star · Galaxy or extended · Artefact · Can't tell
   anomaly  "Is this feature real?"   Real feature · Detector edge or ghost · Cosmic ray or one bad exposure · Can't tell
+           the person is never asked for the class: the task carries a short tree of plain questions (TREES), the answer is
+           the path through it, and `class_of` turns the path into the class; agreement and points are on the class
            no machine verdict exists for these two, so they settle by agreement: a find is shown to people until AGREE_N answers
            agree or MAX_ANSWERS answers are given (Can't tell counts as given). The result is stored on the find
            ("people say: cold brown dwarf, 3 of 3"); with no single most common answer the result is "no agreement".
@@ -50,6 +53,101 @@ ANSWERS: dict[str, tuple[tuple[str, str], ...]] = {
         (CANT_TELL, "Can't tell"),
     ),
 }
+NOT_SURE = "not_sure"
+#: Plain questions, not classes (spec §5b): an amateur cannot choose "cold brown dwarf / dusty star / galaxy / artefact", so the
+#: red-source and anomaly tasks ask a short tree of questions a person answers by looking. Each step: its id, the question, what
+#: the lab shows with it, and the answers; an answer leads to the next step (`next`) or ends the path with a class (`result`).
+#: "Not sure" at any step ends the path as "Can't tell". `examples` name the fixed example pictures shown next to an answer.
+TREES: dict[str, tuple[dict[str, Any], ...]] = {
+    "red": (
+        {
+            "id": "shape", "question": "Is it a sharp point like the stars around it?", "show": "picture",
+            "answers": (
+                {"id": "sharp", "label": "Sharp point", "next": "every_pass", "examples": ("star_point",)},
+                {"id": "fuzzy", "label": "Fuzzy or stretched", "result": "galaxy", "examples": ("known_galaxy",)},
+            ),
+        },
+        {
+            "id": "every_pass", "question": "Is it there in every pass?", "show": "passes",
+            "answers": (
+                {"id": "yes", "label": "Yes", "next": "defect"},
+                {"id": "some", "label": "Only in some", "result": "artefact", "examples": ("cosmic_ray",)},
+            ),
+        },
+        {
+            "id": "defect", "question": "Does it look like one of these defects?", "show": "defects",
+            "answers": (
+                {"id": "yes", "label": "Yes", "result": "artefact", "examples": ("satellite_streak", "picture_edge", "bright_star_ghost")},
+                {"id": "no", "label": "No", "next": "spectrum"},
+            ),
+        },
+        {
+            "id": "spectrum", "question": "Its spectrum next to two examples: which shape is closer?", "show": "spectrum",
+            "answers": (
+                {"id": "dips", "label": "A: deep dips, like ε Indi B", "result": "brown_dwarf", "examples": ("eps_indi_b", "wise_0855")},
+                {"id": "smooth", "label": "B: a smooth rise to the red", "result": "dusty_star", "examples": ("dusty_star",)},
+            ),
+        },
+    ),
+    "anomaly": (
+        {
+            "id": "exposures", "question": "The odd point of the spectrum: is it in more than one exposure?", "show": "exposures",
+            "answers": (
+                {"id": "yes", "label": "Yes", "next": "detector"},
+                {"id": "one", "label": "Only one", "result": "cosmic_ray", "examples": ("cosmic_ray",)},
+            ),
+        },
+        {
+            "id": "detector", "question": "Where did those exposures fall on the detector?", "show": "detector",
+            "answers": (
+                {"id": "edge", "label": "Near an edge or a bright star", "result": "detector", "examples": ("picture_edge", "bright_star_ghost")},
+                {"id": "open", "label": "In the open", "result": "real"},
+            ),
+        },
+    ),
+}  # fmt: skip
+
+
+def tree_of(kind: str) -> list[dict[str, Any]] | None:
+    """The question tree of a task kind as the task body carries it: every step ends with the answer "Not sure"."""
+    if kind not in TREES:
+        return None
+    return [
+        {
+            **step,
+            "answers": [
+                *({**a, "examples": list(a.get("examples", ()))} for a in step["answers"]),
+                {"id": NOT_SURE, "label": "Not sure", "result": CANT_TELL},
+            ],
+        }
+        for step in TREES[kind]
+    ]
+
+
+def class_of(kind: str, path: list[str]) -> str:
+    """The class a path of answers leads to (one answer id per step, from the first step on). "Not sure" at any step is
+    "Can't tell". Raises ValueError for an answer the step does not have, a path that stops before its end, or one that goes on
+    after it."""
+    steps = {s["id"]: s for s in TREES[kind]}
+    step: dict[str, Any] | None = TREES[kind][0]
+    for i, answer in enumerate(path):
+        if step is None:
+            raise ValueError("the path goes on after its end")
+        if answer == NOT_SURE:
+            if i != len(path) - 1:
+                raise ValueError("the path goes on after “Not sure”")
+            return CANT_TELL
+        chosen = next((a for a in step["answers"] if a["id"] == answer), None)
+        if chosen is None:
+            raise ValueError(f"“{answer}” is not an answer to “{step['question']}”")
+        if "result" in chosen:
+            if i != len(path) - 1:
+                raise ValueError("the path goes on after its end")
+            return str(chosen["result"])
+        step = steps[chosen["next"]]
+    raise ValueError("the path stops before its end")
+
+
 #: the final stages a "Does it really move?" answer agrees with
 MOVES_AGREES = {"moves": ("known", "candidate", "confirmed"), "still": ("artefact",), "artefact": ("artefact",)}
 BY_AGREEMENT = ("red", "anomaly")

@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from service import accounts
 from service.accounts import agreement, register_accounts, score
-from service.accounts.agreement import AGREE_N, ANSWERS, MAX_ANSWERS, Agreement
+from service.accounts.agreement import AGREE_N, ANSWERS, MAX_ANSWERS, TREES, Agreement, class_of, tree_of
 from service.accounts.db import AccountsDB
 from service.config import Config
 
@@ -182,3 +182,108 @@ def test_the_new_kinds_through_the_api(tmp_path: Path, monkeypatch: pytest.Monke
     s = ann.get("/api/me/score").json()
     assert (s["points"], s["accuracy"], s["answered"]) == (20, 1.0, 2)
     assert accounts.get(st).db.credits_of(["mover:1"]) == {} and agreement.KINDS == ("moves", "red", "anomaly")
+
+
+def test_plain_questions_lead_to_the_class() -> None:
+    """Spec §5b "Plain questions, not classes": the path of answers through the tree decides the class."""
+    red = {
+        ("fuzzy",): "galaxy",
+        ("sharp", "some"): "artefact",
+        ("sharp", "yes", "yes"): "artefact",
+        ("sharp", "yes", "no", "dips"): "brown_dwarf",
+        ("sharp", "yes", "no", "smooth"): "dusty_star",
+        ("not_sure",): "cant_tell",
+        ("sharp", "not_sure"): "cant_tell",
+        ("sharp", "yes", "not_sure"): "cant_tell",
+        ("sharp", "yes", "no", "not_sure"): "cant_tell",
+    }
+    for path, want in red.items():
+        assert class_of("red", list(path)) == want, path
+    anomaly = {
+        ("one",): "cosmic_ray",
+        ("yes", "edge"): "detector",
+        ("yes", "open"): "real",
+        ("not_sure",): "cant_tell",
+        ("yes", "not_sure"): "cant_tell",
+    }
+    for path, want in anomaly.items():
+        assert class_of("anomaly", list(path)) == want, path
+    # every class of the answer sets can be reached, and nothing else
+    assert set(red.values()) == {a for a, _ in ANSWERS["red"]} and set(anomaly.values()) == {a for a, _ in ANSWERS["anomaly"]}
+    for bad in (
+        [],
+        ["sharp"],
+        ["sharp", "yes", "no"],
+        ["fuzzy", "yes"],
+        ["sharp", "maybe"],
+        ["not_sure", "yes"],
+        ["sharp", "yes", "no", "dips", "x"],
+    ):
+        with pytest.raises(ValueError):
+            class_of("red", bad)
+    assert "moves" not in TREES and tree_of("moves") is None
+
+
+def test_the_task_carries_the_tree_and_the_done_body_the_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SKY_PRODUCT_DB", str(tmp_path / "product.sqlite"))
+    monkeypatch.setenv("SKY_AUTH_DEV", "1")
+    st: Any = SimpleNamespace(cfg=Config(store_dir=tmp_path), salt="s")
+    finds = [
+        {"finding_id": "red:1", "field_key": "k1", "ra": 1.0, "dec": 2.0, "status": "unexplained", "kind": "red", "stage": None},
+        {"finding_id": "anomaly:1", "field_key": "k2", "ra": 3.0, "dec": 4.0, "status": "unexplained", "kind": "anomaly", "stage": None},
+    ]
+    st.task_findings = lambda: finds
+    app = FastAPI()
+    register_accounts(app, st)
+
+    people: dict[str, TestClient] = {}
+
+    def user(name: str) -> TestClient:
+        if name not in people:  # one sign-in each: the sign-in limit is five links per client
+            c = TestClient(app, base_url="http://localhost", follow_redirects=False)
+            link = c.post("/api/auth/email", json={"email": f"{name}@example.org"}).json()["dev_link"]
+            c.get(link.replace("http://localhost", ""))
+            people[name] = c
+        return people[name]
+
+    ann = user("ann")
+    t = ann.get("/api/tasks/next", params={"kind": "red"}).json()["task"]
+    tree = t["tree"]
+    assert [s["id"] for s in tree] == ["shape", "every_pass", "defect", "spectrum"]
+    first = tree[0]
+    assert first["question"] == "Is it a sharp point like the stars around it?" and first["show"] == "picture"
+    assert [(a["id"], a["label"]) for a in first["answers"]] == [
+        ("sharp", "Sharp point"),
+        ("fuzzy", "Fuzzy or stretched"),
+        ("not_sure", "Not sure"),
+    ]
+    assert (
+        first["answers"][0]["next"] == "every_pass"
+        and first["answers"][1]["result"] == "galaxy"
+        and first["answers"][2]["result"] == "cant_tell"
+    )
+    assert tree[3]["answers"][0]["examples"] == ["eps_indi_b", "wise_0855"]
+    # the path decides the class; agreement and points are on the class
+    assert ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["sharp", "yes"]}).status_code == 422  # stops before its end
+    out = ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["sharp", "yes", "no", "dips"]}).json()
+    assert (
+        out["class"] == {"id": "brown_dwarf", "label": "Cold brown dwarf"} and out["task"]["result"] == "brown_dwarf" and out["points"] == 0
+    )
+    for name, path in (("bob", ["sharp", "yes", "no", "dips"]), ("cid", ["sharp", "not_sure"]), ("dee", ["sharp", "yes", "no", "dips"])):
+        c = user(name)
+        t = c.get("/api/tasks/next", params={"kind": "red"}).json()["task"]
+        got = c.post(f"/api/me/tasks/{t['id']}/done", json={"path": path}).json()
+        assert got["class"]["id"] == ("cant_tell" if name == "cid" else "brown_dwarf")
+    res = ann.get("/api/tasks/results", params={"ids": "red:1"}).json()["results"]["red:1"]
+    assert res["text"] == "people say: cold brown dwarf, 3 of 4"  # "Not sure" was given, and is neither right nor wrong
+    assert ann.get("/api/me/score").json()["points"] == 10 and user("cid").get("/api/me/score").json()["accuracy"] is None
+    # the anomaly tree, and the old one-click answer still taken
+    t = ann.get("/api/tasks/next", params={"kind": "anomaly"}).json()["task"]
+    assert [s["id"] for s in t["tree"]] == ["exposures", "detector"]
+    assert ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["yes", "open"]}).json()["class"]["label"] == "Real feature"
+    bob = user("bob")
+    t = bob.get("/api/tasks/next", params={"kind": "anomaly"}).json()["task"]
+    old = bob.post(f"/api/me/tasks/{t['id']}/done", json={"result": "real", "mark_ids": []}).json()
+    assert old["task"]["result"] == "real" and "class" not in old
+    # "Does it really move?" has no tree
+    assert "tree" not in (ann.get("/api/tasks/next", params={"kind": "moves"}).json()["task"] or {})

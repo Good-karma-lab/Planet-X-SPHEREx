@@ -1,7 +1,8 @@
 """Taking a task: the next square to look through, or the next machine finding to check.
 
   GET /api/tasks/next?kind=cell|finding|moves|red|anomaly[&cell_id=|&finding_id=]
-                                     → {task:{id, kind, cell_id|finding_id, field_key, ra, dec[, question, answers:[{id, label}]]}|null}
+                                     → {task:{id, kind, cell_id|finding_id, field_key, ra, dec[, question, answers, tree]}|null}
+                                       (red and anomaly carry `tree`: steps of plain questions; the done body sends `path`)
   GET /api/tasks/results?ids=a,b     → what people said about red sources and anomalies (service/accounts/agreement.py)
   GET /api/tasks/brown-dwarf-queue   → red sources people call cold brown dwarfs, for the brown-dwarf search
 
@@ -152,6 +153,9 @@ def make_tasks_router(st: Any) -> APIRouter:
         if task is not None and task["kind"] in agreement.KINDS:
             task["question"] = agreement.QUESTION[task["kind"]]
             task["answers"] = [{"id": a, "label": label} for a, label in agreement.ANSWERS[task["kind"]]]
+            tree = agreement.tree_of(task["kind"])
+            if tree is not None:  # plain questions, not classes: the lab asks the tree and sends the path of answers
+                task["tree"] = tree
         return task
 
     @router.get("/api/tasks/results")

@@ -64,13 +64,15 @@ class MarkIn(BaseModel):
 
 
 class DoneIn(BaseModel):
-    result: str = Field(max_length=20)
+    result: str = Field("", max_length=20)  # not needed with `path`
     mark_ids: list[str] = Field(default_factory=list, max_length=500)
     # what the lab says about the look (the score: a square counts with at least 60 s and every pass shown)
     seconds: float | None = Field(None, ge=0, le=86400)
     passes_shown: int | None = Field(None, ge=0, le=10000)
     passes_total: int | None = Field(None, ge=0, le=10000)
     local_hour: int | None = Field(None, ge=0, le=23)
+    # red source / anomaly: the answers along the task's question tree, one per step (the server turns them into the class)
+    path: list[str] | None = Field(None, max_length=12)
 
 
 class HistoryIn(BaseModel):
@@ -303,6 +305,11 @@ def make_me_router(st: Any) -> APIRouter:
         if found is None or found[1] not in (None, u["id"]):
             raise HTTPException(404, "no such task")
         task = found[0]
+        if body.path is not None and task["kind"] in agreement.TREES:
+            try:  # plain questions, not classes: the path of answers decides the class
+                body.result = agreement.class_of(task["kind"], body.path)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from None
         if task["kind"] in agreement.KINDS:
             allowed: tuple[str, ...] = tuple(x for x, _ in agreement.ANSWERS[task["kind"]])
         else:
@@ -325,7 +332,10 @@ def make_me_router(st: Any) -> APIRouter:
             look = body.model_dump(include={"seconds", "passes_shown", "passes_total", "local_hour"})
             marks = [m for m in acc.db.marks(u["id"]) if m["id"] in set(body.mark_ids)]
             points = sc.square_done(u["id"], task, look, marks)
-        return {"task": task, "points": points, "achievements": sc.award(u["id"])}
+        out: dict[str, Any] = {"task": task, "points": points, "achievements": sc.award(u["id"])}
+        if body.path is not None and task["kind"] in agreement.TREES:
+            out["class"] = {"id": body.result, "label": agreement.label_of(task["kind"], body.result)}  # what the path led to
+        return out
 
     # -------------------------------------------------------------------------------------------------------------------- history
 
