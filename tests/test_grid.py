@@ -59,6 +59,7 @@ def test_db_and_routes(tmp_path: Path) -> None:
     n = grid.import_searched(db, [{"ra": 50.0, "dec": 8.0, "fov": 5, "state": "done", "found": 2, "key": "k", "kinds": ["passes"]}])
     assert n == 1
     cid = grid.cell_at(50, 8).id
+    other_whole = grid.cell_at(200, -10).id
     app = FastAPI()
     who = {"user": None}  # the signed-in user the accounts module would name (None: a guest)
     app.include_router(make_grid_router(SimpleNamespace(index=None, current_user=lambda request: who["user"]), db))
@@ -84,15 +85,18 @@ def test_db_and_routes(tmp_path: Path) -> None:
     assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "NW", "confirm": True}).status_code == 401
     who["user"] = {"id": "u1"}
     assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "NW"}).status_code == 422  # no confirm
+    who["user"] = {"id": "w"}  # the whole 20′ square on show: all four quarters at once
+    assert c.post(f"/api/grid/cell/{other_whole}/viewed", json={"confirm": True}).json()["quarters"] == 4
+    who["user"] = {"id": "u1"}
     assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "XX", "confirm": True}).status_code == 422
     r = c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "NW", "confirm": True, "result": "nothing"}).json()
     assert r == {"viewers": 1, "quarter": "NW", "quarters": 1}
     for q in ("NE", "SW"):
         c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": q, "confirm": True})
-    assert c.get("/api/grid/meta").json()["counts"]["viewed"] == 0  # three quarters: not yet viewed by people
+    assert c.get("/api/grid/meta").json()["counts"]["viewed"] == 1  # only the whole square: three quarters are not yet viewed
     who["user"] = {"id": "u2"}
     assert c.post(f"/api/grid/cell/{cid}/viewed", json={"quarter": "SE", "confirm": True}).json()["quarters"] == 4
-    assert c.get("/api/grid/meta").json()["counts"]["viewed"] == 1 and c.get(f"/api/grid/cell/{cid}").json()["viewers"] == 2
+    assert c.get("/api/grid/meta").json()["counts"]["viewed"] == 2 and c.get(f"/api/grid/cell/{cid}").json()["viewers"] == 2
     assert {q["id"]: q["mine"] for q in c.get(f"/api/grid/cell/{cid}").json()["quarters"]} == {
         "NE": False,
         "NW": False,

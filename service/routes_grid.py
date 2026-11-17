@@ -28,7 +28,7 @@ class Viewed(BaseModel):
     """A person says they have looked through one quarter of a square: their own click ("I have looked through this square", or a
     look task's closing button), never the opening of a field."""
 
-    quarter: Literal["NW", "NE", "SW", "SE"]
+    quarter: Literal["NE", "NW", "SE", "SW"] | None = None  # none: the whole 20′ square was on show, all four quarters
     confirm: Literal[True]
     result: Literal["nothing", "marks"] | None = None
 
@@ -115,9 +115,11 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         u = user_of(request)
         if not u:
             raise HTTPException(401, "sign in to count a square as looked through")
-        viewers = D().view(cid, f"user:{u['id']}", body.result, body.quarter)
-        q = D().quarters_viewed([cid]).get(cid, dict.fromkeys(grid.QUARTERS, 0))
-        return {"viewers": viewers, "quarter": body.quarter, "quarters": sum(1 for n in q.values() if n > 0)}
+        viewers = 0
+        for quarter in (body.quarter,) if body.quarter else grid.QUARTERS:
+            viewers = D().view(cid, f"user:{u['id']}", body.result, quarter)
+        seen = D().quarters_viewed([cid]).get(cid, dict.fromkeys(grid.QUARTERS, 0))
+        return {"viewers": viewers, "quarter": body.quarter, "quarters": sum(1 for n in seen.values() if n > 0)}
 
     return router
 

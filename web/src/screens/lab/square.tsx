@@ -152,7 +152,9 @@ export function useSquareLook(a: SquareArgs): SquareLook {
         : '';
   const mine = cell?.quarters?.filter((q) => q.mine).length;
   const line = cell
-    ? [`square ${cell.id}`, quarter ? `${quarter} quarter` : '', quarter && mine != null ? `${mine} of 4 looked through` : ''].filter(Boolean).join(' · ')
+    ? [`square ${cell.id}`, quarter ? `${quarter} quarter` : '', quarter && mine != null ? `${mine} of 4 looked through` : '']
+        .filter(Boolean)
+        .join(' · ')
     : '';
 
   const confirm = async (result?: 'nothing' | 'marks'): Promise<boolean> => {
@@ -161,7 +163,7 @@ export function useSquareLook(a: SquareArgs): SquareLook {
       const r = await fetch(`/api/grid/cell/${encodeURIComponent(cell.id)}/viewed`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...(result ? { result } : {}), ...(quarter ? { quarter } : {}) }),
+        body: JSON.stringify({ confirm: true, ...(result ? { result } : {}), ...(quarter ? { quarter } : {}) }),
       });
       return r.ok;
     } catch {
@@ -181,7 +183,9 @@ export function useSquareLook(a: SquareArgs): SquareLook {
     }
     const seen = new Set((cell.quarters ?? []).filter((q) => q.mine).map((q) => q.id));
     seen.add(quarter);
-    const next = QUARTERS.slice(QUARTERS.indexOf(quarter) + 1).concat(QUARTERS).find((q) => !seen.has(q));
+    const next = QUARTERS.slice(QUARTERS.indexOf(quarter) + 1)
+      .concat(QUARTERS)
+      .find((q) => !seen.has(q));
     const at = next ? quarterCentre(cell, next) : null;
     if (!next || !at) {
       setLine2('Square looked through');
