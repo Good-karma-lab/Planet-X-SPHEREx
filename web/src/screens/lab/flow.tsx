@@ -112,6 +112,8 @@ export interface LabFlow {
   taskPanel: ComponentChildren;
   /** a task about one object, the others not asked for: only that object is bright, every other overlay a quiet outline */
   focus: boolean;
+  /** Known objects is on and a catalogue is still being asked */
+  knownBusy: boolean;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -120,8 +122,15 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   knownRef.current = known;
   const epochsKey = a.epochs.map((e) => e.toFixed(4)).join(',');
   useEffect(() => {
-    if (!a.known || !a.epochs.length || !Number.isFinite(a.ra) || !Number.isFinite(a.dec)) {
+    if (!a.epochs.length || !Number.isFinite(a.ra) || !Number.isFinite(a.dec)) {
       setKnown(KNOWN_OFF);
+      return;
+    }
+    if (!a.known) {
+      // the overlay is off: the question is asked once all the same when the field opens, so that the service has the
+      // catalogues by the time the switch is turned on (it goes on asking them in the background)
+      setKnown(KNOWN_OFF);
+      void fetch(knownUrl(a.ra, a.dec, a.fov, a.epochs)).catch(() => {});
       return;
     }
     return followKnown(knownUrl(a.ra, a.dec, a.fov, a.epochs), setKnown);
@@ -189,7 +198,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       countsRef.current = ck;
       setCounts(match ? { known: match.shown.size, noMatch: match.noMatch.length } : null);
     }
-    drawKnown({ ...env, pointer: ptr.current, match: match && env.focus ? { ...match, noMatch: [] } : match }, kn);
+    // a task about one object rings nothing else; and while a deeper catalogue is still being asked no source is ringed as
+    // unmatched (the ring would appear and go when the catalogue arrives): the count on the status line says how many so far
+    const noRings = env.focus || kn.deepPending.length > 0;
+    drawKnown({ ...env, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
     const ms = marksRef.current;
     const rl = rulerRef.current;
     if (!ms.length && !rl.length) return;
@@ -511,7 +523,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const setUp = useRef('');
   useEffect(() => {
     if (!task || setUp.current === taskKey) return;
-    if (task.kind === 'mover') {
+    if (task.kind === 'moves') {
       if (!track || track.passes.length < 2) return;
       setUp.current = taskKey;
       // the two passes with the largest shift between them: the Blink plays those two, the ruler lies from one to the other
@@ -548,7 +560,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const labelOf = (i: number) => a.passes.find((q) => q.index === i)?.label ?? `pass ${i + 1}`;
   const taskSrc: Source | null = task && (task.kind === 'red' || task.kind === 'anomaly') && a.grid ? at : null;
   const extra =
-    task?.kind === 'mover' ? (
+    task?.kind === 'moves' ? (
       <MoverView
         blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'off' : 'waits for the search of the field'}
         ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
@@ -789,5 +801,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     blink,
     taskPanel,
     focus: !!task && focusKind(task.kind) && !others,
+    knownBusy: known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0)),
   };
 }

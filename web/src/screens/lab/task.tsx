@@ -5,13 +5,13 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Mark } from '../../lib/marks';
 
-export type TaskKind = 'cell' | 'finding' | 'submit' | 'mover' | 'red' | 'anomaly';
-const KINDS: TaskKind[] = ['cell', 'finding', 'submit', 'mover', 'red', 'anomaly'];
+export type TaskKind = 'cell' | 'finding' | 'submit' | 'moves' | 'red' | 'anomaly';
+const KINDS: TaskKind[] = ['cell', 'finding', 'submit', 'moves', 'red', 'anomaly'];
 
 /** The kinds of task (product spec §5, §5b): the panel's title, its one question, and the answers ([result sent, button text, tooltip]). */
 export const TASKS: Record<TaskKind, { title: string; ask: string; answers: [string, string, string?][] }> = {
   cell: { title: 'Look through a square', ask: 'Mark everything that moves and has no ring', answers: [['nothing', 'Nothing here'], ['marks', 'Done, with marks']] },
-  mover: {
+  moves: {
     title: 'Does it really move?',
     ask: 'The machine says this moves. Does it?',
     answers: [['moves', 'It moves'], ['still', 'It stands still'], ['artefact', 'It is an artefact'], ['cant_tell', 'Can’t tell']],

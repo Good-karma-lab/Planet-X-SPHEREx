@@ -2808,8 +2808,9 @@ export function Lab({ route }: { route: Route }) {
     onChange: ((v: boolean) => void) | null,
     why = 'not available in this view',
     whyShort = '',
+    busy = false,
   ) => (
-    <label class={`sw ${onChange ? '' : 'dis'}`} title={onChange ? title : `${title} (${why})`}>
+    <label class={`sw ${onChange ? '' : 'dis'}${busy ? ' busy' : ''}`} title={onChange ? title : `${title} (${why})`}>
       <input
         type="checkbox"
         id={id}
@@ -3617,7 +3618,10 @@ export function Lab({ route }: { route: Route }) {
                     'Known objects',
                     'Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame, at its place on the date shown. What moves and has no ring is unknown',
                     opts.known,
-                    (v) => set({ known: v ? '1' : null }),
+                    (v) => set({ known: v ? '1' : inTask ? '0' : null }),
+                    undefined,
+                    '',
+                    flow.knownBusy,
                   )}
                   {sw(
                     'maskChk',
