@@ -237,7 +237,7 @@ function TaskRow({ t }: { t: Task }) {
     <a class="cb-row haspic" href={taskHash(t)} data-testid="task-row">
       <Pic findingId={t.finding_id} ra={t.ra} dec={t.dec} label={t.kind === 'cell' ? `square ${t.cell_id}` : `finding ${t.finding_id}`} />
       <span class="cb-main">
-        <b>{t.kind === 'cell' ? `Square ${t.cell_id}` : `Finding ${t.finding_id}`}</b>
+        <b>{t.kind === 'cell' ? `Square ${t.cell_id}${t.quarter ? ` · ${t.quarter} quarter` : ''}` : `Finding ${t.finding_id}`}</b>
         <span class="mono-s">
           {place(t.ra, t.dec)} · taken {when(t.created)}
           {t.done_at ? ` · closed ${when(t.done_at)}` : ''}

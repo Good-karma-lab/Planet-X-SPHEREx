@@ -43,6 +43,10 @@ export interface Task {
   id: string;
   kind: 'cell' | 'finding';
   cell_id: string | null;
+  /** the quarter of the square (NW, NE, SW, SE): people look through a square a quarter at a time */
+  quarter?: string | null;
+  /** the size of the view in arcmin (10 for a quarter) */
+  fov?: number | null;
   finding_id: string | null;
   field_key: string | null;
   ra: number | null;
@@ -241,10 +245,11 @@ export function taskHash(t: Task): string {
     q.set('ra', t.ra.toFixed(5));
     q.set('dec', t.dec.toFixed(5));
   }
-  q.set('fov', t.kind === 'cell' ? '20' : '5');
+  q.set('fov', t.kind === 'cell' ? String(t.fov ?? 20) : '5'); // a square is looked through a quarter (10′) at a time
   q.set('task', t.id);
   q.set('kind', t.kind); // the lab of a guest cannot look a task up by its id
   if (t.kind === 'cell' && t.cell_id) q.set('cell', t.cell_id);
+  if (t.kind === 'cell' && t.quarter) q.set('quarter', t.quarter);
   if (t.kind === 'finding' && t.finding_id) q.set('finding', t.finding_id);
   return `#/lab?${q}`;
 }
