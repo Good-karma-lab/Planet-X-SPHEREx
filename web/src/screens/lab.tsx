@@ -3135,6 +3135,9 @@ export function Lab({ route }: { route: Route }) {
         line: `${times}${tr ? ` · moves ${rateText(tr)}` : ''}`,
         status: id ? 'known' : id === undefined ? 'checking' : 'unexplained',
         uv: uvNow(x.ra, x.dec),
+        group: 'red',
+        ra: x.ra,
+        dec: x.dec,
         pick: rowPick(`red:${k}`, () => pickRed(k)),
       };
     }),
@@ -3147,6 +3150,9 @@ export function Lab({ route }: { route: Route }) {
         line: `spectrum unlike the field's stars: ${driverWords(a)[0] ?? `score ${a.score.toFixed(1)}`}`,
         status: nm ? 'known' : 'unexplained',
         uv: uvNow(now[0], now[1]),
+        group: 'anomaly',
+        ra: a.ra,
+        dec: a.dec,
         pick: rowPick(`anomaly:${a.n}`, () => pickAnomaly(a.n)),
       };
     }),
@@ -4076,6 +4082,19 @@ export function Lab({ route }: { route: Route }) {
                 also={alsoLine(searchStates)}
                 selected={candSel}
                 picture={() => canvas.current}
+                field={{ ra, dec, fov }}
+                onTask={(kind, findId, r) =>
+                  // the task of this very source: its find at its own place in the field on show (the lab selects it there)
+                  set({
+                    task: kind,
+                    finding: findId,
+                    find: findId,
+                    find_ra: (r.ra ?? ra).toFixed(5),
+                    find_dec: (r.dec ?? dec).toFixed(5),
+                    kind: null,
+                    cell: null,
+                  })
+                }
                 details={
                   <>
               <section class="psec fsec">
