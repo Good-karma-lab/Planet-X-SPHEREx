@@ -244,7 +244,9 @@ export function taskParams(t: NextTask): Record<string, string> | null {
   return {
     ra: t.ra.toFixed(5),
     dec: t.dec.toFixed(5),
-    fov: String(t.fov && t.fov > 0 ? t.fov : t.kind === 'cell' ? (t.quarter ? 10 : 20) : 5),
+    // the service's field size when it gives one (a whole track fits); else as lib/account.ts taskHash: a quarter 10′, a square 20′,
+    // a time-lapse its own 60′ field, any other find 10′
+    fov: String(t.fov && t.fov > 0 ? t.fov : t.kind === 'cell' ? (t.quarter ? 10 : 20) : t.finding_id?.startsWith('film:') ? 60 : 10),
     task: t.id,
     kind: t.kind,
     ...(t.cell_id ? { cell: t.cell_id } : {}),
