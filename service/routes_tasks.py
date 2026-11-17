@@ -175,7 +175,13 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
         return None
     from service.findings import query
 
-    body = query(f.db, None, None, None, 100000, 0)
+    try:  # what people agreed: set-aside finds are not handed out, raised ones come first
+        from service.accounts import field_people, people
+
+        aside, raised = field_people.set_aside(st), people.raised(st)
+    except Exception:
+        aside, raised = {}, {}
+    body = query(f.db, None, None, None, 100000, 0, aside=aside, raised=raised)
     return [
         {
             "finding_id": x["id"],
@@ -185,6 +191,7 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
             "status": x["status"],
             "kind": x["kind"],
             "stage": STAGE_OF_STATUS.get(x["status"]),
+            **({"raised": x["people_raised"]} if "people_raised" in x else {}),
         }
         for x in body["finds"]
     ]
@@ -345,7 +352,8 @@ def make_tasks_router(st: Any) -> APIRouter:
         seen = acc.db.task_refs(user_id, "finding") if user_id else set()
         checked = acc.db.check_counts()
         leads = [r for r in rows if r.get("status") in LEADS and r["finding_id"] not in seen]
-        leads.sort(key=lambda r: checked.get(r["finding_id"], 0))  # stable: the page's order among the equally checked
+        # a find people raised first, then the least checked; stable: the page's order among the equal
+        leads.sort(key=lambda r: ("raised" not in r, checked.get(r["finding_id"], 0)))
         return leads[0] if leads else None
 
     def next_judged(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
@@ -417,7 +425,14 @@ def make_tasks_router(st: Any) -> APIRouter:
     def brown_dwarf_queue() -> Any:
         """{candidates:[{finding_id, ra, dec, agree, total, at}]}: red sources people call cold brown dwarfs, for the brown-dwarf search."""
         acc = accounts.get(st)
-        return {"candidates": agreement.get(st, acc.db).brown_dwarf_queue()}
+        done = getattr(getattr(st, "bd_queue", None), "done", None) or {}
+        # each with what the brown-dwarf search made of it, once it has looked (service/people_queue.py)
+        return {
+            "candidates": [
+                {**c, **({"checked": done[c["finding_id"]]} if c.get("finding_id") in done else {})}
+                for c in agreement.get(st, acc.db).brown_dwarf_queue()
+            ]
+        }
 
     @router.get("/api/tasks/next")
     def next_task(

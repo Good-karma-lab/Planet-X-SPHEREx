@@ -217,6 +217,34 @@ async def test_job_on_an_unknown_mover_can_be_submitted_with_comments(tmp_path: 
 
 
 @sync
+async def test_a_find_people_dropped_spends_no_slow_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """People agreed the find is a streak (service/accounts/people.dropped): JPL and the NEOWISE archive are not asked; the quick
+    checks still answer, and the find cannot be submitted."""
+    from service.accounts import people
+
+    monkeypatch.setattr(people, "dropped", lambda st: {"mover:abc123": "streak"})
+    marks = moving_marks()
+    track = {"passes": [0, 1, 2], "ra": [m["ra"] for m in marks], "dec": [m["dec"] for m in marks], "snr": [12.0, 9.5, 10.1]}
+    known = FakeKnown({"state": "ok", "rows": [FAINT]}, {"state": "ok", "rows": []}, [])
+    c = make(tmp_path, known, result={"tracks": [track]})
+    asked: list[str] = []
+
+    async def no_jpl(job: Any, marks: Any) -> Any:
+        asked.append("jpl")
+        return "pass", ""
+
+    c._jpl = no_jpl  # type: ignore[method-assign]
+    view = await finished(c.start({"field_key": "mover:abc123", "ra": 269.4, "dec": 4.7, "marks": marks}))
+    got = states(view)
+    assert got["jpl"] == "fail" and got["neowise"] == "fail" and asked == []
+    assert "People dropped this find (it is a streak, not a dot)" in next(x["detail"] for x in view["checks"] if x["id"] == "jpl")
+    assert got["two_passes"] == "pass" and view["can_submit"] is False
+    # a request for a place (the lab's own field key), or a find nobody dropped: the checks as before
+    view2 = await finished(c.start({"field_key": "f1", "ra": 269.4, "dec": 4.7, "marks": marks}))
+    assert states(view2)["jpl"] == "pass" and asked == ["jpl"]
+
+
+@sync
 async def test_jpl_body_fails_and_a_silent_catalogue_blocks_until_it_answers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(ck, "JPL_RETRY_S", 0.0)
     marks = [{k: v for k, v in m.items() if k != "mjd"} for m in moving_marks()]  # dated by the pass: JPL is asked over the whole pass

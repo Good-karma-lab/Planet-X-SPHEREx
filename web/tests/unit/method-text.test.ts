@@ -8,7 +8,7 @@ const parts = Object.entries(files)
   .sort((a, b) => a.id.localeCompare(b.id));
 
 const BANNED = [/star-test/i, /\bresearch\b/i, /\bported?\b/i, /\bporting\b/i, /\boffline pipeline\b/i, /not built/i, /to be checked/i, /\bTODO\b/, /SkyBoT/, /[А-Яа-я]/];
-const FIGURES = new Set(['pendulum-barnard', 'film-ecliptic-dec2025', 'slider-eris', 'spectrum-source', 'wall-detectors', 'anomaly-map', 'raw-to-video', 'blink-pluto', 'p9-orbits', 'depth-vs-wise', 'raw-exposures', 'spectral-colour', 'difference', 'archive-images', 'object-portrait', 'field-size', 'epsindi-pendulum', 'epsindi-bands', 'epsindi-wall']);
+const FIGURES = new Set(['pendulum-barnard', 'film-ecliptic-dec2025', 'slider-eris', 'spectrum-source', 'wall-detectors', 'anomaly-map', 'raw-to-video', 'blink-pluto', 'p9-orbits', 'depth-vs-wise', 'raw-exposures', 'spectral-colour', 'difference', 'archive-images', 'object-portrait', 'field-size', 'epsindi-pendulum', 'epsindi-bands', 'epsindi-wall', 'people-counts']);
 
 describe('Method text', () => {
   it('has the sixteen parts in order', () => {

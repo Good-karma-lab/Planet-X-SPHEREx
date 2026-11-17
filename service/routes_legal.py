@@ -47,8 +47,10 @@ except what your own browser keeps for you (for example marks you put before sig
 <li>your e-mail address, used only to sign you in and to send you the sign-in link and the notices you ask for;</li>
 <li>the public name you choose (shown with your finds, on the leaderboard and on your public profile if you turn it on; never your
 e-mail);</li>
-<li>what you do in the app: your marks, your answers to the tasks, the squares you looked through, your investigations, notes and
-submissions, your points and badges, and the history of what you opened;</li>
+<li>what you do in the app: your marks, your answers to the tasks, the squares you looked through, the places you tapped on a picture
+and the pictures you called broken, your investigations, notes and submissions, your points and badges, and the history of what you
+opened;</li>
+<li>your comments under a finding, which everybody can read with your public name (never your e-mail);</li>
 <li>sign-in links and sessions, stored only as one-way hashes (SHA-256), never as the link or the cookie itself.</li>
 </ul>
 
@@ -67,8 +69,9 @@ do not receive your password.</p>
 <h2>Your data is yours</h2>
 <p>In the app, Cabinet → Account: <b>Download my data</b> gives you what we keep about you in one file, and <b>Delete my account
 and my data</b> deletes everything linked to you: your account, your e-mail address, your sign-in links and sessions, your marks,
-tasks, investigations, notes, history, notifications, points and badges. What others' results stand on (your answers on finds, the
-pictures you flagged, the squares you looked through) stays only as an anonymous count that cannot be linked back to you. Finds
+tasks, investigations, notes, comments, history, notifications, points and badges. What others' results stand on (your answers on
+finds, the pictures you flagged, the places you tapped, the squares you looked through) stays only as an anonymous count that cannot
+be linked back to you. Finds
 you submitted stay in Findings without your name.</p>
 
 <h2>Contact</h2>

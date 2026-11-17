@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__, cpu, quarters
+from service import __version__, cpu, people_queue, quarters
 from service.accounts import get as accounts_get
 from service.accounts import register_accounts
 from service.anomalies import Anomalies
@@ -105,6 +105,9 @@ class State:
         self.upcoming_quarters: Any = None
         self.submit_field: Any = None
         self.quarter_stock: dict[str, Any] = {}
+        # people's queue for the brown-dwarf search (service/people_queue.py) and its last step for /health
+        self.bd_queue: Any = None
+        self.bd_queue_last: dict[str, Any] = {}
         self.catalogue: CatalogueContext | None = None
         self.known: Known | None = None
         self.pairs: Pairs | None = None
@@ -249,13 +252,18 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if getattr(st, "quarters", None) is not None:
             st.quarters.bind(asyncio.get_running_loop())
         stock_task = None
+        bd_task = None
         if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None and not STANDBY and quarters.STOCK > 0:
             stock_task = asyncio.get_running_loop().create_task(quarter_stock_loop())
+            st.bd_queue = people_queue.BDQueue(st)
+            bd_task = asyncio.get_running_loop().create_task(bd_queue_loop())
         yield
         if warm_task is not None:
             warm_task.cancel()
         if stock_task is not None:
             stock_task.cancel()
+        if bd_task is not None:
+            bd_task.cancel()
         if st.grid_import is not None:
             st.grid_import.cancel()
         if st.findings is not None:
@@ -298,6 +306,21 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         return key, st.scheduler.submit(fieldjob.KIND, key, params, fn, priority, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
 
     st.submit_field = submit_field  # the square quarters build ahead with it (service/quarters.py)
+
+    async def bd_queue_loop() -> None:
+        """The sources people sent to the brown-dwarf search, looked at one at a time (service/people_queue.py)."""
+        await asyncio.sleep(90.0)
+        while True:
+            try:
+                q = st.bd_queue
+                if q is not None:
+                    waiting = await asyncio.to_thread(q.queue)  # the database is read in a thread
+                    said = q.step(waiting)  # on the loop: the scheduler is not thread-safe
+                    if said:
+                        st.bd_queue_last = {"last": said, "at": time.time(), "waiting": len(waiting), "done": len(q.done)}
+            except Exception as e:  # said in /health; the next round tries again
+                st.bd_queue_last = {"error": f"{type(e).__name__}: {e}"[:200], "at": time.time()}
+            await asyncio.sleep(60.0)
 
     async def quarter_stock_loop() -> None:
         """Keeps a few quarters ready for the people who will take a square next (service/quarters.py), one build at a time."""
@@ -595,6 +618,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "jobs": st.scheduler.snapshot() if st.scheduler else None,
             "warm": {**st.warm.snapshot(), "searches": st.warm_searches} if st.warm else None,
             "quarter_stock": {"target": quarters.STOCK, **st.quarter_stock} if st.quarters is not None else None,
+            "bd_queue": {"done": len(st.bd_queue.done), **st.bd_queue_last} if st.bd_queue is not None else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
             "cpu": cpu.stats(),
             "tiles": None if st.hips is None else {"cached": st.hips.count, "fetched": st.hips.fetched, "failed": st.hips.failed},

@@ -6,11 +6,11 @@ We built one tool with three kinds of moving picture, six searches, a spectrum f
 
 Things in the sky move at very different speeds, and one picture cannot show all of them.
 
-| What moves | Speed | View | Search |
-|---|---|---|---|
-| nearby stars, brown dwarfs | arcseconds per year | the blink of pass stacks (months) | movers between passes |
-| asteroids, comets | arcminutes per day | the time-lapse of the visits of one pass (days) | time-lapse search |
-| bodies beyond Neptune | a few arcseconds per day, a parallax jump between passes | the distance slider | Find Planet X |
+| What moves                 | Speed                                                    | View                                            | Search                |
+| -------------------------- | -------------------------------------------------------- | ----------------------------------------------- | --------------------- |
+| nearby stars, brown dwarfs | arcseconds per year                                      | the blink of pass stacks (months)               | movers between passes |
+| asteroids, comets          | arcminutes per day                                       | the time-lapse of the visits of one pass (days) | time-lapse search     |
+| bodies beyond Neptune      | a few arcseconds per day, a parallax jump between passes | the distance slider                             | Find Planet X         |
 
 ## The questions we answer
 
@@ -52,13 +52,18 @@ A find that is not visible stays in Findings behind "Not visible in the picture"
 
 People look at squares, at machine finds ("Does it really move?"), at red sources and at spectral anomalies.
 
-**Questions, not classes.** A red source or an anomaly is asked as a short tree of plain questions, and the path of answers gives its class:
+**Questions a human eye answers better.** Each kind of find has a short series of plain questions, one at a time, each with the find's own pictures. Nothing the machine already knows is asked (numbers, detector places, catalogue answers), and every settled answer changes what the machine does:
 
-- red source: is it sharp or fuzzy (fuzzy: a galaxy) · is it in every pass (only in some: an artefact) · is there a defect (yes: an artefact) · does the spectrum dip or rise smoothly (dips: a cold brown dwarf; a smooth rise: a dusty or reddened star);
-- anomaly: is it in more than one exposure (only one: a cosmic ray) · where did those exposures fall on the detector (near an edge or a bright star: the detector; in the open: real).
+- a track: does one dot step along the arrow (no: dropped before the slow checks) · if only in some pictures, tap where it is missing (the track is linked again without them) · a dot or a streak (a streak: dropped);
+- a slow mover: does the dot shift while the stars stay put (no: dropped) · one dot or two touching (two: dropped, a blend) · is there a dot further back along the arrow in the old WISE and 2MASS pictures (yes: up the queue, the motion holds over decades);
+- a Planet X peak: is there a dot in the ring when the visits are added along the orbit, and not when added as they are (no: dropped) · is it inside a bright star's glow or on its spike (yes: dropped, and counted against the rule; no: up the queue as a candidate);
+- a red source: a sharp dot or a fuzzy patch (fuzzy: a galaxy) · there every time (no: an artefact) · on a glow, a spike or the edge (yes: an artefact) · has it moved between the old picture and the new (yes: the brown-dwarf search looks at it);
+- an anomaly: does a neighbour star touch it in the odd pictures (yes: those exposures are left out of its spectrum) · do the odd pictures look broken (yes: those exposures are flagged; one flagged by two people is left out of every stack and spectrum).
 
-"Not sure" at any step is "Can't tell".
+"Not sure" at any step is "Can't tell", which is never wrong and never paid. A mark put on the picture has a kind too: one that moves starts the checks on its own; one that is in no catalogue asks every catalogue again; two people calling the same machine find an artefact set it aside (it leaves Findings' leads and the Candidates).
 
-**Agreement.** A red source or an anomaly is settled by 3 agreeing answers, or after 5 answers ("Can't tell" counts toward the five). The result is the single most common real answer; when there is none, people do not agree, and nobody is right or wrong. "Does it really move?" is settled by the find's final stage: "It moves" agrees with known, candidate or confirmed; "It stands still" and "It is an artefact" agree with artefact. A Findings card shows the result in one line ("People say: cold brown dwarf, 3 of 3").
+**Agreement.** The answers of one find settle by weighted agreement: 3 of agreeing weight, or 5 answers given. Each person weighs by how often they were right; a known object of the same kind is mixed in now and then as a control and judged at once. The settled result is the one the series ends in; when answers differ and none reaches the weight, people do not agree, and nobody is right or wrong. A Findings card shows the result in one line ("People say: cold brown dwarf, 3 of 3").
+
+[figure: people-counts | What people have answered so far, live: every series, and how often an answer goes against a rule of the machine]
 
 **Score.** A quarter of a square looked through for at least 60 s earns 5 points, so a whole square is worth 20 (at most 100 a day); an agreeing answer 10; catching a control mover (a known mover of at least 1″/yr, a mark within 60″ of its place at 2025.9) 25; a submit that passed every check 100; a finding that becomes a candidate 500, confirmed 5000. Levels: Observer from 0, Searcher from 100, Tracker from 500, Hunter from 2500, Discoverer from 10 000 points. The leaderboard ranks a person after 10 settled answers, and the share of searchers holding a badge is shown only from 50 searchers.
