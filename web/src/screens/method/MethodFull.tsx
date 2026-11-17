@@ -9,7 +9,17 @@ const NUMBERED = import.meta.glob('./text/[0-9][0-9]-*.md', { query: '?raw', imp
 const groupOf = (id: string): 'Story' | 'Methods' | 'Results' => (+id <= 6 ? 'Story' : +id <= 14 ? 'Methods' : 'Results');
 
 /** Old addresses (#/method?sec=searches) and part numbers (#/method?sec=11). */
-const ALIAS: Record<string, string> = { overview: '06', data: '07', stacks: '08', views: '09', spectra: '10', searches: '11', checks: '13', validation: '15', dated: '15' };
+const ALIAS: Record<string, string> = {
+  overview: '06',
+  data: '07',
+  stacks: '08',
+  views: '09',
+  spectra: '10',
+  searches: '11',
+  checks: '13',
+  validation: '15',
+  dated: '15',
+};
 const wanted = (): string | null => {
   const w = new URLSearchParams(location.hash.split('?')[1] ?? '').get('sec');
   if (!w) return null;
@@ -17,6 +27,16 @@ const wanted = (): string | null => {
 };
 
 // Numbers on this page that the layout itself carries come from runs on the production service.
+// the version of this account: bumped, with a line in CHANGES, whenever an algorithm or a constant it states changes
+export const METHOD_VERSION = { id: 'M38', date: '2026-11-17' };
+const CHANGES: [string, string, string][] = [
+  [
+    'M38',
+    '2026-11-17',
+    'The sky grid and the background sweep; known objects of a frame and the deep match; the checks before submit for slow and fast movers with the NEOWISE stack; "visible in the picture" measured against the ring\'s own neighbourhood; people\'s questions, agreement and score; Time-lapse for film.',
+  ],
+];
+
 const NUM = {
   checks: '8',
   chance: '0.0',
@@ -126,13 +146,15 @@ function Limits() {
   return (
     <div class="limits">
       <div>
-        <b>Bright stars saturate.</b> Brighter than about J = 10.5 the core is clipped: no spectrum, and the motion is measured on a wider field.
+        <b>Bright stars saturate.</b> Brighter than about J = 10.5 the core is clipped: no spectrum, and the motion is measured on a wider
+        field.
       </div>
       <div>
         <b>Asteroids to about V 19.</b> Fainter known bodies are not recovered inside a pass yet; a track needs four visits.
       </div>
       <div>
-        <b>Find Planet X has a depth.</b> It is the measured noise bar of the search on that field, shown with every result; below it, finding nothing proves nothing.
+        <b>Find Planet X has a depth.</b> It is the measured noise bar of the search on that field, shown with every result; below it,
+        finding nothing proves nothing.
       </div>
       <div>
         <b>A lead is not a discovery.</b> It needs the link of passes and the known-body check.
@@ -148,12 +170,27 @@ function Hero({ go }: { go: (id: string) => void }) {
   };
   return (
     <header class="hero" id="top">
-      <div class="k">Method</div>
+      <div class="k">
+        Method · {METHOD_VERSION.id} · {METHOD_VERSION.date}
+      </div>
       <h1>How we turn SPHEREx files into a sky you can watch move.</h1>
       <p class="lede">
-        The whole account in one place: the challenge, the telescope, the idea that found Pluto, every step from a raw exposure to a time-lapse, every search with its numbers,
-        and how we checked each one against another telescope.
+        The whole account in one place: the challenge, the telescope, the idea that found Pluto, every step from a raw exposure to a
+        time-lapse, every search with its numbers, and how we checked each one against another telescope.
       </p>
+      <details class="mchanges">
+        <summary>What changed in {METHOD_VERSION.id}</summary>
+        <ul>
+          {CHANGES.map(([id, date, text]) => (
+            <li key={id}>
+              <b>
+                {id} · {date}
+              </b>{' '}
+              {text}
+            </li>
+          ))}
+        </ul>
+      </details>
       <div class="paths">
         <a class="path" href="#m-01" onClick={link('01')}>
           <div class="pk">Story · parts 1–6</div>

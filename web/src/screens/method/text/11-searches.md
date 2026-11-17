@@ -255,3 +255,23 @@ The plane count uses the ephemeris every 30 minutes, interpolated to each exposu
 **Result:** the plane counts equal IRSA's for all four bodies (docs/validation/2026-11-14-v-most.md). The stack along a body's track is a detection test of that body, not astrometry of it; a body whose frames number only a few is judged by its few frames.
 
 The next part, Bodies beyond Neptune, describes the searches for bodies too faint and too slow for any of these.
+
+## The sky grid and the background sweep
+
+We cut the whole sky into a fixed grid of squares, one square for one 20′ search field. The grid has 540 declination bands, each 20′ high, from the south pole to the north pole. Each band is split into n = max(1, round(360° cos δ_mid / (1/3)°)) equal steps of right ascension starting at RA 0, so every square is about 20′ × 20′ on the sky, and the whole sky is 371 272 squares. A square's id is its band and its step (`294-0148`); the grid never changes, so an id always names the same square.
+
+A square is `new` until something happens to it, then `searching`, then `searched` or `failed`. With it we keep the number of finds, the ids of those finds, the bar the search used, and how many people have looked at it (one person counts once).
+
+The machine walks the squares one after another, in its own process, never inside the service that serves people. For each square it asks a private instance of our own service for the 20′ field at the square's centre, then the search between passes and the brown-dwarf search, exactly as a visitor would. The order is:
+
+1. the predicted Planet Nine band (after Brown & Batygin 2021): RA 15°–105°, ecliptic latitude −25° to +15°, from its centre at RA 50°, Dec +8° outwards (31 680 squares);
+2. the rest of the ecliptic, |β| ≤ 10°, by ecliptic longitude from that centre (48 780 squares);
+3. everything else, from the ecliptic outwards.
+
+**The bar.** A square's find is a source detected at 8σ in each pass whose motion is measured to at least 5σ and shifts at least 6.15″ (one SPHEREx pixel) over the baseline of the passes, or a brown-dwarf candidate as that search grades it. A Gaia star moving as Gaia says is not a find. With every square we keep the bar it was searched to: the number of passes and the passes used, the sources per pass, and the chance of one false track. "Nothing here" is recorded the same way, with its bar.
+
+**Memory.** A watchdog adds up the resident memory of the whole process tree of the sweep's instance twice a second. Over the cap, it stops the instance, records the square as failed with "memory cap", and the sweep ends; it never grows past the cap. Every worker also has its own share of the cap, and the instance is started afresh every 10 squares, because its caches grow by about 150 MB a square.
+
+**Measured.** On a 14-core desktop with 4 workers, in the Planet Nine band: 23 squares searched, none with a find, 10.8 to 16 squares an hour (the first square of a fresh store takes 831 s, a square whose exposures are cached 75–590 s), peak resident memory 3.0–4.2 GB. Building the 20′ field is about 95% of a square's time; the search between passes takes 7–11 s and the brown-dwarf search less than one.
+
+The 47 places searched before the grid existed are marked in the grid as searched, with their own field size: a place smaller than 20′ covers its square only in part.

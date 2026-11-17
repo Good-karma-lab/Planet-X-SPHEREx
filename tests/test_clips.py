@@ -367,3 +367,20 @@ def test_a_faint_track_is_seen_only_when_the_visits_are_added_along_its_motion(t
     img = rng.normal(0.0, 1.0, (41, 41))
     img[20, 20] = 9.0
     assert ring_sn(img, 20, 20, 3) > 6.0 > VISIBLE_SN > ring_sn(np.zeros((41, 41)), 20, 20, 3)
+
+
+def test_visible_needs_the_ring_to_stand_out_from_its_own_neighbourhood() -> None:
+    from service.clips import is_visible, stands_out
+
+    rng = np.random.default_rng(3)
+    quiet = rng.normal(0.0, 1.0, (81, 81))
+    quiet[40, 40] += 12.0  # one source in a quiet field: visible
+    assert is_visible(*stands_out(quiet, 40, 40, 3))
+    crowded = rng.normal(0.0, 1.0, (81, 81))
+    ys, xs = rng.integers(0, 81, 400), rng.integers(0, 81, 400)
+    crowded[ys, xs] += 12.0  # a crowded field: bright specks everywhere, the ring holds one like its neighbours
+    crowded[40, 40] = 12.0
+    sn, beaten, measured = stands_out(crowded, 40, 40, 3, speckled=True)
+    assert measured == 16 and not is_visible(sn, beaten, measured)
+    crowded[40, 40] = 60.0  # the same field with a source far above its neighbourhood: visible
+    assert is_visible(*stands_out(crowded, 40, 40, 3, speckled=True))

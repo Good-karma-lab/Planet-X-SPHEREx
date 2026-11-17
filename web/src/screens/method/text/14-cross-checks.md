@@ -88,3 +88,33 @@ The same reader serves `GET /api/v1/cube/spectrum` with a choice of flag handlin
 **Tracked stack.** `GET /api/v1/film/{key}/tracked` shifts and adds the motion maps of a finished time-lapse along a grid of velocities: a body too faint in any one frame adds up along its path as about A·√n. The velocity grid is spaced so that a body smears at most 2 pixels over the window; windows of 6 hours and a speed limit of 20″/h are the defaults, at least 4 frames are needed, and a grid above 300 pixels is binned 2 × 2 first. The answer lists the strongest peaks per window.
 
 **R Draconis regression field.** The deep collections repeat a few fields many times. `GET /api/v1/regression/r-dra` compares a fixed list of about 2000 Level-2 files that IRSA's SIA service returns for R Draconis (RA 248.1676°, Dec +66.7550°, radius 0.05°) with the exposure index and names any file the archive lists and the index lacks.
+
+## Known objects of a frame
+
+For any frame of the lab we list every Gaia DR3 star, SIMBAD object and JPL Solar System body inside it, each carried to the date of every pass on show, so the ring moves with the star:
+
+- **Gaia DR3:** one cone over the frame (half-diagonal + 130″), the stars of G ≤ 19.0 and every star moving at least 100 mas/yr, at most the 20 000 brightest. The place at 2016.0 is carried by proper motion and parallax as seen from the Earth.
+- **SIMBAD:** one cone (half-diagonal + 300″), at most 5000 objects, carried the same way from 2000.0. A SIMBAD object within 1.5″ of a Gaia star is that star: the star takes its name and type.
+- **JPL:** Small-Body Identification, geocentric, V ≤ 20.5, at each pass date.
+
+An object is listed when it is inside the frame (+6″) at any date. Names and speeds are shown for the fast and the bright ones (at least 200 mas/yr, or magnitude 10 or brighter); the rest get a thin ring. A catalogue that does not answer is said on the picture ("Gaia did not answer"), never shown as an empty field. The answer comes within about a second with what is ready, and a catalogue still being asked is marked pending and answers on the next ask; when a field is first served, its catalogues are asked at once, so the button answers from what is kept.
+
+**The deep match.** To call a moving point "unknown", a fainter list is checked as well, never drawn: Gaia stars of 19 < G ≤ 21, CatWISE2020 sources with their own proper motion (epoch 2015.4), AllWISE (epoch 2010.5) and 2MASS (epoch 1999.5), all carried to each pass date. Sources of these catalogues within 2.5″ of each other are one source, and one within 2.5″ of a drawn object is that object. A point in the picture within 3″ (`DEEP_ARCSEC`) of a deep source at that pass date has a catalogue match; "unknown" is said only when every deep catalogue has answered.
+
+## Checks before submit
+
+A person's marks are checked before anything is submitted. The marks decide which kind of mover it is: **slow** (it moves between passes) when the marks are in different passes, **fast** (it moves within a pass, visit by visit) when every mark carries its own date and all are in one pass. Each check answers pass, warn, fail or no answer; a fail blocks the submit, a warn needs a comment, and no answer is asked again and blocks until it answers.
+
+| Check | Slow mover | Fast mover |
+|---|---|---|
+| seen more than once | at least 2 passes | at least 3 dated visits (dates closer than 0.02 day are one visit) |
+| straight line | the largest distance of a mark from the line through the first and the last mark: ≤ 3.1″ (half a pixel) pass, ≤ 6.2″ warn, more fail; two passes only: warn | places against time fitted at a constant rate: largest residual ≤ 3.1″ pass; a smooth curve (second degree within 3.1″, or the time-lapse search's orbit model within 2″ rms) warn |
+| Gaia, SIMBAD | the catalogue's objects carried to each mark's date: one within 4″ of every mark fail, of some marks warn, none pass | the same |
+| JPL | Small-Body Identification once per visit of each mark's pass (at most 24 asks, 15.5 s apart): a body's track within 12″ of a mark fail | one ask per dated mark, at that instant |
+| edge and bright star | < 20″ from the field's edge, or ≤ 15″ from a star of magnitude ≤ 9 (it saturates SPHEREx): fail; ≤ 60″ (≤ 120″ for magnitude ≤ 6): warn | the same |
+| above the bar | the machine's search between passes has a track within 6.2″ of the marks in the same passes: pass; the search ran and has none: warn (seen by eye only); with the square's stored bar named | the time-lapse search has the track at the marks above 5σ for the visits together: pass; below or none: warn |
+| NEOWISE | along the path of the marks carried back, the NEOWISE single-exposure sources (3″, half-year epochs): on the path in ≥ 3 epochs pass, standing still at the first mark in ≥ 3 epochs fail, nothing warn | not applicable to a body this fast: pass |
+
+**The NEOWISE stack.** For a distant-body candidate with an orbit, the NEOWISE W1 single exposures of 2014–2024 over a 1° × 0.3° strip are made into epoch images (gaps of 30 days), the static sky is subtracted and masked, and the differences are added along the orbit, with the flux scale from isolated CatWISE stars of W1 13.5–15.8. Expected at ≥ 5σ and measured below the expectation by 3σ: fail (ruled out); measured above 3σ: pass (seen); else warn (not deep enough).
+
+The checks run in the background; JPL takes minutes and NEOWISE up to about 20 minutes. The person declares the submit once; the finding is submitted by itself when every check has answered without a fail and every warning has a comment, and the person is told the result.
