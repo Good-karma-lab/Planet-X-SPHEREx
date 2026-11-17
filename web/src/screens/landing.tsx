@@ -2,6 +2,7 @@
 // The background is NASA SVS's Deep Star Maps 2020 star map (Gaia DR2), the globe's default layer, as one equirectangular image
 // drawn from inside the sphere with a stereographic camera that turns as the page scrolls. Nothing is drawn or modelled on it.
 // Pictures on the page are real SPHEREx frames and DSS plates (web/public/landing/). Styles: ../landing.css (classes lp-).
+import { visibleInterval } from '../lib/idle';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import '../landing.css';
 
@@ -171,8 +172,7 @@ function PathHero() {
   const [t, setT] = useState(reducedMotion() ? NOW : 1950.5);
   useEffect(() => {
     if (reducedMotion()) return;
-    const id = setInterval(() => setT((v) => (v + 0.5 > 2054 ? 1950.5 : v + 0.5)), 45);
-    return () => clearInterval(id);
+    return visibleInterval(() => setT((v) => (v + 0.5 > 2054 ? 1950.5 : v + 0.5)), 45);
   }, []);
   const [nx, ny] = at(NOW);
   const R = 4.2;
@@ -249,8 +249,7 @@ function ThenAndNow() {
   const [i, setI] = useState(1);
   useEffect(() => {
     if (reducedMotion()) return;
-    const id = setInterval(() => setI((v) => (v + 1) % 3), 1500);
-    return () => clearInterval(id);
+    return visibleInterval(() => setI((v) => (v + 1) % 3), 1500);
   }, []);
   const b = BLINK[i]!;
   const [x, y] = at(b.t);
