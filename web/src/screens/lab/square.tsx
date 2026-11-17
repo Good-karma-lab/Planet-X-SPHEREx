@@ -4,6 +4,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { useUser } from '../../lib/account';
+import { clearDo, pendingDo, useSignIn } from './signin';
 
 export type Quarter = 'NE' | 'NW' | 'SE' | 'SW';
 /** the picture's reading order: north up, east left */
@@ -118,8 +119,15 @@ export function useSquareLook(a: SquareArgs): SquareLook {
   // the look: seconds with the finished picture on show (page visible), and the passes shown
   const look = useRef({ seconds: 0, passes: new Set<number>() });
   const [, beat] = useState(0);
+  const lookKey = `spherex.look.${fieldKey}`;
   useEffect(() => {
     look.current = { seconds: 0, passes: new Set<number>() };
+    try {
+      const kept = JSON.parse(localStorage.getItem(lookKey) ?? 'null') as { seconds: number; passes: number[]; at: number } | null;
+      if (kept && Date.now() - kept.at < 2 * 3600e3) look.current = { seconds: kept.seconds, passes: new Set(kept.passes) };
+    } catch {
+      /* no store: the look starts at 0 */
+    }
   }, [fieldKey]);
   if (a.ready && a.pass != null) look.current.passes.add(a.pass);
   const readyRef = useRef(a.ready);
@@ -133,6 +141,11 @@ export function useSquareLook(a: SquareArgs): SquareLook {
       last = now;
       if (!readyRef.current || (typeof document !== 'undefined' && document.visibilityState !== 'visible')) return;
       const before = Math.floor(look.current.seconds);
+      try {
+        localStorage.setItem(lookKey, JSON.stringify({ seconds: look.current.seconds, passes: [...look.current.passes], at: Date.now() }));
+      } catch {
+        /* a full store: the look is kept for this page only */
+      }
       look.current.seconds += dt;
       if (Math.floor(look.current.seconds) !== before && look.current.seconds <= LOOK_SECONDS + 2) beat((x) => x + 1);
     }, 1000);
@@ -183,7 +196,9 @@ export function useSquareLook(a: SquareArgs): SquareLook {
 
   // the free lab's button; after a quarter, the next one of the square not yet looked through opens
   const inTask = !!a.params['task'];
+  const si = useSignIn();
   const done = async () => {
+    if (!user) return si.ask('look', 'look'); // a guest: the popup; the link comes back with do=look
     setLine2('saving…');
     const ok = await confirm();
     if (!ok) return setLine2((l) => l || 'Not counted: the service did not answer');
@@ -201,12 +216,18 @@ export function useSquareLook(a: SquareArgs): SquareLook {
     }
     a.open({ ...a.params, ra: at[0].toFixed(5), dec: at[1].toFixed(5), fov: '10', cell: cell.id, quarter: next });
   };
+  useEffect(() => {
+    if (pendingDo(a.params) === 'look' && !inTask && canCount) {
+      clearDo();
+      void done();
+    }
+  }, [canCount, !!user]);
   const button =
     cell && !inTask ? (
       <div class="sqlook" data-testid="square-look">
         <button
           class="btn sm primary"
-          disabled={!canCount}
+          disabled={!!user && !canCount}
           title={canCount ? 'Count your look at this part of the sky' : why}
           onClick={() => void done()}
           data-testid="square-look-button"
@@ -216,6 +237,7 @@ export function useSquareLook(a: SquareArgs): SquareLook {
         <span class="sq-line" data-testid="square-look-line">
           {line2 || why}
         </span>
+        {si.popup}
       </div>
     ) : null;
 

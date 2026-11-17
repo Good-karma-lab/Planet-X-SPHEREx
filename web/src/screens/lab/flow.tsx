@@ -11,6 +11,8 @@ import { AnomalyView, FindingClip, MoverView, RedView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
 import { placeAt } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
+import { clearDo, pendingDo, useSignIn } from './signin';
+import { useRetry, type SearchInfo } from './progress';
 import './flow.css';
 
 export interface FlowGrid {
@@ -130,6 +132,8 @@ export interface LabFlow {
   focus: boolean;
   /** Known objects is on and a catalogue is still being asked */
   knownBusy: boolean;
+  /** the Known objects lookup as the switch and the row say it: asking, how many, or who did not answer and the next try */
+  knownSearch: SearchInfo;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -137,6 +141,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const knownRef = useRef(known);
   knownRef.current = known;
   const epochsKey = a.epochs.map((e) => e.toFixed(4)).join(',');
+  // a lookup that did not answer (or a catalogue that did not) is asked again by itself (lab/progress.tsx)
+  const [knownTry, setKnownTry] = useState(0);
+  const knownSilent = known.state === 'failed' || (known.state === 'ok' && !known.pending.length && !known.deepPending.length && (!known.answered.gaia || !known.answered.simbad || known.deepSilent.length > 0));
+  const knownRetry = useRetry(knownSilent, () => setKnownTry((x) => x + 1), `${a.ra},${a.dec},${a.fov}`);
   useEffect(() => {
     if (!a.epochs.length || !Number.isFinite(a.ra) || !Number.isFinite(a.dec)) {
       setKnown(KNOWN_OFF);
@@ -144,7 +152,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
     // asked when the field opens, switch on or off: the card of a selected object reads the same answer as the picture's rings
     return followKnown(knownUrl(a.ra, a.dec, a.fov, a.epochs), setKnown);
-  }, [a.ra, a.dec, a.fov, epochsKey]);
+  }, [a.ra, a.dec, a.fov, epochsKey, knownTry]);
 
   const [, tick] = useState(0);
   useEffect(() => onMarks(() => tick((x) => x + 1)), []);
@@ -352,6 +360,17 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       return true;
     }
     if (tool === 'mark') {
+      // a guest's first mark: the popup offers to keep the marks under a name (the mark is put all the same, in this browser)
+      if (!si.signedIn) {
+        try {
+          if (!sessionStorage.getItem('spherex.marks.asked')) {
+            sessionStorage.setItem('spherex.marks.asked', '1');
+            si.ask('marks', '');
+          }
+        } catch {
+          /* no store: no popup */
+        }
+      }
       const [ra, dec] = skyOf(x / a.side, y / a.side);
       const n = marksRef.current.length + 1;
       const m = addMark({
@@ -413,8 +432,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   }, [a.ra, a.dec, a.fov, open, a.sel?.ra, a.sel?.dec]);
   // the chip is the investigation of the field it was added from: another field has none until something is added there
   useEffect(() => setInv(null), [a.ra, a.dec, a.fov]);
+  const si = useSignIn();
   const openInvList = async () => {
     if (invList) return setInvList(null);
+    if (!si.signedIn) return si.ask('add', 'add'); // a guest: the popup; the link comes back with the list open
     setInvLine('');
     try {
       const r = await fetch('/api/me/investigations');
@@ -720,6 +741,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       </div>
     </>
   );
+  // after a sign-in link that came from "Add to investigation": the list opens once the selection is back
+  useEffect(() => {
+    if (pendingDo(a.params) === 'add' && si.signedIn && (a.sel || open)) {
+      clearDo();
+      void openInvList();
+    }
+  }, [si.signedIn, !!a.sel, open]);
   const card =
     cur || a.sel || marksHere.length ? (
       <div class="objcard" data-testid="flow-card">
@@ -840,7 +868,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     status: [status, awardNow].filter(Boolean).join(' · '),
     floats: strip,
     blinkPick,
-    card,
+    card: (
+      <>
+        {card}
+        {si.popup}
+      </>
+    ),
     chip,
     markOpen: !!cur,
     catalogueAt: (ra, dec, year) => catalogueAt(knownRef.current, ra, dec, year).object,
@@ -853,6 +886,19 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     blink,
     taskPanel,
     focus: !!task && focusKind(task.kind) && !others,
+    knownSearch: {
+      name: 'known objects',
+      state:
+        known.state === 'off'
+          ? 'idle'
+          : known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0))
+            ? 'running'
+            : knownSilent
+              ? 'failed'
+              : 'done',
+      count: known.state === 'ok' ? String(known.objects.length) : undefined,
+      retry: knownSilent ? knownRetry : null,
+    },
     knownBusy: a.known && (known.state === 'loading' || (known.state === 'ok' && (known.pending.length > 0 || known.deepPending.length > 0))),
   };
 }

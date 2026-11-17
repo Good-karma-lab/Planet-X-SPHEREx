@@ -160,3 +160,51 @@
 .sqlook { flex: none; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-bottom: 1px solid var(--edge-soft); }
 .sqlook .btn { flex: none; white-space: nowrap; }
 .sqlook .sq-line { min-width: 0; font: 500 11px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* the loading overlay: the telescope video under the step, about 60 % of the picture; on a phone it fills the picture */
+.vsq .loadov { position: absolute; left: 20%; right: 20%; top: 50%; transform: translateY(-50%); aspect-ratio: 16 / 10; z-index: 6; border-radius: 16px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55); background: #050a10; transition: opacity 0.45s ease; pointer-events: none; }
+.vsq .loadov.fading { opacity: 0; }
+.vsq .loadov .lo-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.vsq .loadov .lo-dim { position: absolute; inset: 0; background: linear-gradient(180deg, rgba(4, 9, 14, 0.35), rgba(4, 9, 14, 0.82) 55%, rgba(4, 9, 14, 0.9)); }
+.vsq .loadov .lo-ai { position: absolute; right: 10px; top: 8px; font: 600 9.5px var(--font); letter-spacing: 0.06em; color: rgba(230, 242, 246, 0.7); background: rgba(0, 0, 0, 0.45); padding: 2px 6px; border-radius: 6px; }
+.vsq .loadov .lo-body { position: absolute; left: 0; right: 0; bottom: 0; padding: 16px 20px 14px; display: flex; flex-direction: column; gap: 7px; }
+.vsq .loadov .lo-step { font: 650 18px var(--font); color: #f2fbfd; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vsq .loadov .lo-bar { position: relative; height: 5px; border-radius: 3px; background: rgba(255, 255, 255, 0.14); overflow: hidden; }
+.vsq .loadov .lo-bar i { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: var(--accent-l); transition: width 0.4s ease; }
+.vsq .loadov .lo-bar i.busy { animation: lbbusy 1.4s ease-in-out infinite; }
+.vsq .loadov .lo-detail { font: 500 12px var(--mono); color: #cfe3ea; min-height: 16px; }
+.vsq .loadov .lo-stages { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 3px 14px; font-size: 11.5px; color: rgba(214, 231, 237, 0.55); }
+.vsq .loadov .lo-stages li { display: inline-flex; align-items: center; gap: 5px; }
+.vsq .loadov .lo-stages li i { width: 10px; font-style: normal; color: var(--accent-l); }
+.vsq .loadov .lo-stages li.done { color: rgba(214, 231, 237, 0.85); }
+.vsq .loadov .lo-stages li.now { color: #f2fbfd; font-weight: 600; }
+.vsq .loadov .lo-time { font: 500 11px var(--mono); color: rgba(214, 231, 237, 0.65); min-height: 15px; }
+.vsq .loadov.failed .lo-step { color: #ff9c9c; }
+.lab.loading .vsq .fstatus { visibility: hidden; }
+@media (max-width: 560px) { .vsq .loadov { left: 0; right: 0; top: 0; bottom: 0; transform: none; aspect-ratio: auto; border-radius: 0; } }
+
+/* the sign-in popup of a guest's click that needs an account */
+.signin-back { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(2, 6, 10, 0.55); }
+.signin { width: min(420px, calc(100vw - 32px)); box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 18px 18px 14px; border-radius: 16px; background: rgba(10, 20, 27, 0.97); border: 1px solid var(--edge); box-shadow: var(--shadow); color: var(--ink); text-align: left; }
+.signin .si-title { font: 650 16px var(--font); }
+.signin .si-why { margin: 0; font-size: 12.5px; line-height: 1.45; color: rgba(214, 231, 237, 0.85); }
+.signin .si-row { display: flex; gap: 8px; }
+.signin .si-row .inp { flex: 1; min-width: 0; height: 32px; font-size: 13px; padding: 0 10px; }
+.signin .si-google { justify-content: center; text-decoration: none; }
+.signin .si-line { margin: 0; min-height: 16px; font: 500 11.5px var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.signin .si-later { align-self: flex-end; }
+@media (max-width: 560px) { .signin .si-row { flex-direction: column; } }
+
+/* the state of a search after its switch and in the row at the top of Candidates (lab/progress.tsx) */
+.sw .sm-run, .sw .sm-done, .sw .sm-fail { margin-left: 7px; font: 500 10.5px var(--mono); color: var(--muted); white-space: nowrap; }
+.sw .sm-fail, .searchrow .sm-fail { color: #ffb3b3; }
+.sw .sm-fail a, .searchrow .sm-fail a { color: var(--accent-l); }
+.sm-run { display: inline-flex; align-items: center; gap: 4px; }
+.sm-ring { display: inline-block; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid rgba(95, 227, 214, 0.25); border-top-color: var(--accent-l); animation: swbusy 0.9s linear infinite; }
+.searchrow { display: flex; flex-wrap: wrap; gap: 2px 6px; margin: 0 0 8px; font: 500 11px var(--mono); color: var(--muted); }
+.searchrow .sr-item { white-space: nowrap; }
+.searchrow .sr-item em { font-style: normal; margin-right: 6px; opacity: 0.6; }
+.searchrow .sr-item.s-done { color: rgba(214, 231, 237, 0.85); }
+.searchrow .sr-item.s-running { color: var(--accent-l); }
+.swgrid .sw { flex-wrap: wrap; row-gap: 0; }
+.swgrid .sw .sm-done, .swgrid .sw .sm-run, .swgrid .sw .sm-fail { min-width: 0; }

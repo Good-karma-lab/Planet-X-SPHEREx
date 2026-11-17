@@ -5,6 +5,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Mark } from '../../lib/marks';
+import { clearDo, pendingDo, useSignIn } from './signin';
 
 export type TaskKind = 'cell' | 'finding' | 'moves' | 'red' | 'anomaly';
 const KINDS: TaskKind[] = ['cell', 'finding', 'moves', 'red', 'anomaly'];
@@ -235,6 +236,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
   const [id, setId] = useState<string | null>(task?.id ?? null);
   const [, setRefs] = useState<{ cell: string | null; finding: string | null }>({ cell: task?.cell_id ?? null, finding: task?.finding_id ?? null });
   const [busy, setBusy] = useState(false);
+  const si = useSignIn();
   const [line, setLine] = useState('');
   // a tree of plain questions (red source, anomaly): the service's own when the task brought it, and the answers given so far
   const [tree, setTree] = useState<TreeStep[] | null>(task ? (TREES[task.kind] ?? null) : null);
@@ -285,10 +287,21 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
       stop = true;
     };
   }, [key]);
+  // after a sign-in link: the answer the person clicked as a guest is given (a square's once its look counts)
+  const want = pendingDo(a.params);
+  useEffect(() => {
+    if (!task || !si.signedIn || !id || !/^(answer|path):/.test(want)) return;
+    if (task.kind === 'cell' && !a.square?.canCount) return;
+    clearDo();
+    if (want.startsWith('path:')) void close('cant_tell', want.slice(5).split('.'));
+    else void close(want.slice(7));
+  }, [id, si.signedIn, a.square?.canCount, want]);
   if (!task) return null;
 
-  const close = async (result: string, answers?: string[]) => {
-    if (busy) return;
+  async function close(result: string, answers?: string[]) {
+    if (!task || busy) return;
+    // a guest: the popup; the sign-in link comes back to this task with the answer, and it is given then
+    if (!si.signedIn) return si.ask(task.kind === 'cell' ? 'look' : 'answer', answers ? `path:${answers.join('.')}` : `answer:${result}`);
     setBusy(true);
     setLine('saving…');
     const markIds = a.marksHere.map((m) => m.id);
@@ -326,7 +339,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     const to = next && next !== 'failed' && next.id !== id ? taskParams(next) : null;
     if (to) a.open(to);
     else setLine(next === 'failed' ? 'Tasks did not answer' : 'No more tasks of this kind');
-  };
+  }
   const n = a.marksHere.length;
   const T = TASKS[task.kind];
   // a tree of plain questions: one step at a time; an answer goes on to the next step or ends the task with the path
@@ -337,6 +350,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
   };
   return (
     <div class={`taskpanel k-${task.kind}`} data-testid="task-panel">
+      {si.popup}
       <div class="tp-head">
         <b>Task</b>
         <span>{T.title}</span>

@@ -1,6 +1,7 @@
 import { isSquareTask } from './lab/rules';
-import { LoadBlock, loadStep } from './lab/loading';
+import { LoadOverlay, loadStep } from './lab/loading';
 import { useSquareLook } from './lab/square';
+import { SearchMark, SearchRow, searchingLine, useRetry, type SearchInfo } from './lab/progress';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
@@ -434,9 +435,9 @@ export function Lab({ route }: { route: Route }) {
   const opts: Opts = {
     reference: p['ref'] === '1',
     archive: p['arch'] === '1',
-    anomalies: inTask ? p['ano'] === '1' : p['ano'] !== '0',
+    anomalies: p['ano'] === '1',
     movers: p['movers'] !== '0',
-    red: inTask ? p['red'] === '1' : p['red'] !== '0',
+    red: p['red'] === '1',
     marker: p['marker'] !== '0',
     sharp: p['sharp'] !== '0',
     trim: p['trim'] === 'p999' || p['trim'] === 'p995' || p['trim'] === 'adaptive' ? p['trim'] : 'fixed',
@@ -1378,7 +1379,8 @@ export function Lab({ route }: { route: Route }) {
       const ringMax = fovArc >= 3000 ? 5 : fovArc >= 1100 ? 8 : Infinity;
       // anomalies and red sources belong to the passes (Months); the Days scale shows the visit's own movers
       if (st.opts.anomalies && anv?.result && !days) {
-        for (const a of anv.result.anomalies.filter((q) => q.n <= ringMax)) {
+        // only the anomalies the catalogues do not explain: a known one is Known objects' to ring
+        for (const a of anv.result.anomalies.filter((q) => q.n <= ringMax && !q.identified?.simbad?.name)) {
           const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
           const k = near(ara, adec, 10);
           if (k) k.lines.push(`spectral anomaly ${a.n}`);
@@ -1399,6 +1401,8 @@ export function Lab({ route }: { route: Route }) {
       if (rv?.result && !days && st.opts.red) {
         rv.result.red.forEach((x, i) => {
           if (i >= ringMax) return;
+          // only the red sources no catalogue names (SIMBAD, as the Candidates rows ask it)
+          if (identCache.get(`${x.ra.toFixed(5)},${x.dec.toFixed(5)}`)) return;
           const [rra, rdec] =
             x.moves && x.ra_j2000 != null && x.dec_j2000 != null
               ? atEpoch(x.ra_j2000, x.dec_j2000, x.pmra ?? 0, x.pmdec ?? 0, year)
@@ -1932,6 +1936,9 @@ export function Lab({ route }: { route: Route }) {
     };
   }, [ra, dec, fov, valid, film]);
 
+  // a search that failed is asked again by itself (lab/progress.tsx): these counters start its polling again
+  const [moversTry, setMoversTry] = useState(0);
+  const [dwarfTry, setDwarfTry] = useState(0);
   // brown dwarf candidates: red sources that move between passes and have no Gaia counterpart (polled until done)
   useEffect(() => {
     setDwarfs(null);
@@ -1957,7 +1964,7 @@ export function Lab({ route }: { route: Route }) {
     return () => {
       stop = true;
     };
-  }, [ra, dec, fov, valid, meta]);
+  }, [ra, dec, fov, valid, meta, dwarfTry]);
 
   // the search between passes: asked for once the field is finished; polled until its Gaia checks are done
   useEffect(() => {
@@ -1987,7 +1994,7 @@ export function Lab({ route }: { route: Route }) {
     return () => {
       stop = true;
     };
-  }, [ra, dec, fov, valid, meta]);
+  }, [ra, dec, fov, valid, meta, moversTry]);
   // the names of the movers in the lists come from the same identification as the passport's heading (/context at the track's place in 2025.9)
   const identNames = useIdentNames(mv?.result?.tracks ?? []);
   const trackNames = (mv?.result?.tracks ?? []).map((t, ti) => {
@@ -2862,6 +2869,7 @@ export function Lab({ route }: { route: Route }) {
     why = 'not available in this view',
     whyShort = '',
     busy = false,
+    search: SearchInfo | null = null,
   ) => (
     <label class={`sw ${onChange ? '' : 'dis'}${busy ? ' busy' : ''}`} title={onChange ? title : `${title} (${why})`}>
       <input
@@ -2873,6 +2881,7 @@ export function Lab({ route }: { route: Route }) {
         onChange={(e) => onChange?.((e.target as HTMLInputElement).checked)}
       />
       <span>{text}</span>
+      {search && <SearchMark s={search} />}
       {!onChange && whyShort && <em class="why">{whyShort}</em>}
     </label>
   );
@@ -3078,6 +3087,14 @@ export function Lab({ route }: { route: Route }) {
             : null,
     ],
   ];
+  // ---- the searches of the field, one source for the switches, the row at the top of Candidates and the status line
+  const fieldId = `${ra},${dec},${fov}`;
+  const moversRetry = useRetry(mv?.state === 'failed', () => setMoversTry((x) => x + 1), fieldId);
+  const dwarfRetry = useRetry(dwarfs?.state === 'failed', () => setDwarfTry((x) => x + 1), fieldId);
+  const redRetry = useRetry(redv?.state === 'failed', () => void findRed(), fieldId);
+  const anRetry = useRetry(an?.state === 'failed', () => void followAnomalies(true), fieldId);
+  const stOf = (state: string | undefined, started: boolean): SearchInfo['state'] =>
+    !started ? 'idle' : state === 'done' ? 'done' : state === 'failed' ? 'failed' : 'running';
   // ---- the finds of the field as one list (Candidates tab): unexplained first; known ones never count
   const yearNow = passMeta ? 2000 + (passMeta.mjd_mid - 51544.5) / 365.25 : 2025.9;
   const uvNow = (pra: number, pdec: number): [number, number] | null => {
@@ -3219,6 +3236,43 @@ export function Lab({ route }: { route: Route }) {
     ...(FPX_AUTO && !fpx ? [{ name: 'Planet X', state: stateOf(fpxAllOver, fpxLeads.length) }] : []),
   ];
   const foundCount = unexplainedCount(findRows);
+  const unexplainedOf = (g: 'red' | 'anomaly') => findRows.filter((r) => r.group === g && r.status === 'unexplained').length;
+  const fieldOn = valid && !!meta;
+  const searches: SearchInfo[] = [
+    { name: 'movers', state: stOf(mv?.state, fieldOn), count: String(mvr?.tracks.length ?? 0), ours: true, retry: mv?.state === 'failed' ? moversRetry : null },
+    {
+      name: 'brown dwarfs',
+      state: stOf(dwarfs?.state, fieldOn && !!dwarfs),
+      count: String(dwarfs?.result?.counts?.candidates ?? dwarfs?.result?.candidates.length ?? 0),
+      ours: true,
+      retry: dwarfs?.state === 'failed' ? dwarfRetry : null,
+    },
+    { name: 'red sources', state: stOf(redv?.state, fieldOn && !!redv), count: `${unexplainedOf('red')} unexplained`, ours: true, retry: redv?.state === 'failed' ? redRetry : null },
+    {
+      name: 'anomalies',
+      state: stOf(an?.state === 'idle' ? 'running' : an?.state, fieldOn && !!an),
+      frac: an?.state === 'running' ? (anFrac ?? null) : null,
+      count: String(unexplainedOf('anomaly')),
+      ours: true,
+      retry: an?.state === 'failed' ? anRetry : null,
+    },
+    { name: 'asteroids', state: ast.state === 'idle' ? 'idle' : ast.state === 'done' || ast.state === 'none' ? 'done' : ast.state === 'failed' ? 'failed' : 'running', frac: ast.frac, count: String(ast.tracks?.length ?? 0), ours: true },
+    ...(FPX_AUTO && !fpx
+      ? [{ name: 'Planet X', state: (fpxAllOver ? 'done' : fieldOn ? 'running' : 'idle') as SearchInfo['state'], frac: pxState.frac != null && pxState.frac < 1 ? pxState.frac : null, count: String(fpxLeads.length), ours: true }]
+      : []),
+    flow.knownSearch,
+  ];
+  const searchLine = searchingLine(searches.filter((x) => x.name !== 'known objects'));
+  const searchOf = (name: string) => searches.find((x) => x.name === name) ?? null;
+  // the Machine finds switch: movers and brown dwarfs together
+  const machineSearch: SearchInfo | null = (() => {
+    const m = searchOf('movers');
+    const d = searchOf('brown dwarfs');
+    if (!m) return null;
+    const run = m.state === 'running' || d?.state === 'running';
+    const fail = m.state === 'failed' ? m : d?.state === 'failed' ? d : null;
+    return fail ?? { name: 'machine finds', state: run ? 'running' : m.state, count: String((mvr?.tracks.length ?? 0) + Number(d?.count ?? 0)) };
+  })();
 
   // the picture's status line: a note, a wait, the date of what is shown (the flow's own words follow it)
   const mainStatus: string =
@@ -3334,7 +3388,7 @@ export function Lab({ route }: { route: Route }) {
                 data-testid="picture"
               />
               <canvas ref={overlay} class="ov" />
-              {loadNow && <LoadBlock step={loadNow} />}
+              <LoadOverlay step={loadNow} field={`${ra},${dec},${fov}`} />
               {flow.floats}
               {labels.map((l) =>
                 l.empty ? (
@@ -3420,6 +3474,12 @@ export function Lab({ route }: { route: Route }) {
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
                 {mainStatus}
                 {!note && flow.status && <span data-testid="flow-status">{mainStatus ? ' · ' : ''}{flow.status}</span>}
+                {!note && searchLine && (
+                  <span data-testid="search-status">
+                    {mainStatus || flow.status ? ' · ' : ''}
+                    {searchLine}
+                  </span>
+                )}
                 {flow.chip}
                 {time === 'diff' && film === null && (
                   <span class="dkey">
@@ -3789,26 +3849,35 @@ export function Lab({ route }: { route: Route }) {
                     ft.state === 'ok'
                       ? 'the asteroid search found no track in this pass'
                       : 'the asteroid search of this pass has not finished yet',
+                    '',
+                    false,
+                    film === null ? machineSearch : null,
                   )}
                   {sw(
                     'redChk',
                     'Red sources',
                     'Red sources: a ring and the name on every source that is bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (the brown dwarf candidates are among them)',
-                    opts.red && !!redv?.result?.red.length,
-                    redv?.result?.red.length ? (v) => set({ red: v ? null : '0' }) : null,
+                    opts.red,
+                    (v) => set({ red: v ? '1' : null }),
                     redv?.result
                       ? 'the red-source search found none in this field'
                       : 'the red-source search of this field has not finished yet',
+                    '',
+                    false,
+                    searchOf('red sources'),
                   )}
                   {sw(
                     'anoChk',
                     'Anomalies',
                     'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
-                    opts.anomalies && !!an?.result?.anomalies.length,
-                    an?.result?.anomalies.length ? (v) => set({ ano: v ? null : '0' }) : null,
+                    opts.anomalies,
+                    (v) => set({ ano: v ? '1' : null }),
                     an?.result
                       ? 'the anomaly search found no anomaly in this field'
                       : 'the anomaly search of this field has not finished yet',
+                    '',
+                    false,
+                    searchOf('anomalies'),
                   )}
                   {sw(
                     'knownChk',
@@ -3818,7 +3887,8 @@ export function Lab({ route }: { route: Route }) {
                     (v) => set({ known: v ? '1' : inTask ? '0' : null }),
                     undefined,
                     '',
-                    flow.knownBusy,
+                    false,
+                    flow.knownSearch,
                   )}
                   {sw(
                     'maskChk',
@@ -4108,6 +4178,7 @@ export function Lab({ route }: { route: Route }) {
                   onBack={() => setPairSel(null)}
                 />
               )}
+              <SearchRow list={searches} />
               <CandList
                 rows={findRows}
                 also={alsoLine(searchStates)}
