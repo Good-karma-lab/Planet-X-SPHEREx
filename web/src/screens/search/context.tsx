@@ -164,7 +164,9 @@ export function heldRow(key: keyof ContextReply, held: Held | null | undefined):
   if (!g) return 'no entry';
   const parts = [g.source_id];
   if (g.g != null) parts.push(`G ${g.g.toFixed(2)}`);
+  if (g.bp_rp != null) parts.push(`BP−RP ${g.bp_rp.toFixed(2)}`);
   if (g.parallax != null && g.parallax > 0) parts.push(`parallax ${g.parallax.toFixed(2)} mas`);
+  if (g.ruwe != null) parts.push(`RUWE ${g.ruwe.toFixed(1)}`);
   if (g.pmra != null && g.pmdec != null) parts.push(`motion ${(Math.hypot(g.pmra, g.pmdec) / 1000).toFixed(2)} ″/yr`);
   return parts.join(' · ');
 }

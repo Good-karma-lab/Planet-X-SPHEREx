@@ -17,6 +17,8 @@ const reply = parseKnown({
       pmra: -8.0,
       pmdec: 9.0,
       parallax: 1.42,
+      bp_rp: 1.234,
+      ruwe: 1.03,
       positions: [{ epoch: 2025.9, ra: 269.42037, dec: 4.73183 }],
       label: false,
     },
@@ -52,7 +54,7 @@ describe('a ringed known source in the passport', () => {
     const id = heldIdentified(h);
     expect(nameOf({ ra: 269.42037, dec: 4.73183 } as never, id, h)).toBe('Gaia DR3 4472832508888391168');
     expect(heldRow('simbad', h)).toBe('no entry');
-    expect(heldRow('gaia', h)).toBe('4472832508888391168 · G 12.31 · parallax 1.42 mas · motion 0.01 ″/yr');
+    expect(heldRow('gaia', h)).toBe('4472832508888391168 · G 12.31 · BP−RP 1.23 · parallax 1.42 mas · RUWE 1.0 · motion 0.01 ″/yr');
     // the other catalogues are not held: asked
     expect(heldRow('twomass', h)).toBeNull();
   });

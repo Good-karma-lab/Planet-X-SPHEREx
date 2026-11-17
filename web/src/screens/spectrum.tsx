@@ -542,7 +542,7 @@ export function heldIdentified(h: Held | null | undefined): Identified {
   return {
     simbad: h.simbad === 'none' ? { state: 'none' } : h.simbad ? { state: 'ok', name: h.simbad.name, type: h.simbad.type ?? undefined, sp: null } : undefined,
     gaia: h.gaia
-      ? { state: 'ok', source_id: h.gaia.source_id, g: h.gaia.g, parallax: h.gaia.parallax, bp_rp: null, ruwe: null }
+      ? { state: 'ok', source_id: h.gaia.source_id, g: h.gaia.g, parallax: h.gaia.parallax, bp_rp: h.gaia.bp_rp, ruwe: h.gaia.ruwe }
       : h.covered.includes('gaia')
         ? { state: 'none' }
         : undefined,

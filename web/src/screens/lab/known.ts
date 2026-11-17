@@ -24,6 +24,9 @@ export interface KnownObject {
   pmdec?: number | null;
   /** Gaia's parallax, mas */
   parallax?: number | null;
+  /** Gaia's BP−RP colour and RUWE */
+  bp_rp?: number | null;
+  ruwe?: number | null;
   /** a deeper-catalogue match: the catalogues and their ids merged into it */
   catalogues?: string[];
   ids?: string[];
@@ -141,6 +144,8 @@ export function parseKnown(raw: unknown): KnownReply {
       pmra: Number.isFinite(o.pmra as number) ? (o.pmra as number) : null,
       pmdec: Number.isFinite(o.pmdec as number) ? (o.pmdec as number) : null,
       parallax: Number.isFinite(o.parallax as number) ? (o.parallax as number) : null,
+      bp_rp: Number.isFinite(o.bp_rp as number) ? (o.bp_rp as number) : null,
+      ruwe: Number.isFinite(o.ruwe as number) ? (o.ruwe as number) : null,
       positions,
       label: o.label === true,
     });
@@ -573,7 +578,15 @@ export function catalogueAt(
 export interface Held {
   /** the name to show: SIMBAD's when it has one, else the catalogue id (Gaia DR3 …, CatWISE …) */
   name: string;
-  gaia: { source_id: string; g: number | null; parallax: number | null; pmra: number | null; pmdec: number | null } | null;
+  gaia: {
+    source_id: string;
+    g: number | null;
+    bp_rp: number | null;
+    ruwe: number | null;
+    parallax: number | null;
+    pmra: number | null;
+    pmdec: number | null;
+  } | null;
   /** SIMBAD's answer for it: a name (and type), no entry (SIMBAD answered for the field and has none here), or null (not covered) */
   simbad: { name: string; type: string | null } | 'none' | null;
   /** a JPL body: its name and type */
@@ -590,13 +603,26 @@ export function heldAt(k: KnownState, ra: number, dec: number, year: number): He
   const c = catalogueAt(k, ra, dec, year);
   const o = c.object;
   if (o) {
-    if (o.source === 'jpl') return { name: o.name, gaia: null, simbad: null, jpl: { name: o.name, type: o.type ?? null }, deep: null, covered: [] };
+    if (o.source === 'jpl')
+      return { name: o.name, gaia: null, simbad: null, jpl: { name: o.name, type: o.type ?? null }, deep: null, covered: [] };
     if (o.source === 'gaia') {
       const sid = o.id.replace(/^gaia:/, '');
-      const simbad = o.simbad ? { name: o.simbad, type: o.type && o.type !== 'star' ? o.type : null } : k.answered.simbad ? ('none' as const) : null;
+      const simbad = o.simbad
+        ? { name: o.simbad, type: o.type && o.type !== 'star' ? o.type : null }
+        : k.answered.simbad
+          ? ('none' as const)
+          : null;
       return {
         name: o.simbad ?? `Gaia DR3 ${sid}`,
-        gaia: { source_id: sid, g: o.mag ?? null, parallax: o.parallax ?? null, pmra: o.pmra ?? null, pmdec: o.pmdec ?? null },
+        gaia: {
+          source_id: sid,
+          g: o.mag ?? null,
+          bp_rp: o.bp_rp ?? null,
+          ruwe: o.ruwe ?? null,
+          parallax: o.parallax ?? null,
+          pmra: o.pmra ?? null,
+          pmdec: o.pmdec ?? null,
+        },
         simbad,
         jpl: null,
         deep: null,

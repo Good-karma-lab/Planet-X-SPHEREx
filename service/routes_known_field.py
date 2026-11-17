@@ -52,7 +52,7 @@ def make_known_field_router(st: Any, prefix: str = "/api") -> APIRouter:
             raise HTTPException(400, f"epochs: 1 to {MAX_EPOCHS} Julian years (1990-2100) or MJDs")
         out = await known_field_of(st).objects(round(ra, 5), round(dec, 5), round(size_arcmin, 1), eps, match=bool(match), wait_s=wait)
         if compact:  # objects without a label keep what a thin ring needs and what the passport takes as the source's identity
-            keep = ("id", "source", "positions", "mag", "label", "pmra", "pmdec", "parallax")
+            keep = ("id", "source", "positions", "mag", "label", "pmra", "pmdec", "parallax", "bp_rp", "ruwe")
             named = ("name", "type", "simbad")  # a SIMBAD object, or a Gaia star SIMBAD names: its name is its identity
 
             def thin(o: dict[str, Any]) -> dict[str, Any]:
