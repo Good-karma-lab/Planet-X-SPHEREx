@@ -251,3 +251,50 @@ def test_simbad_j_magnitude_stands_in_for_2mass_when_irsa_does_not_answer() -> N
     out = asyncio.run(go())
     assert out["twomass"]["state"] == "ok" and out["twomass"]["J"] == 5.24 and "SIMBAD" in out["twomass"]["via"]
     assert out["allwise"] == {"state": "none"}
+
+
+def test_held_catalogues_are_not_asked_again_and_the_held_motion_places_the_infrared() -> None:
+    """The lab's field lookup already answered Gaia and SIMBAD for a ringed star: the passport asks only the others."""
+
+    async def go() -> tuple[dict[str, Any], list[str], list[tuple[float, float]]]:
+        c = ctx.CatalogueContext(client=httpx.AsyncClient())
+        asked: list[str] = []
+        places: list[tuple[float, float]] = []
+
+        def part(name: str) -> Any:
+            async def f(*a: Any, **k: Any) -> dict[str, Any]:
+                asked.append(name)
+                return {"state": "none"}
+
+            return f
+
+        async def irsa(p: str, a: float, d: float, *rest: Any, **k: Any) -> dict[str, Any]:
+            asked.append(p)
+            places.append((a, d))
+            return {"state": "none"}
+
+        c._simbad, c._gaia, c._vsx, c._ned, c._irsa = part("simbad"), part("gaia"), part("vsx"), part("ned"), irsa  # type: ignore[method-assign]
+        out = await c.context_within(269.45, 4.69, 2025.9, 6.0, 5.0, frozenset({"gaia", "simbad"}), (-797.8, 10326.0))
+        return out, asked, places
+
+    out, asked, places = asyncio.run(go())
+    assert "gaia" not in asked and "simbad" not in asked and "gaia" not in out and "simbad" not in out
+    assert {"vsx", "ned", "twomass", "allwise", "catwise"} <= set(asked) and out["complete"] is True
+    # 2MASS (1999.5) is south of the 2025.9 place by the held motion: 26.4 yr × 10.3″/yr ≈ 272″
+    assert any(d < 4.69 - 0.07 for _, d in places)
+
+
+def test_the_route_reads_skip_and_the_held_motion() -> None:
+    seen: dict[str, Any] = {}
+
+    class Cat:
+        async def context_within(
+            self, ra: float, dec: float, epoch: float, radius: float, deadline: float, skip: Any = None, pm: Any = None
+        ) -> Any:
+            seen.update(skip=skip, pm=pm)
+            return {"ok": 1}
+
+    app = FastAPI()
+    app.include_router(make_router(SimpleNamespace(catalogue=Cat())))
+    r = TestClient(app).get("/api/v1/context?ra=10&dec=20&skip=gaia,simbad,bogus&pmra=-797.8&pmdec=10326")
+    assert r.status_code == 200 and seen["skip"] == frozenset({"gaia", "simbad"}) and seen["pm"] == (-797.8, 10326.0)

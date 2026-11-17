@@ -22,6 +22,14 @@ export interface KnownObject {
   /** proper motion, mas/yr (the objects with a name carry it) */
   pmra?: number | null;
   pmdec?: number | null;
+  /** Gaia's parallax, mas */
+  parallax?: number | null;
+  /** Gaia's BP−RP colour and RUWE */
+  bp_rp?: number | null;
+  ruwe?: number | null;
+  /** a deeper-catalogue match: the catalogues and their ids merged into it */
+  catalogues?: string[];
+  ids?: string[];
   /** its place at each epoch asked for (decimal years) */
   positions: { epoch: number; ra: number; dec: number }[];
   /** the name and the speed are written at the ring; otherwise a thin ring with the name on hover */
@@ -103,7 +111,17 @@ export function parseKnown(raw: unknown): KnownReply {
       .filter((q) => q && Number.isFinite(q.epoch) && Number.isFinite(q.ra) && Number.isFinite(q.dec))
       .map((q) => ({ epoch: q.epoch > 3000 ? yearOfMjd(q.epoch) : q.epoch, ra: q.ra, dec: q.dec }))
       .sort((a, b) => a.epoch - b.epoch);
-    if (positions.length) deep.push({ id: String(m.id ?? `deep:${deep.length}`), source: 'gaia', name: '', positions, label: false });
+    if (positions.length)
+      deep.push({
+        id: String(m.id ?? `deep:${deep.length}`),
+        source: 'gaia',
+        name: '',
+        mag: Number.isFinite(m.mag as number) ? (m.mag as number) : null,
+        catalogues: Array.isArray(m.catalogues) ? m.catalogues.map(String) : [],
+        ids: Array.isArray(m.ids) ? m.ids.map(String) : [],
+        positions,
+        label: false,
+      });
   }
   const objects: KnownObject[] = [];
   for (const o of Array.isArray(r.objects) ? (r.objects as Partial<KnownObject>[]) : []) {
@@ -125,6 +143,9 @@ export function parseKnown(raw: unknown): KnownReply {
       simbad: typeof o.simbad === 'string' && o.simbad ? o.simbad : null,
       pmra: Number.isFinite(o.pmra as number) ? (o.pmra as number) : null,
       pmdec: Number.isFinite(o.pmdec as number) ? (o.pmdec as number) : null,
+      parallax: Number.isFinite(o.parallax as number) ? (o.parallax as number) : null,
+      bp_rp: Number.isFinite(o.bp_rp as number) ? (o.bp_rp as number) : null,
+      ruwe: Number.isFinite(o.ruwe as number) ? (o.ruwe as number) : null,
       positions,
       label: o.label === true,
     });
@@ -549,4 +570,90 @@ export function catalogueAt(
     object: null,
     sep: null,
   };
+}
+
+/** What the field's lookup already holds about a place: the identity of a ringed known source (or a deeper-catalogue match), taken
+ *  as it is instead of asking the catalogues again. `covered`: the catalogues of /api/v1/context the field's lookup answered for it
+ *  (the passport skips them); the others are still asked. */
+export interface Held {
+  /** the name to show: SIMBAD's when it has one, else the catalogue id (Gaia DR3 …, CatWISE …) */
+  name: string;
+  gaia: {
+    source_id: string;
+    g: number | null;
+    bp_rp: number | null;
+    ruwe: number | null;
+    parallax: number | null;
+    pmra: number | null;
+    pmdec: number | null;
+  } | null;
+  /** SIMBAD's answer for it: a name (and type), no entry (SIMBAD answered for the field and has none here), or null (not covered) */
+  simbad: { name: string; type: string | null } | 'none' | null;
+  /** a JPL body: its name and type */
+  jpl: { name: string; type: string | null } | null;
+  /** a deeper-catalogue match only: the catalogues and ids */
+  deep: { catalogues: string[]; ids: string[] } | null;
+  covered: ('gaia' | 'simbad')[];
+}
+
+const DEEP_WORD: Record<string, string> = { gaia: 'Gaia DR3', catwise: 'CatWISE2020', allwise: 'AllWISE', twomass: '2MASS' };
+
+export function heldAt(k: KnownState, ra: number, dec: number, year: number): Held | null {
+  if (k.state !== 'ok') return null;
+  const c = catalogueAt(k, ra, dec, year);
+  const o = c.object;
+  if (o) {
+    if (o.source === 'jpl')
+      return { name: o.name, gaia: null, simbad: null, jpl: { name: o.name, type: o.type ?? null }, deep: null, covered: [] };
+    if (o.source === 'gaia') {
+      const sid = o.id.replace(/^gaia:/, '');
+      const simbad = o.simbad
+        ? { name: o.simbad, type: o.type && o.type !== 'star' ? o.type : null }
+        : k.answered.simbad
+          ? ('none' as const)
+          : null;
+      return {
+        name: o.simbad ?? `Gaia DR3 ${sid}`,
+        gaia: {
+          source_id: sid,
+          g: o.mag ?? null,
+          bp_rp: o.bp_rp ?? null,
+          ruwe: o.ruwe ?? null,
+          parallax: o.parallax ?? null,
+          pmra: o.pmra ?? null,
+          pmdec: o.pmdec ?? null,
+        },
+        simbad,
+        jpl: null,
+        deep: null,
+        covered: simbad ? ['gaia', 'simbad'] : ['gaia'],
+      };
+    }
+    // a SIMBAD object that Gaia does not have at its place (Gaia answered for the field: none there)
+    return {
+      name: o.name,
+      gaia: null,
+      simbad: { name: o.name, type: o.type ?? null },
+      jpl: null,
+      deep: null,
+      covered: k.answered.gaia ? ['gaia', 'simbad'] : ['simbad'],
+    };
+  }
+  const cosd = Math.cos((dec * Math.PI) / 180);
+  for (const d of k.deep) {
+    const p = placeAt(d, year);
+    if (!p || Math.hypot((((p[0] - ra + 540) % 360) - 180) * cosd, p[1] - dec) * 3600 >= DEEP_ARCSEC) continue;
+    const ids = d.ids?.length ? d.ids : [d.id];
+    const first = ids[0] ?? d.id;
+    const [cat, sid] = [first.split(':')[0] ?? '', first.slice(first.indexOf(':') + 1)];
+    return {
+      name: `${DEEP_WORD[cat] ?? cat} ${sid}`,
+      gaia: null,
+      simbad: k.answered.simbad ? 'none' : null,
+      jpl: null,
+      deep: { catalogues: d.catalogues ?? [], ids },
+      covered: k.answered.simbad ? ['simbad'] : [],
+    };
+  }
+  return null;
 }

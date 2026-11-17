@@ -1,3 +1,4 @@
+import { visibleInterval } from '../../lib/idle';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { formatHash } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
@@ -17,6 +18,11 @@ export interface Ident {
   detail: Record<string, unknown>;
   raw?: unknown;
   note?: string;
+}
+
+/** A find some catalogue knows (not the halo check): a miss in another catalogue is then a quiet "no entry", not the word of an unknown. */
+export function knownIn(idents: Ident[]): boolean {
+  return idents.some((i) => i.catalogue !== 'halo' && i.state === 'ok');
 }
 export interface Find {
   id: string;
@@ -82,10 +88,10 @@ export function useFinds(): Reply | null {
         })
         .catch(() => {});
     load();
-    const t = setInterval(load, 60000);
+    const off = visibleInterval(load, 60000); // a hidden tab asks nothing; seen again, it asks at once
     return () => {
       stop = true;
-      clearInterval(t);
+      off();
     };
   }, []);
   return r;
@@ -262,8 +268,7 @@ function Blink({ f }: { f: Find }) {
   }, [f.id]);
   useEffect(() => {
     if (!st.ok) return;
-    const t = setInterval(() => setI((x) => (x + 1) % crops.current.length), 900);
-    return () => clearInterval(t);
+    return visibleInterval(() => setI((x) => (x + 1) % crops.current.length), 900);
   }, [st.ok]);
   useEffect(() => {
     const cv = ref.current;
@@ -473,7 +478,9 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
                   : i.state === 'none'
                     ? i.catalogue === 'halo'
                       ? 'no bright star within 60″'
-                      : 'nothing within 6″'
+                      : knownIn(f.idents)
+                        ? 'no entry'
+                        : 'nothing within 6″'
                     : i.state === 'unavailable'
                       ? 'did not answer'
                       : 'not asked yet'}

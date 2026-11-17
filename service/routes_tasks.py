@@ -28,6 +28,7 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from service import accounts
 from service.accounts import agreement, people
 from service.accounts.score import STAGE_OF_STATUS
+from service.quarters import Quarters
 
 REF_ID = re.compile(r"^[A-Za-z0-9_\-:.]{1,80}$")
 LEADS = ("unexplained", "unchecked")
@@ -120,10 +121,25 @@ def quarter_place(cell_id: str, q: str) -> dict[str, Any]:
     return {"ra": float(qc.ra), "dec": float(qc.dec)}
 
 
-def pick_quarter(viewed: dict[str, int], taken: set[str]) -> str | None:
-    """The least-looked quarter this user has not taken; ties go NE, NW, SE, SW."""
+def pick_quarter(viewed: dict[str, int], taken: set[str], ready: Any = None) -> str | None:
+    """The least-looked quarter this user has not taken; ties go NE, NW, SE, SW. With `ready` (quarter -> its field is built), a
+    built quarter goes before one that would make the person wait."""
     left = [q for q in QUARTERS if q not in taken]
-    return min(left, key=lambda q: (viewed.get(q, 0), QUARTERS.index(q))) if left else None
+    if not left:
+        return None
+    if ready is not None:
+        warm = [q for q in left if ready(q)]
+        if warm:
+            left = warm
+    return min(left, key=lambda q: (viewed.get(q, 0), QUARTERS.index(q)))
+
+
+def open_quarters(viewed: dict[str, int], taken: set[str]) -> list[str]:
+    """A square's quarters this user has not taken, in the order they are given (least looked, then NE, NW, SE, SW)."""
+    return sorted((q for q in QUARTERS if q not in taken), key=lambda q: (viewed.get(q, 0), QUARTERS.index(q)))
+
+
+READY_SCAN = 40  # quarters looked at for a built one before a cold one is given
 
 
 def quarters_looked(acc: accounts.Accounts, user_id: str) -> dict[str, set[str]]:
@@ -217,15 +233,51 @@ def make_tasks_router(st: Any) -> APIRouter:
     def findings() -> list[dict[str, Any]]:
         return find_rows(st)
 
+    qs = Quarters(st, quarter_place)
+    st.quarters = qs
+
+    def upcoming(acc: accounts.Accounts, limit: int = 60) -> list[tuple[str, str]]:
+        """The quarters a newcomer would be given next, in order (the stock of ready quarters follows it)."""
+        rows = searched_cells(acc) or []
+        viewed = quarters_viewed(acc, [r["cell_id"] for r in rows[:500]])
+        order = sorted(
+            ((viewed.get(r["cell_id"], {}).get(q, 0), i, r["cell_id"], q) for i, r in enumerate(rows[:500]) for q in QUARTERS),
+            key=lambda t: (t[0], t[1], QUARTERS.index(t[3])),
+        )
+        return [(c, q) for _, _, c, q in order[:limit]]
+
+    st.upcoming_quarters = upcoming
+
     def next_cell(acc: accounts.Accounts, user_id: str | None, cell_id: str | None, quarter: str | None = None) -> dict[str, Any] | None:
-        """A quarter (10′) of a square. The next quarter of the square this user is looking through, while it has one they have
-        not looked at; then the least-looked searched square and its least-looked quarter (ties NE, NW, SE, SW). `cell_id` asks
-        for one square ("Take this square"), `quarter` for one of its quarters."""
+        """A quarter (10′) of a square, with the one after it built in the background (service/quarters.py)."""
         taken = quarters_looked(acc, user_id) if user_id else {}
+        t = pick_cell(acc, user_id, cell_id, quarter, taken)
+        if t is not None:
+            prebuild_after(acc, t["cell_id"], t["quarter"], taken)
+        return t
+
+    def prebuild_after(acc: accounts.Accounts, cell_id: str, quarter: str, taken: dict[str, set[str]]) -> None:
+        """While the person looks at this quarter, the next one they would get (the same square's next open quarter) is built."""
+        viewed = quarters_viewed(acc, [cell_id]).get(cell_id, {})
+        # the first of the quarters they would get after this one that is not built yet (a built one needs nothing)
+        cold = next((q for q in open_quarters(viewed, taken.get(cell_id, set()) | {quarter}) if not qs.ready(cell_id, q)), None)
+        if cold is not None:
+            qs.prebuild(cell_id, cold)
+
+    def pick_cell(
+        acc: accounts.Accounts, user_id: str | None, cell_id: str | None, quarter: str | None, taken: dict[str, set[str]]
+    ) -> dict[str, Any] | None:
+        """The next quarter of the square this user is looking through, while it has one they have not looked at; then the
+        least-looked searched square and its least-looked quarter (ties NE, NW, SE, SW), a built one before a cold one. `cell_id`
+        asks for one square ("Take this square"), `quarter` for one of its quarters."""
         if cell_id is not None:
             if cell_place(cell_id) is None:
                 raise HTTPException(404, "no such square")
-            q = quarter or pick_quarter(quarters_viewed(acc, [cell_id]).get(cell_id, {}), taken.get(cell_id, set())) or QUARTERS[0]
+            q = (
+                quarter
+                or pick_quarter(quarters_viewed(acc, [cell_id]).get(cell_id, {}), taken.get(cell_id, set()), lambda x: qs.ready(cell_id, x))
+                or QUARTERS[0]
+            )
             return {
                 "cell_id": cell_id,
                 "quarter": q,
@@ -244,7 +296,7 @@ def make_tasks_router(st: Any) -> APIRouter:
             )
             if last is not None:
                 here = str(last["cell_id"])
-                nxt = pick_quarter(quarters_viewed(acc, [here]).get(here, {}), taken.get(here, set()))
+                nxt = pick_quarter(quarters_viewed(acc, [here]).get(here, {}), taken.get(here, set()), lambda x: qs.ready(here, x))
                 if nxt is not None:
                     return {
                         "cell_id": here,
@@ -267,6 +319,19 @@ def make_tasks_router(st: Any) -> APIRouter:
                 best = (v.get(open_q, 0), i, r, open_q)
         if best is None:
             return None
+        # a built quarter first: the open quarters in the order they would be given, the first one whose field is ready (a few
+        # dozen looked at); else the least-looked one, built when the lab opens it
+        order = sorted(
+            (
+                (viewed.get(r["cell_id"], {}).get(q, 0), i, QUARTERS.index(q), r, q)
+                for i, r in enumerate(rows[:500])
+                for q in open_quarters(viewed.get(r["cell_id"], {}), taken.get(r["cell_id"], set()))
+            ),
+            key=lambda x: x[:3],
+        )
+        for _, _, _, r, q in order[:READY_SCAN]:
+            if qs.ready(r["cell_id"], q):
+                return {**r, "quarter": q, "fov": QUARTER_FOV, **quarter_place(r["cell_id"], q)}
         row, q = best[2], best[3]
         return {**row, "quarter": q, "fov": QUARTER_FOV, **quarter_place(row["cell_id"], q)}
 
@@ -371,6 +436,8 @@ def make_tasks_router(st: Any) -> APIRouter:
         if asked is None and uid is not None and not (kind == "cell" and quarter):
             have = acc.db.open_task(uid, kind)
             if have is not None:
+                if kind == "cell" and have.get("cell_id") and have.get("quarter"):
+                    prebuild_after(acc, have["cell_id"], have["quarter"], quarters_looked(acc, uid))
                 return {"task": with_ask(have)}
         if kind == "cell":
             ref = next_cell(acc, uid, cell_id, quarter)

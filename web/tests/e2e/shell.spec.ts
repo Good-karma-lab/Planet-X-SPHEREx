@@ -6,7 +6,9 @@ const expected = (t: string) => /Failed to load resource/.test(t);
 
 test('the rail switches screens by clicking', async ({ page }) => {
   const errors: string[] = [];
-  page.on('console', (m) => { if (m.type() === 'error' && !expected(m.text())) errors.push(m.text()); });
+  page.on('console', (m) => {
+    if (m.type() === 'error' && !expected(m.text())) errors.push(m.text());
+  });
   page.on('pageerror', (e) => errors.push(e.message));
 
   await page.goto('/');
@@ -25,7 +27,19 @@ test('a test target opens the lab with its controls', async ({ page }) => {
   await page.goto('/');
   await page.getByTestId("target-Barnard's Star").getByRole('button', { name: 'Open in lab' }).click();
   await expect(page).toHaveURL(/#\/lab\?ra=269\.4/);
-  for (const t of ['Controls', 'Object', 'Spectrum', 'Picture', 'Wall of bands', 'Wall of detectors', 'Blink', 'Difference', 'Co-add', 'Colour blend', 'Mono sum']) {
+  for (const t of [
+    'Controls',
+    'Object',
+    'Spectrum',
+    'Picture',
+    'Wall of bands',
+    'Wall of detectors',
+    'Blink',
+    'Difference',
+    'Co-add',
+    'Colour blend',
+    'Mono sum',
+  ]) {
     await expect(page.getByRole('button', { name: t, exact: true })).toBeVisible();
   }
   await expect(page.getByTestId('band-ch4')).toContainText('Methane');
@@ -41,4 +55,14 @@ test('no horizontal overflow at phone width', async ({ page }) => {
   await page.goto('/');
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);
+});
+
+test('a first-time visitor who clicks the rail right after the globe opens stays where they clicked (the tour does not take them back)', async ({
+  page,
+}) => {
+  await page.goto('/#/explore');
+  await page.waitForTimeout(600);
+  await page.locator('a[href="#/lab"]').first().click();
+  await page.waitForTimeout(3500); // past the tour's start (2.5 s)
+  await expect(page).toHaveURL(/#\/lab$/);
 });

@@ -284,6 +284,11 @@
   :root .map-ui.map-bar > * {
     flex: none;
   }
+  :root .map-ui.map-bar > .give-square {
+    position: static;
+    order: -4;
+    flex-direction: row;
+  }
   :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] {
     order: -3;
   }

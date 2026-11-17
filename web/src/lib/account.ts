@@ -1,6 +1,7 @@
 // The account side of the product flow (product spec §8): who is signed in, sign in and out, the marks sync for lib/marks.ts,
 // tasks, and the view history. A guest uses the whole site without it; every call here that needs a user is a no-op for a guest.
 
+import { pageVisible } from './idle';
 import { useEffect, useState } from 'preact/hooks';
 
 export interface User {
@@ -234,7 +235,9 @@ export async function nextTask(kind: 'cell' | 'finding', ref?: string): Promise<
 
 /** Close a task (needs a signed-in user). result: nothing | marks for a square; moves | artefact | known for a finding. */
 export async function taskDone(id: string, result: string, markIds: string[] = []): Promise<Task> {
-  return (await api<{ task: Task }>(`/api/me/tasks/${encodeURIComponent(id)}/done`, { method: 'POST', body: { result, mark_ids: markIds } })).task;
+  return (
+    await api<{ task: Task }>(`/api/me/tasks/${encodeURIComponent(id)}/done`, { method: 'POST', body: { result, mark_ids: markIds } })
+  ).task;
 }
 
 /** The place in the lab where a task is done. */
@@ -245,7 +248,8 @@ export function taskHash(t: Task): string {
     q.set('ra', t.ra.toFixed(5));
     q.set('dec', t.dec.toFixed(5));
   }
-  q.set('fov', t.kind === 'cell' ? String(t.fov ?? 20) : '5'); // a square is looked through a quarter (10′) at a time
+  // every task opens at 10′ (a square a quarter at a time); a time-lapse keeps its own size
+  q.set('fov', t.kind === 'cell' ? String(t.fov ?? 10) : t.finding_id?.startsWith('film:') ? '60' : '10');
   q.set('task', t.id);
   q.set('kind', t.kind); // the lab of a guest cannot look a task up by its id
   if (t.kind === 'cell' && t.cell_id) q.set('cell', t.cell_id);
@@ -262,7 +266,9 @@ export type HistoryKind = 'lab' | 'cell' | 'finding' | 'globe';
  *  its hash changes while the user works there. */
 export function recordHistory(kind: HistoryKind, ref: string = location.hash, title = '', key?: string): void {
   if (!user || !ref.startsWith('#/')) return;
-  void api('/api/me/history', { method: 'POST', body: { kind, ref: ref.slice(0, 600), title: title.slice(0, 120), key } }).catch(() => undefined);
+  void api('/api/me/history', { method: 'POST', body: { kind, ref: ref.slice(0, 600), title: title.slice(0, 120), key } }).catch(
+    () => undefined,
+  );
 }
 
 /** What a hash of the app is, for the history: null for a place not worth remembering (a bare screen). */
@@ -273,7 +279,7 @@ export function describeHash(hash: string): { kind: HistoryKind; title: string; 
     const ra = Number(p.get('ra'));
     const dec = Number(p.get('dec'));
     if (!Number.isFinite(ra) || !Number.isFinite(dec)) return null;
-    const fov = p.get('fov') ?? '5';
+    const fov = p.get('fov') ?? '10';
     const place = `RA ${ra.toFixed(3)}° Dec ${dec >= 0 ? '+' : ''}${dec.toFixed(3)}° · ${fov}′`;
     return { kind: 'lab', title: `Lab · ${place}`, key: `lab:${ra.toFixed(3)},${dec.toFixed(3)},${fov}` };
   }
@@ -305,7 +311,7 @@ if (typeof window !== 'undefined' && typeof location !== 'undefined') {
   onUser(() => {
     refreshUnread();
     clearInterval(unreadTimer);
-    if (user) unreadTimer = setInterval(() => refreshUnread(), 60000);
+    if (user) unreadTimer = setInterval(() => pageVisible() && refreshUnread(), 60000); // a hidden tab asks nothing
   });
   void loadUser();
 }

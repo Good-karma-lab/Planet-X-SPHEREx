@@ -1,3 +1,4 @@
+import { visibleInterval } from '../../lib/idle';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { ang2pix } from '../../lib/healpix';
 import { formatHash } from '../../lib/route';
@@ -73,10 +74,10 @@ function useHealth(first: IxHealth | null) {
         })
         .catch(() => {});
     load();
-    const t = setInterval(load, 15000);
+    const off = visibleInterval(load, 15000); // a hidden tab asks nothing; seen again, it asks at once
     return () => {
       stop = true;
-      clearInterval(t);
+      off();
     };
   }, []);
   return h;
@@ -92,10 +93,10 @@ function useCoverage(running: boolean) {
         .then((d: Cov | null) => !stop && d && setC(d))
         .catch(() => {});
     load();
-    const t = running ? setInterval(load, 30000) : undefined;
+    const off = running ? visibleInterval(load, 30000) : undefined;
     return () => {
       stop = true;
-      if (t) clearInterval(t);
+      off?.();
     };
   }, [running]);
   return c;

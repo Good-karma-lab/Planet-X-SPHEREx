@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
+import { nextTask, taskHash } from '../lib/account';
 import { aim, type AimState } from '../lib/aim';
+import { idleLoop, visibleInterval } from '../lib/idle';
 import { formatHash } from '../lib/route';
 import { atEpoch, D2R, formatDec, formatRA, parseDec, parseRA, separation, SURVEY_EPOCH } from '../lib/sky';
 import { icon } from '../ui/icons';
@@ -398,6 +400,8 @@ export function Globe() {
   const live = useRef({ survey, proj, inside, a, sel, catalog, bodyPath, covOn, cellId });
   live.current = { survey, proj, inside, a, sel, catalog, bodyPath, covOn, cellId };
   const dirty = useRef(true);
+  // wakes the drawing loop at once (lib/idle.ts): every change that marks the picture dirty calls it
+  const wakeRef = useRef<() => void>(() => {});
   // the globe opens wide: a view kept from a deep zoom (a 5′ frame) comes back as about 50° across, centred on the same place (decided once, when it opens)
   const view = useRef(
     linked0.current
@@ -429,6 +433,7 @@ export function Globe() {
     void loadCatalog().then((c) => setCatalog((old) => (old === c ? old : c)));
     const offDates = onImageDates(() => {
       dirty.current = true;
+      wakeRef.current();
       setDatesTick((t) => t + 1);
     });
     const offAim = aim.on((next, source) => {
@@ -438,6 +443,7 @@ export function Globe() {
         setDecIn(formatDec(next.dec));
       }
       dirty.current = true;
+      wakeRef.current();
     });
     return () => {
       offDates();
@@ -470,6 +476,7 @@ export function Globe() {
 
   useEffect(() => {
     dirty.current = true;
+    wakeRef.current();
   }, [survey, proj, inside, sel, catalog, bodyPath, covOn, cellId, covTick]);
 
   // the coverage list: read when the layer is switched on, and again every minute while it is on (the machine keeps searching)
@@ -478,10 +485,10 @@ export function Globe() {
     let on = true;
     const read = (fresh: boolean) => void loadCoverage(fresh).then(() => on && setCovTick((t) => t + 1));
     read(false);
-    const iv = setInterval(() => read(true), 60000);
+    const off = visibleInterval(() => read(true), 60000);
     return () => {
       on = false;
-      clearInterval(iv);
+      off();
     };
   }, [covOn]);
   // the card of the chosen square
@@ -511,7 +518,6 @@ export function Globe() {
     let W = 10;
     let H = 10;
     let dpr = 1;
-    let raf = 0;
     let lastSig = '';
     let lastLayer = '';
     let settleAt = 0;
@@ -524,6 +530,7 @@ export function Globe() {
       c.width = W * dpr;
       c.height = H * dpr;
       dirty.current = true;
+      wakeRef.current();
     };
     const ro = new ResizeObserver(resize);
     ro.observe(c.parentElement!);
@@ -854,8 +861,10 @@ export function Globe() {
       z1: number;
       r0?: number;
     } | null = null;
+    // busy: a fly is running, the view has not rested yet, or the sky drew something new (tiles arriving): every frame then; at
+    // rest the loop looks a few times a second (lib/idle.ts)
+    let busyNow = true;
     const loop = () => {
-      raf = requestAnimationFrame(loop);
       const now = performance.now();
       if (anim) {
         const t = Math.min(1, (now - anim.t0) / anim.dur);
@@ -867,6 +876,7 @@ export function Globe() {
         view.current.zoom = Math.exp((1 - e) * (1 - e) * anim.z0 + 2 * e * (1 - e) * anim.zm + e * e * anim.z1);
         if (t >= 1) anim = null;
         dirty.current = true;
+        wakeRef.current();
       }
       // the sky: coarse while the view moves, full resolution (in slices) once it has rested 200 ms or when tiles arrive
       const st = live.current;
@@ -908,6 +918,7 @@ export function Globe() {
       } else if (settling) {
         if (now >= settleAt) settling = false;
       } else changed = sky.frame(sv, layer, false);
+      busyNow = !!anim || settling || changed || dirty.current;
       if (changed || dirty.current) {
         dirty.current = false;
         draw();
@@ -940,7 +951,8 @@ export function Globe() {
         sky.stale = true;
       }
     }
-    loop();
+    const idle = idleLoop(loop, () => busyNow);
+    wakeRef.current = idle.wake;
     const flyTo = (ra: number, dec: number, spanDeg?: number) => {
       if (live.current.proj === 'moll') return;
       const th = separation(ra, dec, view.current.ra, view.current.dec) * D2R;
@@ -969,6 +981,7 @@ export function Globe() {
         z1: lz1,
         r0: view.current.roll ?? 0,
       };
+      wakeRef.current();
     };
     flyRef.current = flyTo;
     northRef.current = () => {
@@ -985,6 +998,7 @@ export function Globe() {
         z1: Math.log(view.current.zoom),
         r0: (((((view.current.roll ?? 0) + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) - Math.PI,
       };
+      wakeRef.current();
     };
 
     // the map keeps its centre within the picture, so that it cannot be dragged away
@@ -1035,12 +1049,14 @@ export function Globe() {
         mv.y = drag.my + dy;
         clampMap();
         dirty.current = true;
+        wakeRef.current();
       } else if (drag.moved && live.current.proj === 'globe') {
         // a free turn like a trackball: the place grabbed stays under the cursor, there is no pole to wind round (no yaw/pitch)
         const rc = c.getBoundingClientRect();
         const u = worldOf(drag.F, rayAt(e.clientX - rc.left, e.clientY - rc.top, R()));
         setFrame(turnFrame(drag.F, u, drag.p0));
         dirty.current = true;
+        wakeRef.current();
       }
     };
     c.onpointerup = (e) => {
@@ -1131,6 +1147,7 @@ export function Globe() {
             const v: V3 = [sa * F.c[0] + sb * c[0], sa * F.c[1] + sb * c[1], sa * F.c[2] + sb * c[2]];
             setFrame(turnFrame(F, F.c, v));
             dirty.current = true;
+            wakeRef.current();
             if (e < 1) requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
@@ -1138,6 +1155,7 @@ export function Globe() {
         view.current.zoom = Math.max(zoomMin(), Math.min(ZOOM_MAX, view.current.zoom * k));
       }
       dirty.current = true;
+      wakeRef.current();
     };
     const ztNow = (): number => {
       const [lo, hi, z] = live.current.proj === 'moll' ? [1, 40, mv.z] : [zoomMin(), ZOOM_MAX, view.current.zoom];
@@ -1176,6 +1194,7 @@ export function Globe() {
         }
         clampMap();
         dirty.current = true;
+        wakeRef.current();
         return;
       }
       anim = null;
@@ -1193,9 +1212,10 @@ export function Globe() {
       const sy = (H / 2 - qy) / R();
       if (inn() || sx * sx + sy * sy < 0.97) setFrame(turnFrame(F, worldOf(F, rayAt(qx, qy, R())), p));
       dirty.current = true;
+      wakeRef.current();
     };
     return () => {
-      cancelAnimationFrame(raf);
+      idle.stop();
       ro.disconnect();
       offTile();
       offEqui();
@@ -1218,6 +1238,7 @@ export function Globe() {
     live.current.inside = v;
     view.current.zoom = Math.max(v ? ZOOM_MIN_INSIDE : ZOOM_MIN, view.current.zoom);
     dirty.current = true;
+    wakeRef.current();
     setInside(v);
   };
 
@@ -1485,6 +1506,7 @@ export function Globe() {
               <span class="lbl">Coverage</span>
             </button>
           </div>
+          <GiveSquare />
         </div>
         {covOn && cellId && (
           <div class="cov-card dark-glass" data-testid="cov-card" role="dialog" aria-label={`Square ${cellId}`}>
@@ -1895,6 +1917,46 @@ export function Globe() {
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** "Give me a square": the next square task (a quarter, 10′, of a searched square: a built one first, service/quarters.py), opened in
+ *  the lab at once. A guest gets one too (trying needs no account); the look counts once they sign in. */
+function GiveSquare() {
+  const [busy, setBusy] = useState(false);
+  const [why, setWhy] = useState('');
+  const go = () => {
+    setBusy(true);
+    setWhy('');
+    nextTask('cell').then(
+      (t) => {
+        setBusy(false);
+        if (t) location.hash = taskHash(t);
+        else setWhy('No searched square is waiting for a look');
+      },
+      (e: Error) => {
+        setBusy(false);
+        setWhy(e.message || 'The service did not answer');
+      },
+    );
+  };
+  return (
+    <div class="give-square">
+      <button
+        class="btn sm primary"
+        onClick={go}
+        disabled={busy}
+        title="Look through a quarter of a square the machine has searched: the lab opens on it with the question"
+        data-testid="give-square"
+      >
+        {busy ? 'Finding a square…' : 'Give me a square'}
+      </button>
+      {why && (
+        <span class="mono-s give-why" role="status">
+          {why}
+        </span>
+      )}
     </div>
   );
 }
