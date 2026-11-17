@@ -8,6 +8,7 @@ import json
 import multiprocessing
 import os
 import secrets
+import shutil
 import time
 from collections.abc import AsyncIterator, Callable, Coroutine
 from concurrent.futures import ProcessPoolExecutor
@@ -546,10 +547,15 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     async def health() -> dict[str, Any]:
         """Cheap liveness and state. Async on purpose: it never queues for the thread pool behind field lookups, so Caddy's health check
         (2 s) does not mistake a busy main instance for a dead one and send visitors to the standby, which cannot build fields."""
+        du = shutil.disk_usage(cfg.store_dir) if cfg.store_dir.exists() else None
         return {
             "ok": True,
             "service": SERVICE_NAME,
             "role": "standby" if STANDBY else "main",
+            # the disk of the store (the keeper cleans it every hour above 75%, tools/disk_keeper.py)
+            "disk": None
+            if du is None
+            else {"free_gb": round(du.free / 1e9, 1), "used_pct": round(100.0 * (du.total - du.free) / du.total, 1)},
             "version": __version__,
             "started_at": st.started_at,
             "uptime_s": round(time.monotonic() - st.started, 1),

@@ -1,0 +1,13 @@
+[Unit]
+Description=SPHEREx Space: keep the disk from filling (tools/disk_keeper.py)
+
+[Service]
+Type=oneshot
+# root: the backups folder (/var/lib/sky-backup) belongs to root; everything else it deletes is the sky user's cache
+User=root
+WorkingDirectory=/opt/sky
+EnvironmentFile=/etc/sky/env
+Environment=SKY_STORE=/var/lib/sky PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/sky/.venv/bin/python tools/disk_keeper.py --store /var/lib/sky --backups /var/lib/sky-backup
+Nice=15
+IOSchedulingClass=idle
