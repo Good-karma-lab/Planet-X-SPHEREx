@@ -66,6 +66,12 @@ export function AboutBody() {
           <p class="mono-s">
             <a href="/privacy">Privacy</a> · <a href="/terms">Terms of use</a>
           </p>
+          <p class="mono-s">
+            Contact: <a href="mailto:good.karma.lab.ltd@gmail.com">good.karma.lab.ltd@gmail.com</a> ·{' '}
+            <a href={`${REPO}/issues`} target="_blank" rel="noopener noreferrer">
+              GitHub issues
+            </a>
+          </p>
         </section>
       </div>
     </>

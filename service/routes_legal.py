@@ -7,7 +7,8 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
 REPO = "https://github.com/Good-karma-lab/Planet-X-SPHEREx"
-CONTACT = f"{REPO}/issues"
+ISSUES = f"{REPO}/issues"
+EMAIL = "good.karma.lab.ltd@gmail.com"
 UPDATED = "17 November 2026"
 
 STYLE = """
@@ -71,7 +72,8 @@ pictures you flagged, the squares you looked through) stays only as an anonymous
 you submitted stay in Findings without your name.</p>
 
 <h2>Contact</h2>
-<p>Questions about this page or your data: open an issue at <a href="{CONTACT}">{CONTACT}</a>.</p>
+<p>Requests about your data, and questions about this page: write to <a href="mailto:{EMAIL}">{EMAIL}</a>. Questions about the
+code can also go to <a href="{ISSUES}">{ISSUES}</a>.</p>
 """
 
 TERMS = f"""
@@ -109,7 +111,8 @@ cannot promise it.</li>
 be unavailable, slow or wrong at times, and we are not liable for any loss from using it.</p>
 
 <h2>Changes and contact</h2>
-<p>We may change these terms; the date above says when they last changed. Questions: <a href="{CONTACT}">{CONTACT}</a>.
+<p>We may change these terms; the date above says when they last changed. Questions: <a href="mailto:{EMAIL}">{EMAIL}</a>, or
+<a href="{ISSUES}">{ISSUES}</a>.
 See also the <a href="/privacy">privacy page</a>.</p>
 """
 
