@@ -6,6 +6,7 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
 import { FieldClient, mjdToDate, type FieldMeta, type PassMeta } from '../lib/field';
+import { idleLoop } from '../lib/idle';
 import { formatHash, parseHash, type Route } from '../lib/route';
 import { formatDec, formatRA, parseDec, parseRA } from '../lib/sky';
 import type { SxpPart } from '../lib/sxp';
@@ -968,7 +969,6 @@ export function Lab({ route }: { route: Route }) {
     clientRef.current = client;
     void client.open(ra, dec, fov);
 
-    let raf = 0;
     let clock = 0;
     let last = performance.now();
     let lastLabels = '';
@@ -1199,7 +1199,6 @@ export function Lab({ route }: { route: Route }) {
         setLabels(out);
         setInsetBox(inset ? { x: inset.x, y: inset.y, w: inset.w, h: inset.h } : null);
       }
-      raf = requestAnimationFrame(tick);
     };
 
     // ---- marks on the picture: one marker per object ----------------------------------------------------------------------
@@ -1902,9 +1901,10 @@ export function Lab({ route }: { route: Route }) {
       }
     };
 
-    raf = requestAnimationFrame(tick);
+    // every frame while the passes play; paused, the picture is drawn a few times a second until the next input (lib/idle.ts)
+    const idle = idleLoop(tick, () => state.current.playing && state.current.frame === null);
     return () => {
-      cancelAnimationFrame(raf);
+      idle.stop();
       client.stop();
       clientRef.current = null;
     };
@@ -3220,7 +3220,9 @@ export function Lab({ route }: { route: Route }) {
     ...(redv?.result?.red ?? []).map((x, k): FindRow => {
       const tr = trackOfRed(x);
       const id = identOf(x.ra, x.dec);
-      const times = redv?.result?.median_colour ? `${x.lower_limit ? 'over ' : ''}${(x.colour / redv.result.median_colour).toFixed(1)}× redder than the field's stars` : 'red';
+      const times = redv?.result?.median_colour
+        ? `${x.lower_limit ? 'over ' : ''}${(x.colour / redv.result.median_colour).toFixed(1)}× redder than the field's stars`
+        : 'red';
       return {
         key: `red:${k}`,
         name: id || placeWord(x.ra, x.dec),
@@ -3248,38 +3250,40 @@ export function Lab({ route }: { route: Route }) {
         pick: rowPick(`anomaly:${a.n}`, () => pickAnomaly(a.n)),
       };
     }),
-    ...(ast.state === 'done' ? (ast.tracks ?? []) : []).slice(0, 8).map(
-      (t, i): FindRow => ({
-        key: `ast:${i}`,
-        name: t.known ? t.known.name : `Track of ${astMjd ? season(astMjd) : 'one pass'}`,
-        line: `crosses the field at ${t.rate.toFixed(1)}″/h · ${t.n} visits of one pass`,
-        // without JPL's answer a track is not a lead: it may be a known asteroid nobody could name
-        status: t.known ? 'known' : jplState === 'unavailable' ? 'jpl' : jplState === 'asking' ? 'checking' : 'unexplained',
-        uv: null,
-        pick: rowPick(`ast:${i}`, () => {
-          selectTrack(i);
-          if (film === null) toDays();
-          setFrame(t.pts[0]?.f ?? 0);
-          setPlaying(false);
-        }),
+    ...(ast.state === 'done' ? (ast.tracks ?? []) : []).slice(0, 8).map((t, i): FindRow => ({
+      key: `ast:${i}`,
+      name: t.known ? t.known.name : `Track of ${astMjd ? season(astMjd) : 'one pass'}`,
+      line: `crosses the field at ${t.rate.toFixed(1)}″/h · ${t.n} visits of one pass`,
+      // without JPL's answer a track is not a lead: it may be a known asteroid nobody could name
+      status: t.known ? 'known' : jplState === 'unavailable' ? 'jpl' : jplState === 'asking' ? 'checking' : 'unexplained',
+      uv: null,
+      pick: rowPick(`ast:${i}`, () => {
+        selectTrack(i);
+        if (film === null) toDays();
+        setFrame(t.pts[0]?.f ?? 0);
+        setPlaying(false);
       }),
-    ),
-    ...(FPX_AUTO && !fpx ? fpxLeads : []).map(
-      (l, i): FindRow => ({
-        key: `px:${i}`,
-        name: placeWord(l.ra, l.dec),
-        line: `Find Planet X peak · S/N ${l.sn} · ${l.d} au · photometry ${l.phot != null ? `${l.phot}σ` : 'n/a'}`,
-        status: 'unexplained',
-        uv: uvNow(l.ra, l.dec),
-        pick: rowPick(`px:${i}`, l.open),
-      }),
-    ),
+    })),
+    ...(FPX_AUTO && !fpx ? fpxLeads : []).map((l, i): FindRow => ({
+      key: `px:${i}`,
+      name: placeWord(l.ra, l.dec),
+      line: `Find Planet X peak · S/N ${l.sn} · ${l.d} au · photometry ${l.phot != null ? `${l.phot}σ` : 'n/a'}`,
+      status: 'unexplained',
+      uv: uvNow(l.ra, l.dec),
+      pick: rowPick(`px:${i}`, l.open),
+    })),
   ];
   const foundCount = unexplainedCount(findRows);
   const unexplainedOf = (g: 'red' | 'anomaly') => findRows.filter((r) => r.group === g && r.status === 'unexplained').length;
   const fieldOn = valid && !!meta;
   const searches: SearchInfo[] = [
-    { name: 'movers', state: stOf(mv?.state, fieldOn), count: String(mvr?.tracks.length ?? 0), ours: true, retry: mv?.state === 'failed' ? moversRetry : null },
+    {
+      name: 'movers',
+      state: stOf(mv?.state, fieldOn),
+      count: String(mvr?.tracks.length ?? 0),
+      ours: true,
+      retry: mv?.state === 'failed' ? moversRetry : null,
+    },
     {
       name: 'brown dwarfs',
       state: stOf(dwarfs?.state, fieldOn && !!dwarfs),
@@ -3296,9 +3300,30 @@ export function Lab({ route }: { route: Route }) {
       ours: true,
       retry: an?.state === 'failed' ? anRetry : null,
     },
-    { name: 'asteroids', state: ast.state === 'idle' ? 'idle' : ast.state === 'done' || ast.state === 'none' ? 'done' : ast.state === 'failed' ? 'failed' : 'running', frac: ast.frac, count: String(ast.tracks?.length ?? 0), ours: true },
+    {
+      name: 'asteroids',
+      state:
+        ast.state === 'idle'
+          ? 'idle'
+          : ast.state === 'done' || ast.state === 'none'
+            ? 'done'
+            : ast.state === 'failed'
+              ? 'failed'
+              : 'running',
+      frac: ast.frac,
+      count: String(ast.tracks?.length ?? 0),
+      ours: true,
+    },
     ...(FPX_AUTO && !fpx
-      ? [{ name: 'Planet X', state: (fpxAllOver ? 'done' : fieldOn ? 'running' : 'idle') as SearchInfo['state'], frac: pxState.frac != null && pxState.frac < 1 ? pxState.frac : null, count: String(fpxLeads.length), ours: true }]
+      ? [
+          {
+            name: 'Planet X',
+            state: (fpxAllOver ? 'done' : fieldOn ? 'running' : 'idle') as SearchInfo['state'],
+            frac: pxState.frac != null && pxState.frac < 1 ? pxState.frac : null,
+            count: String(fpxLeads.length),
+            ours: true,
+          },
+        ]
       : []),
     flow.knownSearch,
   ];
@@ -3311,7 +3336,9 @@ export function Lab({ route }: { route: Route }) {
     if (!m) return null;
     const run = m.state === 'running' || d?.state === 'running';
     const fail = m.state === 'failed' ? m : d?.state === 'failed' ? d : null;
-    return fail ?? { name: 'machine finds', state: run ? 'running' : m.state, count: String((mvr?.tracks.length ?? 0) + Number(d?.count ?? 0)) };
+    return (
+      fail ?? { name: 'machine finds', state: run ? 'running' : m.state, count: String((mvr?.tracks.length ?? 0) + Number(d?.count ?? 0)) }
+    );
   })();
 
   // something is selected: a source, an anomaly, a pair, or an open mark (the Selected object section exists only then)
@@ -3319,15 +3346,15 @@ export function Lab({ route }: { route: Route }) {
   // the picture's status line: a note, a wait, the date of what is shown (the flow's own words follow it)
   const mainStatus: string =
     note ||
-                  (bandsWait
-                    ? 'loading the pictures of the chosen bands…'
-                    : film === null && view !== 'det' && !bands.length
-                      ? 'No band chosen: switch a band on (or ALL) to see the sky'
-                      : film === null && view === 'det' && !dets.length
-                        ? 'No detector chosen: switch one on (or ALL)'
-                        : film !== null
-                          ? daysShort
-                          : dateLabel);
+    (bandsWait
+      ? 'loading the pictures of the chosen bands…'
+      : film === null && view !== 'det' && !bands.length
+        ? 'No band chosen: switch a band on (or ALL) to see the sky'
+        : film === null && view === 'det' && !dets.length
+          ? 'No detector chosen: switch one on (or ALL)'
+          : film !== null
+            ? daysShort
+            : dateLabel);
 
   return (
     <div class="screen">
@@ -3514,7 +3541,12 @@ export function Lab({ route }: { route: Route }) {
               </div>
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
                 {mainStatus}
-                {!note && flow.status && <span data-testid="flow-status">{mainStatus ? ' · ' : ''}{flow.status}</span>}
+                {!note && flow.status && (
+                  <span data-testid="flow-status">
+                    {mainStatus ? ' · ' : ''}
+                    {flow.status}
+                  </span>
+                )}
                 {!note && searchLine && (
                   <span data-testid="search-status">
                     {mainStatus || flow.status ? ' · ' : ''}
