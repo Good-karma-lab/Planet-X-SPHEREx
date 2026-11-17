@@ -1206,8 +1206,10 @@
   }
 }
 
-/* ----- tablet with ONE pane (to 839 px wide, or upright): the lab's picture on top, its panel a sheet under the playback ----- */
-@media (min-width: 600px) and (max-width: 839.98px) and (min-height: 480px), (min-width: 840px) and (max-width: 1279.98px) and (orientation: portrait) {
+/* ----- tablet with ONE pane (to 999 px wide, or upright): the lab's picture on top, its panel a sheet under the playback. Below 1000 px
+   two panes leave the picture under half the width (853 × 798: 400 px, the playback bar wrapped into four rows): one pane gives it
+   the whole width the height allows ----- */
+@media (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
   :root .lab {
     flex-direction: column;
   }
@@ -1221,7 +1223,8 @@
     flex: 0 1 calc(100vw - 124px);
     min-height: 260px;
     align-items: flex-start;
-    justify-content: center;
+    /* the lab centres the picture itself (a whole-pixel left margin): centring the box here too put it off centre */
+    justify-content: flex-start;
   }
   :root .lab .panel {
     --sheet: 1;
@@ -1304,7 +1307,7 @@
     min-width: 44px;
   }
 }
-@media (min-width: 600px) and (max-width: 839.98px) and (min-height: 480px), (min-width: 840px) and (max-width: 1279.98px) and (orientation: portrait) {
+@media (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
   /* one pane: there is room for RA and Dec side by side */
   :root .lab .coords {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2341,34 +2344,18 @@
   }
 }
 
-/* ----- 840–860 px, landscape (a half-screen laptop, 853 × 798): style.css's "below 860 px" turns the lab into a column, but here the
-   tablet layout above has two panes; the lab keeps its row (the picture on the left, the panel the right-hand column) ----- */
-@media (min-width: 840px) and (max-width: 860px) and (min-aspect-ratio: 1/1) and (min-height: 480px) {
-  :root .screen:has(> .lab),
-  :root .lab {
-    flex-direction: row;
+
+/* ----- tablets and half-screen laptops, 600–1279 px: the playback bar in two rows (the controls, then the time line with "⋯" at its end) ----- */
+@media (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
+  :root .lab .tbar .acts {
+    order: 10;
   }
-  :root .lab .vwrap {
-    border-bottom: 0;
+  :root .lab .tbar .blinkpick,
+  :root .lab .tbar .spd {
+    order: 8;
   }
-  :root .lab .panel {
-    width: 326px;
-  }
-  /* the picture's box is as tall as the picture (no empty band above the playback bar) */
-  :root .lab .vstage {
-    flex: 0 0 auto;
-  }
-  /* the band chips: one row inside the picture's width, sliding sideways */
-  :root .vsq .fbands,
-  :root .vsq.compact .fbands {
-    left: 0;
-    right: 0;
-    transform: none;
-    width: auto;
-    max-width: 100%;
-    flex-wrap: nowrap;
-    justify-content: flex-start;
-    overflow-x: auto;
-    scrollbar-width: none;
+  :root .lab .tbar .tl-mid {
+    flex: 1 1 160px;
+    min-width: 0;
   }
 }

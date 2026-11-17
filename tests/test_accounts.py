@@ -219,9 +219,12 @@ def _fake_grid(st: _State) -> None:
     )
 
 
-def test_cell_tasks_walk_the_least_viewed_squares(site: tuple[FastAPI, _State, _Mail]) -> None:
+def test_cell_tasks_walk_the_least_viewed_squares(site: tuple[FastAPI, _State, _Mail], monkeypatch: pytest.MonkeyPatch) -> None:
     """People look through a square a quarter (10′) at a time: the least-looked square, then its least-looked quarter this user
-    has not taken, ties NW, NE, SW, SE."""
+    has not taken, ties NW, NE, SW, SE. (The order itself: SPREAD = 1, nobody is spread over the first few.)"""
+    from service import routes_tasks
+
+    monkeypatch.setattr(routes_tasks, "SPREAD", 1)
     app, st, mail = site
     guest = _client(app)
     assert guest.get("/api/tasks/next", params={"kind": "cell"}).status_code == 503  # no grid yet
