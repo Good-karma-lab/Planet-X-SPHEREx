@@ -207,6 +207,15 @@ def test_the_field_layer_merges_by_place_and_kind_and_shows_what_was_said_only_a
     assert finds["mover:9"]["seen"] and finds["mover:9"]["text"] == "people say: it shifts, 3 of 3"
     hidden = {f["finding_id"]: f for f in ann.get(f"/api/field/{KEY}/people").json()["finds"]}
     assert hidden["mover:9"] == {"finding_id": "mover:9", "ra": 40.001, "dec": 10.001, "seen": False, "answers": 3}
+    # people set it aside: one who has not answered sees that (so it leaves the list), still without the words
+    from service import accounts as acc_mod
+
+    acc_mod.get(site[1]).db._conn().execute(
+        "INSERT INTO acc_people_actions(finding_id, action, reason, data, at) VALUES(?,?,?,?,?)",
+        ("mover:9", "set_aside", "artefact", '{"agree": 2, "total": 2}', 1.0),
+    )
+    hidden = {f["finding_id"]: f for f in ann.get(f"/api/field/{KEY}/people").json()["finds"]}
+    assert hidden["mover:9"]["set_aside"] is True and hidden["mover:9"]["seen"] is False and "text" not in hidden["mover:9"]
     counts = ann.get("/api/people/counts").json()["field"]
     assert counts["marks"]["artefact"] == 3 and counts["artefact_looks"] == {"blinks": 2, "spike": 1} and counts["marks"]["moves"] == 1
 
@@ -230,3 +239,16 @@ def test_mover_marks_link_only_across_passes_and_within_reach() -> None:
         {"ra": 40.0 + 200 * d, "dec": 10.0, "pass": 0, "mjd": 61100.0},
     ]
     assert sorted(len(g) for g in mover_groups(marks)) == [1, 2]
+
+
+def test_a_marks_link_is_kept_and_returned(site: tuple[FastAPI, Any]) -> None:
+    """The lab says a second "it moves" tap is the same mover as an earlier mark (`link`): kept and given back after a reload."""
+    app, _st = site
+    ann = _people(app)("ann")
+    _mark(ann, "mv-0000101", "moves", 40.1, 10.1, **{"pass": 0, "mjd": 61100.1})
+    _mark(ann, "mv-0000102", "moves", 40.1003, 10.1001, **{"pass": 1, "mjd": 61280.4, "link": "mv-0000101"})
+    got = {m["id"]: m.get("link") for m in ann.get("/api/me/marks").json()["marks"]}
+    assert got["mv-0000102"] == "mv-0000101" and got["mv-0000101"] is None
+    assert (
+        ann.post("/api/me/marks", json={"id": "mv-0000103", "field_key": KEY, "ra": 1.0, "dec": 1.0, "link": "bad id!"}).status_code == 422
+    )

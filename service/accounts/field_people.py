@@ -416,7 +416,17 @@ class FieldPeople:
                     }
                 )
             else:
-                finds.append({"finding_id": fid, "ra": r["ra"], "dec": r["dec"], "seen": False, "answers": s.get("total")})
+                # not answered here yet: no words that would lead the person, but a find people set aside is said so (it leaves the list)
+                finds.append(
+                    {
+                        "finding_id": fid,
+                        "ra": r["ra"],
+                        "dec": r["dec"],
+                        "seen": False,
+                        "answers": s.get("total"),
+                        **({"set_aside": True} if s.get("set_aside") else {}),
+                    }
+                )
         return {"field_key": key, "places": places, "finds": finds}
 
     # ----------------------------------------------------------------------------------------------------------- the counts
