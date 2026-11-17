@@ -208,6 +208,26 @@ SKY_CLIPS=/var/lib/sky/clips
   "SPHEREx Space <signin@spherex.space>"; the domain must be verified at Resend).
 - The release blocker is resolved.
 
+**Mail for the release (the user's choice: Resend):**
+- The domain is `mail.spherex.space`, added in Resend (eu-west-1). The sender is
+  `SKY_MAIL_FROM="SPHEREx Space <noreply@mail.spherex.space>"`.
+- A sending-only key, limited to that domain, is on the release Mac at `~/.config/spherex/resend_send.key` (mode 600).
+  - Never print it, commit it, or let it reach a log or the repository.
+- **Gate:** the domain is not verified yet. The user adds three DNS records at GoDaddy (`star-test/design-review/resend_dns_records.md`).
+  - Until Resend reports the domain verified, the key is NOT set on the VM, and production stays in "Sign-in opens soon".
+- **Once verified,** copy the key without echoing it: the file is read on the Mac and fed to the VM through the ssh standard input,
+  never on a command line:
+
+  ```bash
+  { printf 'SKY_RESEND_API_KEY='; cat ~/.config/spherex/resend_send.key; printf '\nSKY_MAIL_FROM="SPHEREx Space <noreply@mail.spherex.space>"\n'; } | ssh -i ~/.ssh/oci_spherex_ed25519 ubuntu@158.179.217.127 'sudo tee -a /etc/sky/env >/dev/null && sudo chmod 640 /etc/sky/env'
+  ```
+
+  Then restart through `./deploy/push.sh` and check:
+  - `/api/me` says `auth.email: true`;
+  - one real sign-in mail arrives (test 6 in the list).
+- **Alternative:** any SMTP server (`SKY_SMTP_HOST`, `SKY_SMTP_PORT` 587, `SKY_SMTP_USER`, `SKY_SMTP_PASSWORD`, `SKY_MAIL_FROM`).
+  Resend wins when both are set.
+
 ### Later jobs (not in this release)
 
 - **The brown-dwarf queue has no reader.** `GET /api/tasks/brown-dwarf-queue`, `agreement.get(...).brown_dwarf_queue()`, lists the
