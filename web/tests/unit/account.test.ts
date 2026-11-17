@@ -14,7 +14,8 @@ describe('the view history knows a place from its hash', () => {
     expect(describeHash('#/lab?ra=269.4486&dec=4.7379&fov=5')?.key).not.toBe(a?.key);
   });
   it('a finding and a square are places; a bare screen is not', () => {
-    expect(describeHash('#/findings?lead=mover%3A6909a2ee0124')).toEqual({ kind: 'finding', title: 'Finding mover:6909a2ee0124', key: 'finding:mover:6909a2ee0124' });
+    expect(describeHash('#/findings?lead=mover%3A6909a2ee0124')).toEqual({ kind: 'finding', title: 'Moving object · 6909a2', key: 'finding:mover:6909a2ee0124' });
+    expect(describeHash('#/findings?lead=film%3A8dcb8e38bc95')?.title).toBe('Time-lapse track · 8dcb8e');
     expect(describeHash('#/explore?cell=b10c20')?.kind).toBe('cell');
     for (const h of ['#/lab', '#/findings', '#/explore', '#/me', '', '#/lab?ra=x&dec=1']) expect(describeHash(h)).toBeNull();
   });
