@@ -32,6 +32,8 @@ export interface KnownReply {
   deep: KnownObject[];
   /** the deeper catalogues that did not answer, by name (empty when all did): "no match" means unknown only then */
   deepSilent: string[];
+  /** of those, the ones the service is still asking (the lab asks again and they arrive) */
+  deepPending: string[];
 }
 
 export interface KnownState {
@@ -42,13 +44,16 @@ export interface KnownState {
   pending: KnownSource[];
   deep: KnownObject[];
   deepSilent: string[];
+  deepPending: string[];
+  /** the lab stopped asking: what is still pending did not answer in time */
+  gaveUp?: boolean;
 }
 
 /** the deeper catalogues of the `match` list, as the status line names them */
 const DEEP: Record<string, string> = { gaia: 'Gaia G 21', catwise: 'CatWISE', allwise: 'AllWISE', twomass: '2MASS' };
 const DEEP_NAMES = Object.values(DEEP);
 
-export const KNOWN_OFF: KnownState = { state: 'off', objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [], deep: [], deepSilent: [...DEEP_NAMES] };
+export const KNOWN_OFF: KnownState = { state: 'off', objects: [], answered: { gaia: false, simbad: false, jpl: false }, pending: [], deep: [], deepSilent: [...DEEP_NAMES], deepPending: [] };
 
 /** the service takes at most this many dates in one question */
 export const MAX_EPOCHS = 40;
@@ -62,6 +67,7 @@ export function knownUrl(ra: number, dec: number, sizeArcmin: number, mjds: numb
     dec: dec.toFixed(5),
     size_arcmin: String(sizeArcmin),
     epochs: mjds.slice(0, MAX_EPOCHS).map((e) => e.toFixed(4)).join(','),
+    compact: '1', // objects without a name carry only what a ring needs
   });
   return `/api/known?${q.toString()}`;
 }
@@ -112,20 +118,26 @@ export function parseKnown(raw: unknown): KnownReply {
     deepSilent: Object.keys(DEEP)
       .filter((c) => r.status?.match?.[c]?.state !== 'ok')
       .map((c) => DEEP[c]!),
+    deepPending: Object.keys(DEEP)
+      .filter((c) => r.status?.match?.[c]?.state === 'pending')
+      .map((c) => DEEP[c]!),
   };
 }
 
-/** Asked again while a catalogue has not answered (the service keeps asking it): at most this many times, this far apart. */
-const RETRIES = 8;
-const RETRY_MS = 5000;
+/** The service answers within about a second with what it has; while a catalogue is still being asked the lab asks again
+ *  this far apart, and what has arrived is drawn at once. After this long without everything it stops and says who is silent. */
+const ASK_AGAIN_MS = 1500;
+const GIVE_UP_MS = 180000;
 
-/** Ask the service for the known objects of a field; `on` gets every state (loading, then the reply, and again when a late catalogue answers). */
+/** Ask the service for the known objects of a field; `on` gets every state: loading, then each partial reply as catalogues arrive. */
 export function followKnown(url: string, on: (s: KnownState) => void): () => void {
   let stop = false;
   const ctl = new AbortController();
   on({ ...KNOWN_OFF, state: 'loading' });
   void (async () => {
-    for (let n = 0; n <= RETRIES && !stop; n++) {
+    const t0 = Date.now();
+    let had = false;
+    for (let fails = 0; !stop; ) {
       let reply: KnownReply | null = null;
       try {
         const r = await fetch(url, { signal: ctl.signal });
@@ -134,10 +146,18 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
         /* said below */
       }
       if (stop) return;
-      if (reply) on({ state: 'ok', ...reply });
-      else if (n === RETRIES || n === 0) on({ ...KNOWN_OFF, state: 'failed' });
-      if (reply && KNOWN_SOURCES.every((s) => reply.answered[s]) && !reply.deepSilent.length) return;
-      await new Promise((res) => setTimeout(res, RETRY_MS));
+      const late = Date.now() - t0 > GIVE_UP_MS;
+      if (reply) {
+        had = true;
+        fails = 0;
+        const waiting = reply.pending.length > 0 || reply.deepPending.length > 0;
+        on({ state: 'ok', ...reply, ...(late && waiting ? { pending: [], deepPending: [], gaveUp: true } : {}) });
+        if (!waiting || late) return;
+      } else if (++fails >= 3 || late) {
+        if (!had) on({ ...KNOWN_OFF, state: 'failed' });
+        return;
+      }
+      await new Promise((res) => setTimeout(res, ASK_AGAIN_MS));
     }
   })();
   return () => {
@@ -146,20 +166,22 @@ export function followKnown(url: string, on: (s: KnownState) => void): () => voi
   };
 }
 
-/** The status line of the overlay: the counts on the picture, and which catalogue is waited for or did not answer. */
+/** The status line of the overlay: the counts on the picture so far, who is still being asked, and who did not answer. */
 export function knownStatus(k: KnownState, counts?: { known: number; noMatch: number } | null): string {
   if (k.state === 'off') return '';
   if (k.state === 'loading') return 'asking Gaia, SIMBAD and JPL…';
   const parts: string[] = [];
-  // "unknown" is said only when every deeper catalogue answered; else the sources are without a match so far, and it says who is silent
-  const deepOk = k.state === 'ok' && !k.deepSilent.length;
-  if (counts && k.state === 'ok') parts.push(`known ${counts.known}`, `${deepOk ? 'unknown' : 'no match'} ${counts.noMatch}`);
-  if (k.state === 'ok' && k.deepSilent.length)
-    parts.push(k.deepSilent.length === DEEP_NAMES.length ? 'deep catalogues did not answer' : `${k.deepSilent.join(', ')} did not answer`);
-  const waiting = k.state === 'ok' ? k.pending : [];
-  for (const c of waiting) parts.push(`${SOURCE_WORD[c]}: waiting`);
-  const silent = KNOWN_SOURCES.filter((c) => (k.state === 'failed' || !k.answered[c]) && !waiting.includes(c)).map((c) => SOURCE_WORD[c]);
-  if (silent.length) parts.push(`${silent.length === 3 ? 'Gaia, SIMBAD and JPL' : silent.join(' and ')} did not answer`);
+  const ok = k.state === 'ok';
+  // "unknown" is said only when every deeper catalogue answered; until then the sources are without a match so far
+  const deepOk = ok && !k.deepSilent.length;
+  if (counts && ok) parts.push(`known ${counts.known}`, `${deepOk ? 'unknown' : 'no match'} ${counts.noMatch}`);
+  const waiting = ok ? [...k.pending.map((c) => SOURCE_WORD[c]), ...k.deepPending] : [];
+  if (waiting.length) parts.push(`asking ${waiting.join(', ')}…`);
+  const silent = [
+    ...KNOWN_SOURCES.filter((c) => (!ok || !k.answered[c]) && !(ok && k.pending.includes(c))).map((c) => SOURCE_WORD[c]),
+    ...(ok ? k.deepSilent.filter((c) => !k.deepPending.includes(c)) : []),
+  ];
+  if (silent.length) parts.push(`${silent.join(', ')} did not answer`);
   return parts.join(' · ');
 }
 

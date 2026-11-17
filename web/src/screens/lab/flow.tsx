@@ -189,7 +189,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       countsRef.current = ck;
       setCounts(match ? { known: match.shown.size, noMatch: match.noMatch.length } : null);
     }
-    drawKnown({ ...env, pointer: ptr.current, match: match && env.focus ? { ...match, noMatch: [] } : match }, kn);
+    // a task about one object rings nothing else; and while a deeper catalogue is still being asked no source is ringed as
+    // unmatched (the ring would appear and go when the catalogue arrives): the count on the status line says how many so far
+    const noRings = env.focus || kn.deepPending.length > 0;
+    drawKnown({ ...env, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
     const ms = marksRef.current;
     const rl = rulerRef.current;
     if (!ms.length && !rl.length) return;
@@ -511,7 +514,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const setUp = useRef('');
   useEffect(() => {
     if (!task || setUp.current === taskKey) return;
-    if (task.kind === 'mover') {
+    if (task.kind === 'moves') {
       if (!track || track.passes.length < 2) return;
       setUp.current = taskKey;
       // the two passes with the largest shift between them: the Blink plays those two, the ruler lies from one to the other
@@ -548,7 +551,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const labelOf = (i: number) => a.passes.find((q) => q.index === i)?.label ?? `pass ${i + 1}`;
   const taskSrc: Source | null = task && (task.kind === 'red' || task.kind === 'anomaly') && a.grid ? at : null;
   const extra =
-    task?.kind === 'mover' ? (
+    task?.kind === 'moves' ? (
       <MoverView
         blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'off' : 'waits for the search of the field'}
         ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
