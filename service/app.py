@@ -304,6 +304,10 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
     st.submit_field = submit_field  # the square quarters build ahead with it (service/quarters.py)
 
+    def warm_ready(qs: Any, ahead: list[tuple[str, str]]) -> None:
+        for c, q in ahead:
+            qs.ready(c, q)
+
     async def quarter_stock_loop() -> None:
         """Keeps a few quarters ready for the people who will take a square next (service/quarters.py), one build at a time."""
         await asyncio.sleep(30.0)
@@ -313,6 +317,9 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                 if qs is not None and upcoming is not None:
                     qs.bind(asyncio.get_running_loop())
                     order = await asyncio.to_thread(upcoming, accounts_get(st))  # the database is read in a thread
+                    # which quarters are built: the exposure index is asked in a thread (asking it for dozens of quarters on the
+                    # loop held it for a second); the step below then reads the kept answers
+                    await asyncio.to_thread(warm_ready, qs, order[: 2 * quarters.STOCK])
                     started = qs.stock_step(order)  # on the loop: the scheduler is not thread-safe
                     if started:
                         st.quarter_stock = {"last": started, "at": time.time()}

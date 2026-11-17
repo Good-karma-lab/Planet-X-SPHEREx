@@ -46,3 +46,10 @@ def test_a_reply_never_carries_nan() -> None:
 
     r = TestClient(app).get("/x")
     assert r.status_code == 200 and "NaN" not in r.text and r.json() == {"scatter": None, "ok": 1.5}
+
+
+def test_the_fast_paths() -> None:
+    """Text without NaN is read as it is; a reply with a numpy number or a NaN still comes out clean."""
+    assert jsonsafe.loads(b'{"a": 1.5}') == {"a": 1.5} and jsonsafe.loads('{"a": NaN}') == {"a": None}
+    assert json.loads(jsonsafe.dumps({"a": np.float32(1.5), "b": math.inf})) == {"a": 1.5, "b": None}
+    assert jsonsafe.SafeJSONResponse({"a": np.float64(2.0), "b": [math.nan]}).body == b'{"a":2.0,"b":[null]}'
