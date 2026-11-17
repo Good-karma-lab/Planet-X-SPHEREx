@@ -22,7 +22,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__, cpu
+from service import __version__, cpu, quarters
+from service.accounts import get as accounts_get
 from service.accounts import register_accounts
 from service.anomalies import Anomalies
 from service.bodies import KnownBodies
@@ -99,6 +100,11 @@ class State:
         self.index_health: dict[str, Any] | None = None
         self.quicklook: QuickLook | None = None
         self.warm_searches: dict[str, Any] = {}
+        # the square quarters built ahead (service/quarters.py): set by the tasks router, the stock loop's last step for /health
+        self.quarters: Any = None
+        self.upcoming_quarters: Any = None
+        self.submit_field: Any = None
+        self.quarter_stock: dict[str, Any] = {}
         self.catalogue: CatalogueContext | None = None
         self.known: Known | None = None
         self.pairs: Pairs | None = None
@@ -240,9 +246,16 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None:
             st.warm = WarmRunner(warm_set())
             warm_task = asyncio.get_running_loop().create_task(warm_loop())
+        if getattr(st, "quarters", None) is not None:
+            st.quarters.bind(asyncio.get_running_loop())
+        stock_task = None
+        if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None and not STANDBY and quarters.STOCK > 0:
+            stock_task = asyncio.get_running_loop().create_task(quarter_stock_loop())
         yield
         if warm_task is not None:
             warm_task.cancel()
+        if stock_task is not None:
+            stock_task.cancel()
         if st.grid_import is not None:
             st.grid_import.cancel()
         if st.findings is not None:
@@ -283,6 +296,24 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             return await fieldjob.run_field(ctx, index, files, store, params, wl)
 
         return key, st.scheduler.submit(fieldjob.KIND, key, params, fn, priority, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
+
+    st.submit_field = submit_field  # the square quarters build ahead with it (service/quarters.py)
+
+    async def quarter_stock_loop() -> None:
+        """Keeps a few quarters ready for the people who will take a square next (service/quarters.py), one build at a time."""
+        await asyncio.sleep(30.0)
+        while True:
+            try:
+                qs, upcoming = getattr(st, "quarters", None), getattr(st, "upcoming_quarters", None)
+                if qs is not None and upcoming is not None:
+                    qs.bind(asyncio.get_running_loop())
+                    order = await asyncio.to_thread(upcoming, accounts_get(st))  # the database is read in a thread
+                    started = qs.stock_step(order)  # on the loop: the scheduler is not thread-safe
+                    if started:
+                        st.quarter_stock = {"last": started, "at": time.time()}
+            except Exception as e:  # said in /health; the next round tries again
+                st.quarter_stock = {"error": f"{type(e).__name__}: {e}"[:200], "at": time.time()}
+            await asyncio.sleep(60.0)
 
     def submit_film(key: str, params: dict[str, Any], priority: Priority) -> Any:
         assert st.index is not None and st.store is not None and st.scheduler is not None and st.files is not None
@@ -563,6 +594,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "index": index_health(),
             "jobs": st.scheduler.snapshot() if st.scheduler else None,
             "warm": {**st.warm.snapshot(), "searches": st.warm_searches} if st.warm else None,
+            "quarter_stock": {"target": quarters.STOCK, **st.quarter_stock} if st.quarters is not None else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
             "cpu": cpu.stats(),
             "tiles": None if st.hips is None else {"cached": st.hips.count, "fetched": st.hips.fetched, "failed": st.hips.failed},
