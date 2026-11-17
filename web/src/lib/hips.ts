@@ -701,9 +701,10 @@ export class Sampler {
    * A run of `count` pixels of one screen row inside one base face: the face point starts at (x, y) and moves by (dx, dy) per pixel. Writes RGBA into o from
    * index q with the tone applied, (value − black) × gain: `blackBaked`/`gainBaked` for a baked tile, `blackLive`/`gainLive` for a live one. Returns how many
    * pixels it painted. The picture is the one `at` gives pixel by pixel; the tile is looked up only when the run enters another one (the globe paints a million
-   * pixels a frame while it turns, so the per-pixel work is kept to the four texel reads).
+   * pixels a frame while it turns, so the per-pixel work is kept to the four texel reads). With `off` > 0 the colour is the mean of two reads `off` texels to
+   * either side along RA (the (1, −1) diagonal of the face): the globe uses it to make the footprint of a texel round where HEALPix texels are long towards the pole.
    */
-  run(face: number, x: number, y: number, dx: number, dy: number, count: number, o: Uint8ClampedArray, q: number, blackBaked: number, gainBaked: number, blackLive: number, gainLive: number): number {
+  run(face: number, x: number, y: number, dx: number, dy: number, count: number, o: Uint8ClampedArray, q: number, blackBaked: number, gainBaked: number, blackLive: number, gainLive: number, off = 0): number {
     const n = this.order;
     const N = n >= 0 ? 1 << n : 0;
     const lv = n >= 0 ? this.L.levels[n]! : undefined;
@@ -733,8 +734,10 @@ export class Sampler {
         if (t) {
           const w = t.w;
           const last = w - 1;
-          let u = (X - tx) * w - 0.5;
-          let v = (Y - ty) * w - 0.5;
+          const u0 = (X - tx) * w - 0.5;
+          const v0 = (Y - ty) * w - 0.5;
+          let u = u0 + off;
+          let v = v0 - off;
           if (u < 0) u = 0;
           else if (u > last) u = last;
           if (v < 0) v = 0;
@@ -756,9 +759,38 @@ export class Sampler {
           const w11 = fu * fv;
           const bl = t.baked ? blackBaked : blackLive;
           const gg = t.baked ? gainBaked : gainLive;
-          const r = d[q00]! * w00 + d[q01]! * w01 + d[q10]! * w10 + d[q11]! * w11 - bl;
-          const g = d[q00 + 1]! * w00 + d[q01 + 1]! * w01 + d[q10 + 1]! * w10 + d[q11 + 1]! * w11 - bl;
-          const b = d[q00 + 2]! * w00 + d[q01 + 2]! * w01 + d[q10 + 2]! * w10 + d[q11 + 2]! * w11 - bl;
+          let r = d[q00]! * w00 + d[q01]! * w01 + d[q10]! * w10 + d[q11]! * w11;
+          let g = d[q00 + 1]! * w00 + d[q01 + 1]! * w01 + d[q10 + 1]! * w10 + d[q11 + 1]! * w11;
+          let b = d[q00 + 2]! * w00 + d[q01 + 2]! * w01 + d[q10 + 2]! * w10 + d[q11 + 2]! * w11;
+          if (off > 0) {
+            // the second read, on the other side along RA (the first was moved to its side above)
+            let u2 = u0 - off;
+            let v2 = v0 + off;
+            if (u2 < 0) u2 = 0;
+            else if (u2 > last) u2 = last;
+            if (v2 < 0) v2 = 0;
+            else if (v2 > last) v2 = last;
+            const a0 = u2 | 0;
+            const c0 = v2 | 0;
+            const a1 = a0 < last ? a0 + 1 : a0;
+            const c1 = c0 < last ? c0 + 1 : c0;
+            const gu = u2 - a0;
+            const gv = v2 - c0;
+            const p00 = (a0 * w + c0) * 4;
+            const p01 = (a0 * w + c1) * 4;
+            const p10 = (a1 * w + c0) * 4;
+            const p11 = (a1 * w + c1) * 4;
+            const x00 = (1 - gu) * (1 - gv);
+            const x01 = (1 - gu) * gv;
+            const x10 = gu * (1 - gv);
+            const x11 = gu * gv;
+            r = (r + d[p00]! * x00 + d[p01]! * x01 + d[p10]! * x10 + d[p11]! * x11) / 2;
+            g = (g + d[p00 + 1]! * x00 + d[p01 + 1]! * x01 + d[p10 + 1]! * x10 + d[p11 + 1]! * x11) / 2;
+            b = (b + d[p00 + 2]! * x00 + d[p01 + 2]! * x01 + d[p10 + 2]! * x10 + d[p11 + 2]! * x11) / 2;
+          }
+          r -= bl;
+          g -= bl;
+          b -= bl;
           o[q] = r > 0 ? r * gg : 0;
           o[q + 1] = g > 0 ? g * gg : 0;
           o[q + 2] = b > 0 ? b * gg : 0;
