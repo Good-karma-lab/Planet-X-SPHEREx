@@ -2340,3 +2340,18 @@
     min-height: 0;
   }
 }
+
+/* ----- 840–860 px, landscape (a half-screen laptop, 853 × 798): style.css's "below 860 px" turns the lab into a column, but here the
+   tablet layout above has two panes; the lab keeps its row (the picture on the left, the panel the right-hand column) ----- */
+@media (min-width: 840px) and (max-width: 860px) and (min-aspect-ratio: 1/1) and (min-height: 480px) {
+  :root .screen:has(> .lab),
+  :root .lab {
+    flex-direction: row;
+  }
+  :root .lab .vwrap {
+    border-bottom: 0;
+  }
+  :root .lab .panel {
+    width: 326px;
+  }
+}
