@@ -350,3 +350,8 @@
 .panel .pcol #sec-obj .obj-spec { border-top: 1px solid var(--edge-soft); padding-top: 8px; min-width: 0; overflow: hidden; }
 /* the spectrum inside the Object tab: the card head above already names the object */
 .panel .pcol #sec-obj .obj-spec .spec-head { display: none; }
+/* the Object tab says each thing once: the spectrum's line names what it is (the portrait's guess would repeat it); an empty
+   status line under "Add to investigation" takes no room */
+.panel .pcol #sec-obj .obj-more .obj-guess { display: none; }
+.objcard .oc-line:empty { display: none; }
+.panel .pcol #sec-obj .spec-state:empty { display: none; }

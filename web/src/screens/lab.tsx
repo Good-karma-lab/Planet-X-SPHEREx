@@ -2908,8 +2908,14 @@ export function Lab({ route }: { route: Route }) {
           (opts.motion ? ' · motion only' : '');
   // the line over the picture is only the date of what is shown (the time bar has the rest; the full line is its tooltip)
   // a field still being made or loaded (Months scale): one finished pass held still, dimmed, the progress in the middle; nothing plays
-  const fieldLoading = valid && film === null && !(meta && phase === '');
-  const loadNow = fieldLoading ? loadStep(phase || 'asking the sky service…', pictures.current.size, meta?.passes.length ?? 0) : null;
+  // the field is made but its first pass is not on the canvas yet (a cold field: 2–8 s): the card stays, never a black picture
+  const drawingFirst = valid && film === null && !!meta && phase === '' && !shown;
+  const fieldLoading = (valid && film === null && !(meta && phase === '')) || drawingFirst;
+  const loadNow = drawingFirst
+    ? { title: 'Drawing the first pass', detail: '', frac: null }
+    : fieldLoading
+      ? loadStep(phase || 'asking the sky service…', pictures.current.size, meta?.passes.length ?? 0)
+      : null;
   const dateLabel = time === 'sum' ? 'all seasons' : passMeta ? season(passMeta.mjd_mid) : fieldLoading ? '' : phase || '';
   const daysShort = filmData ? `visit ${visit + 1} of ${nVisits} · ${utc(filmData.meta.frames[visit]?.mjd ?? 0)}` : daysStatus;
   const passMjd = (passes.find((q) => q.index === (shown?.pass ?? 0)) ?? passes[0])?.mjd_mid;
@@ -3272,7 +3278,11 @@ export function Lab({ route }: { route: Route }) {
       line: `crosses the field at ${t.rate.toFixed(1)}″/h · ${t.n} visits of one pass`,
       // without JPL's answer a track is not a lead: it may be a known asteroid nobody could name
       status: t.known ? 'known' : jplState === 'unavailable' ? 'jpl' : jplState === 'asking' ? 'checking' : 'unexplained',
-      uv: null,
+      // its stamp: the place of its middle visit, cut from the picture on show (the film's grid is the field's)
+      uv: ((q) => {
+        const n = filmData?.meta.grid.n ?? meta?.grid.n;
+        return q && n ? ([(q.x + 0.5) / n, (q.y + 0.5) / n] as [number, number]) : null;
+      })(t.pts[t.pts.length >> 1]),
       pick: rowPick(`ast:${i}`, () => {
         selectTrack(i);
         if (film === null) toDays();
@@ -3860,7 +3870,7 @@ export function Lab({ route }: { route: Route }) {
           <div class="ptabs" role="tablist" aria-label="Panel" data-testid="panel-tabs">
             {(
               [
-                ['task', inTask ? 'Task' : 'Find'],
+                ['task', 'Task'], // one name, task or not: it never changes under the hand
                 ['obj', 'Object'],
                 ['view', 'View'],
               ] as const

@@ -27,6 +27,8 @@ export function loadStep(phase: string, pictures: number, passes: number): LoadS
   m = s.match(/^(\d+) exposures found in (\d+) passes/);
   if (m) return { title: 'Finding the exposures', detail: `${m[1]} exposures in ${m[2]} passes`, frac: null };
   if (/^comparing passes/.test(s)) return { title: 'Comparing the passes', detail: '', frac: null };
+  // the service is done; the first pass is being put on the canvas
+  if (/^done\b/.test(s)) return { title: 'Drawing the first pass', detail: '', frac: null };
   m = s.match(/^Request queued(?: · (\d+) ahead)?/);
   if (m) return { title: 'Request queued', detail: m[1] ? `${m[1]} ahead` : '', frac: null };
   if (/^loading the seasons/.test(s)) return { title: 'Loading the pictures', detail: passes ? `${pictures} of ${passes} passes` : '', frac: passes ? pictures / passes : null };
@@ -36,8 +38,8 @@ export function loadStep(phase: string, pictures: number, passes: number): LoadS
 }
 
 /** The steps of making a field, as the overlay lists them; a field the service already has only loads its pictures. */
-const STAGES = ['Finding the exposures', 'Reading the exposures', 'Stacking the passes', 'Comparing the passes', 'Ready'];
-const LOAD_STAGES = ['Loading the pictures', 'Ready'];
+const STAGES = ['Finding the exposures', 'Reading the exposures', 'Stacking the passes', 'Comparing the passes', 'Drawing the first pass'];
+const LOAD_STAGES = ['Loading the pictures', 'Drawing the first pass'];
 
 /** Which stage of the list a step is ('' stages: queued or asking, before the first). */
 export function stageOf(step: LoadStep): { list: string[]; at: number } {
@@ -47,6 +49,8 @@ export function stageOf(step: LoadStep): { list: string[]; at: number } {
   if (/^Loading the exposures/.test(t)) return { list: STAGES, at: 1 };
   if (/^(Stacking pass|Pass \d+ stacked)/.test(t)) return { list: STAGES, at: 2 };
   if (/^Comparing the passes/.test(t)) return { list: STAGES, at: 3 };
+  // the last step of either list: the pictures are here, the first pass is being put on the canvas
+  if (/^Drawing the first pass/.test(t)) return { list: LOAD_STAGES, at: 1 };
   return { list: STAGES, at: -1 };
 }
 
@@ -68,10 +72,12 @@ export function LoadOverlay({ step, field }: { step: LoadStep | null; field: str
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // the furthest step reached: the service reads the next pass's exposures while it stacks the last one, so the ticks never go back
   const reached = useRef(-1);
+  const listRef = useRef<string[] | null>(null);
   // a new field starts the clock and the steps again
   useEffect(() => {
     started.current = Date.now();
     reached.current = -1;
+    listRef.current = null;
   }, [field]);
   useEffect(() => {
     if (step) {
@@ -107,7 +113,10 @@ export function LoadOverlay({ step, field }: { step: LoadStep | null; field: str
   }, [!!last]);
   if (!last) return null;
   const shown = step ?? { ...last, title: 'Ready', detail: '', frac: 1 };
-  const st = stageOf(shown.title === 'Ready' ? { ...last, title: last.title } : shown);
+  const st0 = stageOf(shown.title === 'Ready' ? { ...last, title: last.title } : shown);
+  // "Drawing the first pass" is the last step of whichever list was on show (a made field's five, a kept field's two)
+  const st = /^Drawing the first pass/.test(shown.title) && listRef.current ? { list: listRef.current, at: listRef.current.length - 1 } : st0;
+  if (!/^Drawing the first pass/.test(shown.title)) listRef.current = st0.list;
   const list = st.list;
   reached.current = Math.max(reached.current, st.at);
   const at = reached.current;

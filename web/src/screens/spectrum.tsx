@@ -456,7 +456,10 @@ export function SpectrumTab({ src }: { src: Source | null }) {
           : view.state === 'running'
             ? `Measuring: ${view.measured} of ${view.total} exposures that cover this place · ${usable} used`
             : view.state === 'done'
-              ? guess.head
+              ? // a saturated star: the amber line below says it once
+                saturated
+                ? ''
+                : guess.head
               : `Failed: ${view.error}`}
       </div>
       {view?.state === 'done' && guess.features && <div class="spec-feat">{guess.features}</div>}
@@ -471,7 +474,7 @@ export function SpectrumTab({ src }: { src: Source | null }) {
       <SpectrumChart points={points} bins={bins} cur={saturated ? null : cur} quick={showQuick ? qpts : null} refs={refs} />
       {(bins.length > 0 || view?.state === 'done') && (
         <div class="spec-bin-note">
-          {view?.state === 'done' ? `${usable} points from the ${view.total} exposures that cover this place` : ''}
+          {view?.state === 'done' ? `${usable} of ${view.total} exposures usable` : ''}
           {view?.state === 'done' && bins.length > 0 ? ' · ' : ''}
           {bins.length > 0 ? binNote(bins) : ''}
         </div>

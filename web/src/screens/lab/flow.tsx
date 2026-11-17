@@ -658,13 +658,18 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         if (m.label) {
           ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
           const tw = ctx.measureText(m.label).width;
-          const lx = x + r + 6 + tw > box.x + box.w - 4 ? x - r - 6 - tw : x + r + 6;
+          // clear of the diamond, and on the side away from the line to the same mover's other place
+          const tail = ms.find((q) => q.id !== m.id && headOf(q, ms)?.id === m.id);
+          const tx = tail ? box.x + uv(tail.ra, tail.dec)[0] * box.w : x;
+          const left = tail ? tx > x : x + r + 8 + tw > box.x + box.w - 4;
+          const lx = left ? x - r - 8 - tw : x + r + 8;
+          const ly = y - r - 5;
           ctx.lineWidth = 3;
           ctx.strokeStyle = '#000';
-          ctx.strokeText(m.label, lx, y - r - 2);
+          ctx.strokeText(m.label, lx, ly);
           ctx.fillStyle = markColour(m);
-          ctx.fillText(m.label, lx, y - r - 2);
-          placed.push({ x0: lx, y0: y - r - 13, x1: lx + tw, y1: y - r });
+          ctx.fillText(m.label, lx, ly);
+          placed.push({ x0: lx, y0: ly - 11, x1: lx + tw, y1: ly + 2 });
         }
       }
       if (!wall && rl.length) {
