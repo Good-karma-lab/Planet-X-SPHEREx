@@ -1,3 +1,4 @@
+import { visibleInterval } from '../../lib/idle';
 import { useEffect, useState } from 'preact/hooks';
 import { useProduct } from './jobs';
 import './search.css';
@@ -45,10 +46,10 @@ export function useSearched(live = true): SearchedField[] | null {
         })
         .catch(() => {});
     void load();
-    const t = setInterval(load, 60000);
+    const off = visibleInterval(load, 60000); // a hidden tab asks nothing; seen again, it asks at once
     return () => {
       stop = true;
-      clearInterval(t);
+      off();
     };
   }, [has, live]);
   return list;
@@ -57,7 +58,11 @@ export function useSearched(live = true): SearchedField[] | null {
 type Project = (ra: number, dec: number) => [number, number, boolean];
 
 /** The footprint of a field in canvas pixels (a square on the sky), or a dot of at least `minR` pixels when it is smaller than that. */
-function shape(f: SearchedField, project: Project, minR: number): { x: number; y: number; r: number; poly: [number, number][] | null } | null {
+function shape(
+  f: SearchedField,
+  project: Project,
+  minR: number,
+): { x: number; y: number; r: number; poly: [number, number][] | null } | null {
   const c = project(f.ra, f.dec);
   if (!c[2]) return null;
   const h = f.fov / 120;
@@ -82,7 +87,9 @@ const MIN_R = 7;
  */
 export function drawSearched(c: CanvasRenderingContext2D, project: Project, fields: SearchedField[], selected?: string | null): void {
   c.save();
-  const shapes = fields.map((f) => ({ f, s: shape(f, project, MIN_R) })).filter((x): x is { f: SearchedField; s: NonNullable<ReturnType<typeof shape>> } => !!x.s);
+  const shapes = fields
+    .map((f) => ({ f, s: shape(f, project, MIN_R) }))
+    .filter((x): x is { f: SearchedField; s: NonNullable<ReturnType<typeof shape>> } => !!x.s);
   shapes.sort((p, q) => q.s.r - p.s.r);
   for (const { f, s } of shapes) {
     const col = colorOf(f);
@@ -132,7 +139,12 @@ export function hitSearched(project: Project, fields: SearchedField[], px: numbe
   return best;
 }
 
-const KIND_TEXT: Record<SearchedKind, string> = { found: 'something found', nothing: 'nothing found', depth: 'Find Planet X depth reached', running: 'running' };
+const KIND_TEXT: Record<SearchedKind, string> = {
+  found: 'something found',
+  nothing: 'nothing found',
+  depth: 'Find Planet X depth reached',
+  running: 'running',
+};
 
 /** The key and the counter of the zones, small, floating over the globe while the zones are shown: a colour per result kind with its count, and the fields and sky searched. */
 export function SearchedLegend({ fields }: { fields: SearchedField[] }) {
@@ -157,15 +169,36 @@ export function SearchedLegend({ fields }: { fields: SearchedField[] }) {
 }
 
 /** The card of a clicked field: what was searched, what was found, and the button that opens the result in the lab. */
-export function SearchedCard({ f, onOpen, onClose }: { f: SearchedField; onOpen: (o: SearchedField['open']) => void; onClose?: () => void }) {
-  const kinds: Record<string, string> = { passes: 'between passes', film: 'inside a pass', distant: 'Find Planet X', deep: 'Find Planet X · deep sum' };
+export function SearchedCard({
+  f,
+  onOpen,
+  onClose,
+}: {
+  f: SearchedField;
+  onOpen: (o: SearchedField['open']) => void;
+  onClose?: () => void;
+}) {
+  const kinds: Record<string, string> = {
+    passes: 'between passes',
+    film: 'inside a pass',
+    distant: 'Find Planet X',
+    deep: 'Find Planet X · deep sum',
+  };
   return (
     <div class="searched-card">
       <div class="nm">
-        <b>{f.fov}′ field</b> <span class="badge orange">{f.state === 'running' ? 'running' : f.found > 0 ? `${f.found} lead${f.found === 1 ? '' : 's'}` : 'nothing above the bar'}</span>
+        <b>{f.fov}′ field</b>{' '}
+        <span class="badge orange">
+          {f.state === 'running' ? 'running' : f.found > 0 ? `${f.found} lead${f.found === 1 ? '' : 's'}` : 'nothing above the bar'}
+        </span>
       </div>
       <div class="mono-s">{f.kinds.map((k) => kinds[k] ?? k).join(' · ')}</div>
-      {f.best && <div class="mono-s">best: {f.best.label}{f.best.sn != null ? ` · S/N ${f.best.sn}` : ''} · a lead, not a discovery</div>}
+      {f.best && (
+        <div class="mono-s">
+          best: {f.best.label}
+          {f.best.sn != null ? ` · S/N ${f.best.sn}` : ''} · a lead, not a discovery
+        </div>
+      )}
       {f.searched_at && <div class="mono-s">searched {f.searched_at.slice(0, 10)}</div>}
       <div class="chips">
         <button class="btn sm primary" onClick={() => onOpen(f.open)}>
@@ -204,7 +237,11 @@ export function SearchedCounter({ fields, leads = true }: { fields: SearchedFiel
   return (
     <div class="fsum searched-counter" aria-label="Searched so far">
       {tile(t.fields.toLocaleString('en-US'), 'fields searched so far')}
-      {tile(t.deg2 < 10 ? t.deg2.toFixed(2) : t.deg2.toFixed(0), 'square degrees', 'the areas of the fields added; fields that overlap count twice')}
+      {tile(
+        t.deg2 < 10 ? t.deg2.toFixed(2) : t.deg2.toFixed(0),
+        'square degrees',
+        'the areas of the fields added; fields that overlap count twice',
+      )}
       {t.exposures > 0 && tile(t.exposures.toLocaleString('en-US'), 'exposures read')}
       {leads && tile(t.leads.toLocaleString('en-US'), 'leads (not discoveries)')}
     </div>

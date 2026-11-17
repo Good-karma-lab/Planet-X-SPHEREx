@@ -1,6 +1,7 @@
 // The account side of the product flow (product spec §8): who is signed in, sign in and out, the marks sync for lib/marks.ts,
 // tasks, and the view history. A guest uses the whole site without it; every call here that needs a user is a no-op for a guest.
 
+import { pageVisible } from './idle';
 import { useEffect, useState } from 'preact/hooks';
 
 export interface User {
@@ -234,7 +235,9 @@ export async function nextTask(kind: 'cell' | 'finding', ref?: string): Promise<
 
 /** Close a task (needs a signed-in user). result: nothing | marks for a square; moves | artefact | known for a finding. */
 export async function taskDone(id: string, result: string, markIds: string[] = []): Promise<Task> {
-  return (await api<{ task: Task }>(`/api/me/tasks/${encodeURIComponent(id)}/done`, { method: 'POST', body: { result, mark_ids: markIds } })).task;
+  return (
+    await api<{ task: Task }>(`/api/me/tasks/${encodeURIComponent(id)}/done`, { method: 'POST', body: { result, mark_ids: markIds } })
+  ).task;
 }
 
 /** The place in the lab where a task is done. */
@@ -263,7 +266,9 @@ export type HistoryKind = 'lab' | 'cell' | 'finding' | 'globe';
  *  its hash changes while the user works there. */
 export function recordHistory(kind: HistoryKind, ref: string = location.hash, title = '', key?: string): void {
   if (!user || !ref.startsWith('#/')) return;
-  void api('/api/me/history', { method: 'POST', body: { kind, ref: ref.slice(0, 600), title: title.slice(0, 120), key } }).catch(() => undefined);
+  void api('/api/me/history', { method: 'POST', body: { kind, ref: ref.slice(0, 600), title: title.slice(0, 120), key } }).catch(
+    () => undefined,
+  );
 }
 
 /** What a hash of the app is, for the history: null for a place not worth remembering (a bare screen). */
@@ -306,7 +311,7 @@ if (typeof window !== 'undefined' && typeof location !== 'undefined') {
   onUser(() => {
     refreshUnread();
     clearInterval(unreadTimer);
-    if (user) unreadTimer = setInterval(() => refreshUnread(), 60000);
+    if (user) unreadTimer = setInterval(() => pageVisible() && refreshUnread(), 60000); // a hidden tab asks nothing
   });
   void loadUser();
 }

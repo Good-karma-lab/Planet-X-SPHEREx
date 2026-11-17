@@ -1,3 +1,4 @@
+import { visibleInterval } from '../../lib/idle';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { formatHash } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
@@ -87,10 +88,10 @@ export function useFinds(): Reply | null {
         })
         .catch(() => {});
     load();
-    const t = setInterval(load, 60000);
+    const off = visibleInterval(load, 60000); // a hidden tab asks nothing; seen again, it asks at once
     return () => {
       stop = true;
-      clearInterval(t);
+      off();
     };
   }, []);
   return r;
@@ -267,8 +268,7 @@ function Blink({ f }: { f: Find }) {
   }, [f.id]);
   useEffect(() => {
     if (!st.ok) return;
-    const t = setInterval(() => setI((x) => (x + 1) % crops.current.length), 900);
-    return () => clearInterval(t);
+    return visibleInterval(() => setI((x) => (x + 1) % crops.current.length), 900);
   }, [st.ok]);
   useEffect(() => {
     const cv = ref.current;
