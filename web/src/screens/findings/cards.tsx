@@ -92,7 +92,7 @@ export function cardTitle(f: CardFind): string {
 
 /** The lab on the field the search ran on, with the task "Check a machine finding" for this find (`task=finding`, `finding=<id>`). */
 export function checkHref(f: CardFind): string {
-  const fp = f.field;
+  const fp = f.kind === 'film' ? f.field : undefined; // a time-lapse keeps its field; every other find opens at 10' on the object
   const base = fp
     ? {
         ra: fp.ra.toFixed(5),

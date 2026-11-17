@@ -32,3 +32,16 @@ describe('the lab opens at 10′', () => {
     expect(q.dec).toBeLessThan(8.3334);
   });
 });
+
+describe('a Findings card opens the lab', () => {
+  it("at 10' on the object, even when the find carries its search field; a time-lapse keeps its field", async () => {
+    const { checkHref } = await import('../../src/screens/findings/cards');
+    const field = { ra: 133.76, dec: -7.24219, fov: 60 };
+    const bd = { id: 'browndwarf:x', kind: 'browndwarf', ra: 133.75946, dec: -7.24177, field } as never;
+    const film = { id: 'film:y', kind: 'film', ra: 60.6, dec: 8.4, field } as never;
+    const p = (h: string) => new URLSearchParams(h.split('?')[1]);
+    expect(p(checkHref(bd)).get('fov')).toBe('10');
+    expect(p(checkHref(bd)).get('ra')).toBe('133.75946');
+    expect(p(checkHref(film)).get('fov')).toBe('60');
+  });
+});
