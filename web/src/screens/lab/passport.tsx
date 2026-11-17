@@ -1,6 +1,7 @@
 // The Object tab's parts that are not the catalogues' (lab v2): a find's own record in Findings, and how the object moves as our
 // passes measured it beside what the catalogue says.
 import { useEffect, useState } from 'preact/hooks';
+import { useTalkCount } from '../findings/talk';
 
 export interface FindRecord {
   id: string;
@@ -58,10 +59,21 @@ export function FindStatus({ id }: { id: string }) {
         <a class="cb-link" href={`#/findings?lead=${encodeURIComponent(f.id)}`}>
           In Findings
         </a>
+        <TalkLink id={f.id} />
       </div>
       {nums.length > 0 && <div class="mono-s">{nums.join(' · ')}</div>}
       {f.verdict && <div class="obj-findtext">{f.verdict}</div>}
       {f.note && <div class="obj-findtext faint">{f.note}</div>}
     </div>
+  );
+}
+
+/** the find's Talk in Findings, with how many comments it has */
+function TalkLink({ id }: { id: string }) {
+  const n = useTalkCount(id);
+  return (
+    <a class="cb-link" href={`#/findings?lead=${encodeURIComponent(id)}`} title="Comments and links under this finding" data-testid="talk-link">
+      Talk{n ? ` · ${n}` : ''}
+    </a>
   );
 }

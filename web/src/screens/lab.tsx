@@ -154,6 +154,13 @@ const SHORT: Record<string, string> = { star: 'Star', h2o: 'H₂O', ch4: 'CH₄'
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 /** A season by its middle month: "Aug ’25". */
+/** the scale bar: the round length (arcminutes) nearest to a quarter of the picture, and its width in CSS px */
+export function scaleBar(fovArcmin: number, sidePx: number): { arcmin: number; px: number; word: string } {
+  const steps = [0.25, 0.5, 1, 2, 5, 10, 20];
+  const want = fovArcmin / 5;
+  const arcmin = steps.reduce((a, b) => (Math.abs(Math.log(b / want)) < Math.abs(Math.log(a / want)) ? b : a));
+  return { arcmin, px: Math.round((sidePx * arcmin) / fovArcmin), word: arcmin < 1 ? `${Math.round(arcmin * 60)}″` : `${arcmin}′` };
+}
 const season = (mjd: number) => {
   const d = mjdToDate(mjd);
   return `${MONTHS[d.getUTCMonth()]} ’${String(d.getUTCFullYear()).slice(2)}`;
@@ -662,6 +669,8 @@ export function Lab({ route }: { route: Route }) {
   // the find picked in the Candidates list: it alone is bright on the picture until the picture is clicked
   const [candSel, setCandSel] = useState<string | null>(null);
   const candSelRef = useRef<string | null>(null);
+  // when a track was chosen (its visits flash at their places just after)
+  const trackSelAt = useRef(-1e9);
   candSelRef.current = candSel;
   const [dwarfs, setDwarfs] = useState<DwarfView | null>(null);
   const dwarfsRef = useRef<DwarfView | null>(null);
@@ -1551,7 +1560,9 @@ export function Lab({ route }: { route: Route }) {
             scale: wcss / F.meta.grid.n,
             k: shownVisit,
             rings: true,
-            trail: false,
+            trail: true,
+            // a track just chosen: its visits flash at their places for a second
+            flash: Math.max(0, 1 - (performance.now() - trackSelAt.current) / 1100),
             selected: trackSelRef.current,
             mjd: F.meta.frames.map((f) => f.mjd),
           },
@@ -1792,7 +1803,7 @@ export function Lab({ route }: { route: Route }) {
           ctx.strokeStyle = mk.colour;
           ctx.stroke();
           ctx.setLineDash([]);
-          ctx.font = '600 10px ui-monospace, Menlo, monospace';
+          ctx.font = '600 11px ui-monospace, Menlo, monospace';
           for (const [yr, px, py] of pts) {
             if (Math.hypot(px - x, py - y) < clipR + 5) continue;
             if (px > x && Math.abs(py - y) < 30) continue; // where the object's own label stands
@@ -1925,6 +1936,39 @@ export function Lab({ route }: { route: Route }) {
         }
       }
       ctx.restore();
+      // the scale bar: a round length near a fifth of the picture, at its bottom right (top right on a phone, where Mark and Ruler
+      // sit at the bottom), clear of the status line and the chips
+      if (!wall && box0) {
+        const sb = scaleBar(fovArc / 60, box0.w);
+        const phone = box0.w < 520 && hcss > box0.w * 0.8 && typeof window !== 'undefined' && window.innerWidth < 600;
+        const x1 = box0.x + box0.w - 14;
+        const x0 = x1 - sb.px;
+        const y = phone ? 76 : hcss - 96;
+        ctx.save();
+        ctx.lineCap = 'square';
+        for (const [w, c] of [
+          [4, 'rgba(0,0,0,0.6)'],
+          [1.6, '#e6f2f6'],
+        ] as const) {
+          ctx.lineWidth = w;
+          ctx.strokeStyle = c;
+          ctx.beginPath();
+          ctx.moveTo(x0, y - 4);
+          ctx.lineTo(x0, y);
+          ctx.lineTo(x1, y);
+          ctx.lineTo(x1, y - 4);
+          ctx.stroke();
+        }
+        ctx.font = '600 11px ui-monospace, Menlo, monospace';
+        ctx.textAlign = 'center';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#000';
+        ctx.strokeText(sb.word, (x0 + x1) / 2, y - 7);
+        ctx.fillStyle = '#e6f2f6';
+        ctx.fillText(sb.word, (x0 + x1) / 2, y - 7);
+        ctx.restore();
+        placed.push({ x0: x0 - 4, y0: y - 20, x1: x1 + 4, y1: y + 4 });
+      }
       // the product flow's layer (Known objects, marks, the ruler): on top of the lab's own rings, at the date shown
       const fpic = !days && st.view === 'picture' ? pictures.current.get(shownPass) : undefined;
       const fnoise = noiseRef.current.get(shownPass);
@@ -1961,7 +2005,7 @@ export function Lab({ route }: { route: Route }) {
       } else return;
       ctx.strokeStyle = 'rgba(255,180,84,0.75)';
       ctx.fillStyle = 'rgba(255,200,130,0.95)';
-      ctx.font = '600 10px ui-monospace, Menlo, monospace';
+      ctx.font = '600 11px ui-monospace, Menlo, monospace';
       ctx.lineWidth = 1;
       // centred on the selected source, else the test target, else the middle of the field
       const centre = all.find((k) => k.selected) ?? all.find((k) => k.kind === 'target');
@@ -2292,6 +2336,7 @@ export function Lab({ route }: { route: Route }) {
   /** a track found inside a pass: selected as an object (at its middle place in the film's grid) and its passport opened */
   const selectTrack = (i: number) => {
     setTrackSel(i);
+    trackSelAt.current = performance.now();
     const t = ft.state === 'ok' ? ft.tracks[i] : undefined;
     const g = filmData?.meta.grid;
     if (t && g && t.pts.length) {
@@ -2980,6 +3025,23 @@ export function Lab({ route }: { route: Route }) {
     return Math.abs(tdec - dec) < half && Math.abs(((tra - ra + 540) % 360) - 180) * Math.cos((dec * Math.PI) / 180) < half;
   });
   const fieldName = inField ? inField.n : 'Sky field';
+  // the picture in words, for a screen reader: said again only when it stops (never every frame of the time-lapse)
+  const passNo = passMeta ? passes.indexOf(passMeta) + 1 : 0;
+  const pictureWords = !meta
+    ? `${fieldName}: loading`
+    : [
+        fieldName,
+        `${fov}′ field`,
+        film !== null ? 'Days: the visits of one pass' : time === 'diff' ? 'Difference' : time === 'sum' ? 'Co-add of every pass' : 'Months',
+        playing && time !== 'sum'
+          ? `playing ${film !== null ? 'the visits' : `${passes.length} passes`}`
+          : passMeta && time !== 'sum'
+            ? `pass ${passNo} of ${passes.length}, ${season(passMeta.mjd_mid)}`
+            : '',
+        sel?.name ? `selected: ${sel.name}` : '',
+      ]
+        .filter(Boolean)
+        .join(', ');
   const beta = eclipticLat(ra, dec);
   const nVisits = filmData?.meta.frames.length ?? 0;
   const bodiesSeen = filmBodies?.bodies.filter((b) => b.seen.length).length ?? 0;
@@ -3589,7 +3651,7 @@ export function Lab({ route }: { route: Route }) {
                 ref={canvas}
                 class={`vid ${wallView ? 'wall' : ''}`}
                 role="img"
-                aria-label="Video of the field built from real SPHEREx exposures"
+                aria-label={pictureWords}
                 data-testid="picture"
               />
               <canvas ref={overlay} class="ov" />
@@ -3710,6 +3772,9 @@ export function Lab({ route }: { route: Route }) {
                   <i style={{ background: 'var(--magenta)' }} /> brighter <i style={{ background: 'var(--cyan)' }} /> fainter · side by side: it moved
                 </div>
               )}
+              <div class="sr-only" aria-live="polite" data-testid="picture-words">
+                {pictureWords}
+              </div>
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
                 {mainStatus}
                 {!note && flow.status && (
@@ -4529,6 +4594,11 @@ export function Lab({ route }: { route: Route }) {
                           Wide
                         </button>
                       )}
+                    </div>
+                  )}
+                  {sel && flow.hintAt(sel.ra, sel.dec) && (
+                    <div class="obj-hint" data-testid="obj-hint" title="A ghost, a spike or the glow of a bright star, or the frame's edge, can look like a source">
+                      {flow.hintAt(sel.ra, sel.dec)}
                     </div>
                   )}
                   {!flow.markOpen && flow.card}

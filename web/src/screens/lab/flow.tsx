@@ -217,6 +217,8 @@ export interface LabFlow {
   markOpen: boolean;
   /** the catalogue object the picture's rings have at a place on a date (decimal year), null when none within 8″ */
   catalogueAt(ra: number, dec: number, year: number): KnownObject | null;
+  /** what the data says about a place that looks like an artefact: the frame's edge, a bright star's glow ('' when nothing) */
+  hintAt(ra: number, dec: number): string;
   tool: FlowTool;
   marks: Mark[];
   /** the marks inside the frame on show */
@@ -376,7 +378,23 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // a task about one object rings nothing else; and while a deeper catalogue is still being asked no source is ringed as
     // unmatched (the ring would appear and go when the catalogue arrives): the count on the status line says how many so far
     const noRings = env.focus || kn.deepPending.length > 0;
-    drawKnown({ ...env, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
+    // the passes seen so far at a place: a source there in one pass only may be a cosmic ray or a hot pixel
+    const seenIn = (u: number, v: number): [number, number] | null => {
+      if (!pic) return null;
+      // one answer per pass (a pass's quick and full pictures are both kept): seen when either shows it
+      const byPass = new Map<string, boolean>();
+      const x = u * pic.n;
+      const y = v * pic.n;
+      for (const [key, pk] of peaksRef.current) {
+        const [pass, n] = key.split(':');
+        if (Number(n) !== pic.n) continue;
+        const hit = pk.some((q) => Math.abs(q.x - x) <= 2 && Math.abs(q.y - y) <= 2);
+        byPass.set(pass!, (byPass.get(pass!) ?? false) || hit);
+      }
+      const k = [...byPass.values()].filter(Boolean).length;
+      return byPass.size ? [k, byPass.size] : null;
+    };
+    drawKnown({ ...env, seenIn, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
     const z = env.zoom;
     if (z && !wall) {
       // the zoom on a find: the same rings and names at the zoom's scale (the sources without a match too: what is near the find)
@@ -448,7 +466,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ctx.strokeStyle = 'rgba(255,200,110,0.95)';
         ctx.stroke();
         // every visit: a faint dot with its number (red when tapped as missing); the one on show is bright, with its ring below
-        ctx.font = '600 10px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
         xy.forEach(([x, y], k) => {
           const miss = taskTrack.missing.includes(tt[k]!.i);
           const cur = k === near && Math.abs(yr(tt[k]!.mjd) - env.year) < 0.25 / 365.25;
@@ -544,7 +562,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     const pp = argsRef.current.people && peopleRef.current.key === fieldKey(argsRef.current.ra, argsRef.current.dec, argsRef.current.fov) ? peopleRef.current.places : [];
     if (pp.length && !wall) {
       ctx.save();
-      ctx.font = '600 10.5px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
+      ctx.font = '600 11px -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif';
       for (const box of rects)
         for (const q of pp) {
           if (!q.seen || q.mine && q.people === 1) continue; // only what others said, where I said something too
@@ -883,10 +901,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   };
 
   /** what the data already says about a mark's place: the frame's edge, a bright star beside it ('' when nothing) */
-  const hintOf = (m: Mark): string => {
+  const hintOf = (m: { ra: number; dec: number }): string => {
+    if (!g) return ''; // no picture yet: nothing to say about its edge
     const [u, v] = uvOf(m.ra, m.dec);
     const out: string[] = [];
-    if (Math.min(u, v, 1 - u, 1 - v) < 0.03) out.push('at the frame edge');
+    const edge = Math.min(u, v, 1 - u, 1 - v);
+    if (edge >= 0 && edge < 0.03) out.push('at the frame edge');
     if (known.state === 'ok' && a.epochNow != null) {
       let best: { name: string; mag: number; d: number } | null = null;
       for (const o of known.objects) {
@@ -1498,6 +1518,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     chip,
     markOpen: !!cur,
     catalogueAt: (ra, dec, year) => catalogueAt(knownRef.current, ra, dec, year).object,
+    hintAt: (ra, dec) => hintOf({ ra, dec }),
     tool,
     marks,
     marksHere,
