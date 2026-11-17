@@ -41,6 +41,10 @@ def card_extras(x: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+LIST_TTL_S = 15.0  # the Findings list is the same for every guest: kept this long
+LIST_KEEP = 64
+
+
 def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
     router = APIRouter()
 
@@ -91,6 +95,9 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             raised_cache["at"] = now
         v: dict[str, str] = raised_cache["v"]
         return v
+
+    list_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
+    list_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
 
     def need() -> Any:
         f = getattr(st, "findings", None)
@@ -170,6 +177,37 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         if clips is not None and os.environ.get("SKY_CLIPS_PRERENDER", "1") == "1":
             clips.prerender(every_find)  # the background queue starts with the first look at the list
         rank = clips.rank if clips is not None else None
+        # every guest asks the same list: the answer of the same question is kept LIST_TTL_S, and requests that arrive while it is
+        # being made wait for that one instead of each making their own (a launch-day crowd costs one query, not hundreds)
+        ckey = (kind, status, place, limit, offset, sort, stage, waiting, many, ids, visibility, noted, lite)
+        hit = list_cache.get(ckey)
+        if hit is not None and time.monotonic() - hit[0] < LIST_TTL_S:
+            return hit[1]
+        running = list_inflight.get(ckey)
+        if running is not None:
+            return await asyncio.shield(running)
+        fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
+        list_inflight[ckey] = fut
+        try:
+            made = await make_list(
+                f, kind, status, place, limit, offset, sort, stage, waiting, many, rank, ids, noted, clips, visibility, lite
+            )
+            fut.set_result(made)
+            list_cache[ckey] = (time.monotonic(), made)
+            while len(list_cache) > LIST_KEEP:
+                list_cache.pop(next(iter(list_cache)))
+            return made
+        except Exception as e:
+            fut.set_exception(e)
+            fut.exception()  # read: no "never retrieved" warning when nobody else waited
+            raise
+        finally:
+            list_inflight.pop(ckey, None)
+
+    async def make_list(
+        f: Any, kind: Any, status: Any, place: Any, limit: int, offset: int, sort: Any, stage: Any, waiting: bool, many: tuple[str, ...],
+        rank: Any, ids: str | None, noted: bool, clips: Any, visibility: Any, lite: bool,
+    ) -> Any:  # fmt: skip
         aside = await asyncio.to_thread(people_aside)
         raised = await asyncio.to_thread(people_raised)
         tracks = await asyncio.to_thread(people_tracks_said)
