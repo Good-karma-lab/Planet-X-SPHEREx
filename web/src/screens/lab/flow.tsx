@@ -836,7 +836,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
 
   // the investigation of the field is seen on the picture's status line: a chip that opens it in the Cabinet
   const chip = inv ? (
-    <a class="invchip" href={`#/me?tab=investigations&inv=${encodeURIComponent(inv.id)}`} title={`Open “${inv.title}” in the Cabinet`} data-testid="inv-chip">
+    <a class="invchip" href={`#/me?inv=${encodeURIComponent(inv.id)}`} title={`Open “${inv.title}” in the Cabinet`} data-testid="inv-chip">
       Investigation · {inv.marks} mark{inv.marks === 1 ? '' : 's'}
     </a>
   ) : null;
