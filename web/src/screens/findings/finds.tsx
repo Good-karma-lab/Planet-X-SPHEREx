@@ -363,7 +363,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
           find_ra: f.ra.toFixed(5),
           find_dec: f.dec.toFixed(5),
         }
-      : { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '20', find: f.id },
+      : { ra: f.ra.toFixed(5), dec: f.dec.toFixed(5), fov: f.kind === 'film' ? '60' : '10', find: f.id },
   });
   const json = () =>
     encodeURIComponent(JSON.stringify({ ...f, note: 'a lead, not a discovery', exported: new Date().toISOString() }, null, 2));

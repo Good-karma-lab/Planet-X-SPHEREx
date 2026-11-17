@@ -105,7 +105,7 @@ export function checkHref(f: CardFind): string {
     : {
         ra: f.ra.toFixed(5),
         dec: f.dec.toFixed(5),
-        fov: f.kind === 'film' ? '60' : '20',
+        fov: f.kind === 'film' ? '60' : '10',
         find: f.id,
         find_ra: f.ra.toFixed(5),
         find_dec: f.dec.toFixed(5),
@@ -144,7 +144,7 @@ export function submittedCard(s: Submitted): CardFind {
     id: s.finding_id,
     kind: 'submitted',
     place: s.created ? s.created.slice(0, 10) : '',
-    fov: 20,
+    fov: 10,
     ra: s.ra ?? 0,
     dec: s.dec ?? 0,
     rate: null,
