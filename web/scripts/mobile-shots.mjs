@@ -163,11 +163,13 @@ async function run(sizeKey) {
       deviceScaleFactor: S.dsf,
       isMobile: S.mobile,
       hasTouch: S.mobile,
-      userAgent: S.mobile
-        ? S.width >= 768 || S.height >= 768
-          ? 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-          : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-        : undefined,
+      userAgent: S.userAgent
+        ? S.userAgent
+        : S.mobile
+          ? S.width >= 768 || S.height >= 768
+            ? 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+            : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+          : undefined,
     });
     // the newcomer tour is its own subject: the screens are captured as a returning visitor sees them (--tour keeps it)
     if (!process.argv.includes('--tour')) await ctx.addInitScript(() => localStorage.setItem('spherex-tour-seen', '1'));
