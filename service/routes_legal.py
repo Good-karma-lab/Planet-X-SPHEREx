@@ -65,8 +65,10 @@ do not receive your password.</p>
 
 <h2>Your data is yours</h2>
 <p>In the app, Cabinet → Account: <b>Download my data</b> gives you what we keep about you in one file, and <b>Delete my account
-and my data</b> deletes your account, your e-mail address, your sign-in links and sessions, your marks, tasks, investigations,
-history and notifications. Finds you submitted stay in Findings without your name, so that the record of a find is not lost.</p>
+and my data</b> deletes everything linked to you: your account, your e-mail address, your sign-in links and sessions, your marks,
+tasks, investigations, notes, history, notifications, points and badges. What others' results stand on (your answers on finds, the
+pictures you flagged, the squares you looked through) stays only as an anonymous count that cannot be linked back to you. Finds
+you submitted stay in Findings without your name.</p>
 
 <h2>Contact</h2>
 <p>Questions about this page or your data: open an issue at <a href="{CONTACT}">{CONTACT}</a>.</p>
