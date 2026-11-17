@@ -190,7 +190,7 @@
 }
 
 /* "Give me a square": at the top right, under the bar (the bar itself is full on a laptop); on a phone the first chip of the row */
-.map-bar > .give-square { position: fixed; right: 16px; top: 62px; z-index: 5; flex-direction: row-reverse; }
+.map-bar > .give-square { position: absolute; right: 0; top: calc(100% + 8px); z-index: 5; flex-direction: row-reverse; }
 .give-square { display: flex; align-items: center; gap: 8px; flex: none; }
 .give-square .btn { white-space: nowrap; }
 .give-square .give-why { max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
