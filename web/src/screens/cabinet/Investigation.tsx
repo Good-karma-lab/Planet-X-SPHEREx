@@ -71,6 +71,9 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
   const [declNote, setDeclNote] = useState('');
   const { checks, note: checksNote } = useChecks(inv.checks_job);
   const own = marks.filter((m) => inv.mark_ids.includes(m.id));
+  const items = inv.items ?? [];
+  // marks of the investigation that came with no object (put there before the lab added objects)
+  const loose = own.filter((m) => !items.some((it) => it.mark_ids.includes(m.id)));
   const run = (job: Promise<unknown>) => {
     setBusy(true);
     setStatus('');
@@ -139,10 +142,48 @@ export function InvestigationPage({ inv, marks, finding, reload }: { inv: Invest
         </a>
       )}
 
-      <h4>Marks</h4>
-      {own.length === 0 && <span class="mono-s">No marks</span>}
-      <div class="cb-list">
-        {own.map((m) => (
+      <h4>Objects</h4>
+      {items.length === 0 && own.length === 0 && <span class="mono-s">Nothing gathered yet: add an object in the lab</span>}
+      <div class="cb-list" data-testid="inv-items">
+        {items.map((it) => {
+          const mine = marks.filter((m) => it.mark_ids.includes(m.id));
+          const passes = [...new Set(mine.map((m) => m.pass).filter((p): p is number => p != null))].sort((a, b) => a - b);
+          return (
+            <div key={it.id} class="cb-row haspic" data-testid="inv-item">
+              {it.thumb ? <img class="cb-pic" src={it.thumb} alt="" width={96} height={96} /> : <Pic findingId={it.finding_id} ra={it.ra} dec={it.dec} label={it.label || 'object'} />}
+              <span class="cb-main">
+                <b>{it.label || 'Object'}</b>
+                <span class="mono-s">
+                  {formatRA(it.ra, true)} {formatDec(it.dec, true)}
+                  {mine.length > 0 ? ` · ${mine.length} ${mine.length === 1 ? 'mark' : 'marks'}${passes.length ? ` on ${passes.length === 1 ? 'pass' : 'passes'} ${passes.map((p) => p + 1).join(', ')}` : ''}` : ' · no marks'}
+                </span>
+                {it.ruler && (
+                  <span class="cb-note" data-testid="inv-ruler">
+                    Ruler: {it.ruler.rate.toFixed(2)}″/yr{it.ruler.pa != null ? ` toward ${Math.round(it.ruler.pa)}°` : ''}
+                    {it.ruler.shift != null ? `, ${it.ruler.shift.toFixed(1)}″ between the passes` : ''}
+                    {it.ruler.catalogue_rate != null ? ` · the catalogue: ${it.ruler.catalogue_rate.toFixed(2)}″/yr${it.ruler.object ? ` (${it.ruler.object})` : ''}` : ''}
+                  </span>
+                )}
+                <span class="cb-note" data-testid="inv-catalogue">
+                  {it.catalogue ? `Catalogue: ${it.catalogue.name}${it.catalogue.type ? `, ${it.catalogue.type}` : ''}${it.catalogue.sep != null ? `, ${it.catalogue.sep.toFixed(1)}″ away` : ''} (${it.catalogue.source})` : 'Catalogue: no match recorded'}
+                </span>
+              </span>
+              <span class="cb-side">
+                {it.ref && (
+                  <a class="btn sm" href={it.ref}>
+                    Open in the lab
+                  </a>
+                )}
+                {!inv.submitted && (
+                  <button class="btn sm" disabled={busy} onClick={() => confirm(`Take “${it.label || 'this object'}” out of the investigation?`) && void run(api(`/api/me/investigations/${inv.id}/items/${it.id}`, { method: 'DELETE' }))}>
+                    Remove
+                  </button>
+                )}
+              </span>
+            </div>
+          );
+        })}
+        {loose.map((m) => (
           <div key={m.id} class="cb-row haspic">
             <Pic ra={m.ra} dec={m.dec} label={m.label || 'mark'} />
             <span class="cb-main">

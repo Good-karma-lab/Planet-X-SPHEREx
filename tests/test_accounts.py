@@ -547,7 +547,8 @@ def test_the_lab_adds_objects_to_a_new_or_an_existing_investigation(site: tuple[
     for i in (1, 2, 3):
         c.post("/api/me/marks", json={**MARK, "id": f"m-000{i}-abcdef", "pass": i})
     item = {
-        "label": "Dot north of Barnard", "ra": 269.45, "dec": 4.74, "field_key": "269.45,+4.74,20", "mark_ids": ["m-0001-abcdef", "m-0002-abcdef"],
+        "label": "Dot north of Barnard", "ra": 269.45, "dec": 4.74, "field_key": "269.45,+4.74,20",
+        "mark_ids": ["m-0001-abcdef", "m-0002-abcdef"],
         "ruler": {"rate": 10.1, "catalogue_rate": 10.39, "pa": 356.0, "shift": 5.2, "object": "Barnard's star"},
         "catalogue": {"source": "gaia", "name": "Gaia DR3 4472832130942575872", "sep": 1.1},
         "ref": "#/lab?ra=269.45&dec=4.74&fov=20",

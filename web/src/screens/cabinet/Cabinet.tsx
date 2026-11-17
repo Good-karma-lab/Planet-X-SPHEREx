@@ -15,9 +15,25 @@ interface Check {
   state: string;
   detail?: string;
 }
+/** An object the lab added to an investigation: where it is, its marks, the ruler's result, the catalogue match. */
+export interface InvItem {
+  id: string;
+  label: string;
+  ra: number;
+  dec: number;
+  field_key?: string;
+  finding_id?: string;
+  mark_ids: string[];
+  ruler?: { rate: number; catalogue_rate?: number; pa?: number; shift?: number; object?: string };
+  catalogue?: { source: string; name: string; sep?: number; type?: string };
+  ref?: string;
+  thumb?: string;
+  at: string;
+}
 export interface Investigation {
   id: string;
   title: string;
+  items: InvItem[];
   finding_id: string | null;
   mark_ids: string[];
   notes: { text: string; at: string }[];
@@ -494,7 +510,7 @@ export function Cabinet({ route }: { route: Route }) {
                               <span class="cb-main">
                                 <b>{inv.title}</b>
                                 <span class="mono-s">
-                                  {inv.notes.length} notes · {inv.frames.length} saved frames · {inv.mark_ids.length} marks · changed {when(inv.updated)}
+                                  {(inv.items ?? []).length} objects · {inv.mark_ids.length} marks · {inv.notes.length} notes · changed {when(inv.updated)}
                                 </span>
                               </span>
                               <span class="cb-side">
