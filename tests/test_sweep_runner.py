@@ -148,3 +148,16 @@ def test_strip_keeps_a_pinned_product(tmp_path: Path) -> None:
     st.complete("p" * 24)
     st.pin("p" * 24)
     assert st.strip("field", "p" * 24) == 0 and (st.path("field", "p" * 24) / "picture_p0.sxp").exists()
+
+
+def test_the_archive_backoff_waits_for_given_up_reads_or_a_burst(tmp_path: Path) -> None:
+    r, st, _ = make(tmp_path)
+    stats = SimpleNamespace(failures=0, retries=0)
+    st.files = SimpleNamespace(s3=SimpleNamespace(stats=stats))
+    before = r._s3_now()
+    stats.failures, stats.retries = 3, 3  # three reads failed once and then worked: normal
+    assert not r._archive_troubled(before)
+    stats.failures = 4  # one read gave up
+    assert r._archive_troubled(before)
+    stats.failures, stats.retries = 3 + sweep_runner.RETRY_BURST, 3 + sweep_runner.RETRY_BURST  # a burst of retries
+    assert r._archive_troubled(before)

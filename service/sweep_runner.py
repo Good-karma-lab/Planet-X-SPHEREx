@@ -39,6 +39,7 @@ ARCHIVE_BACKOFF_S = 600.0
 IDLE_S = 30.0  # how often a paused sweep looks again
 KEEP_DAYS = 7.0  # a square with a mover or brown-dwarf find keeps its 20′ field this long (people open it), then it is stripped
 SQUARE_LIMIT_S = 3600.0  # a square that takes longer is marked failed and left
+RETRY_BURST = 20  # failed archive reads during one square (retried or not) that make the sweep wait; a few retries are normal
 
 
 def disk_used_pct(path: Any) -> float:
@@ -63,7 +64,6 @@ class SweepRunner:
         self.enabled = os.environ.get("SKY_SWEEP", "1") != "0"
         self._order: Iterator[grid.Cell] | None = None
         self._backoff_until = 0.0
-        self._s3_failures = self._s3_now()
         self.day = datetime.now(UTC).date().isoformat()
         self.status: dict[str, Any] = {"state": "starting", "squares_today": 0, "finds_today": 0, "seconds_today": 0.0}
 
@@ -82,10 +82,16 @@ class SweepRunner:
         self.status.update(state=state, at=round(time.time()), **kw)
 
     # ---- the gates --------------------------------------------------------------------------------------------------------------
-    def _s3_now(self) -> int:
+    def _s3_now(self) -> tuple[int, int]:
+        """(reads that gave up, failed attempts) so far: `failures` counts every failed attempt, `retries` those tried again."""
         s3 = getattr(getattr(self.st, "files", None), "s3", None)
         stats = getattr(s3, "stats", None)
-        return int(getattr(stats, "failures", 0) or 0) + int(getattr(stats, "retries", 0) or 0)
+        failed = int(getattr(stats, "failures", 0) or 0)
+        return failed - int(getattr(stats, "retries", 0) or 0), failed
+
+    def _archive_troubled(self, before: tuple[int, int]) -> bool:
+        gave_up, failed = self._s3_now()
+        return gave_up > before[0] or failed - before[1] >= RETRY_BURST
 
     def gate(self) -> str | None:
         """Why the sweep must not start a square now, or None."""
@@ -214,7 +220,7 @@ class SweepRunner:
             except Exception as e:  # said, the square marked failed, the next one tried
                 got = {"state": "failed", "error": f"{type(e).__name__}: {e}"[:200]}
                 await asyncio.to_thread(self.st.grid.put, ce.id, "failed", error=got["error"], source="sweep")
-            if self._s3_now() > before:  # the archive failed or retried during this square: give it time
+            if self._archive_troubled(before):  # a read gave up, or many retries, during this square: give the archive time
                 self._backoff_until = time.time() + ARCHIVE_BACKOFF_S
             if got.get("state") == "searched":
                 self.status["squares_today"] += 1
