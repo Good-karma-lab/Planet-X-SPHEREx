@@ -490,7 +490,9 @@ class AccountsDB:
     def submit(
         self, user_id: str, inv: dict[str, Any], checks_job: str, place: dict[str, Any], checks: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        """Record the finding under the user's name (once per investigation) and tell the user."""
+        """Record the finding under the user's name (once per investigation) and tell the user. Safe when two requests of
+        the same user settle the same submit at once: the second finds the row and says nothing twice. A machine finding that
+        somebody already submitted keeps its first submitter; this user is credited on it as well."""
         have = self.submission_of(inv["id"])
         if have is not None:
             return have
@@ -498,17 +500,25 @@ class AccountsDB:
         fid = inv["finding_id"] or f"user:{secrets.token_hex(6)}"
         now = time.time()
         c.execute(
-            "INSERT INTO acc_submissions(finding_id,user_id,investigation_id,checks_job,title,field_key,ra,dec,checks,created,updated)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR IGNORE INTO acc_submissions(finding_id,user_id,investigation_id,checks_job,title,field_key,ra,dec,checks,created,"
+            "updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (fid, user_id, inv["id"], checks_job, inv["title"], place.get("field_key"), place.get("ra"), place.get("dec"), json.dumps(checks),
              now, now),
         )  # fmt: skip
-        c.execute("UPDATE acc_investigations SET submitted=?, checks_job=?, updated=? WHERE id=?", (fid, checks_job, now, inv["id"]))
-        self.credit(fid, user_id, "submitted")
-        self.notify(user_id, "submitted", f"Your finding “{inv['title']}” is submitted and waits for the verdict.", fid)
-        sub = self.submission_of(inv["id"])
-        assert sub is not None
-        return sub
+        # the row of this investigation (written now, or by the request that was a moment earlier), else the finding's own row
+        r = c.execute("SELECT * FROM acc_submissions WHERE investigation_id=?", (inv["id"],)).fetchone()
+        if r is None:
+            r = c.execute("SELECT * FROM acc_submissions WHERE finding_id=?", (fid,)).fetchone()
+        assert r is not None
+        fid = r["finding_id"]
+        marked = c.execute(
+            "UPDATE acc_investigations SET submitted=?, checks_job=?, updated=? WHERE id=? AND submitted IS NULL",
+            (fid, checks_job, now, inv["id"]),
+        )
+        if marked.rowcount == 1:  # this call is the one that submitted it
+            self.credit(fid, user_id, "submitted")
+            self.notify(user_id, "submitted", f"Your finding “{inv['title']}” is submitted and waits for the verdict.", fid)
+        return self._sub(r)
 
     def credit(self, finding_id: str, user_id: str, role: str, result: str | None = None) -> None:
         """role: `marked` (first to mark it), `checked` (closed its task), `submitted`. The first record of a role by a user stays."""

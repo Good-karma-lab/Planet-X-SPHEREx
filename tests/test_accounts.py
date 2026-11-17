@@ -517,3 +517,25 @@ def test_resend_sender_sends_the_link_and_keeps_the_key_out_of_the_log(
     assert c.post("/api/auth/email", json={"email": "ann@example.org"}).status_code == 502
     status[0] = 200
     assert c.post("/api/auth/email", json={"email": "ann@example.org"}).json() == {"sent": True, "minutes": 15}
+
+
+def test_two_requests_settling_the_same_submit_at_once_submit_it_once(site: tuple[FastAPI, _State, _Mail]) -> None:
+    """The cabinet reads the investigations and the notifications side by side; both settle a declared submit."""
+    app, st, mail = site
+    c = _sign_in(app, mail)
+    uid = c.get("/api/me").json()["user"]["id"]
+    db = accounts.get(st).db
+    stale = db.add_investigation(uid, {"title": "Twice"})  # what each request read before the other one wrote
+    first = db.submit(uid, stale, "j", {"ra": 1.0, "dec": 2.0}, [])
+    again = db.submit(uid, {**stale, "submitted": None}, "j", {"ra": 1.0, "dec": 2.0}, [])
+    assert again["finding_id"] == first["finding_id"]
+    raced = db.add_investigation(uid, {"title": "Raced"})
+    db.submission_of = lambda _inv: None  # type: ignore[method-assign]  # the second request passed the check before the first wrote
+    one = db.submit(uid, raced, "j", {}, [])
+    two = db.submit(uid, raced, "j", {}, [])
+    assert one["finding_id"] == two["finding_id"]
+    texts = [n["text"] for n in c.get("/api/me/notifications").json()["notifications"] if n["kind"] == "submitted"]
+    assert sorted(texts) == [
+        "Your finding “Raced” is submitted and waits for the verdict.",
+        "Your finding “Twice” is submitted and waits for the verdict.",
+    ]
