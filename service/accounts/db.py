@@ -134,6 +134,7 @@ CREATE TABLE IF NOT EXISTS acc_credits (
 MAX_MARKS = 5000
 MAX_HISTORY = 500
 MAX_INVESTIGATIONS = 500
+MAX_ITEMS = 100  # objects in one investigation
 #: the statuses of a finding (docs: product spec §3)
 STATUSES = ("new", "in_review", "submitted", "known", "artefact", "candidate", "confirmed")
 
@@ -162,6 +163,9 @@ class AccountsDB:
         path.parent.mkdir(parents=True, exist_ok=True)
         self._local = threading.local()
         self._conn().executescript(SCHEMA)
+        if "extra" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_investigations)")}:
+            # what the lab adds to an investigation: the objects gathered (`items`), the ruler's result, the old-survey match
+            self._conn().execute("ALTER TABLE acc_investigations ADD COLUMN extra TEXT NOT NULL DEFAULT '{}'")
         if "mjd" not in {r[1] for r in self._conn().execute("PRAGMA table_info(acc_marks)")}:
             # added on 16 Nov 2026: the date of the frame a mark was put on (the checks tell fast movers from slow ones by it)
             self._conn().execute("ALTER TABLE acc_marks ADD COLUMN mjd REAL")
@@ -358,6 +362,7 @@ class AccountsDB:
             "id": r["id"], "title": r["title"], "finding_id": r["finding_id"], "mark_ids": json.loads(r["mark_ids"]),
             "notes": json.loads(r["notes"]), "frames": json.loads(r["frames"]), "checks_job": r["checks_job"],
             "submitted": r["submitted"], "declared": iso(r["declared"]), "created": iso(r["created"]), "updated": iso(r["updated"]),
+            "items": json.loads(r["extra"] or "{}").get("items", []),
         }  # fmt: skip
 
     def declare(self, user_id: str, inv_id: str, checks_job: str) -> None:
@@ -412,6 +417,45 @@ class AccountsDB:
         if sets:
             q = "UPDATE acc_investigations SET " + ", ".join(f"{k}=?" for k, _ in sets) + ", updated=? WHERE id=? AND user_id=?"
             self._conn().execute(q, (*[v for _, v in sets], time.time(), inv_id, user_id))
+        return self.investigation(user_id, inv_id)
+
+    def add_item(self, user_id: str, inv_id: str, item: dict[str, Any]) -> dict[str, Any] | None:
+        """One more object gathered in the lab: kept in the investigation with its marks, ruler result and catalogue match.
+        Its marks join the investigation's marks (the checks run on them); the same object sent again (same item id) is replaced."""
+        c = self._conn()
+        r = c.execute("SELECT extra, mark_ids, finding_id FROM acc_investigations WHERE id=? AND user_id=?", (inv_id, user_id)).fetchone()
+        if r is None:
+            return None
+        extra = json.loads(r["extra"] or "{}")
+        items = [x for x in extra.get("items", []) if x.get("id") != item["id"]]
+        if len(items) >= MAX_ITEMS:
+            raise LimitReachedError
+        extra["items"] = [*items, item]
+        marks = list(dict.fromkeys([*json.loads(r["mark_ids"]), *item.get("mark_ids", [])]))
+        c.execute(
+            "UPDATE acc_investigations SET extra=?, mark_ids=?, finding_id=COALESCE(finding_id, ?), updated=? WHERE id=? AND user_id=?",
+            (json.dumps(extra, ensure_ascii=False), json.dumps(marks), item.get("finding_id"), time.time(), inv_id, user_id),
+        )
+        return self.investigation(user_id, inv_id)
+
+    def remove_item(self, user_id: str, inv_id: str, item_id: str) -> dict[str, Any] | None:
+        """Take an object out of the investigation, with the marks that came only with it."""
+        c = self._conn()
+        r = c.execute("SELECT extra, mark_ids FROM acc_investigations WHERE id=? AND user_id=?", (inv_id, user_id)).fetchone()
+        if r is None:
+            return None
+        extra = json.loads(r["extra"] or "{}")
+        gone = [x for x in extra.get("items", []) if x.get("id") == item_id]
+        if not gone:
+            return None
+        extra["items"] = [x for x in extra.get("items", []) if x.get("id") != item_id]
+        kept = {m for x in extra["items"] for m in x.get("mark_ids", [])}
+        drop = {m for x in gone for m in x.get("mark_ids", [])} - kept
+        marks = [m for m in json.loads(r["mark_ids"]) if m not in drop]
+        c.execute(
+            "UPDATE acc_investigations SET extra=?, mark_ids=?, updated=? WHERE id=? AND user_id=?",
+            (json.dumps(extra, ensure_ascii=False), json.dumps(marks), time.time(), inv_id, user_id),
+        )
         return self.investigation(user_id, inv_id)
 
     def delete_investigation(self, user_id: str, inv_id: str) -> bool:

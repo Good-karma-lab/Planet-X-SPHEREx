@@ -156,3 +156,4 @@ a.cb-row:hover, button.cb-row:hover { background: rgba(95, 227, 214, 0.08); }
 .cb-story .cb-card { min-height: 0; }
 .cb-storygrid:has(.cb-pic[data-state='none']) { grid-template-columns: 1fr; }
 .cb-storypic:has(.cb-pic[data-state='none']) { display: none; }
+.cb-row.haspic > img.cb-pic { width: 96px; height: 96px; object-fit: cover; }
