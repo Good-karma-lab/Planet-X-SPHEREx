@@ -2354,4 +2354,21 @@
   :root .lab .panel {
     width: 326px;
   }
+  /* the picture's box is as tall as the picture (no empty band above the playback bar) */
+  :root .lab .vstage {
+    flex: 0 0 auto;
+  }
+  /* the band chips: one row inside the picture's width, sliding sideways */
+  :root .vsq .fbands,
+  :root .vsq.compact .fbands {
+    left: 0;
+    right: 0;
+    transform: none;
+    width: auto;
+    max-width: 100%;
+    flex-wrap: nowrap;
+    justify-content: flex-start;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
 }
