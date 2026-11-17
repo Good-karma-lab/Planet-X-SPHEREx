@@ -566,6 +566,10 @@ def test_flow_fields_promise_first_and_the_looks_people_gave(tmp_path: Path) -> 
     assert hid["finds"][0]["promise"] <= 2 and hid["finds"][0]["visible"] is False and vis["visibility"]["in_view"]["not_visible"] == 1
     assert vis["visibility"]["by_kind"]["red"] == {"visible": 0, "not_visible": 1, "not_measured": 0}
     assert query(db, None, "all", None, 100, 0)["finds"][0]["visible"] is None  # not measured: nothing is assumed
+    # a fresh store: no picture measured yet, the default view ("seen") still lists every find; "unseen" lists none
+    fresh = query(db, None, "all", None, 100, 0, flow=flow, sort="promise", seen=lambda f: (None, None), visibility="seen")
+    none_hidden = query(db, None, "all", None, 100, 0, flow=flow, sort="promise", seen=lambda f: (None, None), visibility="unseen")
+    assert fresh["count"] == again["count"] and none_hidden["count"] == 0
     # a find with a machine note (it looks like an artefact) goes below every clean find, whatever its promise
     import service.findings as sf
 

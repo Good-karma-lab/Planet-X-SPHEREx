@@ -715,9 +715,10 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
           <div class="fkinds fstat" role="group" aria-label="Visible in the picture">
             <button class={!unseen ? 'on' : ''} aria-pressed={!unseen} onClick={() => setUnseen(false)}>
               Visible in the picture <span>{h.visibility.in_view.visible}</span>
+              {h.visibility.in_view.not_measured > 0 && <span class="wait"> · {h.visibility.in_view.not_measured} being measured</span>}
             </button>
             <button class={unseen ? 'on' : ''} aria-pressed={unseen} onClick={() => setUnseen(true)}>
-              Not visible in the picture <span>{h.visibility.in_view.not_visible + h.visibility.in_view.not_measured}</span>
+              Not visible in the picture <span>{h.visibility.in_view.not_visible}</span>
             </button>
           </div>
         )}
