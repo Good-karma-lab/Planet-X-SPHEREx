@@ -73,7 +73,7 @@ a.cb-row:hover, button.cb-row:hover { background: rgba(95, 227, 214, 0.08); }
 .cb-account .cb-line { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
 .btn.danger:hover { border-color: rgba(255, 111, 111, 0.6); background: rgba(255, 111, 111, 0.1); box-shadow: none; }
 .tab { position: relative; }
-.navbadge { position: absolute; top: 3px; right: 5px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--amber); color: #1a1205; font: 700 10px/15px var(--mono); text-align: center; }
+.navbadge { position: absolute; top: 3px; right: 5px; min-width: 15px; height: 15px; padding: 0 4px; box-sizing: border-box; border-radius: 8px; background: var(--amber); color: #1a1205; font: 700 10.5px/15px var(--mono); text-align: center; }
 @media (max-width: 600px) { .cb-row.haspic { grid-template-columns: auto minmax(0, 1fr); } .cb-row.haspic .cb-side { grid-column: 1 / -1; } .cb-head { align-items: flex-start; } .cb-tabs .cb-status { margin-left: 0 !important; flex-basis: 100%; } .cb-frames a { width: calc(50% - 5px); } .cb-frames img, .cb-frames .cb-noimg { width: 100%; height: auto; aspect-ratio: 1; } }
 .cb-pic[data-state='none'] { background: none; border-style: dashed; }
 @media (max-width: 600px) { .cb-tabs .cb-status:empty { display: none; } }
@@ -293,6 +293,6 @@ a.cb-row2:hover { background: rgba(95, 227, 214, 0.07); }
 .cb-pic > canvas { display: block; border-radius: 7px; }
 .cb-pic .cb-ring { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .cb-pic .cb-ring circle { fill: none; stroke: rgba(95, 227, 214, 0.85); stroke-width: 1.6; }
-.cb-pic .cb-src { position: absolute; left: 4px; bottom: 3px; font: 600 8.5px var(--mono); letter-spacing: 0.06em; color: rgba(214, 231, 237, 0.75); text-shadow: 0 0 3px #000; pointer-events: none; }
+.cb-pic .cb-src { position: absolute; left: 4px; bottom: 3px; font: 600 10.5px var(--mono); letter-spacing: 0.06em; color: rgba(214, 231, 237, 0.75); text-shadow: 0 0 3px #000; pointer-events: none; }
 .cb-pic:has(> canvas), .cb-pic:has(> img) { border-style: solid; }
 .cb-pic.cb-icontile { display: grid; place-items: center; border-style: solid; color: var(--accent-l); background: radial-gradient(circle at 50% 40%, rgba(95, 227, 214, 0.12), rgba(2, 7, 10, 0.9)); }

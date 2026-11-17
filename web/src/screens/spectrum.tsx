@@ -526,6 +526,12 @@ export function SpectrumTab({ src, inPassport = false }: { src: Source | null; i
         />
       )}
       {cur && !saturated && stampsDone && stamps.size === 0 && <div class="mono-s">The pixels were not kept for this spectrum (it was measured before they were stored).</div>}
+      {(why.get('at the edge of the detector') ?? 0) >= Math.max(2, 0.3 * points.length) && (
+        // most of its exposures put it on a detector's edge: what is measured there is less sure
+        <div class="obj-hint" data-testid="edge-hint">
+          Artefact hint: at a detector edge in {why.get('at the edge of the detector')} of {points.length} exposures
+        </div>
+      )}
       {why.size > 0 && !saturated && <div class="mono-s">Not used: {[...why.entries()].map(([k2, n]) => `${n} ${k2}`).join(' · ')}</div>}
       {error && (
         <div class="mono-s" style={{ color: 'var(--amber)' }}>

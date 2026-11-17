@@ -5,6 +5,7 @@ import { formatDec, formatRA } from '../../lib/sky';
 import { parseSxp, halfToFloat } from '../../lib/sxp';
 import { ATLAS_LEAD, LeadPanel } from './leads';
 import { api, useUser } from '../../lib/account';
+import { Talk } from './talk';
 import { Clip, FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
 import { peopleLine, usePeople } from './people';
 
@@ -525,6 +526,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
           Download JSON
         </a>
       </div>
+      <Talk id={f.id} next={`#/findings?lead=${encodeURIComponent(f.id)}`} />
       <div class="mono-s fver">
         {Object.entries(f.versions)
           .map(([k, v]) => `${k} ${v}`)

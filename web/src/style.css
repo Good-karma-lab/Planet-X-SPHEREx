@@ -64,8 +64,9 @@ a {
   color: var(--accent);
   text-decoration: none;
 }
+/* the keyboard's place: a 2 px amber ring on every control (teal would vanish on the teal buttons) */
 :focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--amber, #ffb454);
   outline-offset: 2px;
 }
 ::-webkit-scrollbar {
@@ -498,7 +499,7 @@ input[type='range']::-moz-range-thumb {
 }
 .aim .field label {
   color: var(--faint);
-  font: 600 9.5px var(--mono);
+  font: 600 10.5px var(--mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   min-width: 26px;
@@ -616,7 +617,7 @@ input[type='range']::-moz-range-thumb {
   font-weight: 650;
 }
 .bchip em {
-  font: 500 10px var(--mono);
+  font: 500 10.5px var(--mono);
   font-style: normal;
   color: var(--muted);
 }
@@ -761,7 +762,7 @@ input[type='range']::-moz-range-thumb {
   flex: none;
 }
 .panel-label em {
-  font: 500 10px var(--mono);
+  font: 500 10.5px var(--mono);
   font-style: normal;
   color: var(--muted);
 }
@@ -1555,7 +1556,7 @@ input[type='range']::-moz-range-thumb {
   }
   .tab {
     padding: 4px 6px;
-    font-size: 9px;
+    font-size: 10.5px;
   }
   .tab svg {
     width: 20px;
@@ -2246,7 +2247,7 @@ input[type='range']::-moz-range-thumb {
 .sline { grid-template-columns: minmax(0, 1fr) 80px 96px; }
 .vsq .fbands { flex-wrap: nowrap; gap: 3px; }
 .vsq .fbands .bchip { padding: 2px 6px; font-size: 10.5px; gap: 4px; }
-.vsq .fbands .bchip em { font-size: 9.5px; }
+.vsq .fbands .bchip em { font-size: 10.5px; }
 .vsq .fbands .mini { height: 22px; padding: 0 6px; font-size: 10.5px; }
 .psec .coords { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .psec .coords .field { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -2260,14 +2261,14 @@ input[type='range']::-moz-range-thumb {
 .vsquare .vi svg { width: 30px; height: 30px; }
 .vsquare:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
 .vsquare.on { background: rgba(95, 227, 214, 0.14); border-color: rgba(95, 227, 214, 0.6); color: var(--accent-l); }
-.tbadge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 999px; background: var(--accent); color: #02161a; font: 700 10px var(--font); }
+.tbadge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 999px; background: var(--accent); color: #02161a; font: 700 10.5px var(--font); }
 .fsec { gap: 4px; }
 .fsh { font: 650 12px var(--font); color: var(--ink); }
 .sbar { cursor: pointer; }
 .sbar .sline:hover b { color: var(--accent-l); }
 
 /* rail: the words fit (U) */
-.rail .tab { font-size: 8.5px; letter-spacing: 0.04em; padding: 8px 0 6px; gap: 4px; }
+.rail .tab { font-size: 9.5px; letter-spacing: 0.04em; padding: 8px 0 6px; gap: 4px; }
 .rail .tab svg { width: 22px; height: 22px; }
 /* phones: a gap between the words of the rail */
 @media (max-width: 860px), (max-aspect-ratio: 1/1) {
@@ -2295,7 +2296,7 @@ input[type='range']::-moz-range-thumb {
   .tab {
     padding: 4px 1px;
     letter-spacing: 0;
-    font-size: 8px;
+    font-size: 9.5px;
   }
   .tab span {
     text-overflow: clip;
@@ -2317,9 +2318,9 @@ input[type='range']::-moz-range-thumb {
 
 /* a picture under 760 px: compact buttons on one row, nothing hidden at the edges (QA r5) */
 .vsq.compact .fbands { gap: 2px; padding: 3px 4px; }
-.vsq.compact .fbands .bchip { padding: 2px 5px; font-size: 10px; }
+.vsq.compact .fbands .bchip { padding: 2px 5px; font-size: 10.5px; }
 .vsq.compact .fbands .bchip em, .vsq.compact .fbands .bchip .dot { display: none; }
-.vsq.compact .fbands .mini { height: 20px; padding: 0 5px; font-size: 10px; }
+.vsq.compact .fbands .mini { height: 20px; padding: 0 5px; font-size: 10.5px; }
 .vsq.compact .fstatus { font-size: 10.5px; bottom: 44px; }
 /* a narrow window: the time bar wraps instead of hiding its last controls behind the panel */
 @media (max-width: 1250px) {
@@ -2354,7 +2355,8 @@ input[type='range']::-moz-range-thumb {
 /* the picture sits at whole pixels (its offsets are set in the page), so its frame has one width in every state */
 .lab .vstage { align-items: flex-start; justify-content: flex-start; }
 
-.vsq :focus, .vsq :focus-visible { outline: none; }
+.vsq :focus:not(:focus-visible) { outline: none; }
+.vsq :focus-visible { outline: 2px solid var(--amber, #ffb454); outline-offset: 1px; }
 
 /* the scans: a header with a clear chevron; opened (default), one line per scan; folded, the same scans in one wrapped line */
 .sbar .tray-head { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 0 4px; background: none; border: 0; color: var(--muted); cursor: pointer; font: 650 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; }
@@ -2381,7 +2383,7 @@ input[type='range']::-moz-range-thumb {
 .about-grid { align-items: start; }
 /* tiles of a wall under 200 px: the message sits at the top, small, clear of the marker in the middle */
 .vsq .panel-empty.small { place-items: start center; padding: 6px 4px; }
-.vsq .panel-empty.small span { font-size: 9.5px; line-height: 1.25; padding: 3px 5px; max-width: 96%; }
+.vsq .panel-empty.small span { font-size: 10.5px; line-height: 1.25; padding: 3px 5px; max-width: 96%; }
 /* a screen under 860 px high: the panel keeps its fixed layout (tabs, a scrolling body, the scans tray in its own region at the bottom: nothing above it can push it); the tray starts folded to one line there */
 
 /* the scans never reflow while a count or a % changes: fixed columns, digits of one width */
@@ -2402,7 +2404,7 @@ input[type='range']::-moz-range-thumb {
 .adesrow { margin-top: 4px; }
 
 /* the timeline's restart marker: the loop starts at the first season and comes back to it */
-.tl-labels span.restart::before { content: '↻'; margin-right: 3px; color: var(--accent); font-size: 10px; }
+.tl-labels span.restart::before { content: '↻'; margin-right: 3px; color: var(--accent); font-size: 10.5px; }
 
 /* the Object tab keeps the room its content will fill (portrait, catalogue rows, light curves), so that what follows it in a single column (the scans tray) does not jump when they arrive */
 @media (max-width: 999.98px), (max-aspect-ratio: 1/1) {
@@ -2448,3 +2450,9 @@ input[type='range']::-moz-range-thumb {
 @media (max-width: 860px), (max-aspect-ratio: 1/1) {
   .rail .tab.tab-end { margin-top: 0; margin-left: auto; }
 }
+
+/* read by screen readers only */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* controls that draw their own focus state still show the keyboard's place */
+.inp:focus-visible, .pager select:focus-visible, input[type='range']:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }

@@ -26,7 +26,7 @@
 .leadpanel .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 @media (max-width: 600px) {
   .leads { max-width: none; }
-  .leadrow .badge { font-size: 9.5px; padding: 1px 5px; }
+  .leadrow .badge { font-size: 10.5px; padding: 1px 5px; }
   .leadpanel { width: 100vw; border-radius: 0; border-left: 0; }
 }
 .lp-pair { display: flex; gap: 12px; margin: 4px 0 12px; flex-wrap: wrap; }
@@ -64,7 +64,7 @@
 .fnums b { overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
 .fblink .fthumb canvas { position: static; width: 100%; height: 100%; image-rendering: auto; }
 .fring { position: absolute; left: 50%; top: 50%; width: 30px; height: 30px; margin: -15px 0 0 -15px; border: 1.5px solid var(--amber); border-radius: 50%; pointer-events: none; }
-.fchart { margin: 10px 0; } .fchart svg { width: 100%; max-width: 480px; height: auto; display: block; } .fchart .ft { font: 10px var(--mono); fill: var(--muted); }
+.fchart { margin: 10px 0; } .fchart svg { width: 100%; max-width: 480px; height: auto; display: block; } .fchart .ft { font: 10.5px var(--mono); fill: var(--muted); }
 .ftab { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 10px 0; }
 .ftab caption { text-align: left; padding-bottom: 4px; }
 .ftab td { padding: 3px 8px 3px 0; border-bottom: 1px solid var(--edge-soft); vertical-align: top; overflow-wrap: anywhere; }
@@ -148,3 +148,22 @@ a.fcard-title:hover { color: var(--accent); }
 .pg-h + .searched-counter { box-sizing: border-box; height: 38px; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
 .pg-h + .fbar { margin-top: 52px; }
 @media (max-width: 420px) { .pg-h + .searched-counter { gap: 6px 14px; } }
+
+/* Talk under a finding */
+.talk { margin: 14px 0 6px; padding-top: 10px; border-top: 1px solid var(--edge-soft); display: flex; flex-direction: column; gap: 8px; }
+.talk-h { font-weight: 650; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.talk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.talk-list li { display: flex; flex-direction: column; gap: 2px; }
+.talk-list li.hidden { opacity: 0.55; }
+.talk-meta { display: flex; align-items: baseline; gap: 4px; color: var(--muted); }
+.talk-meta b { color: var(--ink); font-weight: 600; }
+.talk-act { margin-left: auto; background: none; border: 0; padding: 0 2px; font: 500 11px var(--font); color: var(--faint); cursor: pointer; }
+.talk-act:hover:not(:disabled) { color: var(--ink); }
+.talk-text { margin: 0; font-size: 13px; line-height: 1.45; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.talk-text a { color: var(--accent-l, var(--accent)); }
+.talk-form { display: flex; flex-direction: column; gap: 6px; }
+.talk-in { width: 100%; box-sizing: border-box; min-height: 52px; resize: vertical; font: 13px/1.4 var(--font); padding: 8px 10px; }
+.talk-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--muted); }
+.talk-foot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.talk-foot .bad { color: #ffb3b3; }
+.talk-signin { align-self: flex-start; }

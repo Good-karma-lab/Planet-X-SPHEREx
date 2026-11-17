@@ -52,7 +52,7 @@ export interface TrackDraw {
   /** the frame on screen */
   k: number;
   rings: boolean;
-  /** kept for the callers that pass it: earlier places are always drawn now, as small dots */
+  /** a short trail: only the last three places behind the ring, fading (else every earlier place, as small dots) */
   trail?: boolean;
   /** the selected track (-1 or out of range: none) */
   selected: number;
@@ -112,8 +112,9 @@ export function drawTracks(c: CanvasRenderingContext2D, tracks: FilmTrack[], d: 
     const here = trackPlace(tr, d.k, d.mjd);
     if (!here) return; // outside the time span: nothing of this track is drawn
     c.globalAlpha = sel >= 0 && sel !== i ? 0.35 : 1;
-    // earlier places: small dots on a thin dashed path that ends at the ring
-    const past = tr.pts.filter((q) => q.f < d.k);
+    // earlier places: small dots on a thin dashed path that ends at the ring (a short trail: the last three, fading)
+    const all = tr.pts.filter((q) => q.f < d.k);
+    const past = d.trail ? all.slice(-3) : all;
     c.strokeStyle = col;
     c.lineWidth = 1 * dpr;
     c.globalAlpha *= 0.7;
@@ -124,11 +125,14 @@ export function drawTracks(c: CanvasRenderingContext2D, tracks: FilmTrack[], d: 
     c.stroke();
     c.setLineDash([]);
     c.fillStyle = col;
-    for (const q of past) {
+    const a0 = c.globalAlpha;
+    past.forEach((q, j) => {
+      if (d.trail) c.globalAlpha = a0 * (0.35 + (0.65 * (j + 1)) / past.length);
       c.beginPath();
-      c.arc(X(q.x), Y(q.y), 2.2 * dpr, 0, 7);
+      c.arc(X(q.x), Y(q.y), (d.trail ? 2.8 : 2.2) * dpr, 0, 7);
       c.fill();
-    }
+    });
+    c.globalAlpha = a0;
     c.globalAlpha = sel >= 0 && sel !== i ? 0.35 : 1;
     // the ring: solid on a measured visit, dashed between visits
     const x = X(here.x);

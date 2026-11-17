@@ -378,6 +378,8 @@ export interface KnownDrawEnv {
   pointer: { x: number; y: number } | null;
   /** true where nothing is drawn (under the zoom inset, the title row and the status line) */
   hidden: (x: number, y: number) => boolean;
+  /** in how many of the passes seen so far a source stands at this place of the picture (fractions), and of how many */
+  seenIn?: (u: number, v: number) => [number, number] | null;
 }
 
 function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, fill: string): void {
@@ -469,7 +471,7 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
     ctx.restore();
   }
   // what the eye must land on: detected sources with no catalogue object at their place
-  let lone: { x: number; y: number } | null = null;
+  let lone: { x: number; y: number; u: number; v: number } | null = null;
   if (match && !wall) {
     const ring = new Path2D();
     for (const box of rects)
@@ -480,7 +482,7 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
         ring.moveTo(x + NOMATCH_R, y);
         ring.arc(x, y, NOMATCH_R, 0, 2 * Math.PI);
         placed.push({ x0: x - NOMATCH_R - 2, y0: y - NOMATCH_R - 2, x1: x + NOMATCH_R + 2, y1: y + NOMATCH_R + 2 });
-        if (pointer && Math.hypot(pointer.x - x, pointer.y - y) <= NOMATCH_R + 3) lone = { x, y };
+        if (pointer && Math.hypot(pointer.x - x, pointer.y - y) <= NOMATCH_R + 3) lone = { x, y, u: q.u, v: q.v };
       }
     ctx.strokeStyle = 'rgba(0,0,0,0.6)';
     ctx.lineWidth = 3.4;
@@ -491,10 +493,13 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
   }
   if (lone && !hover) {
     ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-    text(ctx, 'no catalogue match', lone.x + NOMATCH_R + 5, lone.y + 4, '#ffffff');
+    // in one pass only, it may be a cosmic ray or a hot pixel: the passes say so, the word stays the data's
+    const seen = env.seenIn?.(lone.u, lone.v);
+    const s = seen && seen[1] >= 2 ? `no catalogue match · in ${seen[0]} of ${seen[1]} passes` : 'no catalogue match';
+    text(ctx, s, lone.x + NOMATCH_R + 5, lone.y + 4, seen && seen[1] >= 3 && seen[0] <= 1 ? '#ffd08a' : '#ffffff');
   }
   if (!wall) {
-    ctx.font = '500 10.5px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    ctx.font = '500 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
     const put = (q: { o: KnownObject; x: number; y: number; r: number; box: (typeof rects)[number] }, force: boolean) => {
       const sp = speedWord(q.o);
       const s = [q.o.name || SOURCE_WORD[q.o.source], sp].filter(Boolean).join(' · ');
