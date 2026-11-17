@@ -218,27 +218,31 @@ class SkyPainter {
       this.painter = `cpu: ${why}`;
       return null;
     };
-    if (view.proj !== 'globe') return cpu('the Mollweide map');
-    if (layer.length !== 1) return cpu('three surveys, one per colour');
-    if ((l0.id === 'dust' && !bakedOf('dust')) || equiOf(l0.id)) return cpu('a picture of the whole sky');
+    if ((l0.id === 'dust' && !bakedOf('dust')) || (layer.length === 1 && equiOf(l0.id))) return cpu('a picture of the whole sky');
+    if (layer.length !== 1 && layer.length !== 3) return cpu(`${layer.length} surveys`);
     this.glSky ??= new GlSky();
     const g = this.glSky;
     if (!g.ok) return cpu('no WebGL2');
     tiles.frame();
-    const sm = new Sampler(l0.id, orderFor(l0.id, view.R));
+    const moll = view.proj === 'moll';
+    const R = moll ? mw(view) / 5 : view.R;
+    const samplers = layer.map((l) => new Sampler(l.id, orderFor(l.id, R)));
     const sw = Math.ceil(view.W);
     const sh = Math.ceil(view.H);
     const b = basis(view);
-    const gal = HIPS[l0.id]?.frame === 'galactic';
-    const B0 = bakedOf(l0.id);
-    const blackLive = l0.black;
-    const gainLive = (l0.gain * 255) / (255 - l0.black);
-    const blackBaked = B0 ? Math.max(B0.black, EXTRA_BLACK[l0.id] ?? 0) : blackLive;
-    const gainBaked = B0 ? (B0.gain * 255) / (255 - blackBaked) : gainLive;
+    const gal = layer.every((l) => HIPS[l.id]?.frame === 'galactic');
+    // the tones as the CPU loop applies them: one survey (a baked tile may want a black point on top), or three surveys, one per colour
+    const tones = layer.map((l): [number, number, number, number] => {
+      const B = bakedOf(l.id);
+      const blackLive = l.black;
+      const gainLive = (l.gain * 255) / (255 - l.black);
+      if (layer.length === 3) return [B?.black ?? 0, B?.gain ?? 1, blackLive, gainLive];
+      const blackBaked = B ? Math.max(B.black, EXTRA_BLACK[l.id] ?? 0) : blackLive;
+      return [blackBaked, B ? (B.gain * 255) / (255 - blackBaked) : gainLive, blackLive, gainLive];
+    });
     const r = g.paint({
-      sw, sh, R: view.R, inside: !!view.inside, c: b.c,
-      e: b.e,
-      n: b.n, gal, sampler: sm, blackBaked, gainBaked, blackLive, gainLive,
+      sw, sh, R: view.R, inside: !!view.inside, c: b.c, e: b.e, n: b.n, gal, samplers, tones,
+      map: moll ? { x: mcx(view), y: mcy(view), w: mw(view) } : undefined,
       place: (i, j, f) => this.place(view, b, gal, 1, sw, sh, i, j, f),
     });
     if (!r) return cpu(g.why);
