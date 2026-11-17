@@ -154,3 +154,5 @@ a.cb-row:hover, button.cb-row:hover { background: rgba(95, 227, 214, 0.08); }
 .cb-kicker { font: 700 11px var(--mono); letter-spacing: 0.2em; text-transform: uppercase; color: var(--amber); }
 @media (max-width: 700px) { .cb-storygrid { grid-template-columns: 1fr; } .cb-storypic .cb-pic { width: 100% !important; height: auto !important; aspect-ratio: 1; } .cb-celebrate { flex-direction: column; text-align: center; padding: 18px 14px; } .cb-celebrate h1 { font-size: 24px; } .cb-front { flex-direction: column; text-align: center; } .cb-prohead .cb-levelbadge { width: 56px; height: 56px; } }
 .cb-story .cb-card { min-height: 0; }
+.cb-storygrid:has(.cb-pic[data-state='none']) { grid-template-columns: 1fr; }
+.cb-storypic:has(.cb-pic[data-state='none']) { display: none; }
