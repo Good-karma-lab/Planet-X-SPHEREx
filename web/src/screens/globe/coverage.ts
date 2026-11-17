@@ -53,7 +53,8 @@ const roundEven = (x: number): number => {
   const r = Math.round(x);
   return Math.abs(x - Math.trunc(x)) === 0.5 && r % 2 !== 0 ? r - 1 : r;
 };
-const colsOf = (): number[] => Array.from({ length: N_BANDS }, (_, b) => Math.max(1, roundEven((360 * Math.cos((DEC0 + (b + 0.5) * CELL_DEG) * D2R)) / CELL_DEG)));
+const colsOf = (): number[] =>
+  Array.from({ length: N_BANDS }, (_, b) => Math.max(1, roundEven((360 * Math.cos((DEC0 + (b + 0.5) * CELL_DEG) * D2R)) / CELL_DEG)));
 let COLS: number[] = colsOf();
 export const nCols = (band: number): number => COLS[band]!;
 export let TOTAL = COLS.reduce((s, n) => s + n, 0);
@@ -93,6 +94,27 @@ export function cellAt(ra: number, dec: number): { band: number; col: number } {
 export function cellBox(band: number, col: number): { ra0: number; ra1: number; dec0: number; dec1: number } {
   const w = 360 / COLS[band]!;
   return { ra0: col * w, ra1: (col + 1) * w, dec0: DEC0 + band * CELL_DEG, dec1: DEC0 + (band + 1) * CELL_DEG };
+}
+/** The quarters a person looks through (10′ × 10′), in the lab's order: north up, east left. */
+export const QUARTERS = ['NE', 'NW', 'SE', 'SW'] as const;
+export type Quarter = (typeof QUARTERS)[number];
+/** The edges of a quarter of a square: its north or south half in Dec and east (larger RA) or west half in RA. */
+export function quarterBox(band: number, col: number, q: Quarter): { ra0: number; ra1: number; dec0: number; dec1: number } {
+  const b = cellBox(band, col);
+  const dm = (b.dec0 + b.dec1) / 2;
+  const rm = (b.ra0 + b.ra1) / 2;
+  return {
+    ra0: q[1] === 'E' ? rm : b.ra0,
+    ra1: q[1] === 'E' ? b.ra1 : rm,
+    dec0: q[0] === 'N' ? dm : b.dec0,
+    dec1: q[0] === 'N' ? b.dec1 : dm,
+  };
+}
+/** The quarter of a square that holds a sky place. */
+export function quarterAt(band: number, col: number, ra: number, dec: number): Quarter {
+  const b = cellBox(band, col);
+  const r = ((ra % 360) + 360) % 360;
+  return `${dec >= (b.dec0 + b.dec1) / 2 ? 'N' : 'S'}${r >= (b.ra0 + b.ra1) / 2 ? 'E' : 'W'}` as Quarter;
 }
 export function cellCentre(band: number, col: number): { ra: number; dec: number } {
   const b = cellBox(band, col);
@@ -142,7 +164,11 @@ export function loadCoverage(fresh = false): Promise<Coverage | null> {
   if (req && !fresh) return req;
   const mine: Promise<Coverage | null> = (async () => {
     const [cov, meta] = await Promise.all([getJson('/api/grid/coverage?corners=1'), getJson('/api/grid/meta')]);
-    if (cov && Array.isArray(cov['cells']) && (!meta || (meta['scheme'] === SCHEME && setScheme(meta['scheme_params'] as Parameters<typeof setScheme>[0])))) {
+    if (
+      cov &&
+      Array.isArray(cov['cells']) &&
+      (!meta || (meta['scheme'] === SCHEME && setScheme(meta['scheme_params'] as Parameters<typeof setScheme>[0])))
+    ) {
       const cells = new Map<string, CovCell>();
       for (const c of cov['cells'] as CovCell[]) if (parseId(c.id)) cells.set(c.id, c);
       const counts = (meta?.['counts'] as Coverage['counts']) ?? null;
@@ -151,7 +177,13 @@ export function loadCoverage(fresh = false): Promise<Coverage | null> {
     }
     const s = await getJson('/api/v1/searched');
     if (s && Array.isArray(s['fields'])) {
-      data = { cells: fromSearched(s['fields'] as { ra: number; dec: number; state: string; found: number }[]), source: 'searched', total: TOTAL, counts: null, version: ++version };
+      data = {
+        cells: fromSearched(s['fields'] as { ra: number; dec: number; state: string; found: number }[]),
+        source: 'searched',
+        total: TOTAL,
+        counts: null,
+        version: ++version,
+      };
       return data;
     }
     return data;
@@ -186,7 +218,19 @@ export async function loadCell(id: string): Promise<CellCard | null> {
     };
   }
   const k = data?.cells.get(id);
-  return { id, ra: c.ra, dec: c.dec, state: k?.state ?? 'new', n_finds: k?.finds ?? 0, finds: [], viewers: k?.viewers ?? 0, bar: null, searched_at: null, field_key: null, open: { ra: c.ra, dec: c.dec, fov: 20 } };
+  return {
+    id,
+    ra: c.ra,
+    dec: c.dec,
+    state: k?.state ?? 'new',
+    n_finds: k?.finds ?? 0,
+    finds: [],
+    viewers: k?.viewers ?? 0,
+    bar: null,
+    searched_at: null,
+    field_key: null,
+    open: { ra: c.ra, dec: c.dec, fov: 20 },
+  };
 }
 
 /** The bar of a square's search in plain words (the measured depth of the search), or '' when the service kept none. */
@@ -213,10 +257,28 @@ export function barText(bar: Record<string, unknown> | null): string {
 // what a square (or a block of squares) is, for its colour
 
 export type Kind = 'finds' | 'viewed' | 'searched' | 'searching' | 'failed';
-export const KIND_COLOUR: Record<Kind, string> = { finds: '#ffd166', viewed: '#b69cff', searched: '#5fe3d6', searching: '#ffffff', failed: '#ff7b7b' };
+export const KIND_COLOUR: Record<Kind, string> = {
+  finds: '#ffd166',
+  viewed: '#b69cff',
+  searched: '#5fe3d6',
+  searching: '#ffffff',
+  failed: '#ff7b7b',
+};
 /** the short words of the legend */
-export const KIND_SHORT: Record<Kind, string> = { finds: 'Has finds', viewed: 'Viewed', searched: 'Searched', searching: 'Being searched', failed: 'Failed' };
-export const KIND_WORD: Record<Kind, string> = { finds: 'Has finds', viewed: 'Viewed by people', searched: 'Searched by the machine', searching: 'Being searched', failed: 'Search failed' };
+export const KIND_SHORT: Record<Kind, string> = {
+  finds: 'Has finds',
+  viewed: 'Viewed',
+  searched: 'Searched',
+  searching: 'Being searched',
+  failed: 'Failed',
+};
+export const KIND_WORD: Record<Kind, string> = {
+  finds: 'Has finds',
+  viewed: 'Viewed by people',
+  searched: 'Searched by the machine',
+  searching: 'Being searched',
+  failed: 'Search failed',
+};
 /** Has finds first, then viewed by people, then searched; a square in the queue or in the search is "being searched". */
 export function kindOf(c: { state: CellState; finds: number; viewers: number }): Kind | null {
   if (c.finds > 0) return 'finds';
@@ -440,7 +502,13 @@ export function drawCoverage(ctx: CanvasRenderingContext2D, cov: Coverage | null
             ctx.strokeText(t, x0 + 5, y1 - 6);
             ctx.fillText(t, x0 + 5, y1 - 6);
           }
-        } else frames.push([p00[0], p00[1], p10[0], p10[1]], [p00[0], p00[1], p01[0], p01[1]], [p10[0], p10[1], p11[0], p11[1]], [p01[0], p01[1], p11[0], p11[1]]);
+        } else
+          frames.push(
+            [p00[0], p00[1], p10[0], p10[1]],
+            [p00[0], p00[1], p01[0], p01[1]],
+            [p10[0], p10[1], p11[0], p11[1]],
+            [p01[0], p01[1], p11[0], p11[1]],
+          );
       }
     }
     // the frames of the new squares in one stroke

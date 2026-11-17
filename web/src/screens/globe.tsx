@@ -6,7 +6,26 @@ import { icon } from '../ui/icons';
 import { backdropYear, coldNote, imageDates, onImageDates, shownPlace, type ArchiveImage } from './globe/epochs';
 import { sky, STAR_MAP_TO_VISIBLE, type SkyLayer } from './globe/sky';
 import { catalogNow, kept, loadCatalog, type Obj, type SurveyId } from './globe/store';
-import { CELL_DEG, KIND_COLOUR, KIND_SHORT, KIND_WORD, barText, cellCentre, coverageNow, drawCoverage, kindOf, loadCell, loadCoverage, parseId, pickCell, type CellCard, type Kind } from './globe/coverage';
+import {
+  CELL_DEG,
+  KIND_COLOUR,
+  KIND_SHORT,
+  KIND_WORD,
+  barText,
+  cellBox,
+  cellCentre,
+  quarterAt,
+  quarterBox,
+  coverageNow,
+  drawCoverage,
+  kindOf,
+  loadCell,
+  loadCoverage,
+  parseId,
+  pickCell,
+  type CellCard,
+  type Kind,
+} from './globe/coverage';
 import { equiOf, onEquiTile } from '../lib/equi';
 import { HIPS, bakedOf, loadManifest, manifestKnown, tiles } from '../lib/hips';
 import { KnownList } from './search/known';
@@ -83,20 +102,42 @@ const LAYER_CAPTION: Record<string, string> = {
   wise: 'Infrared · AllWISE · NASA/JPL-Caltech/UCLA',
   dust: 'Dust map · IRAS IRIS · Miville-Deschênes & Lagache',
 };
-const LAYER_WORD: Record<string, string> = { svs: 'Star map', dss2: 'Visible', spherex: 'SPHEREx', '2mass': 'Near-infrared', wise: 'Infrared', dust: 'Dust map' };
+const LAYER_WORD: Record<string, string> = {
+  svs: 'Star map',
+  dss2: 'Visible',
+  spherex: 'SPHEREx',
+  '2mass': 'Near-infrared',
+  wise: 'Infrared',
+  dust: 'Dust map',
+};
 /** the globe zoom limits; above ZOOM_NEAR a pin is an open ring so that the star under it shows */
 const ZOOM_MIN = 0.8;
 const ZOOM_MIN_INSIDE = 1.05;
 const ZOOM_MAX = 400;
 const ZOOM_NEAR = 30;
 /** A name SIMBAD knows (CDS Sesame, answered from the browser): its place, type and proper motion (mas/yr). */
-interface Named { n: string; type: string; ra: number; dec: number; pmra: number; pmdec: number }
+interface Named {
+  n: string;
+  type: string;
+  ra: number;
+  dec: number;
+  pmra: number;
+  pmdec: number;
+}
 /** Asks CDS Sesame for a name (SIMBAD first); null when it knows no such name. */
 async function sesame(q: string, signal: AbortSignal): Promise<Named | null> {
   // the service's resolver first (cached, near SIMBAD); CDS Sesame from the browser when the service has none
   const sv = await fetch(`/api/v1/resolve?name=${encodeURIComponent(q)}`, { signal }).catch(() => null);
   if (sv && sv.ok) {
-    const d = (await sv.json()) as { found?: boolean; name?: string; type?: string; ra?: number; dec?: number; pmra?: number; pmdec?: number };
+    const d = (await sv.json()) as {
+      found?: boolean;
+      name?: string;
+      type?: string;
+      ra?: number;
+      dec?: number;
+      pmra?: number;
+      pmdec?: number;
+    };
     if (d.found === false || d.ra == null || d.dec == null) return null;
     return { n: d.name ?? q, type: d.type ?? '', ra: d.ra, dec: d.dec, pmra: d.pmra ?? 0, pmdec: d.pmdec ?? 0 };
   }
@@ -107,13 +148,24 @@ async function sesame(q: string, signal: AbortSignal): Promise<Named | null> {
   if (!j) return null;
   const n = (t.match(/^%I\.0\s+(.+)$/m)?.[1] ?? q).replace(/^\*+\s*/, '').trim();
   const p = t.match(/^%P\s+([\d.+-]+)\s+([\d.+-]+)/m);
-  return { n, type: (t.match(/^%C\.0\s+(\S+)/m)?.[1] ?? '').trim(), ra: Number(j[1]), dec: Number(j[2]), pmra: p ? Number(p[1]) : 0, pmdec: p ? Number(p[2]) : 0 };
+  return {
+    n,
+    type: (t.match(/^%C\.0\s+(\S+)/m)?.[1] ?? '').trim(),
+    ra: Number(j[1]),
+    dec: Number(j[2]),
+    pmra: p ? Number(p[1]) : 0,
+    pmdec: p ? Number(p[2]) : 0,
+  };
 }
 const pad2 = (v: number) => String(Math.floor(v)).padStart(2, '0');
 /** RA and Dec as 17:57:48.5 +04:41:36, short enough for one line of a card */
 function shortCoords(ra: number, dec: number): string {
-  const h = (((ra % 360) + 360) % 360) / 15, hm = (h % 1) * 60, hs = (hm % 1) * 60;
-  const ad = Math.abs(dec), dm = (ad % 1) * 60, ds = (dm % 1) * 60;
+  const h = (((ra % 360) + 360) % 360) / 15,
+    hm = (h % 1) * 60,
+    hs = (hm % 1) * 60;
+  const ad = Math.abs(dec),
+    dm = (ad % 1) * 60,
+    ds = (dm % 1) * 60;
   return `${pad2(h)}:${pad2(hm)}:${hs.toFixed(1).padStart(4, '0')} ${dec < 0 ? '−' : '+'}${pad2(ad)}:${pad2(dm)}:${pad2(ds)}`;
 }
 const ROW_ICON = (n: string) => <span dangerouslySetInnerHTML={{ __html: icon(n, 16) }} style={{ display: 'contents' }} />;
@@ -191,10 +243,13 @@ const epochPlace = (o: Obj): [number, number] =>
   o.pmra != null && o.pmdec != null ? atEpoch(o.ra, o.dec, o.pmra, o.pmdec, SURVEY_EPOCH) : [o.ra, o.dec];
 
 const moving = (o: Obj): MovingObject | null =>
-  o.pmra != null && o.pmdec != null && Math.hypot(o.pmra, o.pmdec) > PATH_PM ? { name: o.n, ra: o.ra, dec: o.dec, pmra: o.pmra, pmdec: o.pmdec } : null;
+  o.pmra != null && o.pmdec != null && Math.hypot(o.pmra, o.pmdec) > PATH_PM
+    ? { name: o.n, ra: o.ra, dec: o.dec, pmra: o.pmra, pmdec: o.pmdec }
+    : null;
 
 /** The archive images of a test target or the selected object (asked for once); other objects use the surveys' middle years. */
-const datesOf = (o: Obj, sel: Obj | null): ArchiveImage[] | null | undefined => (o.b || o === sel ? imageDates(o.n, o.ra, o.dec) : undefined);
+const datesOf = (o: Obj, sel: Obj | null): ArchiveImage[] | null | undefined =>
+  o.b || o === sel ? imageDates(o.n, o.ra, o.dec) : undefined;
 
 /** Sky span (degrees) the view should show for an object: its path from the earliest image to 2050, or a few field widths. */
 function spanOf(o: Obj, fov: number): number {
@@ -204,7 +259,6 @@ function spanOf(o: Obj, fov: number): number {
   const y0 = Math.min(1950, ...(imgs ?? []).map((x) => x.year));
   return Math.max((fov / 60) * 1.2, (Math.hypot(mo.pmra, mo.pmdec) * (2050 - y0)) / 3.6e6);
 }
-
 
 type V3 = [number, number, number];
 /** The view's own axes in the sky's coordinates: c to the centre of the view, e to the left of the picture (east), n up. */
@@ -238,7 +292,7 @@ function viewOf(F: Frame): { ra: number; dec: number; roll: number } {
   const de = Math.asin(Math.max(-1, Math.min(1, F.c[2])));
   const e0: V3 = [-Math.sin(ra), Math.cos(ra), 0];
   const n0: V3 = [-Math.sin(de) * Math.cos(ra), -Math.sin(de) * Math.sin(ra), Math.cos(de)];
-  return { ra: ((ra / D2R) % 360 + 360) % 360, dec: de / D2R, roll: Math.atan2(dot3(F.e, n0), dot3(F.e, e0)) };
+  return { ra: (((ra / D2R) % 360) + 360) % 360, dec: de / D2R, roll: Math.atan2(dot3(F.e, n0), dot3(F.e, e0)) };
 }
 
 /** The frame turned by the rotation (about the axis u × v, by the angle between them) that takes the direction u to the direction v: the way a trackball turns. */
@@ -274,7 +328,15 @@ const covKind = (c: CellCard): Kind | null => kindOf({ state: c.state, finds: c.
 /** The state of a square in the words of its card. */
 function covStateWord(c: CellCard): string {
   const base =
-    c.state === 'searched' ? 'Searched by the machine' : c.state === 'searching' ? 'Being searched now' : c.state === 'queued' ? 'In the queue of the search' : c.state === 'failed' ? 'The search failed' : 'Not searched yet';
+    c.state === 'searched'
+      ? 'Searched by the machine'
+      : c.state === 'searching'
+        ? 'Being searched now'
+        : c.state === 'queued'
+          ? 'In the queue of the search'
+          : c.state === 'failed'
+            ? 'The search failed'
+            : 'Not searched yet';
   return `${base}${c.n_finds > 0 ? ' · has finds' : ''}${c.viewers > 0 ? ' · viewed by people' : ''}`;
 }
 /** The line of the legend: how much of the sky is done (from the list on hand; the argument only says "read again"). */
@@ -349,7 +411,18 @@ export function Globe() {
 
   // the choices survive a visit to another screen
   useEffect(() => {
-    Object.assign(kept, { survey: autoVisible.current ? 'svs' : surveyPick, proj, inside, covOn, catOpen, filter, query, page, per, sel: sel?.n ?? null });
+    Object.assign(kept, {
+      survey: autoVisible.current ? 'svs' : surveyPick,
+      proj,
+      inside,
+      covOn,
+      catOpen,
+      filter,
+      query,
+      page,
+      per,
+      sel: sel?.n ?? null,
+    });
   }, [surveyPick, proj, inside, covOn, catOpen, filter, query, page, per, sel]);
 
   useEffect(() => {
@@ -624,7 +697,14 @@ export function Globe() {
             const q = project(ra, dec, b);
             return q[2] ? [p25[0] + m * (q[0] - p25[0]), p25[1] + m * (q[1] - p25[1]), true] : q;
           };
-          drawMovingPath(ctx, pm, mo, { imageYears: years, backdropYear: by, zoomedIn: near, maxJump: W / 2, font, note: coldNote(st.sel.sp, shownId) });
+          drawMovingPath(ctx, pm, mo, {
+            imageYears: years,
+            backdropYear: by,
+            zoomedIn: near,
+            maxJump: W / 2,
+            font,
+            note: coldNote(st.sel.sp, shownId),
+          });
           const q = pm(...placeAt(mo, by));
           pins.push({ o: st.sel, x: q[0], y: q[1] });
           pathPin = true;
@@ -678,39 +758,97 @@ export function Globe() {
           ctx.fillText(txt, p[0] + lx, p[1] + 4);
         }
       }
-      // aim frame
+      // aim frame: drawn from its four sky corners (north-up on the sky, as the lab's field is), so it turns with a rolled view.
+      // A selected square is the frame itself at 20′; at 10′ the frame is the quarter of that square under the aim.
       const p = project(st.a.ra, st.a.dec, b);
       if (p[2]) {
-        const skyDeg = st.a.fov / 60;
-        const truePx = st.proj === 'globe' ? R() * skyDeg * D2R : (mw() / 360) * skyDeg;
-        const s = Math.max(truePx, 26);
+        const sq = st.cellId ? parseId(st.cellId) : null;
+        let box: { ra0: number; ra1: number; dec0: number; dec1: number };
+        const inSq =
+          sq &&
+          (() => {
+            const c = cellBox(sq.band, sq.col);
+            const r = ((st.a.ra % 360) + 360) % 360;
+            return st.a.dec >= c.dec0 - 1e-6 && st.a.dec <= c.dec1 + 1e-6 && r >= c.ra0 - 1e-6 && r <= c.ra1 + 1e-6;
+          })();
+        if (sq && inSq && st.a.fov >= 20) box = cellBox(sq.band, sq.col);
+        else if (sq && inSq && st.a.fov >= 10) box = quarterBox(sq.band, sq.col, quarterAt(sq.band, sq.col, st.a.ra, st.a.dec));
+        else {
+          const h = st.a.fov / 60 / 2;
+          const w = h / Math.max(Math.cos(st.a.dec * D2R), 1e-3);
+          box = { ra0: st.a.ra - w, ra1: st.a.ra + w, dec0: Math.max(-90, st.a.dec - h), dec1: Math.min(90, st.a.dec + h) };
+        }
+        // each edge in 8 steps, so the frame follows the sky's curves like the squares do
+        const pts: [number, number][] = [];
+        const edge = (r0: number, d0: number, r1: number, d1: number) => {
+          for (let k = 0; k < 8; k++) {
+            const t = k / 8;
+            const q = project(r0 + (r1 - r0) * t, d0 + (d1 - d0) * t, b);
+            if (q[2]) pts.push([q[0], q[1]]);
+          }
+        };
+        edge(box.ra0, box.dec0, box.ra1, box.dec0);
+        edge(box.ra1, box.dec0, box.ra1, box.dec1);
+        edge(box.ra1, box.dec1, box.ra0, box.dec1);
+        edge(box.ra0, box.dec1, box.ra0, box.dec0);
+        // the frame's own centre on the screen (a quarter's centre is not the aim point when the aim sits on the square's centre)
+        const cx = pts.length ? pts.reduce((t, q) => t + q[0], 0) / pts.length : p[0];
+        const cy = pts.length ? pts.reduce((t, q) => t + q[1], 0) / pts.length : p[1];
+        let rad = 0;
+        for (const [x, y] of pts) rad = Math.max(rad, Math.hypot(x - cx, y - cy));
         ctx.save();
-        ctx.translate(p[0], p[1]);
         ctx.strokeStyle = '#6aaaff';
         ctx.lineWidth = 2;
         ctx.shadowColor = '#000';
         ctx.shadowBlur = 6;
-        ctx.strokeRect(-s / 2, -s / 2, s, s);
-        ctx.beginPath();
-        ctx.moveTo(-s, 0);
-        ctx.lineTo(-s / 2 - 4, 0);
-        ctx.moveTo(s, 0);
-        ctx.lineTo(s / 2 + 4, 0);
-        ctx.moveTo(0, -s);
-        ctx.lineTo(0, -s / 2 - 4);
-        ctx.moveTo(0, s);
-        ctx.lineTo(0, s / 2 + 4);
-        ctx.stroke();
+        if (pts.length >= 24 && rad >= 3) {
+          ctx.beginPath();
+          ctx.moveTo(pts[0]![0], pts[0]![1]);
+          for (const [x, y] of pts.slice(1)) ctx.lineTo(x, y);
+          ctx.closePath();
+          ctx.stroke();
+          // ticks outward from the middle of each edge (the edge midpoints: points 4, 12, 20, 28)
+          ctx.beginPath();
+          for (const i of [4, 12, 20, 28]) {
+            const m = pts[i];
+            if (!m) continue;
+            const dx = m[0] - cx;
+            const dy = m[1] - cy;
+            const l = Math.hypot(dx, dy) || 1;
+            ctx.moveTo(m[0] + (dx / l) * 4, m[1] + (dy / l) * 4);
+            ctx.lineTo(m[0] + (dx / l) * Math.max(10, l * 0.5), m[1] + (dy / l) * Math.max(10, l * 0.5));
+          }
+          ctx.stroke();
+        } else {
+          // too small on screen to show its shape: a marker of fixed size
+          const s0 = 26;
+          ctx.strokeRect(cx - s0 / 2, cy - s0 / 2, s0, s0);
+          rad = s0 / 2;
+        }
         ctx.shadowBlur = 0;
         ctx.fillStyle = '#6aaaff';
         ctx.font = `700 12px ${font}`;
-        ctx.fillText(`${st.a.fov}′`, s / 2 + 6, -s / 2 - 4);
+        let lx = cx + rad * 0.72;
+        let ly = cy - rad * 0.72;
+        for (const [x, y] of pts) if (x - y > lx - ly) [lx, ly] = [x, y]; // the corner furthest up and right
+        ctx.fillText(`${st.a.fov}′`, lx + 6, ly - 4);
         ctx.restore();
-        frame = { x: p[0], y: p[1], s };
+        frame = { x: cx, y: cy, s: rad * 2 * 0.71 };
       } else frame = null;
     };
     let frame: { x: number; y: number; s: number } | null = null;
-    let anim: { t0: number; dur: number; ra0: number; dra: number; de0: number; dde: number; z0: number; zm: number; z1: number; r0?: number } | null = null;
+    let anim: {
+      t0: number;
+      dur: number;
+      ra0: number;
+      dra: number;
+      de0: number;
+      dde: number;
+      z0: number;
+      zm: number;
+      z1: number;
+      r0?: number;
+    } | null = null;
     const loop = () => {
       raf = requestAnimationFrame(loop);
       const now = performance.now();
@@ -737,7 +875,19 @@ export function Globe() {
           setSurvey('svs');
         }
       }
-      const sv = { ra: view.current.ra, dec: view.current.dec, roll: view.current.roll ?? 0, R: R(), proj: st.proj, inside: st.inside && st.proj === 'globe', W, H, mz: mv.z, mx: mv.x, my: mv.y };
+      const sv = {
+        ra: view.current.ra,
+        dec: view.current.dec,
+        roll: view.current.roll ?? 0,
+        R: R(),
+        proj: st.proj,
+        inside: st.inside && st.proj === 'globe',
+        W,
+        H,
+        mz: mv.z,
+        mx: mv.x,
+        my: mv.y,
+      };
       const sig = [sv.ra, sv.dec, sv.roll, sv.R, sv.proj, sv.inside, W, H, mv.z, mv.x, mv.y].join();
       const layer = SURVEYS.find((x) => x.id === st.survey)!.layer;
       if (st.survey !== lastLayer) {
@@ -771,7 +921,16 @@ export function Globe() {
     {
       const k = sky.shown;
       const v = view.current;
-      if (k && k.proj === live.current.proj && !!k.inside === (live.current.inside && k.proj === 'globe') && k.W === W && k.H === H && k.ra === v.ra && k.dec === v.dec && k.R === R()) {
+      if (
+        k &&
+        k.proj === live.current.proj &&
+        !!k.inside === (live.current.inside && k.proj === 'globe') &&
+        k.W === W &&
+        k.H === H &&
+        k.ra === v.ra &&
+        k.dec === v.dec &&
+        k.R === R()
+      ) {
         lastSig = [k.ra, k.dec, k.R, k.proj, !!k.inside, W, H, mv.z, mv.x, mv.y].join();
         sky.stale = true;
       }
@@ -782,10 +941,12 @@ export function Globe() {
       const th = separation(ra, dec, view.current.ra, view.current.dec) * D2R;
       const z0 = view.current.zoom;
       const minWH = Math.min(W, H);
-      const z1 = spanDeg
-        ? Math.max(zoomMin(), Math.min(ZOOM_MAX, (0.42 * minWH) / (spanDeg * D2R) / ((minWH / 2) * 0.9)))
-        : z0;
-      if (!spanDeg && (inn() ? Math.tan(Math.min(th, 1.5)) * R() < minWH * 0.3 : th < (Math.PI / 2) * 0.9 && R() * Math.sin(th) < minWH * 0.3)) return;
+      const z1 = spanDeg ? Math.max(zoomMin(), Math.min(ZOOM_MAX, (0.42 * minWH) / (spanDeg * D2R) / ((minWH / 2) * 0.9))) : z0;
+      if (
+        !spanDeg &&
+        (inn() ? Math.tan(Math.min(th, 1.5)) * R() < minWH * 0.3 : th < (Math.PI / 2) * 0.9 && R() * Math.sin(th) < minWH * 0.3)
+      )
+        return;
       // the widest view on the way: the whole move fits in it
       const zm = Math.min(z0, z1, Math.max(1.2, 1 / Math.max(1e-6, th)));
       const lz0 = Math.log(z0);
@@ -807,7 +968,18 @@ export function Globe() {
     flyRef.current = flyTo;
     northRef.current = () => {
       // the view turns about its own axis until north is up again
-      anim = { t0: performance.now(), dur: 450, ra0: view.current.ra, dra: 0, de0: view.current.dec, dde: 0, z0: Math.log(view.current.zoom), zm: Math.log(view.current.zoom), z1: Math.log(view.current.zoom), r0: ((((view.current.roll ?? 0) + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI) - Math.PI };
+      anim = {
+        t0: performance.now(),
+        dur: 450,
+        ra0: view.current.ra,
+        dra: 0,
+        de0: view.current.dec,
+        dde: 0,
+        z0: Math.log(view.current.zoom),
+        zm: Math.log(view.current.zoom),
+        z1: Math.log(view.current.zoom),
+        r0: (((((view.current.roll ?? 0) + Math.PI) % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI)) - Math.PI,
+      };
     };
 
     // the map keeps its centre within the picture, so that it cannot be dragged away
@@ -1062,7 +1234,9 @@ export function Globe() {
     return L;
   }, [catalog, filter, query]);
   const ql = query.trim().toLowerCase();
-  const fixedList = (filter === 'demo' ? DEMOS : filter === 'small' ? SMALL : []).filter((d) => !ql || d.n.toLowerCase().includes(ql) || d.what.toLowerCase().includes(ql));
+  const fixedList = (filter === 'demo' ? DEMOS : filter === 'small' ? SMALL : []).filter(
+    (d) => !ql || d.n.toLowerCase().includes(ql) || d.what.toLowerCase().includes(ql),
+  );
   const [knownCount, setKnownCount] = useState(0);
   // a name the snapshot does not hold: ask SIMBAD (debounced), and offer it at the top of the list
   const [named, setNamed] = useState<Named | null>(null);
@@ -1091,7 +1265,8 @@ export function Globe() {
     };
   }, [ql, filter, list.length]);
   const namedNew = named && !list.some((o) => separation(o.ra, o.dec, named.ra, named.dec) < 0.01);
-  const total = filter === 'demo' ? fixedList.length : filter === 'small' ? fixedList.length + knownCount : list.length + (namedNew ? 1 : 0);
+  const total =
+    filter === 'demo' ? fixedList.length : filter === 'small' ? fixedList.length + knownCount : list.length + (namedNew ? 1 : 0);
   const pages = Math.max(1, Math.ceil(list.length / per));
   const pg = Math.min(page, pages);
   const slice = list.slice((pg - 1) * per, pg * per);
@@ -1222,7 +1397,13 @@ export function Globe() {
             </label>
             <label class="fld" for="gFov">
               <span>FOV</span>
-              <select id="gFov" class="inp fovsel" value={String(a.fov)} onChange={(e) => aim.set({ fov: Number((e.target as HTMLSelectElement).value) }, 'fov')} title="Field of view of the frame">
+              <select
+                id="gFov"
+                class="inp fovsel"
+                value={String(a.fov)}
+                onChange={(e) => aim.set({ fov: Number((e.target as HTMLSelectElement).value) }, 'fov')}
+                title="Field of view of the frame"
+              >
                 {SIZES.map((s) => (
                   <option key={s} value={String(s)}>
                     {s}′
@@ -1243,29 +1424,57 @@ export function Globe() {
           </div>
           {proj === 'globe' && (
             <div class="seg sm" role="group" aria-label="Camera" data-testid="cam">
-              <button title="Turn the view until north is up" aria-label="North up" data-testid="north-up" onClick={() => northRef.current()}>
+              <button
+                title="Turn the view until north is up"
+                aria-label="North up"
+                data-testid="north-up"
+                onClick={() => northRef.current()}
+              >
                 N↑
               </button>
-              <button class={inside ? 'on' : ''} aria-pressed={inside} title="The sky seen from the centre of the sphere" onClick={() => setInsideCam(true)}>
+              <button
+                class={inside ? 'on' : ''}
+                aria-pressed={inside}
+                title="The sky seen from the centre of the sphere"
+                onClick={() => setInsideCam(true)}
+              >
                 Inside
               </button>
-              <button class={!inside ? 'on' : ''} aria-pressed={!inside} title="The sphere seen from outside" onClick={() => setInsideCam(false)}>
+              <button
+                class={!inside ? 'on' : ''}
+                aria-pressed={!inside}
+                title="The sphere seen from outside"
+                onClick={() => setInsideCam(false)}
+              >
                 Outside
               </button>
             </div>
           )}
           <div class="seg sm" role="group" aria-label="Sky background">
             {SURVEYS.filter((s) => s.id !== 'svs' || svsOn).map((s) => (
-              <button key={s.id} class={s.id === survey ? 'on' : ''} aria-pressed={s.id === survey} title={`${s.name}: ${s.note}`} onClick={() => {
-                autoVisible.current = false;
-                setSurvey(s.id);
-              }}>
+              <button
+                key={s.id}
+                class={s.id === survey ? 'on' : ''}
+                aria-pressed={s.id === survey}
+                title={`${s.name}: ${s.note}`}
+                onClick={() => {
+                  autoVisible.current = false;
+                  setSurvey(s.id);
+                }}
+              >
                 {LAYER_WORD[s.id] ?? s.name}
               </button>
             ))}
           </div>
           <div class="seg sm" role="group" aria-label="Grid of squares">
-            <button class={covOn ? 'on' : ''} aria-pressed={covOn} aria-label="Coverage" data-testid="cov-toggle" title="Coverage: the grid of 20′ squares over the sky: searched by the machine, viewed by people, has finds, being searched. Click a square for its card." onClick={() => setCovOn(!covOn)}>
+            <button
+              class={covOn ? 'on' : ''}
+              aria-pressed={covOn}
+              aria-label="Coverage"
+              data-testid="cov-toggle"
+              title="Coverage: the grid of 20′ squares over the sky: searched by the machine, viewed by people, has finds, being searched. Click a square for its card."
+              onClick={() => setCovOn(!covOn)}
+            >
               <span dangerouslySetInnerHTML={{ __html: icon('scan', 14) }} style={{ display: 'contents' }} />
               <span class="lbl">Coverage</span>
             </button>
@@ -1310,7 +1519,16 @@ export function Globe() {
                     data-testid="cov-take"
                     title="Open the lab with the task: look through this square"
                     onClick={() => {
-                      location.hash = formatHash({ screen: 'lab', params: { ra: cell.open.ra.toFixed(5), dec: cell.open.dec.toFixed(5), fov: String(cell.open.fov), task: 'cell', cell: cell.id } });
+                      location.hash = formatHash({
+                        screen: 'lab',
+                        params: {
+                          ra: cell.open.ra.toFixed(5),
+                          dec: cell.open.dec.toFixed(5),
+                          fov: String(cell.open.fov),
+                          task: 'cell',
+                          cell: cell.id,
+                        },
+                      });
                     }}
                   >
                     Take this square
@@ -1346,7 +1564,15 @@ export function Globe() {
           {sel && moving(sel) && (
             <div class="map-read map-dates" data-testid="globe-dates">
               On this picture: <b>{sel.n.length > 26 ? `${sel.n.slice(0, 24)}…` : sel.n}</b> in {selYear.toFixed(1)}
-              {selImage ? ` (${selImage.name} image)` : shownLayer === 'svs' ? ' (Gaia epoch)' : shownLayer === 'spherex' ? ' (SPHEREx survey)' : shownLayer === 'dust' ? ' (SPHEREx survey; no stars on the dust map)' : ' (middle of the survey)'}
+              {selImage
+                ? ` (${selImage.name} image)`
+                : shownLayer === 'svs'
+                  ? ' (Gaia epoch)'
+                  : shownLayer === 'spherex'
+                    ? ' (SPHEREx survey)'
+                    : shownLayer === 'dust'
+                      ? ' (SPHEREx survey; no stars on the dust map)'
+                      : ' (middle of the survey)'}
               {selDates === undefined ? (
                 <span class="faint"> · asking IRSA for the dates of the archive images…</span>
               ) : selDates ? (
@@ -1360,21 +1586,28 @@ export function Globe() {
             <div class="map-read cov-legend" data-testid="cov-legend">
               {(['searched', 'viewed', 'finds', 'searching'] as Kind[]).map((k) => (
                 <span key={k} class="cov-key" title={KIND_WORD[k]}>
-                  <i class={`cov-sw${k === 'searching' ? ' dash' : ''}`} style={{ background: k === 'searching' ? 'transparent' : KIND_COLOUR[k], borderColor: KIND_COLOUR[k] }} />
+                  <i
+                    class={`cov-sw${k === 'searching' ? ' dash' : ''}`}
+                    style={{ background: k === 'searching' ? 'transparent' : KIND_COLOUR[k], borderColor: KIND_COLOUR[k] }}
+                  />
                   {KIND_SHORT[k]}
                 </span>
               ))}
-              <span class="faint" data-testid="cov-count">{covLine(covTick)}</span>
-              <span class="cov-do" data-testid="cov-do">click a square to take it</span>
+              <span class="faint" data-testid="cov-count">
+                {covLine(covTick)}
+              </span>
+              <span class="cov-do" data-testid="cov-do">
+                click a square to take it
+              </span>
             </div>
           )}
           <div class="map-credit" data-testid="map-credit">
             {LAYER_CAPTION[shownLayer]}
           </div>
           <div class="map-help" title={`Background: ${sv.note} · IRSA / CDS HiPS`}>
-          <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab. Orange
-          ★ are test targets.
-        </div>
+            <b>Drag</b> to rotate · <b>scroll</b> to zoom · <b>click</b> to aim · <b>double-click</b> the frame to open it in the lab.
+            Orange ★ are test targets.
+          </div>
         </div>
         <button class="btn primary big map-open" onClick={showArea} title="Open the field under the frame in the spectral lab">
           <span dangerouslySetInnerHTML={{ __html: icon('scan', 18) }} style={{ display: 'contents' }} />
@@ -1382,190 +1615,101 @@ export function Globe() {
         </button>
       </div>
       <div class={`cat-drawer${catOpen ? ' open' : ''}`} data-testid="cat-drawer">
-        <button class="cat-handle" onClick={() => setCatOpen(!catOpen)} aria-expanded={catOpen} title={catOpen ? 'Slide the catalogue away' : 'Slide the catalogue out'}>
+        <button
+          class="cat-handle"
+          onClick={() => setCatOpen(!catOpen)}
+          aria-expanded={catOpen}
+          title={catOpen ? 'Slide the catalogue away' : 'Slide the catalogue out'}
+        >
           <span class="cat-arrow">{catOpen ? '›' : '‹'}</span>
           <span class="cat-word">Catalogue</span>
         </button>
-      <aside class="catalog glass">
-        <div class="cat-top">
-          <input
-            class="inp search"
-            placeholder="Search a name or coordinates"
-            autocomplete="off"
-            value={query}
-            onInput={(e) => {
-              setQuery((e.target as HTMLInputElement).value);
-              setPage(1);
-            }}
-          />
-          <div class="chips">
-            {(
-              [
-                ['all', 'SIMBAD snapshot'],
-                ['bench', `Test targets (${nBench})`],
-                ['bd', 'Brown dwarfs'],
-                ['fast', 'Fast stars'],
-                ['var', 'Variables'],
-                ['demo', `Demo fields (${DEMOS.length})`],
-                ['small', 'Comets / Asteroids'],
-              ] as const
-            ).map(([k, l]) => (
-              <button
-                key={k}
-                class={`chip ${filter === k ? 'on' : ''}`}
-                onClick={() => {
-                  setFilter(k);
-                  setPage(1);
-                }}
-                data-testid={`chip-${k}`}
-              >
-                {l}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div class="cat-list">
-          {filter !== 'demo' && filter !== 'small' && !slice.length && !namedNew && catalog.length > 0 && (
-            <div class="empty">
-              {asking === 'asking' ? 'Not in this list; asking SIMBAD for that name…' : asking === 'none' ? 'SIMBAD knows no object of that name.' : asking === 'slow' ? 'SIMBAD did not answer in time.' : 'Nothing in this list.'} Coordinates work too, e.g. “17h57m48s, +04d41m”.
-            </div>
-          )}
-          {(filter === 'demo' || filter === 'small') && ql && !fixedList.length && filter === 'demo' && <div class="empty">No demo field matches “{query.trim()}”.</div>}
-          {(filter === 'demo' || filter === 'small') &&
-            fixedList.map((d) => (
-              <div key={d.n} class="row" onClick={() => {
-                setSel(null);
-                aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
-              }}>
-                <div class="nm">
-                  <span class="t" title={d.n}>{d.n}</span>
-                  <span class="badge orange">{d.film ? 'film' : 'field'}</span>
-                </div>
-                <div class="meta" title={d.what}>
-                  <span class="co">{shortCoords(d.ra, d.dec)} · {d.fov}′</span>
-                  <span class="mv">{d.what}</span>
-                </div>
-                <div class="gobtns">
-                  <button
-                    class="btn sm primary go ico"
-                    title="Show on map"
-                    aria-label={`Show ${d.n} on the map`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSel(null);
-                      aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
-                      flyRef.current(d.ra, d.dec, (d.fov / 60) * 1.5);
-                    }}
-                  >
-                    {ROW_ICON('target')}
-                  </button>
-                  <button
-                    class="btn sm go ico"
-                    title="Open in lab"
-                    aria-label={`Open ${d.n} in the lab`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      location.hash = formatHash({
-                        screen: 'lab',
-                        params: { ra: d.ra.toFixed(5), dec: d.dec.toFixed(5), fov: String(d.fov), ...(d.film ? { film: String(d.film) } : {}) },
-                      });
-                    }}
-                  >
-                    {ROW_ICON('chart-line-up')}
-                  </button>
-                </div>
-              </div>
-            ))}
-          {filter === 'small' && (
-            <div class="known-head">
-              <span class="mono-s">Every comet and asteroid of the JPL Small-Body Database: Show on map draws its path since April 2025</span>
-            </div>
-          )}
-          {filter === 'small' && (
-            <KnownList
-              query={query.trim()}
-              onCount={setKnownCount}
-              selected={bodyPath?.body.spkid ?? null}
-              today={bodyPath}
-              onShow={(p) => {
-                setBodyPath(p);
-                aim.set({ ra: p.today.ra, dec: p.today.dec, fov: 10 }, 'catalog');
-                flyRef.current(p.today.ra, p.today.dec, 30);
-              }}
-              onOpen={(_b, c) => {
-                location.hash = formatHash({
-                  screen: 'lab',
-                  params: { ra: c.ra.toFixed(5), dec: c.dec.toFixed(5), fov: '10', film: ((c.mjd0 + c.mjd1) / 2).toFixed(3) },
-                });
+        <aside class="catalog glass">
+          <div class="cat-top">
+            <input
+              class="inp search"
+              placeholder="Search a name or coordinates"
+              autocomplete="off"
+              value={query}
+              onInput={(e) => {
+                setQuery((e.target as HTMLInputElement).value);
+                setPage(1);
               }}
             />
-          )}
-          {filter !== 'demo' && filter !== 'small' && namedNew && named && (
-            <div class="row named">
-              <div class="nm">
-                <span class="t" title={named.n}>{named.n}</span>
-                <span class="badge">SIMBAD{named.type ? ` · ${named.type}` : ''}</span>
-              </div>
-              <div class="meta">
-                <span class="co">{shortCoords(named.ra, named.dec)}</span>
-                <span class="mv">{Math.hypot(named.pmra, named.pmdec) >= 50 ? `Motion: ${(Math.hypot(named.pmra, named.pmdec) / 1000).toFixed(2)} ″/yr` : 'found by name in SIMBAD'}</span>
-              </div>
-              <div class="gobtns">
+            <div class="chips">
+              {(
+                [
+                  ['all', 'SIMBAD snapshot'],
+                  ['bench', `Test targets (${nBench})`],
+                  ['bd', 'Brown dwarfs'],
+                  ['fast', 'Fast stars'],
+                  ['var', 'Variables'],
+                  ['demo', `Demo fields (${DEMOS.length})`],
+                  ['small', 'Comets / Asteroids'],
+                ] as const
+              ).map(([k, l]) => (
                 <button
-                  class="btn sm primary go ico"
-                  title="Show on map"
-                  aria-label={`Show ${named.n} on the map`}
+                  key={k}
+                  class={`chip ${filter === k ? 'on' : ''}`}
                   onClick={() => {
-                    aim.set({ ra: named.ra, dec: named.dec }, 'catalog');
-                    flyRef.current(named.ra, named.dec, 2);
+                    setFilter(k);
+                    setPage(1);
                   }}
+                  data-testid={`chip-${k}`}
                 >
-                  {ROW_ICON('target')}
+                  {l}
                 </button>
-                <button
-                  class="btn sm go ico"
-                  title="Open in lab"
-                  aria-label={`Open ${named.n} in the lab`}
-                  onClick={() => {
-                    location.hash = formatHash({ screen: 'lab', params: { ra: named.ra.toFixed(5), dec: named.dec.toFixed(5), fov: '5' } });
-                  }}
-                >
-                  {ROW_ICON('chart-line-up')}
-                </button>
-              </div>
+              ))}
             </div>
-          )}
-          {filter !== 'demo' &&
-            filter !== 'small' &&
-            slice.map((o) => {
-              const { ra, dec } = o;
-              return (
+          </div>
+          <div class="cat-list">
+            {filter !== 'demo' && filter !== 'small' && !slice.length && !namedNew && catalog.length > 0 && (
+              <div class="empty">
+                {asking === 'asking'
+                  ? 'Not in this list; asking SIMBAD for that name…'
+                  : asking === 'none'
+                    ? 'SIMBAD knows no object of that name.'
+                    : asking === 'slow'
+                      ? 'SIMBAD did not answer in time.'
+                      : 'Nothing in this list.'}{' '}
+                Coordinates work too, e.g. “17h57m48s, +04d41m”.
+              </div>
+            )}
+            {(filter === 'demo' || filter === 'small') && ql && !fixedList.length && filter === 'demo' && (
+              <div class="empty">No demo field matches “{query.trim()}”.</div>
+            )}
+            {(filter === 'demo' || filter === 'small') &&
+              fixedList.map((d) => (
                 <div
-                  key={o.n}
-                  class={`row ${sel === o ? 'on' : ''}`}
-                  onClick={() => select(o)}
-                  onDblClick={() => openObj(o)}
-                  data-testid={o.b ? `target-${o.n}` : undefined}
+                  key={d.n}
+                  class="row"
+                  onClick={() => {
+                    setSel(null);
+                    aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
+                  }}
                 >
                   <div class="nm">
-                    {o.b ? <span title="Test target of this project">★</span> : null}
-                    <span class="t" title={o.n}>
-                      {o.n}
+                    <span class="t" title={d.n}>
+                      {d.n}
                     </span>
-                    <span class={`badge ${KIND[o.k]?.cls ?? ''}`}>{o.b ? (TARGET_CLASS[o.n] ?? o.c) : o.c}</span>
+                    <span class="badge orange">{d.film ? 'film' : 'field'}</span>
                   </div>
-                  <div class="meta">
-                    <span class="co">{shortCoords(ra, dec)}</span>
-                    <span class="mv">{motion(o).replace(/^Motion:\s*/, '')}</span>
+                  <div class="meta" title={d.what}>
+                    <span class="co">
+                      {shortCoords(d.ra, d.dec)} · {d.fov}′
+                    </span>
+                    <span class="mv">{d.what}</span>
                   </div>
                   <div class="gobtns">
                     <button
                       class="btn sm primary go ico"
-                      title="Show on map: fly to it, zoom and draw its path"
-                      aria-label={`Show ${o.n} on the map`}
+                      title="Show on map"
+                      aria-label={`Show ${d.n} on the map`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        select(o, true);
+                        setSel(null);
+                        aim.set({ ra: d.ra, dec: d.dec, fov: d.fov }, 'catalog');
+                        flyRef.current(d.ra, d.dec, (d.fov / 60) * 1.5);
                       }}
                     >
                       {ROW_ICON('target')}
@@ -1573,49 +1717,176 @@ export function Globe() {
                     <button
                       class="btn sm go ico"
                       title="Open in lab"
-                      aria-label={`Open ${o.n} in the lab`}
+                      aria-label={`Open ${d.n} in the lab`}
                       onClick={(e) => {
                         e.stopPropagation();
-                        openObj(o);
+                        location.hash = formatHash({
+                          screen: 'lab',
+                          params: {
+                            ra: d.ra.toFixed(5),
+                            dec: d.dec.toFixed(5),
+                            fov: String(d.fov),
+                            ...(d.film ? { film: String(d.film) } : {}),
+                          },
+                        });
                       }}
                     >
                       {ROW_ICON('chart-line-up')}
                     </button>
                   </div>
                 </div>
-              );
-            })}
-        </div>
-        <div class="pager">
-          <button class="pg" disabled={pg === 1} onClick={() => setPage(pg - 1)}>
-            ‹
-          </button>
-          {pagerNums.map((p, i) => (
-            <>
-              {i > 0 && p - pagerNums[i - 1]! > 1 && <span class="faint">…</span>}
-              <button key={p} class={`pg ${p === pg ? 'on' : ''}`} onClick={() => setPage(p)}>
-                {p}
-              </button>
-            </>
-          ))}
-          <button class="pg" disabled={pg === pages} onClick={() => setPage(pg + 1)}>
-            ›
-          </button>
-          <select
-            title="Objects per page"
-            value={String(per)}
-            onChange={(e) => {
-              setPer(Number((e.target as HTMLSelectElement).value));
-              setPage(1);
-            }}
-          >
-            {[25, 50, 100].map((v) => (
-              <option value={String(v)}>{v} / page</option>
+              ))}
+            {filter === 'small' && (
+              <div class="known-head">
+                <span class="mono-s">
+                  Every comet and asteroid of the JPL Small-Body Database: Show on map draws its path since April 2025
+                </span>
+              </div>
+            )}
+            {filter === 'small' && (
+              <KnownList
+                query={query.trim()}
+                onCount={setKnownCount}
+                selected={bodyPath?.body.spkid ?? null}
+                today={bodyPath}
+                onShow={(p) => {
+                  setBodyPath(p);
+                  aim.set({ ra: p.today.ra, dec: p.today.dec, fov: 10 }, 'catalog');
+                  flyRef.current(p.today.ra, p.today.dec, 30);
+                }}
+                onOpen={(_b, c) => {
+                  location.hash = formatHash({
+                    screen: 'lab',
+                    params: { ra: c.ra.toFixed(5), dec: c.dec.toFixed(5), fov: '10', film: ((c.mjd0 + c.mjd1) / 2).toFixed(3) },
+                  });
+                }}
+              />
+            )}
+            {filter !== 'demo' && filter !== 'small' && namedNew && named && (
+              <div class="row named">
+                <div class="nm">
+                  <span class="t" title={named.n}>
+                    {named.n}
+                  </span>
+                  <span class="badge">SIMBAD{named.type ? ` · ${named.type}` : ''}</span>
+                </div>
+                <div class="meta">
+                  <span class="co">{shortCoords(named.ra, named.dec)}</span>
+                  <span class="mv">
+                    {Math.hypot(named.pmra, named.pmdec) >= 50
+                      ? `Motion: ${(Math.hypot(named.pmra, named.pmdec) / 1000).toFixed(2)} ″/yr`
+                      : 'found by name in SIMBAD'}
+                  </span>
+                </div>
+                <div class="gobtns">
+                  <button
+                    class="btn sm primary go ico"
+                    title="Show on map"
+                    aria-label={`Show ${named.n} on the map`}
+                    onClick={() => {
+                      aim.set({ ra: named.ra, dec: named.dec }, 'catalog');
+                      flyRef.current(named.ra, named.dec, 2);
+                    }}
+                  >
+                    {ROW_ICON('target')}
+                  </button>
+                  <button
+                    class="btn sm go ico"
+                    title="Open in lab"
+                    aria-label={`Open ${named.n} in the lab`}
+                    onClick={() => {
+                      location.hash = formatHash({
+                        screen: 'lab',
+                        params: { ra: named.ra.toFixed(5), dec: named.dec.toFixed(5), fov: '5' },
+                      });
+                    }}
+                  >
+                    {ROW_ICON('chart-line-up')}
+                  </button>
+                </div>
+              </div>
+            )}
+            {filter !== 'demo' &&
+              filter !== 'small' &&
+              slice.map((o) => {
+                const { ra, dec } = o;
+                return (
+                  <div
+                    key={o.n}
+                    class={`row ${sel === o ? 'on' : ''}`}
+                    onClick={() => select(o)}
+                    onDblClick={() => openObj(o)}
+                    data-testid={o.b ? `target-${o.n}` : undefined}
+                  >
+                    <div class="nm">
+                      {o.b ? <span title="Test target of this project">★</span> : null}
+                      <span class="t" title={o.n}>
+                        {o.n}
+                      </span>
+                      <span class={`badge ${KIND[o.k]?.cls ?? ''}`}>{o.b ? (TARGET_CLASS[o.n] ?? o.c) : o.c}</span>
+                    </div>
+                    <div class="meta">
+                      <span class="co">{shortCoords(ra, dec)}</span>
+                      <span class="mv">{motion(o).replace(/^Motion:\s*/, '')}</span>
+                    </div>
+                    <div class="gobtns">
+                      <button
+                        class="btn sm primary go ico"
+                        title="Show on map: fly to it, zoom and draw its path"
+                        aria-label={`Show ${o.n} on the map`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          select(o, true);
+                        }}
+                      >
+                        {ROW_ICON('target')}
+                      </button>
+                      <button
+                        class="btn sm go ico"
+                        title="Open in lab"
+                        aria-label={`Open ${o.n} in the lab`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openObj(o);
+                        }}
+                      >
+                        {ROW_ICON('chart-line-up')}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+          </div>
+          <div class="pager">
+            <button class="pg" disabled={pg === 1} onClick={() => setPage(pg - 1)}>
+              ‹
+            </button>
+            {pagerNums.map((p, i) => (
+              <>
+                {i > 0 && p - pagerNums[i - 1]! > 1 && <span class="faint">…</span>}
+                <button key={p} class={`pg ${p === pg ? 'on' : ''}`} onClick={() => setPage(p)}>
+                  {p}
+                </button>
+              </>
             ))}
-          </select>
-          <span class="cnt">Total: {total.toLocaleString('en-US')}</span>
-        </div>
-      </aside>
+            <button class="pg" disabled={pg === pages} onClick={() => setPage(pg + 1)}>
+              ›
+            </button>
+            <select
+              title="Objects per page"
+              value={String(per)}
+              onChange={(e) => {
+                setPer(Number((e.target as HTMLSelectElement).value));
+                setPage(1);
+              }}
+            >
+              {[25, 50, 100].map((v) => (
+                <option value={String(v)}>{v} / page</option>
+              ))}
+            </select>
+            <span class="cnt">Total: {total.toLocaleString('en-US')}</span>
+          </div>
+        </aside>
       </div>
     </div>
   );
