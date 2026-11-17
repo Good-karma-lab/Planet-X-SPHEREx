@@ -14,8 +14,9 @@ import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 
+from service.jsonsafe import SafeJSONResponse as JSONResponse
 from service.red import find_red_async
 from service.workers import fieldjob
 

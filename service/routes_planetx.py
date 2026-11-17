@@ -15,9 +15,9 @@ import math
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
-from fastapi.responses import JSONResponse
 
 from service.jobs.scheduler import Job, Priority
+from service.jsonsafe import SafeJSONResponse as JSONResponse
 from service.products.store import product_key
 from service.ratelimit import client_id
 from service.reader.psfs import PsfProvider

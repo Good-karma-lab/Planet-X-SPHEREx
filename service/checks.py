@@ -45,7 +45,7 @@ from engine.grid import Grid
 from engine.movers import EDGE_ARCSEC as FIELD_EDGE_ARCSEC
 from engine.movers import NSIG
 from engine.onoff import TRACK_NSIG
-from service import checks_neowise
+from service import checks_neowise, jsonsafe
 from service.context import BRIGHT_MAG, BRIGHT_RADIUS, display_name
 from service.known_field import GAIA_EPOCH, SIMBAD_EPOCH, KnownField, cache_dir, epoch_year, offsets_arcsec, propagate
 from service.storage import digest
@@ -562,7 +562,7 @@ class Checks:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{job.id}.part"
-            tmp.write_text(json.dumps({**job.kept(), "request": job.request, "checks": job.checks}, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps({**job.kept(), "request": job.request, "checks": job.checks}, separators=(",", ":")))
             tmp.replace(self.dir / f"{job.id}.json")
         except OSError:
             pass
