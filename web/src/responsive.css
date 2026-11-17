@@ -2201,3 +2201,100 @@
     margin: 0;
   }
 }
+
+/* ----- every touch window: the last small targets and small text found by the measured pass (17 Nov) ----- */
+@media (max-width: 1279.98px) {
+  :root .cb-score h4,
+  :root .cb-achname,
+  :root .ipage th,
+  :root .fpage-sec h2,
+  :root .lp-plab small,
+  :root .map-ui.map-bar .fld > span,
+  :root .leadpanel span,
+  :root .fnums span {
+    font-size: 11px;
+  }
+  /* the passes' slider: 36 px for the finger around its 18 px line, without moving it */
+  :root .tbar .tl-mid input[type='range'] {
+    height: 36px;
+    margin-top: -9px;
+    margin-bottom: -9px;
+  }
+  :root .vsq .factions select {
+    min-height: var(--hit);
+  }
+  /* RA and Dec: the word is part of its field's target */
+  :root .lab .field > label {
+    display: flex;
+    align-items: center;
+    min-height: var(--hit);
+    min-width: 28px;
+  }
+  :root .rail .brand,
+  :root .rail .brand .logo {
+    min-width: var(--hit);
+    min-height: var(--hit);
+  }
+  :root .map-ui .seg button,
+  :root .map-ui .seg.sm button {
+    min-width: var(--hit);
+  }
+  :root .zoomctl .zs input {
+    height: var(--hit);
+  }
+  :root .fcard-title a,
+  :root a.fcard-title {
+    display: flex;
+    align-items: center;
+    min-height: var(--hit);
+  }
+  /* lists of links (About's references, Method's contents): each link is a row a finger can take */
+  :root .about-grid li > a,
+  :root .mtoc a {
+    display: inline-flex;
+    align-items: center;
+    min-height: var(--hit);
+  }
+  :root .mtoc a {
+    display: flex;
+  }
+}
+
+/* ----- tablets: the globe's bar of controls wraps instead of running off the edge; "Mark" reads as a button here too ----- */
+@media (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
+  :root .map-ui.map-bar {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+  :root .map-ui.map-bar > .seg:not(.sm) .lbl,
+  :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] .lbl {
+    display: inline;
+  }
+  :root .vsq .float.fmark {
+    gap: 7px;
+    padding: 0 14px 0 12px;
+    font-size: 15px;
+    color: var(--accent-l);
+    background: rgba(6, 24, 28, 0.9);
+    border: 1.5px solid var(--accent);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.6),
+      0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+  :root .vsq .float.fmark::before {
+    content: '';
+    width: 16px;
+    height: 16px;
+    background:
+      linear-gradient(currentColor, currentColor) 50% 0 / 2px 5px no-repeat,
+      linear-gradient(currentColor, currentColor) 50% 100% / 2px 5px no-repeat,
+      linear-gradient(currentColor, currentColor) 0 50% / 5px 2px no-repeat,
+      linear-gradient(currentColor, currentColor) 100% 50% / 5px 2px no-repeat;
+  }
+}
+/* the globe's line of mouse words ("scroll to zoom, double-click") is not shown where the pointer is a finger */
+@media (max-width: 1279.98px) and (pointer: coarse) {
+  :root .map-bl .map-help {
+    display: none;
+  }
+}
