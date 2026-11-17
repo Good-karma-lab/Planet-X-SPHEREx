@@ -226,7 +226,7 @@ export function CandList({
           {all ? 'Fewer' : `All ${list.length}`}
         </button>
       )}
-      {!list.length && <div class="cr-none">No mover, track, brown dwarf, pair or Planet X peak in this field so far</div>}
+      {!list.length && <div class="cr-none">Nothing unexplained so far</div>}
       {folded.length > 0 && (
         <details class="cr-group" open={openGroup} onToggle={(e) => setOpenGroup((e.target as HTMLDetailsElement).open)} data-testid="cand-group">
           <summary>
@@ -235,9 +235,11 @@ export function CandList({
           {folded.map(row)}
         </details>
       )}
-      <div class="cr-also" data-testid="cand-also">
-        {also}
-      </div>
+      {also && (
+        <div class="cr-also" data-testid="cand-also">
+          {also}
+        </div>
+      )}
       <details class="cr-details">
         <summary>Details</summary>
         {details}

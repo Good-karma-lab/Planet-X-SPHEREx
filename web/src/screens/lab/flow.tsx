@@ -6,7 +6,10 @@ import {
   addMark,
   allMarks,
   fieldKey,
-  MARK_LEVELS,
+  MARK_KINDS,
+  MARK_LOOKS,
+  LEVEL_OF_KIND,
+  type MarkKind,
   marksSyncNote,
   onMarks,
   removeMark,
@@ -29,7 +32,7 @@ import {
 } from './known';
 import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
-import { awardLine, focusKind, taskOfParams, useLabTask, type NextTask } from './task';
+import { awardLine, focusKind, taskOfParams, taskTrack, useLabTask, type NextTask } from './task';
 import { FindingClip, MoverView, StampsView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
 import { KNOWN_SOURCES, placeAt } from './known';
@@ -130,7 +133,12 @@ export interface FlowDrawEnv extends Omit<KnownDrawEnv, 'pointer' | 'match'> {
 }
 
 const LEVEL_COLOUR: Record<MarkLevel, string> = { suspicious: '#ff9d5c', interesting: '#7fd8ff', artefact: '#aab4b9' };
-const LEVEL_WORD: Record<MarkLevel, string> = { suspicious: 'Suspicious', interesting: 'Interesting', artefact: 'Artefact' };
+const KIND_COLOUR: Record<MarkKind, string> = { moves: '#ffd08a', not_in_catalogues: '#7fd8ff', artefact: '#aab4b9', odd: '#d7a6ff' };
+const KIND_WORD: Record<MarkKind, string> = { moves: 'It moves', not_in_catalogues: 'Not in catalogues', artefact: 'Artefact', odd: 'Something odd' };
+const KIND_SHORT: Record<MarkKind, string> = { moves: 'It moves', not_in_catalogues: 'Not in catalogues', artefact: 'Artefact', odd: 'Odd' };
+const LOOK_WORD: Record<string, string> = { blinks: 'Blinks on and off', glare: 'Glare or ghost', spike: 'Spike', edge: 'Picture edge', hot_dot: 'One hot dot' };
+/** a mark's colour: its kind's, else the level of before */
+const markColour = (m: Pick<Mark, 'kind' | 'level'>) => (m.kind ? KIND_COLOUR[m.kind] : LEVEL_COLOUR[m.level]);
 
 export interface LabFlow {
   /** drawn on the lab's overlay every frame, after its own rings */
@@ -202,6 +210,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const marksRef = useRef(marks);
   marksRef.current = marks;
   const [tool, setTool] = useState<FlowTool>(null);
+  // another field (or the next task) starts with no tool: a Mark or Ruler left on would take the first click there
+  useEffect(() => setTool(null), [fieldKey(a.ra, a.dec, a.fov)]);
   const [open, setOpen] = useState<string | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
@@ -263,6 +273,71 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // unmatched (the ring would appear and go when the catalogue arrives): the count on the status line says how many so far
     const noRings = env.focus || kn.deepPending.length > 0;
     drawKnown({ ...env, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
+    // a track's task: its path through the visits, the direction, a dot per visit (red when tapped as missing), the ring on the visit
+    // shown, so that "does one dot step along the arrow?" has the arrow and the dot on the picture
+    const tt = taskTrack.pts;
+    if (tt.length >= 2 && !wall) {
+      const yr = (m: number) => 2000 + (m - 51544.5) / 365.25;
+      let near = 0;
+      tt.forEach((q, k) => Math.abs(yr(q.mjd) - env.year) < Math.abs(yr(tt[near]!.mjd) - env.year) && (near = k));
+      ctx.save();
+      for (const box of rects) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(box.x, box.y, box.w, box.h);
+        ctx.clip();
+        const xy = tt.map((q) => {
+          const [u, v] = uv(q.ra, q.dec);
+          return [box.x + u * box.w, box.y + v * box.h] as const;
+        });
+        ctx.beginPath();
+        xy.forEach(([x, y], k) => (k ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+        ctx.setLineDash([5, 5]);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.stroke();
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = 'rgba(255,200,110,0.9)';
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // the arrow at the last visit
+        const [x1, y1] = xy[xy.length - 1]!;
+        const [x0, y0] = xy[xy.length - 2]!;
+        const ang = Math.atan2(y1 - y0, x1 - x0);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x1 - 11 * Math.cos(ang - 0.45), y1 - 11 * Math.sin(ang - 0.45));
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x1 - 11 * Math.cos(ang + 0.45), y1 - 11 * Math.sin(ang + 0.45));
+        ctx.lineWidth = 1.8;
+        ctx.strokeStyle = 'rgba(255,200,110,0.95)';
+        ctx.stroke();
+        xy.forEach(([x, y], k) => {
+          ctx.beginPath();
+          ctx.arc(x, y, 2.6, 0, 2 * Math.PI);
+          ctx.fillStyle = taskTrack.missing.includes(tt[k]!.i) ? '#ff6b6b' : 'rgba(255,200,110,0.95)';
+          ctx.fill();
+        });
+        const [rx, ry] = xy[near]!;
+        ctx.beginPath();
+        ctx.arc(rx, ry, 13, 0, 2 * Math.PI);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(0,0,0,0.55)';
+        ctx.stroke();
+        ctx.lineWidth = 1.6;
+        ctx.strokeStyle = taskTrack.missing.includes(tt[near]!.i) ? '#ff6b6b' : '#ffd08a';
+        ctx.stroke();
+        ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = '#000';
+        const lab = `visit ${tt[near]!.i + 1}`;
+        ctx.strokeText(lab, rx + 17, ry + 4);
+        ctx.fillStyle = '#ffd08a';
+        ctx.fillText(lab, rx + 17, ry + 4);
+        ctx.restore();
+      }
+      ctx.restore();
+    }
     // the whole grid square: a thin dashed outline (a quarter of it is on show at 10′)
     const sqo = argsRef.current.square?.outline;
     if (sqo && sqo.length >= 4 && !wall) {
@@ -357,7 +432,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ctx.strokeStyle = 'rgba(0,0,0,0.6)';
         ctx.stroke();
         ctx.lineWidth = sel ? 2 : 1.4;
-        ctx.strokeStyle = sel ? '#ffffff' : LEVEL_COLOUR[m.level];
+        ctx.strokeStyle = sel ? '#ffffff' : markColour(m);
         ctx.stroke();
         if (wall) continue;
         placed.push({ x0: x - r - 2, y0: y - r - 2, x1: x + r + 2, y1: y + r + 2 });
@@ -368,7 +443,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           ctx.lineWidth = 3;
           ctx.strokeStyle = '#000';
           ctx.strokeText(m.label, lx, y - r - 2);
-          ctx.fillStyle = LEVEL_COLOUR[m.level];
+          ctx.fillStyle = markColour(m);
           ctx.fillText(m.label, lx, y - r - 2);
           placed.push({ x0: lx, y0: y - r - 13, x1: lx + tw, y1: y - r });
         }
@@ -839,10 +914,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           }}
           data-testid={`blink-${k ? 'b' : 'a'}`}
         >
-          <option value="">{k ? 'all' : 'all'}</option>
+          <option value="">{k ? 'B · all' : 'A · all'}</option>
           {a.passes.map((q) => (
             <option key={q.index} value={String(q.index)} disabled={q.index === (k ? pa : pb)}>
-              {q.label}
+              {`${k ? 'B' : 'A'} · ${q.label}`}
             </option>
           ))}
         </select>
@@ -907,7 +982,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         {cur ? (
           <>
             <div class="oc-head">
-              <i class="oc-glyph" style={{ borderColor: LEVEL_COLOUR[cur.level] }} />
+              <i class="oc-glyph" style={{ borderColor: markColour(cur) }} />
               <input
                 class="inp"
                 value={cur.label}
@@ -929,20 +1004,29 @@ export function useLabFlow(a: FlowArgs): LabFlow {
                 Remove
               </button>
             </div>
-            <div class="seg sm oc-levels" role="group" aria-label="Level">
-              {MARK_LEVELS.map((l) => (
+            <div class="oc-kinds" role="group" aria-label="What it is" data-testid="mark-kinds">
+              {MARK_KINDS.map((k) => (
                 <button
-                  key={l}
-                  class={cur.level === l ? 'on' : ''}
-                  aria-pressed={cur.level === l}
-                  onClick={() => updateMark(cur.id, { level: l })}
-                  data-testid={`mark-level-${l}`}
+                  key={k}
+                  class={cur.kind === k ? 'on' : ''}
+                  aria-pressed={cur.kind === k}
+                  onClick={() => updateMark(cur.id, { kind: k, level: LEVEL_OF_KIND[k], look: k === 'artefact' ? (cur.look ?? null) : null })}
+                  data-testid={`mark-kind-${k}`}
                 >
-                  <i style={{ background: LEVEL_COLOUR[l] }} />
-                  {LEVEL_WORD[l]}
+                  <i style={{ background: KIND_COLOUR[k] }} />
+                  {KIND_WORD[k]}
                 </button>
               ))}
             </div>
+            {cur.kind === 'artefact' && (
+              <div class="oc-looks" role="group" aria-label="What it looks like" data-testid="mark-looks">
+                {MARK_LOOKS.map((l) => (
+                  <button key={l} class={cur.look === l ? 'on' : ''} aria-pressed={cur.look === l} onClick={() => updateMark(cur.id, { look: l })} data-testid={`mark-look-${l}`}>
+                    {LOOK_WORD[l]}
+                  </button>
+                ))}
+              </div>
+            )}
             <dl class="oc-facts">
               <dt>Put on</dt>
               <dd>{cur.pass != null ? (a.passes.find((q) => q.index === cur.pass)?.label ?? `pass ${cur.pass + 1}`) : 'no pass'}</dd>
@@ -985,9 +1069,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
             <div class="psub">Marks in this field</div>
             {marksHere.map((m) => (
               <button key={m.id} class={`ft-mark ${m.id === open ? 'on' : ''}`} onClick={() => setOpen(m.id === open ? null : m.id)}>
-                <i style={{ background: LEVEL_COLOUR[m.level] }} />
+                <i style={{ background: markColour(m) }} />
                 <b>{m.label || 'Mark'}</b>
-                <span>{LEVEL_WORD[m.level]}</span>
+                <span>{m.kind ? KIND_SHORT[m.kind] : 'no kind yet'}</span>
               </button>
             ))}
           </div>

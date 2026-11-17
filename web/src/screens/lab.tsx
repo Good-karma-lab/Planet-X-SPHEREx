@@ -47,7 +47,7 @@ import { useDistantPlan } from './search/distant';
 import { FPX_AUTO } from '../lib/flags';
 import { useAsteroidSearch } from './asteroids';
 import { useLabFlow, type LabFlow } from './lab/flow';
-import { alsoLine, CandList, unexplainedCount, useJplState, type FindRow } from './lab/candidates';
+import { CandList, unexplainedCount, useJplState, type FindRow } from './lab/candidates';
 import { SheetGrip } from '../ui/Sheet';
 
 const SIZES = [2, 5, 10, 20, 60];
@@ -1356,7 +1356,8 @@ export function Lab({ route }: { route: Route }) {
           const yrs = year - 2025.9;
           const decN = t.dec_2025_9 + (t.v_north * yrs) / 3600;
           const raN = t.ra_2025_9 + (t.v_east * yrs) / 3600 / Math.cos((decN * Math.PI) / 180);
-          const line = `${rateText(t)} · ${gaiaWord(t)}${t.saturated ? ' · saturated core' : ''}${t.source === 'red' ? ' · red bands' : ''}`;
+          // on the picture only the rate: the catalogue match and the core's state are in the object's card
+          const line = rateText(t);
           const same = marks.find(
             (k) => k.kind === 'target' && Math.hypot((k.ra - raN) * Math.cos((decN * Math.PI) / 180), k.dec - decN) * 3600 < 12,
           );
@@ -2911,9 +2912,11 @@ export function Lab({ route }: { route: Route }) {
         disabled={!onChange}
         onChange={(e) => onChange?.((e.target as HTMLInputElement).checked)}
       />
-      <span>{text}</span>
-      {search && <SearchMark s={search} />}
-      {!onChange && whyShort && <em class="why">{whyShort}</em>}
+      <span class="swl">{text}</span>
+      <span class="swr">
+        {search && <SearchMark s={search} />}
+        {!onChange && whyShort && <em class="why">{whyShort}</em>}
+      </span>
     </label>
   );
   const pct = (f: number | null | undefined) => (f === null || f === undefined ? null : Math.max(0, Math.min(100, Math.round(f * 100))));
@@ -3256,16 +3259,6 @@ export function Lab({ route }: { route: Route }) {
       }),
     ),
   ];
-  const stateOf = (done: boolean, n: number, failed = false) => (failed ? 'failed' : !done ? 'running' : n ? 'found' : 'nothing') as 'failed' | 'running' | 'found' | 'nothing';
-  const searchStates = [
-    { name: 'movers', state: stateOf(mv?.state === 'done', mvr?.tracks.length ?? 0, mv?.state === 'failed') },
-    { name: 'pairs', state: stateOf(mv?.state === 'done', pairs.length, mv?.state === 'failed') },
-    { name: 'brown dwarfs', state: stateOf(dwarfs?.state === 'done', (dwarfs?.result?.candidates.length ?? 0) + (dwarfs?.result?.known.length ?? 0)) },
-    { name: 'red sources', state: stateOf(redv?.state === 'done', redv?.result?.red.length ?? 0, redv?.state === 'failed') },
-    { name: 'anomalies', state: stateOf(an?.state === 'done', an?.result?.anomalies.length ?? 0, an?.state === 'failed') },
-    { name: 'asteroids', state: stateOf(ast.state === 'done' || ast.state === 'none', ast.tracks?.length ?? 0, ast.state === 'failed') },
-    ...(FPX_AUTO && !fpx ? [{ name: 'Planet X', state: stateOf(fpxAllOver, fpxLeads.length) }] : []),
-  ];
   const foundCount = unexplainedCount(findRows);
   const unexplainedOf = (g: 'red' | 'anomaly') => findRows.filter((r) => r.group === g && r.status === 'unexplained').length;
   const fieldOn = valid && !!meta;
@@ -3278,7 +3271,7 @@ export function Lab({ route }: { route: Route }) {
       ours: true,
       retry: dwarfs?.state === 'failed' ? dwarfRetry : null,
     },
-    { name: 'red sources', state: stOf(redv?.state, fieldOn && !!redv), count: `${unexplainedOf('red')} unexplained`, ours: true, retry: redv?.state === 'failed' ? redRetry : null },
+    { name: 'red sources', state: stOf(redv?.state, fieldOn && !!redv), count: String(unexplainedOf('red')), ours: true, retry: redv?.state === 'failed' ? redRetry : null },
     {
       name: 'anomalies',
       state: stOf(an?.state === 'idle' ? 'running' : an?.state, fieldOn && !!an),
@@ -3731,7 +3724,12 @@ export function Lab({ route }: { route: Route }) {
                 <option value={String(v)}>{`${v}×`}</option>
               ))}
             </select>
-            <span class="acts">
+            <details class="acts" data-testid="bar-more">
+              <summary class="mini" title="Link, export, video" aria-label="More: link, export, video">
+                <span aria-hidden="true">⋯</span>
+                {(copied || exportNote || recording) && <span class="t">{copied || exportNote || 'Recording…'}</span>}
+              </summary>
+              <span class="acts-menu">
               <button
                 class="mini"
                 onClick={() => {
@@ -3752,7 +3750,7 @@ export function Lab({ route }: { route: Route }) {
                 aria-label="Copy link"
               >
                 <span dangerouslySetInnerHTML={{ __html: icon('link', 14) }} style={{ display: 'contents' }} />
-                {copied && <span class="t">{copied}</span>}
+                <span class="al">Copy link</span>
               </button>
               <span class="expwrap">
                 <button
@@ -3765,7 +3763,7 @@ export function Lab({ route }: { route: Route }) {
                   data-testid="export"
                 >
                   <span dangerouslySetInnerHTML={{ __html: icon('archive', 14) }} style={{ display: 'contents' }} />
-                  {exportNote && <span class="t">{exportNote}</span>}
+                  <span class="al">Export finds</span>
                 </button>
                 {exportOpen && (
                   <span class="expmenu" role="menu">
@@ -3786,9 +3784,10 @@ export function Lab({ route }: { route: Route }) {
                 aria-label="Download video"
               >
                 <span dangerouslySetInnerHTML={{ __html: icon('download-simple', 14) }} style={{ display: 'contents' }} />
-                {recording && <span class="t">Recording…</span>}
+                <span class="al">Video (WebM)</span>
               </button>
-            </span>
+              </span>
+            </details>
           </div>
         </div>
         <aside class="panel">
@@ -3827,7 +3826,7 @@ export function Lab({ route }: { route: Route }) {
                 )}
                 <CandList
                   rows={findRows}
-                  also={alsoLine(searchStates)}
+                  also=""
                   selected={candSel}
                   picture={() => canvas.current}
                   field={{ ra, dec, fov }}
@@ -4421,7 +4420,7 @@ export function Lab({ route }: { route: Route }) {
             )}
             <section class="psec" id="sec-show" data-testid="sec-show">
               <div class="psh">On the picture</div>
-              <div class="swgrid">
+              <div class="swlist">
                     {sw(
                       'knownChk',
                       'Known objects',
@@ -4485,7 +4484,7 @@ export function Lab({ route }: { route: Route }) {
                     'Old surveys: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
                     opts.archive,
                     film !== null ? null : (v) => set({ arch: v ? '1' : null }),
-                    'Months scale only',
+                    'Months only',
                   )}
               </div>
             </section>
@@ -4552,7 +4551,7 @@ export function Lab({ route }: { route: Route }) {
                       <option value="adaptive">Trim adaptive</option>
                     </select>
                   </div>
-              <div class="swgrid">
+              <div class="swgrid chips">
                     {sw(
                       'boostChk',
                       'Brighten',

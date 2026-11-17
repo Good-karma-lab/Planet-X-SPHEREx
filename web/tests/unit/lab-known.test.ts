@@ -81,10 +81,10 @@ describe('known objects of a lab field', () => {
 
   it('says which catalogue did not answer, and nothing when all did', () => {
     const k = parseKnown(FAKE);
-    expect(knownStatus({ state: 'ok', ...k })).toBe('JPL did not answer');
+    expect(knownStatus({ state: 'ok', ...k })).toBe('JPL: no answer');
     expect(knownStatus({ state: 'ok', ...k, answered: { gaia: true, simbad: true, jpl: true } })).toBe('');
-    expect(knownStatus({ state: 'ok', ...k, answered: { gaia: false, simbad: true, jpl: false } })).toBe('Gaia, JPL did not answer');
-    expect(knownStatus({ ...KNOWN_OFF, state: 'failed' })).toBe('Gaia, SIMBAD, JPL did not answer');
+    expect(knownStatus({ state: 'ok', ...k, answered: { gaia: false, simbad: true, jpl: false } })).toBe('Gaia, JPL: no answer');
+    expect(knownStatus({ ...KNOWN_OFF, state: 'failed' })).toBe('Gaia, SIMBAD, JPL: no answer');
     expect(knownStatus(KNOWN_OFF)).toBe('');
   });
 
@@ -94,7 +94,7 @@ describe('known objects of a lab field', () => {
     expect(knownStatus({ state: 'ok', ...k }, { known: 212, noMatch: 7 })).toBe('known 212 · unknown 7 · asking JPL…');
     // a deeper catalogue that did not answer: the sources are without a match so far, not unknown
     const half = parseKnown({ ...FAKE, status: { match: { gaia: { state: 'ok' }, catwise: { state: 'unavailable' }, allwise: { state: 'ok' }, twomass: { state: 'ok' } } } });
-    expect(knownStatus({ state: 'ok', ...half }, { known: 3, noMatch: 2 })).toBe('known 3 · no match 2 · JPL, CatWISE did not answer');
+    expect(knownStatus({ state: 'ok', ...half }, { known: 3, noMatch: 2 })).toBe('known 3 · no match 2 · JPL, CatWISE: no answer');
     // a partial answer: what has arrived is counted, the rest is being asked
     const part = parseKnown({ ...FAKE, answered: { gaia: true, simbad: false, jpl: false }, status: { simbad: { state: 'pending' }, jpl: { state: 'pending' }, match: { gaia: { state: 'ok' }, catwise: { state: 'pending' }, allwise: { state: 'ok' }, twomass: { state: 'pending' } } } });
     expect(knownStatus({ state: 'ok', ...part }, { known: 40, noMatch: 5 })).toBe('known 40 · no match 5 · asking SIMBAD, JPL, CatWISE, 2MASS…');

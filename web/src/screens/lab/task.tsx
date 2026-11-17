@@ -146,6 +146,11 @@ export function stepAt(series: SeriesStep[], path: string[]): SeriesStep | null 
 }
 
 /** A task about one object: that object alone gets the bright ring and its label, the rest is dimmed (spec §5b). */
+/** A track's task on the picture: its place in each visit of the pass (the task's pictures) and the visits tapped as missing.
+ *  The task writes it as it renders, the lab's overlay (flow.tsx) draws it: the path with its arrow, a dot per visit, the ring on
+ *  the visit shown. Empty when the task is not about a track. */
+export const taskTrack: { pts: { i: number; mjd: number; ra: number; dec: number }[]; missing: number[] } = { pts: [], missing: [] };
+
 export const focusKind = (k: TaskKind): boolean => k !== 'cell' && k !== 'bad_picture';
 
 export interface LabTask {
@@ -428,6 +433,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     else void close(x.result ?? 'cant_tell', [...path, x.id]);
   };
   const pictures = body?.pictures ?? [];
+  taskTrack.pts = pictures.filter((q): q is { i: number; mjd: number; ra: number; dec: number } => q.mjd != null && q.ra != null && q.dec != null);
+  taskTrack.missing = missing;
   view.panel = (
     <div class={`taskpanel k-${task.kind}`} data-testid="task-panel">
       {si.popup}
@@ -465,17 +472,34 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         </div>
       )}
       <div class="tp-line" data-testid="task-line">
+        {step && (
+          <button
+            class="tp-back"
+            style={{ visibility: path.length > 0 ? 'visible' : 'hidden' }}
+            disabled={busy}
+            onClick={() => setPath(path.slice(0, -1))}
+            data-testid="task-back"
+            title="Back to the previous question"
+          >
+            ← Back
+          </button>
+        )}
         {line ||
           (task.kind === 'cell'
             ? [`${n} mark${n === 1 ? '' : 's'}`, a.square?.why ?? ''].filter(Boolean).join(' · ')
             : step && steps
-              ? [`Question ${path.length + 1} of at most ${steps.length}`, step.tap ? `${missing.length} missing` : ''].filter(Boolean).join(' · ')
+              ? [`Question ${path.length + 1} of ${steps.length}`, step.tap ? `${missing.length} missing` : ''].filter(Boolean).join(' · ')
               : tapping
                 ? `${taps.length} tapped`
                 : '')}
       </div>
       {step ? (
-        <div class="tp-tree" data-testid="task-tree">
+        <div
+          class="tp-tree"
+          data-testid="task-tree"
+          // as tall as the longest step of this series (its answers and their example pictures), so no step jumps and none leaves a gap
+          style={{ minHeight: `${Math.max(...(steps ?? [step]).map((x) => x.answers.reduce((h, y) => h + ((EXAMPLES[`${seriesId}.${x.id}.${y.id}`] ?? []).length ? 52 : 38) + 6, 0)))}px` }}
+        >
           {step.answers.map((x, k) => (
             <button
               key={x.id}
@@ -497,15 +521,6 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               ))}
             </button>
           ))}
-          <button
-            class="mini tp-back"
-            style={{ visibility: path.length > 0 ? 'visible' : 'hidden' }}
-            disabled={busy}
-            onClick={() => setPath(path.slice(0, -1))}
-            data-testid="task-back"
-          >
-            Back
-          </button>
         </div>
       ) : (
         <div class={`tp-btns n${answers.length}`}>

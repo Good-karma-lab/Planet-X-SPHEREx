@@ -214,7 +214,7 @@ export function knownStatus(k: KnownState, counts?: { known: number; noMatch: nu
     ...KNOWN_SOURCES.filter((c) => (!ok || !k.answered[c]) && !(ok && k.pending.includes(c))).map((c) => SOURCE_WORD[c]),
     ...(ok ? k.deepSilent.filter((c) => !k.deepPending.includes(c)) : []),
   ];
-  if (silent.length) parts.push(`${silent.join(', ')} did not answer${nextIn != null ? ` · next try in ${nextIn} s` : ''}`);
+  if (silent.length) parts.push(`${silent.join(', ')}: no answer${nextIn != null ? ` · retry ${nextIn} s` : ''}`);
   return parts.join(' · ');
 }
 
