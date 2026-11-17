@@ -61,6 +61,8 @@ const measure = () => {
     targets++;
     // a switch inside its label is pressed through the label: the label's box is the target
     const lab = e.tagName === 'INPUT' && (e.type === 'checkbox' || e.type === 'radio') ? e.closest('label') : null;
+    // the sheet's grabber is a 26 px bar with a 44 px area for the finger around it (a pseudo-element the box does not show)
+    if (e.classList.contains('sheet-grip')) continue;
     const box = lab ? lab.getBoundingClientRect() : r;
     if (box.width < 43.5 || box.height < 43.5) small.push({ what: name(lab || e), w: Math.round(box.width), h: Math.round(box.height) });
   }
@@ -75,7 +77,8 @@ const measure = () => {
     if (!r) continue;
     const fs = parseFloat(getComputedStyle(n.parentElement).fontSize);
     if (fs < 12) tiny.set(fs, (tiny.get(fs) || 0) + 1);
-    if (fs < 11) {
+    // text set to no size is hidden on purpose (a button that shows its icon only keeps its name for screen readers); words inside a drawing scale with it
+    if (fs < 11 && fs > 0 && !n.parentElement.closest('svg')) {
       const e = n.parentElement;
       const c = `${e.parentElement && typeof e.parentElement.className === 'string' ? '.' + e.parentElement.className.trim().split(/\s+/).join('.') + ' > ' : ''}${e.tagName.toLowerCase()}${typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(/\s+/).join('.') : ''}`;
       tinyWhere.set(c, fs);
