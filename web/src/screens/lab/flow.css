@@ -46,3 +46,25 @@
    on a desktop it sat at the top left over the picture's title. button + class outweighs `.vsq .float` and stays below the phone layer's
    `:root .vsq .fmark` (which shows it at the bottom right). */
 .vsq button.touch-only { display: none; }
+.taskpanel .tp-others { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.taskpanel .tp-others input { accent-color: var(--accent-l); }
+.taskpanel .tp-btns .btn.quiet { opacity: 0.8; }
+.taskpanel .tp-btns.n5 .btn, .taskpanel .tp-btns.n4 .btn { flex: 1 1 40%; }
+.tv { display: flex; flex-direction: column; gap: 4px; }
+.tv .tv-plot { width: 100%; display: block; border-radius: 8px; background: rgba(0, 0, 0, 0.32); }
+.tv .tv-legend { display: flex; flex-direction: column; gap: 1px; font-size: 10.5px; color: var(--ink); min-height: 44px; }
+.tv .tv-legend span { display: flex; align-items: center; gap: 6px; }
+.tv .tv-legend span.off { color: var(--muted); }
+.tv .tv-legend i { width: 14px; height: 2px; border-radius: 1px; flex: none; }
+.tv .tv-line { min-height: 15px; font: 500 10.5px var(--mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tv .tv-dets { display: flex; gap: 4px; }
+.tv .tv-dets span { flex: 1; display: flex; align-items: center; justify-content: center; gap: 4px; height: 22px; border-radius: 6px; border: 1px solid var(--edge-soft); font: 500 10.5px var(--mono); color: var(--muted); }
+.tv .tv-dets span.on { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
+.tv .tv-dets b { font-weight: 700; }
+.tv .tv-row { display: flex; gap: 8px; font-size: 11.5px; min-height: 17px; }
+.tv .tv-row b { width: 46px; flex: none; font: 600 10.5px var(--font); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding-top: 1px; }
+.tv .tv-row span { font: 500 11px var(--mono); color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tv .tv-cat { min-height: 20px; max-height: 120px; overflow-y: auto; }
+/* a switch whose data is still arriving: a small turning ring after its name (Known objects while a catalogue is asked) */
+.sw.busy > span::after { content: ''; display: inline-block; width: 9px; height: 9px; margin-left: 7px; vertical-align: -1px; border-radius: 50%; border: 1.5px solid rgba(95, 227, 214, 0.25); border-top-color: var(--accent-l); animation: swbusy 0.9s linear infinite; }
+@keyframes swbusy { to { transform: rotate(360deg); } }

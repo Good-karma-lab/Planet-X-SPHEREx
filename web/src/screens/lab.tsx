@@ -658,7 +658,8 @@ export function Lab({ route }: { route: Route }) {
     void distRef.start(null);
   }, [fpx, meta, distRef.available, distRef.ds.state, ra, dec, fov]);
   // a link from Findings (find=<id>): the find sits at the field's centre; once the field is open it is selected and its ring pulses on the picture
-  const findId = p['find'] ?? '';
+  // in a task the find is the task's object (the cabinet's and the lab's own task links name it `finding`)
+  const findId = p['find'] ?? (p['task'] ? (p['finding'] ?? '') : '');
   const findShown = useRef('');
   useEffect(() => {
     const key = `${findId}|${ra},${dec},${fov}`;
@@ -1500,6 +1501,7 @@ export function Lab({ route }: { route: Route }) {
           };
       }
       const all = selMark ? [...marks, selMark] : marks;
+      const focus = !!flowRef.current?.focus;
       const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
       let labelled = 0;
       const ring = (x: number, y: number, mk: Mark, rr: number, ticks: boolean) => {
@@ -1730,13 +1732,25 @@ export function Lab({ route }: { route: Route }) {
           const x = box.x + u * box.w;
           const y = box.y + v * box.h;
           if (x < box.x - 30 || y < box.y - 30 || x > box.x + box.w + 30 || y > box.y + box.h + 30) continue;
+          // a task about one object: that object alone is bright; every other mark is a quiet outline without a name or a path
+          const quiet = focus && !mk.selected;
           if (wall) {
             // every tile of a wall carries the same rings as the picture (movers, red sources, anomalies, known bodies, the selected one), without names
             if (mk.ghost) continue;
-            ring(x, y, mk, Math.max(5, Math.min(10, box.w / 26)), mk.kind === 'target');
+            if (quiet) ctx.globalAlpha = 0.35;
+            ring(x, y, mk, Math.max(5, Math.min(10, box.w / 26)), mk.kind === 'target' && !quiet);
+            ctx.globalAlpha = 1;
             continue;
           }
           if (underInset(x, y)) continue;
+          if (quiet) {
+            if (!mk.ghost) {
+              ctx.globalAlpha = 0.35;
+              ring(x, y, mk, Math.min(mk.rr, 9), false);
+              ctx.globalAlpha = 1;
+            }
+            continue;
+          }
           if (!mk.ghost) {
             ring(x, y, mk, mk.rr, mk.kind === 'target');
             // a ring is a thing no name is put on
@@ -1750,6 +1764,7 @@ export function Lab({ route }: { route: Route }) {
             const x = box.x + u * box.w;
             const y = box.y + v * box.h;
             if (x < box.x || y < box.y || x > box.x + box.w || y > box.y + box.h || underInset(x, y) || mk.ghost) continue;
+            if (focus && !mk.selected) continue;
             // a crowded field: names for the first dozen marks (targets, movers, known bodies first), rings only for the rest
             if (++labelled > 14 && (mk.kind === 'anomaly' || mk.kind === 'red') && !mk.selected) continue;
             // a phone: names for the first six marks only (the selected one and the test target always)
@@ -1786,6 +1801,7 @@ export function Lab({ route }: { route: Route }) {
         fovArc,
         placed,
         hidden: underInset,
+        focus,
         picture:
           fpic && fnoise && fpic.n === grid.n
             ? { pass: shownPass, n: fpic.n, rgb: fpic.rgb, bg: fnoise.bg, sigma: fnoise.sigma, step: grid.step_arcsec }
@@ -2291,6 +2307,16 @@ export function Lab({ route }: { route: Route }) {
     single: film !== null || view === 'picture',
     side,
     known: opts.known,
+    sel,
+    tracks: mv?.result?.tracks ?? [],
+    anomalies: an?.result?.anomalies ?? [],
+    set,
+    setTab,
+    pickAnomaly: (n) => pickAnomaly(n),
+    pickTrack: (i) => {
+      const t = mv?.result?.tracks[i];
+      if (t) pickTrack(t, trackNamesRef.current[i] ?? '');
+    },
     fieldKey: clientRef.current?.key ?? null,
     params: p,
     open: (q) => {
@@ -2782,8 +2808,9 @@ export function Lab({ route }: { route: Route }) {
     onChange: ((v: boolean) => void) | null,
     why = 'not available in this view',
     whyShort = '',
+    busy = false,
   ) => (
-    <label class={`sw ${onChange ? '' : 'dis'}`} title={onChange ? title : `${title} (${why})`}>
+    <label class={`sw ${onChange ? '' : 'dis'}${busy ? ' busy' : ''}`} title={onChange ? title : `${title} (${why})`}>
       <input
         type="checkbox"
         id={id}
@@ -3591,7 +3618,10 @@ export function Lab({ route }: { route: Route }) {
                     'Known objects',
                     'Known objects: a ring on every Gaia DR3 star, SIMBAD object and JPL body in the frame, at its place on the date shown. What moves and has no ring is unknown',
                     opts.known,
-                    (v) => set({ known: v ? '1' : null }),
+                    (v) => set({ known: v ? '1' : inTask ? '0' : null }),
+                    undefined,
+                    '',
+                    flow.knownBusy,
                   )}
                   {sw(
                     'maskChk',

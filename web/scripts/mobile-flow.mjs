@@ -5,7 +5,7 @@
 //   node scripts/mobile-flow.mjs --out <dir> [--url http://localhost:5187] [--size p390]
 //
 // Prints one line per step, PASS or FAIL with the reason; exits 1 when a step fails. Every browser started here is closed.
-import { chromium } from '@playwright/test';
+import { chromium, webkit } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { SIZES } from './mobile-sizes.mjs';
@@ -17,22 +17,47 @@ const arg = (k, d) => {
 const URL = arg('url', 'http://localhost:5187');
 const OUT = arg('out', 'test-results/mobile-flow');
 const sizeKey = arg('size', 'p390');
+const ENGINE = arg('engine', 'chromium');
 const S = SIZES[sizeKey];
 const LOADED = /^[A-Z][a-z]{2} ’\d\d/;
-const dir = join(OUT, sizeKey);
+const dir = join(OUT, `${sizeKey}-${ENGINE}`);
 mkdirSync(dir, { recursive: true });
 
-const browser = await chromium.launch({ channel: 'chromium', args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
+const browser = ENGINE === 'webkit' ? await webkit.launch() : await chromium.launch({ channel: 'chromium', args: ['--use-angle=metal', '--enable-gpu', '--ignore-gpu-blocklist'] });
 let failed = 0;
 try {
-  const ctx = await browser.newContext({ viewport: { width: S.width, height: S.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const ctx = await browser.newContext({ viewport: { width: S.width, height: S.height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, ...(S.userAgent ? { userAgent: S.userAgent } : {}) });
   await ctx.addInitScript(() => localStorage.setItem('spherex-tour-seen', '1'));
   const page = await ctx.newPage();
   page.setDefaultTimeout(30000);
-  const cdp = await ctx.newCDPSession(page);
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e).slice(0, 200)));
-  const touch = (type, pts) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p[0], y: p[1], id: i, radiusX: 12, radiusY: 12, force: 1 })) });
+  // Chromium: real touches through the DevTools protocol. WebKit has no such door: there the same finger paths are sent as touch
+  // pointer events made in the page (a tap is still Playwright's real tap). The globe's own one-finger turn takes pointer capture,
+  // which only a real touch has, so that one step is Chromium's alone.
+  const cdp = ENGINE === 'chromium' ? await ctx.newCDPSession(page) : null;
+  let down = [];
+  const touch = async (type, pts) => {
+    if (cdp) return cdp.send('Input.dispatchTouchEvent', { type, touchPoints: pts.map((p, i) => ({ x: p[0], y: p[1], id: i, radiusX: 12, radiusY: 12, force: 1 })) });
+    await page.evaluate(
+      ({ type, pts, was }) => {
+        const w = window;
+        w.__t = w.__t || {};
+        const fire = (name, i, p) => {
+          const target = name === 'pointerdown' ? document.elementFromPoint(p[0], p[1]) : w.__t[i];
+          if (!target) return;
+          if (name === 'pointerdown') w.__t[i] = target;
+          target.dispatchEvent(new PointerEvent(name, { pointerId: 40 + i, pointerType: 'touch', isPrimary: i === 0, clientX: p[0], clientY: p[1], button: name === 'pointermove' ? -1 : 0, buttons: name === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true, composed: true }));
+          if (name === 'pointerup') delete w.__t[i];
+        };
+        if (type === 'touchStart') pts.forEach((p, i) => i >= was.length && fire('pointerdown', i, p));
+        else if (type === 'touchMove') pts.forEach((p, i) => fire('pointermove', i, p));
+        else was.forEach((p, i) => fire('pointerup', i, p));
+      },
+      { type, pts, was: down },
+    );
+    down = type === 'touchEnd' ? [] : pts;
+  };
   const slide = async (from, to, steps = 12, hold = null) => {
     await touch('touchStart', [from]);
     for (let i = 1; i <= steps; i++) {
@@ -84,6 +109,7 @@ try {
   });
 
   await step('globe: one finger turns it and the page does not move', async () => {
+    if (!cdp) return 'not tried here: the globe takes pointer capture, which only a real touch has (Chromium run)';
     const b = await box(page.getByTestId('sky'));
     const y0 = await scrollY();
     const before = await page.getByTestId('sky').screenshot();
@@ -160,7 +186,7 @@ try {
     await page.waitForTimeout(400);
     await shot('06-mark-editor');
     const ed = await box(page.getByTestId('mark-editor'));
-    if (ed.y < to[1] + 12) throw new Error('the editor covers the point of the mark');
+    if (to[0] >= ed.x && to[0] <= ed.x + ed.width && to[1] >= ed.y && to[1] <= ed.y + ed.height) throw new Error('the editor covers the point of the mark');
     await page.getByTestId('mark-label').fill('Touch mark');
     return `editor at ${Math.round(ed.y)} px, the point at ${Math.round(to[1])} px`;
   });
@@ -170,8 +196,9 @@ try {
     const x = page.getByTestId('mark-editor').locator('button').first();
     await x.tap();
     await page.getByTestId('mark-editor').waitFor({ state: 'hidden' });
-    const p0 = await box(page.getByTestId('picture'));
     const grip = page.getByTestId('sheet-grip');
+    if (!(await grip.isVisible())) return 'no sheet in this layout: the panel is a pane beside the picture';
+    const p0 = await box(page.getByTestId('picture'));
     const h = () => page.evaluate(() => Math.round(document.querySelector('.lab .panel').getBoundingClientRect().height));
     const h0 = await h();
     await grip.tap();
@@ -214,7 +241,7 @@ try {
     await shot('09-findings');
     const cards = await page.locator('.fcard').evaluateAll((els) => els.slice(0, 6).map((e) => Math.round(e.getBoundingClientRect().left)));
     const cols = new Set(cards).size;
-    const want = S.width < 600 ? 1 : S.width < 840 ? 2 : 3;
+    const want = S.height < 480 ? 2 : S.width < 600 ? 1 : S.width < 840 ? 2 : 3;
     if (cols !== want) throw new Error(`${cols} columns of cards, ${want} wanted`);
     await go.scrollIntoViewIfNeeded();
     const b = await box(go);

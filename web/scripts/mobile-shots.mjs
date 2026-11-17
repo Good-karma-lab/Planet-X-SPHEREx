@@ -163,11 +163,13 @@ async function run(sizeKey) {
       deviceScaleFactor: S.dsf,
       isMobile: S.mobile,
       hasTouch: S.mobile,
-      userAgent: S.mobile
-        ? S.width >= 768 || S.height >= 768
-          ? 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-          : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
-        : undefined,
+      userAgent: S.userAgent
+        ? S.userAgent
+        : S.mobile
+          ? S.width >= 768 || S.height >= 768
+            ? 'Mozilla/5.0 (iPad; CPU OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+            : 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1'
+          : undefined,
     });
     // the newcomer tour is its own subject: the screens are captured as a returning visitor sees them (--tour keeps it)
     if (!process.argv.includes('--tour')) await ctx.addInitScript(() => localStorage.setItem('spherex-tour-seen', '1'));
@@ -302,7 +304,8 @@ async function run(sizeKey) {
         }).then((r) => r.json());
         return d.id;
       });
-      for (const t of ['squares', 'marks', 'findings', 'investigations', 'tasks', 'history', 'notifications', 'account']) {
+      const tabs = await page.locator('.cb-tabs [data-testid^="tab-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid').slice(4)));
+      for (const t of tabs) {
         const tab = page.getByTestId(`tab-${t}`);
         await tab.scrollIntoViewIfNeeded();
         await tap(tab);
@@ -316,6 +319,27 @@ async function run(sizeKey) {
       await page.waitForTimeout(1500);
       await shot('19-investigation');
       await shot('19-investigation-full', true);
+    });
+
+    // the pages of the sharing round: a finding's own page, and the signed-in user's public profile (opened from the Cabinet)
+    await step('share', async () => {
+      const id = await page.evaluate(() => fetch('/api/v1/findings?limit=1').then((r) => r.json()).then((d) => d.finds?.[0]?.id ?? null));
+      if (id) {
+        await go(`#/findings/${encodeURIComponent(id)}`);
+        await page.waitForTimeout(3500);
+        await shot('21-finding-page');
+        await shot('21-finding-page-full', true);
+      }
+      await go('#/me?tab=score');
+      await page.waitForTimeout(1500);
+      const to = page.locator('[data-testid="to-profile"], [data-testid="open-profile"]').first();
+      if (await to.isVisible().catch(() => false)) {
+        await tap(to);
+        await page.getByTestId('profile').waitFor({ timeout: 15000 });
+        await page.waitForTimeout(1500);
+        await shot('22-profile');
+        await shot('22-profile-full', true);
+      } else report['share!note'] = 'no link to the public profile in the Cabinet for this user';
     });
 
     await ctx.close();

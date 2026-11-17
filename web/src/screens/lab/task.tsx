@@ -5,8 +5,43 @@ import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Mark } from '../../lib/marks';
 
-export type TaskKind = 'cell' | 'finding' | 'submit';
-const KINDS: TaskKind[] = ['cell', 'finding', 'submit'];
+export type TaskKind = 'cell' | 'finding' | 'submit' | 'moves' | 'red' | 'anomaly';
+const KINDS: TaskKind[] = ['cell', 'finding', 'submit', 'moves', 'red', 'anomaly'];
+
+/** The kinds of task (product spec §5, §5b): the panel's title, its one question, and the answers ([result sent, button text, tooltip]). */
+export const TASKS: Record<TaskKind, { title: string; ask: string; answers: [string, string, string?][] }> = {
+  cell: { title: 'Look through a square', ask: 'Mark everything that moves and has no ring', answers: [['nothing', 'Nothing here'], ['marks', 'Done, with marks']] },
+  moves: {
+    title: 'Does it really move?',
+    ask: 'The machine says this moves. Does it?',
+    answers: [['moves', 'It moves'], ['still', 'It stands still'], ['artefact', 'It is an artefact'], ['cant_tell', 'Can’t tell']],
+  },
+  finding: {
+    title: 'Check a machine finding',
+    ask: 'Is this a real object?',
+    answers: [['moves', 'It moves'], ['artefact', 'Artefact'], ['known', 'Known object'], ['cant_tell', 'Can’t tell']],
+  },
+  red: {
+    title: 'What is this red source?',
+    ask: 'Why is it red?',
+    answers: [
+      ['brown_dwarf', 'Cold brown dwarf', 'Methane and water dips'],
+      ['dusty_star', 'Dusty or reddened star'],
+      ['galaxy', 'Galaxy or extended'],
+      ['artefact', 'Artefact'],
+      ['cant_tell', 'Can’t tell'],
+    ],
+  },
+  anomaly: {
+    title: 'What is this spectral anomaly?',
+    ask: 'Is this feature real?',
+    answers: [['real', 'Real feature'], ['detector', 'Detector edge or ghost'], ['cosmic_ray', 'Cosmic ray or one bad exposure'], ['cant_tell', 'Can’t tell']],
+  },
+  submit: { title: 'Bring a finding to submit', ask: 'Checks before submit', answers: [] },
+};
+
+/** A task about one object: that object alone gets the bright ring and its label, the rest is dimmed (spec §5b). */
+export const focusKind = (k: TaskKind): boolean => k !== 'cell';
 
 export interface LabTask {
   id: string | null;
@@ -221,16 +256,19 @@ export function awardLine(): string {
   return Date.now() < award.until ? award.text : '';
 }
 
+type Takeable = Exclude<TaskKind, 'submit'>;
 interface NextTask {
   id: string;
-  kind: 'cell' | 'finding';
+  kind: Takeable;
   cell_id: string | null;
   finding_id: string | null;
   ra: number | null;
   dec: number | null;
+  /** the field size the find was made in, arcminutes (when the service says it) */
+  fov?: number | null;
 }
 
-async function takeTask(kind: 'cell' | 'finding', ref?: string | null): Promise<NextTask | null | 'failed'> {
+async function takeTask(kind: Takeable, ref?: string | null): Promise<NextTask | null | 'failed'> {
   try {
     const q = new URLSearchParams({ kind });
     if (ref) q.set(kind === 'cell' ? 'cell_id' : 'finding_id', ref);
@@ -242,17 +280,18 @@ async function takeTask(kind: 'cell' | 'finding', ref?: string | null): Promise<
   }
 }
 
-/** The lab address of a task: its place, the size its kind is looked at (a square 20′, a finding 5′), and the task itself. */
+/** The lab address of a task: its place, the size it is looked at (the service's, else a square 20′ and a find 5′), and the task itself. */
 export function taskParams(t: NextTask): Record<string, string> | null {
   if (t.ra == null || t.dec == null) return null;
   return {
     ra: t.ra.toFixed(5),
     dec: t.dec.toFixed(5),
-    fov: t.kind === 'cell' ? '20' : '5',
+    fov: String(t.fov && t.fov > 0 ? t.fov : t.kind === 'cell' ? 20 : 5),
     task: t.id,
     kind: t.kind,
     ...(t.cell_id ? { cell: t.cell_id } : {}),
-    ...(t.finding_id ? { finding: t.finding_id } : {}),
+    // the find is the lab's selected object (`find`): the one thing the task rings brightly
+    ...(t.finding_id ? { finding: t.finding_id, find: t.finding_id } : {}),
   };
 }
 
@@ -267,6 +306,11 @@ export interface TaskArgs {
   /** the pass on show (null in Days) and how many passes the field has: a square is looked through when every pass was shown */
   pass: number | null;
   passesTotal: number;
+  /** what the lab shows for the task's question (the mover's blink and ruler, the red source's spectrum, the anomaly's bins) */
+  extra?: ComponentChildren;
+  /** the other overlays are on show (off by default in a task about one object); and the switch for it */
+  others: boolean;
+  setOthers: (on: boolean) => void;
 }
 
 /** The Task panel, or null when the lab has no task. */
@@ -312,7 +356,7 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
         stop = true;
       };
     }
-    void takeTask(task.kind, task.kind === 'cell' ? task.cell_id : task.finding_id).then((t) => {
+    void takeTask(task.kind as Takeable, task.kind === 'cell' ? task.cell_id : task.finding_id).then((t) => {
       if (stop) return;
       if (t === 'failed' || !t) setLine(t === 'failed' ? 'Tasks did not answer' : 'No task here');
       else {
@@ -352,14 +396,20 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
         local_hour: new Date().getHours(),
       });
       // what the answer earned: one status item each, on the lab's own status line
-      const got = (r.json ?? {}) as { points?: number; achievements?: { name?: string }[] };
+      const got = (r.json ?? {}) as {
+        points?: number;
+        achievements?: { name?: string }[];
+        agreement?: { answers?: number; needed?: number };
+      };
       const items = [
         ...(got.achievements ?? []).map((x) => `Achievement: ${x.name ?? ''}`),
         ...(typeof got.points === 'number' && got.points > 0 ? [`+${got.points} points`] : []),
+        // red sources and anomalies settle by agreement: how many answers the find has so far
+        ...(got.agreement?.answers != null ? [`${got.agreement.answers} of ${got.agreement.needed ?? 3} answers`] : []),
       ];
       if (items.length) award = { text: items.join(' · '), until: Date.now() + 12000 };
     }
-    const next = await takeTask(task.kind as 'cell' | 'finding');
+    const next = await takeTask(task.kind as Takeable);
     setBusy(false);
     const to = next && next !== 'failed' && next.id !== id ? taskParams(next) : null;
     if (to) a.open(to);
@@ -389,36 +439,43 @@ export function useLabTask(a: TaskArgs): ComponentChildren {
     </button>
   );
   const n = a.marksHere.length;
+  const T = TASKS[task.kind];
   return (
     <div class={`taskpanel k-${task.kind}`} data-testid="task-panel">
       <div class="tp-head">
         <b>Task</b>
-        <span>{task.kind === 'cell' ? 'Look through a square' : task.kind === 'finding' ? 'Check a machine finding' : 'Bring a finding to submit'}</span>
+        <span>{T.title}</span>
+        {focusKind(task.kind) && (
+          <label class="tp-others" title="Show the other rings and names of the field as usual (in a task only the object in question is bright)">
+            <input type="checkbox" checked={a.others} onChange={(e) => a.setOthers((e.target as HTMLInputElement).checked)} data-testid="task-others" />
+            <span>Other objects</span>
+          </label>
+        )}
       </div>
-      <div class="tp-ask">
-        {task.kind === 'cell' ? 'Mark everything that moves and has no ring' : task.kind === 'finding' ? 'Is this a real object?' : 'Checks before submit'}
-      </div>
-      {task.kind !== 'cell' && <ChecksList view={checks.view} />}
+      <div class="tp-ask">{T.ask}</div>
+      {(task.kind === 'finding' || task.kind === 'submit') && <ChecksList view={checks.view} />}
+      {a.extra}
       <div class="tp-line" data-testid="task-line">
         {line ||
           (task.kind === 'cell'
             ? `${n} mark${n === 1 ? '' : 's'} in this square`
-            : checksStatus(checks.view) || (task.kind === 'finding' ? 'Checks wait for a mark on the object' : ''))}
+            : task.kind === 'finding' || task.kind === 'submit'
+              ? checksStatus(checks.view) || (task.kind === 'finding' ? 'Checks wait for a mark on the object' : '')
+              : '')}
       </div>
-      <div class="tp-btns">
-        {task.kind === 'cell' && (
-          <>
-            {btn('Nothing here', () => void close('nothing'), false, false, 'task-nothing')}
-            {btn('Done, with marks', () => void close('marks'), n === 0, true, 'task-marks')}
-          </>
-        )}
-        {task.kind === 'finding' && (
-          <>
-            {btn('It moves', () => void close('moves'), false, true, 'task-moves')}
-            {btn('Artefact', () => void close('artefact'), false, false, 'task-artefact')}
-            {btn('Known object', () => void close('known'), false, false, 'task-known')}
-          </>
-        )}
+      <div class={`tp-btns n${T.answers.length}`}>
+        {T.answers.map(([result, text, tip], k) => (
+          <button
+            key={result}
+            class={`btn sm${(task.kind === 'cell' ? result === 'marks' : k === 0) ? ' primary' : ''}${result === 'cant_tell' ? ' quiet' : ''}`}
+            disabled={busy || (task.kind === 'cell' && result === 'marks' && n === 0)}
+            title={tip}
+            onClick={() => void close(result)}
+            data-testid={`task-${result}`}
+          >
+            {text}
+          </button>
+        ))}
         {task.kind === 'submit' && btn('Check and submit', () => void declare(), !a.fieldKey || checks.view.state === 'running', true, 'task-check')}
       </div>
     </div>
