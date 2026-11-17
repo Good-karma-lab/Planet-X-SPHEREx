@@ -2,6 +2,7 @@
 // small still, its name or place, one line of what it is and one status badge. Known ones follow, dimmer, and never count.
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { visibleInterval } from '../../lib/idle';
 
 export type FindStatus = 'unexplained' | 'checking' | 'jpl' | 'known';
 export const STATUS_WORD: Record<FindStatus, string> = {
@@ -82,8 +83,8 @@ function Still({ uv, picture }: { uv: [number, number] | null; picture: () => HT
       }
     };
     draw();
-    const t = setInterval(draw, 4000);
-    return () => clearInterval(t);
+    // the picture changes with the pass: the still follows it every 4 s, never in a hidden tab
+    return visibleInterval(draw, 4000);
   }, [key]);
   // a find that is not on the picture on show (a track inside one pass) keeps the place of its still, empty
   return <canvas ref={cv} class="cr-still" style={{ visibility: uv ? 'visible' : 'hidden' }} width={STILL * 2} height={STILL * 2} aria-hidden="true" />;

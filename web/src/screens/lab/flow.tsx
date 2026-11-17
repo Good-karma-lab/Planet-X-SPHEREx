@@ -207,6 +207,8 @@ export interface LabFlow {
   card: ComponentChildren;
   /** the field's marks, one row per mark (Task tab) */
   marksList: ComponentChildren;
+  /** people set the machine's find at this place aside (spec §5g): it leaves the field's list */
+  asideAt(ra: number, dec: number): boolean;
   /** on the picture's status line: the investigation of the field, opening it in the Cabinet */
   chip: ComponentChildren;
   /** a mark's card is open: the Object tab is the mark's alone */
@@ -272,22 +274,23 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   tapRef.current = tapHere;
   // the People's marks of this field (GET /api/field/{key}/people): places merged by kind with counts, words only where I said something
   type PeoplePlace = { ra: number; dec: number; people: number; mine: boolean; seen: boolean; text?: string; kinds?: { kind: string }[] };
-  const [people, setPeople] = useState<{ key: string; state: 'running' | 'done' | 'failed'; places: PeoplePlace[] }>({ key: '', state: 'running', places: [] });
+  type PeopleFind = { finding_id: string; ra: number; dec: number; seen: boolean; set_aside?: boolean };
+  const [people, setPeople] = useState<{ key: string; state: 'running' | 'done' | 'failed'; places: PeoplePlace[]; finds: PeopleFind[] }>({ key: '', state: 'running', places: [], finds: [] });
   const peopleRef = useRef(people);
   peopleRef.current = people;
   const pKey = fieldKey(a.ra, a.dec, a.fov);
+  // read whether or not the layer is drawn: a find people set aside leaves this field's list for everyone
   useEffect(() => {
-    if (!a.people) return;
     let stop = false;
-    setPeople((x) => (x.key === pKey ? x : { key: pKey, state: 'running', places: [] }));
+    setPeople((x) => (x.key === pKey ? x : { key: pKey, state: 'running', places: [], finds: [] }));
     fetch(`/api/field/${encodeURIComponent(pKey)}/people`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-      .then((d: { places?: PeoplePlace[] }) => !stop && setPeople({ key: pKey, state: 'done', places: d.places ?? [] }))
-      .catch(() => !stop && setPeople({ key: pKey, state: 'failed', places: [] }));
+      .then((d: { places?: PeoplePlace[]; finds?: PeopleFind[] }) => !stop && setPeople({ key: pKey, state: 'done', places: d.places ?? [], finds: d.finds ?? [] }))
+      .catch(() => !stop && setPeople({ key: pKey, state: 'failed', places: [], finds: [] }));
     return () => {
       stop = true;
     };
-  }, [a.people, pKey, marks.length, marks.map((m) => m.kind ?? '').join(',')]);
+  }, [pKey, marks.length, marks.map((m) => m.kind ?? '').join(',')]);
   // another field (or the next task) starts with no tool: a Mark or Ruler left on would take the first click there
   useEffect(() => {
     setTool(null);
@@ -1398,6 +1401,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       </>
     ),
     marksList,
+    asideAt: (ra, dec) => people.key === pKey && people.finds.some((f) => f.set_aside && sep(ra, dec, Number(f.ra), Number(f.dec)) < 6),
     chip,
     markOpen: !!cur,
     catalogueAt: (ra, dec, year) => catalogueAt(knownRef.current, ra, dec, year).object,

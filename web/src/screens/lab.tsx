@@ -3179,7 +3179,7 @@ export function Lab({ route }: { route: Route }) {
     setCandSel(key);
     f();
   };
-  const findRows: FindRow[] = [
+  const findRowsAll: FindRow[] = [
     ...(mvr?.tracks ?? []).map((t, i): FindRow => {
       const nm = trackNames[i] || t.name || '';
       const named = !!nm && !nm.startsWith('Gaia DR3');
@@ -3187,6 +3187,8 @@ export function Lab({ route }: { route: Route }) {
       const dnow = t.dec_2025_9 + (t.v_north * yrs) / 3600;
       return {
         key: `mover:${i}`,
+        ra: t.ra_2025_9,
+        dec: t.dec_2025_9,
         name: nm || placeWord(t.ra_2025_9, t.dec_2025_9),
         line: `moves ${rateText(t)} toward ${t.pa.toFixed(0)}° · ${t.passes.length} passes`,
         status: t.check === 'same' || named ? 'known' : t.check === 'pending' ? 'checking' : 'unexplained',
@@ -3287,6 +3289,8 @@ export function Lab({ route }: { route: Route }) {
       pick: rowPick(`px:${i}`, l.open),
     })),
   ];
+  // a find people set aside (two agreed it is an artefact) leaves the list, as it leaves Findings
+  const findRows = findRowsAll.filter((r) => r.ra == null || r.dec == null || !flow.asideAt(r.ra, r.dec));
   const foundCount = unexplainedCount(findRows);
   const unexplainedOf = (g: 'red' | 'anomaly') => findRows.filter((r) => r.group === g && r.status === 'unexplained').length;
   const fieldOn = valid && !!meta;
