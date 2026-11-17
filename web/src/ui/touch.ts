@@ -228,3 +228,16 @@ export function installLoupe(doc: Document = document): () => void {
     glass?.remove();
   };
 }
+
+/**
+ * The globe's Coverage legend on a phone is one line (the count of squares); a tap on it opens the key to the colours, a second tap
+ * closes it. On wider windows the legend is always whole and the class this sets has no rule.
+ */
+export function installLegend(doc: Document = document): () => void {
+  const tap = (e: MouseEvent) => {
+    const l = (e.target as Element | null)?.closest?.('.cov-legend');
+    if (l) l.classList.toggle('open');
+  };
+  doc.addEventListener('click', tap);
+  return () => doc.removeEventListener('click', tap);
+}
