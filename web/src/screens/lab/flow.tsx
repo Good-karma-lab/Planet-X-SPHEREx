@@ -385,6 +385,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     setInvLine('');
     setInvList(null);
   }, [a.ra, a.dec, a.fov, open, a.sel?.ra, a.sel?.dec]);
+  // the chip is the investigation of the field it was added from: another field has none until something is added there
+  useEffect(() => setInv(null), [a.ra, a.dec, a.fov]);
   const openInvList = async () => {
     if (invList) return setInvList(null);
     setInvLine('');

@@ -318,7 +318,8 @@ export function matchKnown(
   for (const p of peaks) {
     const hit = cat.near(p.x, p.y, r);
     if (hit) shown.add(hit.o.id);
-    else if (p.snr >= NOMATCH_SIGMA && !dcat.near(p.x, p.y, rd) && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r)) noMatch.push({ u: p.x / n, v: p.y / n, snr: p.snr });
+    // a bump in a diffuse glow is the halo of a bright star (which may lie outside the frame), not a source without a match
+    else if (p.snr >= NOMATCH_SIGMA && !p.glow && !dcat.near(p.x, p.y, rd) && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r)) noMatch.push({ u: p.x / n, v: p.y / n, snr: p.snr });
   }
   return { shown, noMatch };
 }

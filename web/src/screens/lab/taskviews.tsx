@@ -226,7 +226,7 @@ export function RedView({ src, show, passes }: { src: Source | null; show: strin
                 {name}
                 {st ? <em> · {st}</em> : null}
               </div>
-              <SpecPlot bins={b} height={44} testid={k === 0 ? 'task-spectrum' : undefined} />
+              <SpecPlot bins={b} height={38} testid={k === 0 ? 'task-spectrum' : undefined} />
             </div>
           ))}
         </>

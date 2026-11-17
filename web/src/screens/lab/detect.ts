@@ -8,6 +8,9 @@ export interface Peak {
   y: number;
   /** its height above the background, in sigmas */
   snr: number;
+  /** it stands in a diffuse glow (the halo of a bright star, which may lie outside the frame): the sky around it, 7 pixels
+   *  away, is well above the picture's background */
+  glow?: boolean;
 }
 
 /** a peak this many sigmas above the background is a source the eye sees on the picture */
@@ -17,6 +20,25 @@ export const NOMATCH_SIGMA = 8;
 /** peaks closer than this to the picture's edge are not counted (grid pixels) */
 const EDGE = 3;
 const MAX_PEAKS = 6000;
+/** the ring around a peak where the sky is sampled for a glow: radius in grid pixels, and how far above the background (sigmas)
+ *  its median must be */
+export const GLOW_RADIUS = 7;
+export const GLOW_SIGMA = 4;
+
+/** The median of the picture on a ring around a place (16 samples); NaN when the ring leaves the picture. */
+function ringMedian(v: Float32Array, n: number, x: number, y: number, r: number): number {
+  const vals: number[] = [];
+  for (let k = 0; k < 16; k++) {
+    const a = (k * Math.PI) / 8;
+    const px = Math.round(x + r * Math.cos(a));
+    const py = Math.round(y + r * Math.sin(a));
+    if (px < 0 || py < 0 || px >= n || py >= n) continue;
+    vals.push(v[py * n + px]!);
+  }
+  if (vals.length < 8) return NaN;
+  vals.sort((p, q) => p - q);
+  return vals[Math.floor(vals.length / 2)]!;
+}
 
 /** Local maxima (over a 5×5 neighbourhood) of the mean of the three colour planes, at least `DETECT_SIGMA` above the background. */
 export function findPeaks(rgb: Uint16Array, n: number, bg: number, sigma: number): Peak[] {
@@ -45,7 +67,10 @@ export function peaksOf(v: Float32Array, n: number, bg: number, sigma: number): 
             break;
           }
         }
-      if (top) out.push({ x: x + 0.5, y: y + 0.5, snr: (c - bg) / sigma });
+      if (top) {
+        const around = ringMedian(v, n, x, y, GLOW_RADIUS);
+        out.push({ x: x + 0.5, y: y + 0.5, snr: (c - bg) / sigma, ...(around > bg + GLOW_SIGMA * sigma ? { glow: true } : {}) });
+      }
     }
   if (out.length > MAX_PEAKS) out.sort((a, b) => b.snr - a.snr).splice(MAX_PEAKS);
   return out;
