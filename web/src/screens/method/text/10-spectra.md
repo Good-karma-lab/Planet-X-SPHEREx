@@ -34,7 +34,7 @@ When the core is saturated in more than half of the exposures that cover the pla
 
 ## The live spectrum
 
-A spectrum job publishes each exposure's point the moment it is fitted, so you watch the spectrum grow. Each point carries the index `i` of its exposure in the list of exposures that cover the place. The page asks every 0.35 s for the points it does not hold yet (a cursor, `since = points already held`), draws them coloured by detector, and rings the exposure under study; at the end it fetches the finished list once more, because deviating points are only marked when all points are in. A finished spectrum is kept on disk and served at once.
+A spectrum job publishes each exposure's point the moment it is fitted, so you watch the spectrum grow. Each point carries the index `i` of its exposure in the list of exposures that cover the place. A point whose exposure people called broken, or in which people saw a neighbour star touch the find, is kept on the chart but left out of the fit, with the reason. The page asks every 0.35 s for the points it does not hold yet (a cursor, `since = points already held`), draws them coloured by detector, and rings the exposure under study; at the end it fetches the finished list once more, because deviating points are only marked when all points are in. A finished spectrum is kept on disk and served at once.
 
 For every exposure we also keep the pixels of the fit: the 15 × 15 pixels of the file around the source, and three 7 × 7 stamps: pixels used (background removed), flux × PSF, and the residual, with the mask of pixels used. A play button replays the build-up one exposure per 90 ms and a slider scrubs through the exposures; the file pixels, the model and the residual of the exposure at hand are shown beside the chart. The points can be downloaded as a CSV file (exposure index, MJD, detector, wavelength, flux, error, used or not, reason).
 
@@ -44,13 +44,13 @@ For every exposure we also keep the pixels of the fit: the 15 × 15 pixels of th
 
 To know that the numbers are right we compare the spectrum with catalogue photometry of the same star. We average the used points under the filter curves of 2MASS J, H, Ks and WISE W1, W2 (photon counting: the mean of the flux weighted by `T(λ)/λ`; curves from the [SVO Filter Profile Service](https://svo2.cab.inta-csic.es/theory/fps/)) and compare with `F0 · 10^(−0.4 m)`.
 
-| Band | Zero point F0 (Jy) | Catalogue | Epoch |
-|---|---|---|---|
-| J | 1594 | 2MASS point-source catalogue | 1999.5 |
-| H | 1024 | 2MASS | 1999.5 |
-| Ks | 666.7 | 2MASS | 1999.5 |
-| W1 | 309.54 | AllWISE | 2010.5 |
-| W2 | 171.79 | AllWISE | 2010.5 |
+| Band | Zero point F0 (Jy) | Catalogue                    | Epoch  |
+| ---- | ------------------ | ---------------------------- | ------ |
+| J    | 1594               | 2MASS point-source catalogue | 1999.5 |
+| H    | 1024               | 2MASS                        | 1999.5 |
+| Ks   | 666.7              | 2MASS                        | 1999.5 |
+| W1   | 309.54             | AllWISE                      | 2010.5 |
+| W2   | 171.79             | AllWISE                      | 2010.5 |
 
 We ask [IRSA](https://irsa.ipac.caltech.edu/) for the catalogue source within 3″ of the place moved to each survey's epoch; if there are several the nearest is used and the page says it is a blend. A band is compared only with photometric quality A or B, and only where the spectrum covers the filter without a hole: the used points are binned at 0.04 µm (median), at least 20 points and 4 bins are needed, and no gap between bins may exceed 0.15 µm. W2 reaches beyond SPHEREx's 5 µm: it is shown, not compared. The page shows for each band the spectrum under the filter, the catalogue flux with its magnitude, and the ratio (flagged when it is more than 25 % from 1). The comparison runs after the points and never delays them. A catalogue magnitude is from 1999 or 2010, so a variable source can differ.
 

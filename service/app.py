@@ -22,7 +22,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__, cpu, people_queue, quarters
+from service import __version__, cpu, exposure_flags, people_queue, quarters
 from service.accounts import get as accounts_get
 from service.accounts import register_accounts
 from service.anomalies import Anomalies
@@ -253,6 +253,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.quarters.bind(asyncio.get_running_loop())
         stock_task = None
         bd_task = None
+        flags_task = asyncio.get_running_loop().create_task(exposure_flags_loop())
         if os.environ.get("SKY_WARM", "1") == "1" and st.index is not None and not STANDBY and quarters.STOCK > 0:
             stock_task = asyncio.get_running_loop().create_task(quarter_stock_loop())
             st.bd_queue = people_queue.BDQueue(st)
@@ -264,6 +265,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             stock_task.cancel()
         if bd_task is not None:
             bd_task.cancel()
+        flags_task.cancel()
         if st.grid_import is not None:
             st.grid_import.cancel()
         if st.findings is not None:
@@ -306,6 +308,13 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         return key, st.scheduler.submit(fieldjob.KIND, key, params, fn, priority, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
 
     st.submit_field = submit_field  # the square quarters build ahead with it (service/quarters.py)
+
+    async def exposure_flags_loop() -> None:
+        """The exposures people agreed are broken, read every minute (service/exposure_flags.py)."""
+        while True:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(exposure_flags.refresh, st)
+            await asyncio.sleep(60.0)
 
     async def bd_queue_loop() -> None:
         """The sources people sent to the brown-dwarf search, looked at one at a time (service/people_queue.py)."""
@@ -959,11 +968,20 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         pmdec: float = Query(0.0, ge=-20000, le=20000),
         epoch: float = Query(2000.0, ge=1900, le=2100),
         since: int = Query(0, ge=0),
+        finding: str | None = Query(None, max_length=80, pattern=r"^[a-z]+:[0-9a-f]{6,40}$"),
     ) -> Any:
-        """The spectrum of a place: the points measured so far (from `since` on); the first request starts the measurement."""
+        """The spectrum of a place: the points measured so far (from `since` on); the first request starts the measurement. The
+        exposures people agreed are broken are marked left out (service/exposure_flags.py); with `finding`, also those people saw a
+        neighbour star touch for that find."""
         if st.spectra is None:
             raise HTTPException(503, "the exposure index is not loaded")
         params = spectrum_params(ra, dec, pmra, pmdec, epoch)
+        neighbour: set[str] = set()
+        if finding is not None:  # people agreed a neighbour star touches this find in some exposures: those are left out of its spectrum
+            with contextlib.suppress(Exception):
+                from service.accounts import people as people_mod
+
+                neighbour = await asyncio.to_thread(people_mod.left_out, st, finding)
         run = st.spectra.get(params)
         if run is None:
             wait = st.new_work.take(client_id(request, st.salt))
@@ -972,7 +990,10 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                     {"error": "too many new measurements from this address; try again shortly"}, 429, {"Retry-After": f"{wait:.0f}"}
                 )
             run = st.spectra.start(params)
-        return run.view(since)
+        view = run.view(since)
+        if exposure_flags.bad() or neighbour:
+            view["points"] = exposure_flags.mark_points(view.get("points") or [], neighbour)
+        return view
 
     @app.get(f"{API_PREFIX}/coverage")
     def coverage_here(

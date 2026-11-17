@@ -28,8 +28,13 @@ const wanted = (): string | null => {
 
 // Numbers on this page that the layout itself carries come from runs on the production service.
 // the version of this account: bumped, with a line in CHANGES, whenever an algorithm or a constant it states changes
-export const METHOD_VERSION = { id: 'M38', date: '2026-11-17' };
+export const METHOD_VERSION = { id: 'M39', date: '2026-11-17' };
 const CHANGES: [string, string, string][] = [
+  [
+    'M39',
+    '2026-11-17',
+    "People's answers change the machine: the question series of each kind of find with what each settled answer does (dropped before the slow checks, up the queue, set aside, the brown-dwarf search's queue); exposures two people call broken are left out of every stack and spectrum, and a field touched by one is made again; a neighbour star people see touching a find leaves those exposures out of its spectrum.",
+  ],
   [
     'M38',
     '2026-11-17',

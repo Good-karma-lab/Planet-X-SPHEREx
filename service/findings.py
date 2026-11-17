@@ -28,6 +28,7 @@ from typing import Any
 
 import httpx
 
+from service import people_tracks
 from service.bodies import SB_IDENT, _iso, _sexa_dec, _sexa_ra
 from service.products.store import Store
 from service.products.versions import VERSIONS
@@ -1534,10 +1535,12 @@ def query(
     visibility: str | None = None,
     aside: Mapping[str, dict[str, Any]] | None = None,
     raised: Mapping[str, str] | None = None,
+    tracks: Mapping[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """The finds with what the catalogues said. `aside`: the machine finds people set aside as artefacts ({id: {look, agree, total}},
     service/accounts/field_people.set_aside): their status is `set_aside`, kept out of the leads and the default list like a halo.
-    `raised`: the finds people raised up the queue ({id: why}, service/accounts/people.raised): first in the promise order. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
+    `raised`: the finds people raised up the queue ({id: why}, service/accounts/people.raised): first in the promise order.
+    `tracks`: what people said about tracks (service/people_tracks.read): a corrected track is under data["people_track"]. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
     stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
     the old one). Every find also carries the flow fields (flow_fields)."""
     with _READ:
@@ -1554,6 +1557,8 @@ def query(
             "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "updated": r["updated"],
             "versions": json.loads(r["versions"] or "{}"), **rel[r["id"]],
         }  # fmt: skip
+        if tracks and r["id"] in tracks:
+            f = people_tracks.apply(f, tracks[r["id"]])
         ids_ = idents[r["id"]]
         have = {i["catalogue"] for i in ids_}
         for c in want_of(r["kind"], r["ra"], r["dec"], f["data"]):

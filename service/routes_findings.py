@@ -60,6 +60,22 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         v: dict[str, dict[str, Any]] = aside_cache["v"]
         return v
 
+    tracks_cache: dict[str, Any] = {"at": 0.0, "v": {}}
+
+    def people_tracks_said() -> dict[str, dict[str, Any]]:
+        """What people said about tracks (missing visits, re-centred and found-again taps), read every 30 s at most."""
+        now = time.time()
+        if now - tracks_cache["at"] > 30.0:
+            try:
+                from service import people_tracks
+
+                tracks_cache["v"] = people_tracks.read(st)
+            except Exception:  # no accounts here: nobody said anything
+                tracks_cache["v"] = {}
+            tracks_cache["at"] = now
+        v: dict[str, dict[str, Any]] = tracks_cache["v"]
+        return v
+
     raised_cache: dict[str, Any] = {"at": 0.0, "v": {}}
 
     def people_raised() -> dict[str, str]:
@@ -156,6 +172,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         rank = clips.rank if clips is not None else None
         aside = await asyncio.to_thread(people_aside)
         raised = await asyncio.to_thread(people_raised)
+        tracks = await asyncio.to_thread(people_tracks_said)
         body: dict[str, Any] = await asyncio.to_thread(
             lambda: query(
                 f.db,
@@ -176,6 +193,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 visibility=visibility,
                 aside=aside,
                 raised=raised,
+                tracks=tracks,
             )
         )
         body = enrich(body)
@@ -186,11 +204,16 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
     async def one(find_id: str) -> Any:
         f = need()
         aside = await asyncio.to_thread(people_aside)
-        body: dict[str, Any] = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), aside=aside))
+        tracks = await asyncio.to_thread(people_tracks_said)
+        body: dict[str, Any] = await asyncio.to_thread(
+            lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), aside=aside, tracks=tracks)
+        )
         hidden: dict[str, Any] = {"finds": []}
         if not any(x["id"] == find_id for x in body["finds"]) and find_row(f.db, find_id) is not None:
             for hs in ("residual", "galaxy", "below", "halo", "set_aside"):  # a find kept out of the lists still has its page
-                hidden = await asyncio.to_thread(partial(query, f.db, None, hs, None, 5000, 0, flow=flow_of(st), aside=aside))
+                hidden = await asyncio.to_thread(
+                    partial(query, f.db, None, hs, None, 5000, 0, flow=flow_of(st), aside=aside, tracks=tracks)
+                )
                 if any(x["id"] == find_id for x in hidden["finds"]):
                     break
         for x in body["finds"] + hidden["finds"]:

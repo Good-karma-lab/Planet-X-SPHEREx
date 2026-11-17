@@ -24,6 +24,7 @@ from engine.diff import z_map
 from engine.field import PassProducts
 from engine.grid import grid_for_fov
 from indexer.store import Index
+from service import exposure_flags
 from service.jobs.scheduler import Context
 from service.products.store import Store
 from service.products.sxp import encode
@@ -210,7 +211,7 @@ async def run_field(
     return {"exposures": len(b.exposures), "passes": len(built)}
 
 
-_SIGNATURES: dict[tuple[str, int], str] = {}
+_SIGNATURES: dict[tuple[str, int, int], str] = {}
 
 
 def annotate(meta: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -245,7 +246,7 @@ def exposure_signature(index: Index, params: dict[str, Any]) -> str:
     version = getattr(index, "version", None)
     if version is None:  # an index without a version token (tests): no memory
         return _signature(index, params)
-    memo = (json.dumps(params, sort_keys=True), int(version()))
+    memo = (json.dumps(params, sort_keys=True), int(version()), exposure_flags.version())
     hit = _SIGNATURES.get(memo)
     if hit is not None:
         return hit
@@ -260,7 +261,11 @@ def _signature(index: Index, params: dict[str, Any]) -> str:
     found = index.overlapping(params["ra"], params["dec"], params["fov"] / 60.0 / 2.0 * 2**0.5)
     import hashlib
 
-    return hashlib.sha256(json.dumps(sorted(e.key for e in found)).encode()).hexdigest()[:16]
+    keys = sorted(e.key for e in found)
+    # the exposures people agreed are broken that touch this field (service/exposure_flags.py): a field without any keeps its key
+    broken = [k for k in keys if k in exposure_flags.bad()]
+    body: Any = keys if not broken else {"exposures": keys, "left_out": broken}
+    return hashlib.sha256(json.dumps(body).encode()).hexdigest()[:16]
 
 
 # ---- compute of the published parts (module level: these run in worker processes) -------------------------------------------------
