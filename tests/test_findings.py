@@ -241,6 +241,8 @@ def test_film_tracks_all_listed_with_their_own_control(tmp_path: Path) -> None:
     by = {f["data"]["track"]["method"]: f for f in finds}
     assert len(finds) == 2 and by["orbit"]["chance"] == 0.04 and not by["orbit"]["data"]["less_certain"]
     assert by["line"]["data"]["less_certain"] and by["line"]["chance"] == 0.0
+    # the lab opens a film on the film's own field (warm), not on a new field centred on the track
+    assert by["orbit"]["data"]["field_params"] == {"ra": 10.0, "dec": 5.0, "fov": 60.0}
 
 
 def test_slow_motions_are_not_finds(tmp_path: Path) -> None:

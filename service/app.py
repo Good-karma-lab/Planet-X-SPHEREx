@@ -272,7 +272,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         # standby, unless SKY_SWEEP=0; it gives way to people, the stock, the disk and the archive by itself
         sweep_env = os.environ.get("SKY_SWEEP", "1")
         if background and (sweep_env == "force" or (sweep_env == "1" and os.environ.get("SKY_WARM", "1") == "1")):
-            st.sweep = sweep_runner.SweepRunner(st, sweep_searches, sweep_planetx)
+            st.sweep = sweep_runner.SweepRunner(st, sweep_searches, sweep_planetx, lambda: sweep_runner.top_find_fields(st))
             sweep_task = asyncio.get_running_loop().create_task(sweep_loop())
         yield
         if warm_task is not None:

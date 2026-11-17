@@ -60,7 +60,7 @@ CATALOGUE_LABEL = {
 MOVING = (
     "film",
 )  # asked of JPL Small-Body Identification: only tracks within one pass move like an asteroid (the movers between passes are stars)
-COLLECT_REV = 6
+COLLECT_REV = 7  # 7: film finds carry their field (field_params)
 IDENT_RANK = {
     "peak": 0,
     "mover": 0,
@@ -425,6 +425,8 @@ def collect(
                             "mjd": mjd,
                             "visits": visits,
                             "film": p.get("mjd"),
+                            # the lab opens the film's own field (warm, pinned), not a new field centred on the track (M1: a cold build)
+                            "field_params": {"ra": float(p["ra"]), "dec": float(p["dec"]), "fov": float(p.get("fov", 60))},
                             "control": ctl,
                             "less_certain": line,
                             "controls_per_search": per_search,

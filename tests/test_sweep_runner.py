@@ -161,3 +161,56 @@ def test_the_archive_backoff_waits_for_given_up_reads_or_a_burst(tmp_path: Path)
     assert r._archive_troubled(before)
     stats.failures, stats.retries = 3 + sweep_runner.RETRY_BURST, 3 + sweep_runner.RETRY_BURST  # a burst of retries
     assert r._archive_troubled(before)
+
+
+def test_a_top_finds_lab_field_is_built_before_the_next_square(tmp_path: Path) -> None:
+    r, _st, asked = make(tmp_path)
+    want = [{"ra": 60.71158, "dec": 8.617, "fov": 60.0}, {"ra": 10.0, "dec": 5.0, "fov": 10.0}]
+    reads: list[int] = []
+
+    def lab_fields() -> list[dict[str, Any]]:
+        reads.append(1)
+        return list(want)
+
+    r.lab_fields = lab_fields
+    first = r.next_lab_field()
+    assert first == want[0]
+    got = asyncio.run(r.lab_field(first))
+    assert got["state"] == "warmed" and asked[-1] == (want[0], Priority.P2) and r.status["lab_fields_today"] == 1
+    assert r.next_lab_field() == want[1]
+    assert r.next_lab_field() is None and len(reads) == 1  # the list is read again only every LAB_STOCK_EVERY_S
+
+
+def test_the_top_finds_fields_are_the_labs_and_built_ones_are_left(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import findings
+    from service.products.store import product_key
+
+    finds = [
+        {"kind": "film", "ra": 60.6089, "dec": 8.3985, "data": {"field_params": {"ra": 60.71158333, "dec": 8.617, "fov": 60.0}}},
+        {"kind": "film", "ra": 1.0, "dec": 1.0, "data": {}},  # an old film without its field: left
+        {"kind": "mover", "ra": 120.0, "dec": -30.0, "data": {"field_params": {"ra": 120.1, "dec": -30.1, "fov": 20.0}}},
+        {"kind": "browndwarf", "ra": 200.0, "dec": 10.0, "data": {}},
+    ]
+    asked: list[dict[str, Any]] = []
+
+    def query(db: Any, kind: Any, status: Any, place: Any, limit: int, offset: int, **k: Any) -> dict[str, Any]:
+        asked.append({"limit": limit, **k})
+        return {"finds": finds}
+
+    monkeypatch.setattr(findings, "query", query)
+    monkeypatch.setattr(fieldjob, "exposure_signature", lambda index, params: "sig")
+    store = Store(tmp_path / "store")
+    st = SimpleNamespace(findings=SimpleNamespace(db=object()), findings_flow=object(), index=object(), store=store)
+    got = sweep_runner.top_find_fields(st)
+    film = fieldjob.canonical(60.71158333, 8.617, 60.0)
+    assert got == [
+        film,
+        fieldjob.canonical(120.0, -30.0, 10.0),
+        fieldjob.canonical(200.0, 10.0, 10.0),
+    ]  # a film on its field; others 10′ on the object
+    assert asked[0]["limit"] == sweep_runner.LAB_STOCK and asked[0]["sort"] == "promise"
+    key = product_key(fieldjob.KIND, film, extra=("sig",))
+    store.begin("field", key, film)
+    store.write_meta("field", key, {"passes": [{}, {}]})
+    store.complete(key)
+    assert film not in sweep_runner.top_find_fields(st)  # built: left
