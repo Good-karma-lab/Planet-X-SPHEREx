@@ -3361,17 +3361,6 @@ export function Lab({ route }: { route: Route }) {
                   </select>
                 </label>
               </div>
-              {/* touch windows: the Mark tool on the picture itself, so that it is not looked for in the panel (not displayed on a desktop) */}
-              <button
-                type="button"
-                class={`float fmark touch-only${flow.tool === 'mark' ? ' on' : ''}`}
-                aria-pressed={flow.tool === 'mark'}
-                disabled={!flow.markable}
-                onClick={() => flow.setTool(flow.tool === 'mark' ? null : 'mark')}
-                data-testid="touch-mark"
-              >
-                Mark
-              </button>
               <div class="float fstatus" data-testid="lab-status" title={film !== null ? daysStatus : status}>
                 {note ||
                   (bandsWait

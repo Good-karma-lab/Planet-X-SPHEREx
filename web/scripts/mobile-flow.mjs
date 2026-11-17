@@ -180,13 +180,21 @@ try {
   });
 
   let marks0 = 0;
+  // the task panel says how many marks the square has (a signed-in user's marks live in the account, a guest's in the browser)
+  const marksNow = () => page.getByTestId('task-line').innerText().then((t) => Number(/(\d+) marks?/.exec(t)?.[1] ?? NaN));
   await step('lab: a mark is put by sliding under the magnifier, where the finger lifts', async () => {
-    marks0 = await page.evaluate(() => JSON.parse(localStorage.getItem('spherex-marks') ?? '[]').length).catch(() => 0);
-    const mark = page.getByTestId('touch-mark');
+    const before = await marksNow();
+    // the Mark tool is on the picture itself (the lab's tool strip)
+    const mark = page.getByTestId('tool-strip').getByTestId('tool-mark');
+    const mb = await box(mark);
+    if (mb.width < 44 || mb.height < 44) throw new Error(`the Mark tool is ${Math.round(mb.width)} × ${Math.round(mb.height)} px`);
     if ((await mark.getAttribute('aria-pressed')) !== 'true') await mark.tap();
     const p = await box(page.getByTestId('picture'));
-    const from = [p.x + p.width * 0.35, p.y + p.height * 0.5];
-    const to = [p.x + p.width * 0.55, p.y + p.height * 0.38];
+    // a new place each run: lifting on a mark left by an earlier run opens that mark instead of putting one
+    const rx = 0.3 + Math.random() * 0.4;
+    const ry = 0.3 + Math.random() * 0.25;
+    const from = [p.x + p.width * (rx - 0.15), p.y + p.height * (ry + 0.1)];
+    const to = [p.x + p.width * rx, p.y + p.height * ry];
     let glass = null;
     await slide(from, to, 12, async () => {
       glass = await page.locator('canvas.loupe').boundingBox({ timeout: 3000 }).catch(() => null);
@@ -195,20 +203,19 @@ try {
     if (!glass) throw new Error('no magnifier while the finger was down');
     // above the finger, or beside it near the top of the window: never over the point itself
     if (to[0] > glass.x - 8 && to[0] < glass.x + glass.width + 8 && to[1] > glass.y - 8 && to[1] < glass.y + glass.height + 8) throw new Error('the magnifier covers the point under the finger');
-    await page.getByTestId('mark-editor').waitFor({ timeout: 8000 });
+    await page.waitForFunction((n) => Number(/(\d+) marks?/.exec(document.querySelector('[data-testid="task-line"]')?.textContent ?? '')?.[1]) === n + 1, before, { timeout: 8000 });
     await page.waitForTimeout(400);
-    await shot('06-mark-editor');
-    const ed = await box(page.getByTestId('mark-editor'));
-    if (to[0] >= ed.x && to[0] <= ed.x + ed.width && to[1] >= ed.y && to[1] <= ed.y + ed.height) throw new Error('the editor covers the point of the mark');
-    await page.getByTestId('mark-label').fill('Touch mark');
-    return `editor at ${Math.round(ed.y)} px, the point at ${Math.round(to[1])} px`;
+    await shot('06-mark-put');
+    // nothing may lie over the point just marked
+    const top = await page.evaluate(([x, y]) => {
+      const e = document.elementFromPoint(x, y);
+      return e ? (e.closest('.float, .panel, .rail') ? e.closest('.float, .panel, .rail').className : '') : '';
+    }, to);
+    if (top) throw new Error(`the point of the mark is covered by "${top}"`);
+    return `one mark more (${before} → ${before + 1}), the point is in sight`;
   });
 
   await step('lab: the sheet goes up by a tap on its grabber and by a drag, the picture keeps its size', async () => {
-    // the editor is closed first (its own close button)
-    const x = page.getByTestId('mark-editor').locator('button').first();
-    await x.tap();
-    await page.getByTestId('mark-editor').waitFor({ state: 'hidden' });
     const grip = page.getByTestId('sheet-grip');
     if (!(await grip.isVisible())) return 'no sheet in this layout: the panel is a pane beside the picture';
     const p0 = await box(page.getByTestId('picture'));

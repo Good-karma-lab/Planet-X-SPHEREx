@@ -553,28 +553,6 @@
     top: 52px;
     left: 8px;
   }
-  /* the Mark tool on the picture (touch windows only) */
-  :root .vsq .float.fmark {
-    display: inline-flex;
-    right: 8px;
-    bottom: 8px;
-    min-width: 72px;
-    height: 44px;
-    padding: 0 14px;
-    justify-content: center;
-    border-radius: 12px;
-    font: 600 14px var(--font);
-    color: var(--ink);
-    cursor: pointer;
-  }
-  :root .vsq .fmark.on {
-    color: #06211f;
-    background: var(--accent);
-    border-color: var(--accent-l);
-  }
-  :root .vsq .fmark:disabled {
-    opacity: 0.45;
-  }
   /* band chips: one row under the picture, 44 px high, slides sideways */
   :root .vsq .fbands,
   :root .vsq.compact .fbands {
@@ -1294,30 +1272,6 @@
   :root .lab .vsq:not(.compact) .fstatus {
     bottom: 64px;
   }
-  /* the Mark tool on the picture, under the field-size picker */
-  :root .vsq .float.fmark {
-    display: inline-flex;
-    right: 10px;
-    top: 62px;
-    left: auto;
-    bottom: auto;
-    min-width: 72px;
-    height: 44px;
-    padding: 0 14px;
-    justify-content: center;
-    border-radius: 12px;
-    font: 600 14px var(--font);
-    color: var(--ink);
-    cursor: pointer;
-  }
-  :root .vsq .float.fmark.on {
-    color: #06211f;
-    background: var(--accent);
-    border-color: var(--accent-l);
-  }
-  :root .vsq .float.fmark:disabled {
-    opacity: 0.45;
-  }
   /* RA and Dec are typed in 16 px text: one under the other where the panel is narrow */
   :root .lab .coords {
     display: grid;
@@ -1525,29 +1479,6 @@
   /* the passes end before the fade */
   :root .tbar .tl-mid > * {
     width: calc(100vw - 112px);
-  }
-  /* "Mark" reads as a button: a lit edge, its sign, full contrast */
-  :root .vsq .float.fmark {
-    height: 46px;
-    padding: 0 14px 0 12px;
-    gap: 7px;
-    font-size: 15px;
-    color: var(--accent-l);
-    background: rgba(6, 24, 28, 0.9);
-    border: 1.5px solid var(--accent);
-    box-shadow:
-      0 0 0 1px rgba(0, 0, 0, 0.6),
-      0 6px 18px rgba(0, 0, 0, 0.55);
-  }
-  :root .vsq .float.fmark::before {
-    content: '';
-    width: 16px;
-    height: 16px;
-    background:
-      linear-gradient(currentColor, currentColor) 50% 0 / 2px 5px no-repeat,
-      linear-gradient(currentColor, currentColor) 50% 100% / 2px 5px no-repeat,
-      linear-gradient(currentColor, currentColor) 0 50% / 5px 2px no-repeat,
-      linear-gradient(currentColor, currentColor) 100% 50% / 5px 2px no-repeat;
   }
 
   /* ----- Findings: one short status line, every filter in ONE row that slides sideways ----- */
@@ -1948,30 +1879,6 @@
     font-size: 11px;
     white-space: normal;
   }
-  :root .vsq .float.fmark {
-    display: inline-flex;
-    right: 8px;
-    top: 56px;
-    left: auto;
-    bottom: auto;
-    height: 44px;
-    padding: 0 14px 0 12px;
-    gap: 7px;
-    justify-content: center;
-    border-radius: 12px;
-    font: 600 15px var(--font);
-    color: var(--accent-l);
-    background: rgba(6, 24, 28, 0.9);
-    border: 1.5px solid var(--accent);
-    cursor: pointer;
-  }
-  :root .vsq .float.fmark.on {
-    color: #06211f;
-    background: var(--accent);
-  }
-  :root .vsq .float.fmark:disabled {
-    opacity: 0.45;
-  }
   /* playback: at the top of the right column (it belongs to the picture's box in the page, so it is placed from there) */
   :root .lab .tbar {
     position: absolute;
@@ -2175,9 +2082,6 @@
   :root .vsq.compact .fstatus {
     bottom: 56px;
   }
-  :root .vsq .float.fmark {
-    bottom: 56px;
-  }
   :root .tbar {
     grid-template-rows: 46px 44px;
     gap: 2px 8px;
@@ -2270,27 +2174,6 @@
   :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] .lbl {
     display: inline;
   }
-  :root .vsq .float.fmark {
-    gap: 7px;
-    padding: 0 14px 0 12px;
-    font-size: 15px;
-    color: var(--accent-l);
-    background: rgba(6, 24, 28, 0.9);
-    border: 1.5px solid var(--accent);
-    box-shadow:
-      0 0 0 1px rgba(0, 0, 0, 0.6),
-      0 6px 18px rgba(0, 0, 0, 0.55);
-  }
-  :root .vsq .float.fmark::before {
-    content: '';
-    width: 16px;
-    height: 16px;
-    background:
-      linear-gradient(currentColor, currentColor) 50% 0 / 2px 5px no-repeat,
-      linear-gradient(currentColor, currentColor) 50% 100% / 2px 5px no-repeat,
-      linear-gradient(currentColor, currentColor) 0 50% / 5px 2px no-repeat,
-      linear-gradient(currentColor, currentColor) 100% 50% / 5px 2px no-repeat;
-  }
 }
 /* the globe's line of mouse words ("scroll to zoom, double-click") is not shown where the pointer is a finger */
 @media (max-width: 1279.98px) and (pointer: coarse) {
@@ -2349,5 +2232,91 @@
   :root .lp-nav a {
     min-width: var(--hit);
     justify-content: center;
+  }
+}
+
+/* =====================================================================================================================
+   The lab's picture tools (Mark, Ruler: the lab's own strip on the picture) on touch windows: 46 px buttons that read as
+   buttons, in the lower right corner of the picture where the thumb is; the field-size picker keeps its number clear of its arrow.
+   ===================================================================================================================== */
+@media (max-width: 1279.98px) {
+  :root .vsq .float.toolstrip {
+    gap: 8px;
+    padding: 0;
+    background: none;
+    border: 0;
+    box-shadow: none;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  :root .toolstrip button {
+    width: 46px;
+    height: 46px;
+    padding: 0;
+    border-radius: 13px;
+    color: var(--accent-l);
+    background: rgba(6, 24, 28, 0.9);
+    border: 1.5px solid var(--accent);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.6),
+      0 6px 18px rgba(0, 0, 0, 0.55);
+  }
+  :root .toolstrip button svg {
+    width: 22px;
+    height: 22px;
+  }
+  :root .toolstrip button.on {
+    color: #06211f;
+    background: var(--accent);
+    border-color: var(--accent-l);
+  }
+  :root .vsq .factions select {
+    width: auto;
+    min-width: 76px;
+    padding-left: 10px;
+  }
+  /* the card of a mark or an object in the panel: fields and buttons to a finger's size */
+  :root .objcard .inp {
+    min-height: var(--hit);
+  }
+  :root .objcard .oc-levels button {
+    min-height: var(--hit);
+  }
+}
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .vsq .float.toolstrip {
+    top: auto;
+    right: 8px;
+    bottom: 8px;
+    flex-direction: row;
+  }
+  :root .vsq .fstatus,
+  :root .vsq.compact .fstatus {
+    max-width: calc(100% - 124px);
+  }
+}
+@media (max-width: 599.98px) and (min-height: 480px) and (max-height: 739.98px) {
+  :root .vsq .float.toolstrip {
+    bottom: 56px;
+  }
+}
+@media (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
+  :root .vsq .float.toolstrip {
+    top: 62px;
+    right: 10px;
+    flex-direction: column;
+  }
+}
+
+/* ----- phones: a task's example picture belongs to the sheet pulled up; at rest the task is its question, one line and its
+   answers, so that the lab's own picture keeps its size ----- */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .lab .panel[data-detent='peek'] .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree),
+  :root .lab .panel:not([data-detent]) .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree) {
+    display: none;
+  }
+  :root .taskpanel .tp-tree,
+  :root .taskpanel .tp-others {
+    min-height: 0;
   }
 }
