@@ -268,7 +268,7 @@ async function run(sizeKey) {
       await shot('11-finding-open-full', true);
     });
 
-    for (const [i, s] of [['12', 'planetx'], ['13', 'index'], ['14', 'method'], ['15', 'about']]) {
+    for (const [i, s] of [['12', 'planetx'], ['13', 'index'], ['14', 'method'], ['15', 'about'], ['20', 'leaders']]) {
       await step(s, async () => {
         await go(`#/${s}`);
         await page.waitForTimeout(4000);
