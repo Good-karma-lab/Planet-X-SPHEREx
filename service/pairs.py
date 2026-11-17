@@ -23,7 +23,7 @@ from numpy.typing import NDArray
 
 from engine import pairs as epairs
 from engine.grid import Grid
-from service import cpu
+from service import cpu, jsonsafe
 from service.context import CatalogueContext
 from service.products.store import Store
 from service.products.sxp import decode
@@ -211,7 +211,7 @@ class Pairs:
         if not left:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{run.key}.part"
-            tmp.write_text(json.dumps(run.result, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps(run.result, separators=(",", ":")))
             tmp.replace(self.dir / f"{run.key}.json")
 
     def view(self, run: PairRun) -> dict[str, Any]:

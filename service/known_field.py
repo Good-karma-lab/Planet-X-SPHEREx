@@ -42,7 +42,7 @@ import httpx
 import numpy as np
 from scipy.spatial import cKDTree
 
-from service import cpu
+from service import cpu, jsonsafe
 from service.context import GAIA_TAPS, SIMBAD_BASES, display_name, gaia_cloud_rows
 from service.storage import digest
 from service.upstream import jpl
@@ -198,7 +198,7 @@ class KnownField:
         try:
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{name}.part"
-            tmp.write_text(json.dumps(val, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps(val, separators=(",", ":")))
             tmp.replace(self.dir / f"{name}.json")
         except OSError:  # a read-only place: the answer stays in memory
             pass

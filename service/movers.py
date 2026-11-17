@@ -26,7 +26,7 @@ from scipy.ndimage import center_of_mass, label
 
 from engine import movers
 from engine.grid import Grid
-from service import cpu
+from service import cpu, jsonsafe
 from service.products.store import Store, product_key
 from service.products.sxp import decode
 from service.upstream import gaia, gaia_hats
@@ -164,7 +164,7 @@ class Movers:
         if all(t["check"] != "pending" for t in run.result["tracks"]):
             self.dir.mkdir(parents=True, exist_ok=True)
             tmp = self.dir / f"{run.key}.part"
-            tmp.write_text(json.dumps(run.result, separators=(",", ":")))
+            tmp.write_text(jsonsafe.dumps(run.result, separators=(",", ":")))
             tmp.replace(self.dir / f"{run.key}.json")
 
     async def _star_name(self, t: dict[str, Any]) -> str | None:

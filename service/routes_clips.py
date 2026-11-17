@@ -14,11 +14,12 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse
 
 from service.clips import VERSION, ClipPending, Clips, ClipUnavailable, clips_dir
 from service.findings import find_row
 from service.jobs.scheduler import Priority
+from service.jsonsafe import SafeJSONResponse as JSONResponse
 from service.products.store import Store, product_key
 from service.workers import fieldjob
 

@@ -22,6 +22,7 @@ import numpy as np
 from astropy.io import fits
 from astropy.wcs import WCS
 
+from service import jsonsafe
 from service.reader.s3 import S3
 
 RELEASE = "dr1/hips5_cube/hips_20261026"
@@ -152,7 +153,7 @@ class QuickLook:
             wcs_h = h2.tostring(sep="\n")
             lay = TileLayout(key, wcs_h, data0, planes, extra, lam)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(json.dumps(lay.__dict__))
+            path.write_text(jsonsafe.dumps(lay.__dict__))
             self.layouts[npix] = lay
             return lay
 

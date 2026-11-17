@@ -42,6 +42,7 @@ from engine.spx import flags as spxflags
 from engine.spx import psf as spxpsf
 from engine.spx import wcs as spxwcs
 from indexer.store import Exposure, Index
+from service import jsonsafe
 from service.jobs.scheduler import Context
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
@@ -181,7 +182,7 @@ def _tracked_call(fn: Callable[..., Any], args: tuple[Any, ...], kwargs: dict[st
         last[0] = now
         tmp = progress_path + ".tmp"
         with open(tmp, "w") as f:
-            json.dump([float(v) for v in vals], f)
+            f.write(jsonsafe.dumps([float(v) for v in vals]))
         os.replace(tmp, progress_path)
 
     return fn(*args, progress=progress, cancel=_FileCancel(cancel_path), **kwargs)
