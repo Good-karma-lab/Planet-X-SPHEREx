@@ -13,7 +13,8 @@ export default defineConfig({
   plugins: [preact()],
   server: {
     port: 5173,
-    proxy: { '/api': API, ...(TILES ? { '/tiles': { target: TILES, changeOrigin: true } } : {}) },
+    // '/s': the share pages (server pages with their Open Graph tags, /s/<kind>/<ref>) come from the API as well
+    proxy: { '/api': API, '/s': API, ...(TILES ? { '/tiles': { target: TILES, changeOrigin: true } } : {}) },
   },
   build: { outDir: 'dist', sourcemap: true },
   test: { include: ['tests/unit/**/*.test.ts'], environment: 'node' },
