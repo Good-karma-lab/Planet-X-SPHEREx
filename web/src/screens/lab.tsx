@@ -1764,12 +1764,20 @@ export function Lab({ route }: { route: Route }) {
             ctx.beginPath();
             ctx.arc(px, py, 2.4, 0, 2 * Math.PI);
             ctx.fill();
+            // the year beside its dot: to the right, else to the left, else none (never over another label: a pass's "’26" or a name)
+            const tw = ctx.measureText(String(yr)).width;
+            const hit = (bx: { x0: number; y0: number; x1: number; y1: number }) =>
+              placed.some((q) => bx.x0 < q.x1 && bx.x1 > q.x0 && bx.y0 < q.y1 && bx.y1 > q.y0);
+            const right = { x0: px + 4, y0: py - 15, x1: px + 6 + tw, y1: py - 2 };
+            const left = { x0: px - 6 - tw, y0: py - 15, x1: px - 4, y1: py - 2 };
+            const spot = !hit(right) ? right : !hit(left) ? left : null;
+            if (!spot) continue;
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#000';
-            placed.push({ x0: px + 4, y0: py - 15, x1: px + 34, y1: py - 2 });
-            ctx.strokeText(String(yr), px + 5, py - 4);
+            placed.push(spot);
+            ctx.strokeText(String(yr), spot.x0 + 1, py - 4);
             ctx.fillStyle = '#e8f6f4';
-            ctx.fillText(String(yr), px + 5, py - 4);
+            ctx.fillText(String(yr), spot.x0 + 1, py - 4);
           }
           ctx.restore();
         }

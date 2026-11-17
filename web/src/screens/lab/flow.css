@@ -372,3 +372,7 @@
 /* the picture's title keeps its place in every width: the coordinates smaller, cut with … when there is no room */
 :root .lab .vsq .ftitle span, :root .lab .vsq.compact .ftitle span { display: inline; font-size: 10.5px; min-width: 0; }
 :root .lab .vsq .ftitle { display: flex; align-items: baseline; gap: 6px; text-overflow: ellipsis; }
+/* the loading card always inside the picture: never taller than it (a 400 px picture: the video gives way, the steps stay) */
+.vsq .loadov { max-height: calc(100% - 24px); }
+.vsq .loadov .lo-media { flex: 0 1 auto; min-height: 0; overflow: hidden; }
+.vsq .loadov .lo-body { flex: none; }
