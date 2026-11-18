@@ -121,6 +121,18 @@ Measured on 18 Nov 2026 (cold fields, the same places on both machines, one at a
 | the public archive, one file / three at once | ~20 MB/s / 61 MB/s | ~20 MB/s / 63 MB/s |
 | a 60′ time-lapse and its search (exposures cached) | – | film 52 s, search 429 s |
 
+After the resize to 4 OCPU / 24 GB (18 Nov 2026, 21:29 CET; normal profile from r55: 4 field builds at once, a 9.7 GB budget inside a
+17.6 GB fence), at three new places on both machines, each with its own sweep running:
+
+| | E5 | A1, 4 OCPU / 24 GB |
+|---|---|---|
+| cold 10′ field (465 exposures) | 114 s | 200 s |
+| cold 20′ field (610 exposures) | 141 s | 242 s |
+| cold 60′ field (599 exposures) | 219 s | 435 s; service memory peak 12.6 GB |
+
+The extra cores help the large field most (60′ is now about twice the E5's time, not 2.2–2.6 times). One small field takes about as long
+as on 2 OCPU: it is bound by reading and decoding the exposures, not by the number of cores.
+
 **Memory.** `sky-api.service` has `MemoryMax=70%` of the machine (8.8 GB on the A1), and `machine.py` keeps the jobs' budget within 55 % of
 that fence (4.8 GB on the A1). Before 18 Nov a fixed 13 GB fence under a 24 GB budget let the kernel kill the E5's API.
 
