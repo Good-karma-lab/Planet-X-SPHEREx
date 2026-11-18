@@ -13,10 +13,23 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 SMALL_CORES = 4  # this many cores or fewer: a small machine
 SMALL_RAM_MB = 16000  # this much memory or less: a small machine
+FENCE_SHARE = 55  # per cent of the unit's MemoryMax the jobs may hold
+
+
+def cgroup_max_mb() -> int | None:
+    """The memory limit of this process's cgroup (systemd's MemoryMax of the unit) in MB, or None when there is none or it cannot be
+    read. The jobs' budget must stay inside it: on 18 Nov 2026 a 13 GB fence under a 24 GB budget had the kernel kill the API."""
+    try:
+        line = next(x for x in Path("/proc/self/cgroup").read_text().splitlines() if x.startswith("0::"))
+        raw = Path(f"/sys/fs/cgroup{line[3:].strip()}/memory.max").read_text().strip()
+    except (OSError, StopIteration):
+        return None
+    return None if raw == "max" else int(raw) // 1_000_000
 
 
 def ram_mb() -> int:
@@ -35,6 +48,7 @@ class Limits:
     workers: int  # processes of the compute pool
     heavy_slots: int  # field builds at once
     memory_budget_mb: int  # what the jobs together may hold
+    memory_max_mb: int | None  # the unit's fence (cgroup memory.max), None without one
     worker_mem_mb: int  # the cap of one worker process
     bg_heavy: int  # background (warm, stock, sweep) builds at once
     quarter_stock: int  # ready quarters kept ahead
@@ -51,13 +65,17 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def limits(cores: int | None = None, ram: int | None = None) -> Limits:
-    """The limits for a machine of `cores` cores and `ram` MB (this machine's by default); the environment overrides each one."""
+def limits(cores: int | None = None, ram: int | None = None, fence: int | bool | None = True) -> Limits:
+    """The limits for a machine of `cores` cores and `ram` MB (this machine's by default) inside a cgroup `fence` of MB (this process's
+    by default; None: no fence); the environment overrides each one."""
     c = max(1, cores if cores is not None else (os.cpu_count() or 2))
     r = max(1000, ram if ram is not None else ram_mb())
+    cg = cgroup_max_mb() if fence is True else (fence if isinstance(fence, int) and not isinstance(fence, bool) else None)
     small = c <= SMALL_CORES or r <= SMALL_RAM_MB
-    # memory: half the machine for the jobs (the rest is the API process, the page cache the archive reads live on, the standby)
-    budget = min(24000, r // 2)
+    # memory: half the machine for the jobs (the rest is the API process, the page cache the archive reads live on, the standby), and
+    # never more than FENCE_SHARE of the unit's fence (the API process and a worker's peak above its estimate live inside it too)
+    budget = min(24000, r // 2, *([cg * FENCE_SHARE // 100] if cg else []))
+    mem = min(r, cg) if cg else r
     sweep_env = os.environ.get("SKY_SWEEP")
     return Limits(
         cores=c,
@@ -66,7 +84,8 @@ def limits(cores: int | None = None, ram: int | None = None) -> Limits:
         workers=_env_int("SKY_WORKERS", c),
         heavy_slots=_env_int("SKY_HEAVY_SLOTS", 6 if not small else 2),
         memory_budget_mb=_env_int("SKY_MEMORY_BUDGET_MB", budget),
-        worker_mem_mb=_env_int("SKY_WORKER_MEM_MB", min(6000, max(1500, r * 35 // 100))),
+        memory_max_mb=cg,
+        worker_mem_mb=_env_int("SKY_WORKER_MEM_MB", min(6000, max(1500, mem * 35 // 100))),
         bg_heavy=_env_int("SKY_BG_HEAVY", 2 if not small else 1),
         quarter_stock=_env_int("SKY_QUARTER_STOCK", 40 if not small else 8),
         # off on a small machine unless asked for (SKY_SWEEP=1 or force): a person's field needs both cores there

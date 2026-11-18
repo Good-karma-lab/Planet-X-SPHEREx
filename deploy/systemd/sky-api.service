@@ -17,7 +17,8 @@ TimeoutStopSec=40
 KillMode=mixed
 LimitNOFILE=65536
 # memory: the scheduler admits jobs within its budget; this is the outer fence
-MemoryMax=13G
+# 70 % of the machine (33 GB on the 48 GB E5, 8.4 GB on a 12 GB A1); service/machine.py keeps the jobs' budget within 55 % of it
+MemoryMax=70%
 
 [Install]
 WantedBy=multi-user.target
