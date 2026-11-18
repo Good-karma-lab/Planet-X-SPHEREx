@@ -48,3 +48,12 @@ API. The store (index, products) stays. A product version bump purges and re-war
 | `sky-index.timer` → `sky-index.service` | daily: new days of the exposure index, reconciliation with the bucket |
 | `caddy.service` | HTTPS for the domain and plain HTTP on the bare address |
 | `sky-snapshot.*`, `sky-tunnel.service` | optional: snapshot to object storage; a Cloudflare Tunnel instead of open ports |
+
+## Outside uptime check
+
+`.github/workflows/uptime.yml` asks `https://www.spherex.space` from GitHub's machines every 10 minutes (GitHub may run it later under
+load): `/api/v1/health` must say `"ok":true`, the home page and `/api/v1/findings` must answer 200, each with three tries 20 s apart.
+When one does not, it opens a single issue labelled `uptime` (GitHub notifies the repository's watchers, the owner by e-mail per their
+notification settings), comments on it while the site stays down, and closes it when the site answers again. It needs no account and
+no secret beyond the workflow's own token. Run it by hand from the Actions tab (`workflow_dispatch`). GitHub turns schedules off in a
+public repository after 60 days without a commit; a push turns them on again.
