@@ -63,7 +63,7 @@ const fmtTime = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60
 /** The overlay over the picture while a field is made or loaded: a looping video of a telescope building the sky (generated with
  *  Gemini, marked so) whole and at full brightness at the top of the card, under it the step, a real progress bar with its numbers, the list of steps, the time since the start.
  *  It fades out when the picture is ready. `step` null: nothing is loading. */
-export function LoadOverlay({ step, field }: { step: LoadStep | null; field: string }) {
+export function LoadOverlay({ step, field, firstLook = false }: { step: LoadStep | null; field: string; firstLook?: boolean }) {
   const [last, setLast] = useState<LoadStep | null>(step);
   const [fading, setFading] = useState(false);
   const started = useRef(Date.now());
@@ -157,8 +157,10 @@ export function LoadOverlay({ step, field }: { step: LoadStep | null; field: str
   const left = elapsed > 10 && done > 0.16 && done < 0.98 ? (elapsed * (1 - done)) / done : null;
   const leftWord = left == null ? '' : left < 45 ? 'under a minute left' : `about ${Math.max(1, Math.round(left / 30) / 2)} min left`;
   return (
-    <div class={`loadov${fading ? ' fading' : ''}${shown.failed ? ' failed' : ''}`} role="status" aria-live="polite" data-testid="load-block">
-      <div class="lo-media">
+    <div class={`loadov${fading ? ' fading' : ''}${shown.failed ? ' failed' : ''}${firstLook ? ' first' : ''}`} role="status" aria-live="polite" data-testid="load-block">
+      {/* the real sky is on the picture already (the all-sky map's first look): the card steps aside, the video gives way */}
+      {firstLook && <span class="lo-first">First look · SPHEREx all-sky map{shown.failed ? '' : ' · this field is being built'}</span>}
+      <div class="lo-media" hidden={firstLook}>
         {reduced ? (
           <img class="lo-video" src="/loading/telescope_poster.jpg" alt="" />
         ) : (
