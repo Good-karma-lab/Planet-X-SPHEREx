@@ -756,6 +756,8 @@ export function Lab({ route }: { route: Route }) {
     selectFind();
   }, [findId, meta, ra, dec, fov, p['find_ra'], p['find_dec']]);
   // the find opened from Findings, as Findings has it: the first row of "To look at" (a time-lapse track is on no other list)
+  // the selected find's record (its own catalogue answers): the Object tab says what its badge stands on
+  const selRecord = useFindRecord(sel?.finding ?? '');
   const openFind = useFindRecord(p['find'] && !inTask && p['find'].startsWith('film:') ? p['find'] : '');
   // a find opened from Findings in a wide field: the picture says what is around the find (10′), the rest of the field dimmed, with
   // no rings or names there; "Whole field" shows everything again
@@ -2565,6 +2567,7 @@ export function Lab({ route }: { route: Route }) {
       setFrame(q.index);
     },
     visit: film !== null ? visit : null,
+    findIdents: selRecord && selRecord !== 'failed' && selRecord.id === sel?.finding ? (selRecord.idents ?? null) : null,
     visitOf: (mjd) => {
       // the visit of the pass on show nearest a date, numbered as the time line numbers it (within two hours, else none)
       const fr = filmData?.meta.frames ?? [];
