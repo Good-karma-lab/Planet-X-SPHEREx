@@ -41,6 +41,13 @@ def site(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[FastAPI, Any]
             (round(ra, 4), round(dec, 4)), {"sources": [], "answered": True, "asked": ["gaia", "simbad", "deep:catwise"], "silent": []}
         )
 
+    st.bodies = []  # JPL's bodies (name, ra, dec, V, rate ra, rate dec) asked about a single dated "it moves" mark
+    st.jpl_state = "ok"
+
+    def jpl_at(ra: float, dec: float, mjd: float) -> dict[str, Any]:
+        return {"state": st.jpl_state, "rows": st.bodies} if st.jpl_state == "ok" else {"state": st.jpl_state, "error": "down"}
+
+    st.jpl_at = jpl_at
     st.start_checks = start
     st.checks_status = lambda job: st.jobs.get(job)
     st.lookup_place = lookup
@@ -77,7 +84,7 @@ def test_it_moves_on_two_passes_starts_the_checks_and_a_finding_found_by_people(
     app, st = site
     ann = _people(app)("ann")
     one = _mark(ann, "mv-0000001", "moves", 40.1, 10.1, **{"pass": 0, "mjd": 61100.1})
-    assert one["effect"] == {"effect": "moves", "state": "needs_another_pass"} and st.started == []
+    assert one["effect"]["state"] == "needs_another_pass" and st.started == []
     two = _mark(ann, "mv-0000002", "moves", 40.1003, 10.1001, **{"pass": 1, "mjd": 61280.4})
     assert two["effect"]["state"] == "checking" and len(st.started) == 1
     req = st.started[0]
@@ -93,7 +100,7 @@ def test_it_moves_on_two_passes_starts_the_checks_and_a_finding_found_by_people(
     )  # one job per object
     # another body in the same 10′ field (100″ away, on the first pass): its own object, not "checking" already
     other = _mark(ann, "mv-0000009", "moves", 40.1 + 100 / 3600, 10.1, **{"pass": 0, "mjd": 61100.1})
-    assert other["effect"] == {"effect": "moves", "state": "needs_another_pass"} and len(st.started) == 1
+    assert other["effect"]["state"] == "needs_another_pass" and len(st.started) == 1
     # the checks answer, none failed: submitted by itself, under her name
     st.jobs["j1"] = {"job": "j1", "state": "done", "checks": [{"id": "gaia", "state": "pass", "detail": ""}], "can_submit": True}
     st.on_checks_done(st.jobs["j1"])
@@ -252,3 +259,48 @@ def test_a_marks_link_is_kept_and_returned(site: tuple[FastAPI, Any]) -> None:
     assert (
         ann.post("/api/me/marks", json={"id": "mv-0000103", "field_key": KEY, "ra": 1.0, "dec": 1.0, "link": "bad id!"}).status_code == 422
     )
+
+
+def test_every_mark_ends_with_a_verdict(site: tuple[FastAPI, Any]) -> None:
+    """Explorer round 3 B-1: a mark's Checks step never finished, and a known asteroid was never named. One dated "it moves" mark asks
+    JPL at once: a known body there at that moment is named; JPL not answering says so with the time it is asked again, and the
+    service's loop asks again until it answers; the marks list carries every mark's verdict."""
+    import asyncio
+
+    app, st = site
+    ann = _people(app)("ann")
+    # a known asteroid where the mark is, at that moment
+    st.bodies = [["12304 (1991 SR1)", 60.89821, 8.58951, 19.4, 30.0, -10.0]]
+    got = _mark(ann, "mv-0000101", "moves", 60.8982, 8.5895, **{"mjd": 61085.548})
+    assert got["effect"]["state"] == "known" and got["effect"]["name"] == "12304 (1991 SR1)"
+    # JPL down: the mark says it could not be checked yet and when it is asked again
+    st.bodies, st.jpl_state = [], "unavailable"
+    got = _mark(ann, "mv-0000102", "moves", 61.5, 9.5, **{"mjd": 61085.955})
+    assert got["effect"]["state"] == "jpl_wait" and got["effect"]["retry_at"]
+    marks = {m["id"]: m for m in ann.get("/api/me/marks").json()["marks"]}
+    assert marks["mv-0000101"]["verdict"]["state"] == "known" and "12304" in marks["mv-0000101"]["verdict"]["text"]
+    v = marks["mv-0000102"]["verdict"]
+    assert v["state"] == "waiting" and "JPL did not answer" in v["text"] and "asked again at" in v["text"]
+    # JPL answers on the retry (its time has come): no body there, so it needs a second mark; the verdict follows
+    fp = field_people.get(st, accounts.get(st).db)
+    fp.db._conn().execute("UPDATE acc_people_jobs SET data=json_set(data, '$.retry_at', 0) WHERE id='single:mv-0000102'")
+    st.jpl_state = "ok"
+    assert asyncio.run(fp.retry_due()) == 1
+    v = {m["id"]: m for m in ann.get("/api/me/marks").json()["marks"]}["mv-0000102"]["verdict"]
+    assert v["state"] == "needs_another_pass" and "no known body" in v["text"]
+
+
+def test_a_mark_made_before_the_single_check_gets_its_answer(site: tuple[FastAPI, Any]) -> None:
+    """The explorer's two marks (one dated mark each) never got a check: at start they are queued and asked."""
+    import asyncio
+
+    app, st = site
+    ann = _people(app)("ann")
+    _mark(ann, "mv-0000201", "moves", 60.8982, 8.5895, **{"mjd": 61085.548})
+    fp = field_people.get(st, accounts.get(st).db)
+    fp.db._conn().execute("DELETE FROM acc_people_jobs")  # as before the single check existed
+    assert fp.backfill() == 1 and fp.backfill() == 0  # queued once
+    st.bodies = [["12304 (1991 SR1)", 60.89821, 8.58951, 19.4, 30.0, -10.0]]
+    assert asyncio.run(fp.retry_due()) == 1
+    v = {m["id"]: m for m in ann.get("/api/me/marks").json()["marks"]}["mv-0000201"]["verdict"]
+    assert v["state"] == "known" and v["name"] == "12304 (1991 SR1)"

@@ -26,6 +26,7 @@ import json
 import math
 import time
 from collections import Counter
+from datetime import UTC, datetime
 from typing import Any
 
 from service.accounts import people
@@ -52,6 +53,9 @@ MATCH_ARCSEC = 3.0  # a catalogue source this close to a "not in the catalogues"
 ARTEFACT_AGREE = 2  # distinct people marking an artefact at one place set the machine's finds there aside
 LOOKUP_SIZE_ARCMIN = 1.0  # the patch asked of the catalogues around a "not in the catalogues" mark
 LOOKUP_EPOCH = 2025.9
+SINGLE_JPL_ARCSEC = 12.0  # a known body this close to one dated "it moves" mark, at that moment, is the marked point (the checks' radius)
+SINGLE_JPL_SIZE_ARCMIN = 2.0  # the patch JPL is asked about around it
+RETRY_STEPS_S = (120.0, 600.0, 1800.0, 3600.0)  # a catalogue that did not answer is asked again after these, then every hour
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS acc_people_jobs (
@@ -164,7 +168,9 @@ class FieldPeople:
         dates = {(x.get("pass"), round(float(x["mjd"]), 4) if x.get("mjd") is not None else None) for x in group}
         passes = {x.get("pass") for x in group}
         if len(passes) < 2 and len(dates) < 2:
-            return {"effect": "moves", "state": "needs_another_pass"}  # one more mark on another pass (or visit) starts the checks
+            # one dated mark: JPL says at once whether a known body was there then (a known asteroid is named without a second
+            # mark); a second mark on another pass or visit starts the checks of its motion
+            return await self._single(user_id, mark)
         group.sort(key=lambda x: (x.get("pass") if x.get("pass") is not None else -1, x.get("mjd") or 0.0))
         first = group[0]
         request = {
@@ -194,6 +200,217 @@ class FieldPeople:
         fresh = self.db.investigation(user_id, inv["id"])
         state = submit.settle(self.st, self.db, user_id, fresh) if fresh else "checking"
         return {"effect": "moves", "state": state, "investigation_id": inv["id"], "checks_job": job}
+
+    async def _single(self, user_id: str, mark: dict[str, Any]) -> dict[str, Any]:
+        """One dated "it moves" mark: JPL is asked for a known Solar System body at that place at that moment."""
+        if mark.get("mjd") is None:
+            return {"effect": "moves", "state": "needs_another_pass"}
+        c = self.db._conn()
+        jid = f"single:{mark['id']}"
+        now = time.time()
+        row = c.execute("SELECT data FROM acc_people_jobs WHERE id=?", (jid,)).fetchone()
+        tries = int(json.loads(row[0] or "{}").get("tries", 0)) if row else 0
+        c.execute(
+            "INSERT OR IGNORE INTO acc_people_jobs(id,kind,user_id,field_key,ra,dec,mark_ids,state,at,updated) VALUES(?,?,?,?,?,?,?,?,?,?)",
+            (jid, "single", user_id, mark["field_key"], mark["ra"], mark["dec"], json.dumps([mark["id"]]), "asking", now, now),
+        )
+        got = await self._jpl_at(mark)
+        if got is None or got.get("state") != "ok":
+            retry_at = now + RETRY_STEPS_S[min(tries, len(RETRY_STEPS_S) - 1)]
+            data = {"tries": tries + 1, "retry_at": retry_at, "why": (got or {}).get("error") or (got or {}).get("state") or "not loaded"}
+            c.execute("UPDATE acc_people_jobs SET state='jpl_wait', data=?, updated=? WHERE id=?", (json.dumps(data), time.time(), jid))
+            return {"effect": "moves", "state": "jpl_wait", "retry_at": iso(retry_at)}
+        near = []
+        for body in got.get("rows") or []:
+            d = sep(mark["ra"], mark["dec"], float(body[1]), float(body[2]))
+            if d <= SINGLE_JPL_ARCSEC:
+                near.append((d, str(body[0]), body[3]))
+        if near:
+            d, name, v = min(near)
+            data = {"tries": tries + 1, "name": name, "sep": round(d, 1), "v": v}
+            c.execute("UPDATE acc_people_jobs SET state='known', data=?, updated=? WHERE id=?", (json.dumps(data), time.time(), jid))
+            self.db.notify(
+                user_id, "checks", f"Your mark at RA {mark['ra']:.4f}° Dec {mark['dec']:+.4f}° is a known body: {name} (JPL).", None
+            )
+            return {"effect": "moves", "state": "known", "name": name, "sep": round(d, 1)}
+        data = {"tries": tries + 1, "bodies": len(got.get("rows") or [])}
+        c.execute("UPDATE acc_people_jobs SET state='no_body', data=?, updated=? WHERE id=?", (json.dumps(data), time.time(), jid))
+        return {"effect": "moves", "state": "needs_another_pass", "jpl": "no_body"}
+
+    async def _jpl_at(self, mark: dict[str, Any]) -> dict[str, Any] | None:
+        """JPL's bodies around a mark at its moment, or None where there is no catalogue service (a test puts its own `jpl_at`)."""
+        hook = getattr(self.st, "jpl_at", None)
+        if callable(hook):
+            got = hook(mark["ra"], mark["dec"], float(mark["mjd"]))
+            return dict(await got if asyncio.iscoroutine(got) else got)
+        try:
+            from service.routes_known_field import known_field_of
+
+            kf = known_field_of(self.st)
+        except Exception:
+            return None
+        try:
+            return await kf.jpl_at(round(mark["ra"], 4), round(mark["dec"], 4), SINGLE_JPL_SIZE_ARCMIN, round(float(mark["mjd"]), 5), 20.0)
+        except Exception as e:  # said as "not answered"; asked again later
+            return {"state": "unavailable", "error": f"{type(e).__name__}"}
+
+    def backfill(self) -> int:
+        """Once at start: every dated "it moves" mark that never got an answer (made before the single check existed) gets one, asked by
+        the next retry_due. Returns how many were queued."""
+        c = self.db._conn()
+        have = {m for r in c.execute("SELECT mark_ids FROM acc_people_jobs") for m in json.loads(r[0] or "[]")}
+        n = 0
+        now = time.time()
+        for r in c.execute("SELECT id, user_id, field_key, ra, dec FROM acc_marks WHERE kind='moves' AND mjd IS NOT NULL").fetchall():
+            if r["id"] in have:
+                continue
+            c.execute(
+                "INSERT OR IGNORE INTO acc_people_jobs(id,kind,user_id,field_key,ra,dec,mark_ids,state,data,at,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (f"single:{r['id']}", "single", r["user_id"], r["field_key"], r["ra"], r["dec"], json.dumps([r["id"]]), "jpl_wait",
+                 json.dumps({"tries": 0, "retry_at": now}), now, now),
+            )  # fmt: skip
+            n += 1
+        return n
+
+    async def retry_due(self) -> int:
+        """Ask again what did not answer and whose time has come: a single mark's JPL, a "not in the catalogues" lookup. Returns how
+        many were asked (the service's loop calls it every minute; it survives restarts, the jobs are in the database)."""
+        c = self.db._conn()
+        now = time.time()
+        n = 0
+        rows = c.execute(
+            "SELECT id, kind, user_id, mark_ids, state, data, updated FROM acc_people_jobs WHERE state IN ('jpl_wait','no_answer')"
+        ).fetchall()
+        for r in rows:
+            data = json.loads(r["data"] or "{}")
+            tries = int(data.get("tries", 1))
+            due = (
+                float(data["retry_at"])
+                if data.get("retry_at") is not None
+                else float(r["updated"]) + RETRY_STEPS_S[min(max(tries - 1, 0), len(RETRY_STEPS_S) - 1)]
+            )
+            if due > now:
+                continue
+            ids = json.loads(r["mark_ids"] or "[]")
+            mark = next((m for m in self.db.marks(r["user_id"]) if ids and m["id"] == ids[0]), None)
+            if mark is None:
+                continue
+            if r["kind"] == "single":
+                await self._single(r["user_id"], mark)
+            elif r["kind"] == "lookup":
+                c.execute("UPDATE acc_people_jobs SET data=? WHERE id=?", (json.dumps({**data, "tries": tries + 1}), r["id"]))
+                await self._lookup(r["user_id"], mark)
+            n += 1
+        return n
+
+    def verdicts(self, user_id: str) -> dict[str, dict[str, Any]]:
+        """{mark id: verdict} for every mark of this user that acted: {state, text, name?, retry_at?, investigation_id?}. Every mark ends
+        with one: known (and what), no match in any catalogue, set aside as an artefact, or could not be checked yet (asked again at …)."""
+        c = self.db._conn()
+        out: dict[str, dict[str, Any]] = {}
+        jobs = c.execute("SELECT * FROM acc_people_jobs WHERE user_id=? ORDER BY updated", (user_id,)).fetchall()
+        for j in jobs:
+            v = self._verdict_of(dict(j))
+            if v is not None:
+                for mid in json.loads(j["mark_ids"] or "[]"):
+                    out[mid] = v
+        return out
+
+    def _verdict_of(self, j: dict[str, Any]) -> dict[str, Any] | None:
+        data = json.loads(j.get("data") or "{}")
+        st, kind = j["state"], j["kind"]
+
+        def waiting(what: str) -> dict[str, Any]:
+            at = data.get("retry_at")
+            when = f"; asked again at {datetime.fromtimestamp(float(at), UTC):%H:%M} UTC" if at else "; asked again soon"
+            return {
+                "state": "waiting",
+                "text": f"Could not be checked yet: {what} did not answer{when}.",
+                **({"retry_at": iso(float(at))} if at else {}),
+            }
+
+        if kind == "single":
+            if st == "known":
+                return {
+                    "state": "known",
+                    "name": data.get("name"),
+                    "text": f"Known: {data.get('name')}, a Solar System body JPL puts {data.get('sep')}″ from your mark at that moment.",
+                }
+            if st == "jpl_wait":
+                return waiting("JPL")
+            if st == "no_body":
+                return {
+                    "state": "needs_another_pass",
+                    "text": "JPL has no known body there at that moment. Mark it in another visit or pass: then its motion is checked.",
+                }
+            return {"state": "checking", "text": "Asking JPL…"}
+        if kind == "lookup":
+            if st == "known":
+                return {
+                    "state": "known",
+                    "name": (data.get("matches") or [None])[0],
+                    "text": f"Known: {', '.join(data.get('matches') or [])[:120]}.",
+                }
+            if st == "unknown":
+                return {
+                    "state": "no_match",
+                    "text": "No match in any catalogue: it is a find, submitted under your name.",
+                    "finding_id": j.get("finding_id"),
+                }
+            if st == "no_answer":
+                return waiting(", ".join(data.get("silent") or []) or "the catalogues")
+            return {"state": "checking", "text": "Asking the catalogues…"}
+        if kind == "moves":
+            if st == "no_checks":
+                return {
+                    "state": "waiting",
+                    "text": "The checks could not start here: press Check and submit in the Cabinet.",
+                    "investigation_id": j.get("investigation_id"),
+                }
+            job = data.get("checks_job")
+            view = None
+            hook = getattr(self.st, "checks_status", None)
+            if job and callable(hook):
+                with contextlib.suppress(Exception):
+                    view = hook(job)
+            if not view:
+                return {"state": "checking", "text": "Checking…", "investigation_id": j.get("investigation_id")}
+            checks = {c["id"]: c for c in view.get("checks") or []}
+            failed = [c for c in checks.values() if c.get("state") == "fail"]
+            jpl = checks.get("jpl") or {}
+            if jpl.get("state") == "fail":
+                return {
+                    "state": "known",
+                    "text": str(jpl.get("detail") or "A known Solar System body (JPL)."),
+                    "investigation_id": j.get("investigation_id"),
+                }
+            if failed:
+                return {
+                    "state": "known",
+                    "text": str(failed[0].get("detail") or "A catalogue explains it."),
+                    "investigation_id": j.get("investigation_id"),
+                }
+            if view.get("next_try_at") and any(c.get("state") == "no_answer" for c in checks.values()):
+                who = ", ".join(cid.upper() if cid == "jpl" else cid for cid, c in checks.items() if c.get("state") == "no_answer")
+                return {
+                    **waiting(who),
+                    "retry_at": view["next_try_at"],
+                    "text": f"Could not be checked yet: {who} did not answer; asked again at {view['next_try_at'][11:16]} UTC.",
+                }
+            if view.get("state") == "done" and view.get("can_submit"):
+                return {
+                    "state": "no_match",
+                    "text": "No match in any catalogue: submitted, waiting for the verdict.",
+                    "investigation_id": j.get("investigation_id"),
+                }
+            if view.get("state") == "done" and view.get("needs_comment"):
+                return {
+                    "state": "comment",
+                    "text": "The checks answered with a warning: one comment is needed (Cabinet).",
+                    "investigation_id": j.get("investigation_id"),
+                }
+            return {"state": "checking", "text": "Checking…", "investigation_id": j.get("investigation_id")}
+        return None
 
     async def _start_checks(self, request: dict[str, Any]) -> str | None:
         """The checks of §6 on these marks: the checks stream's job, or None where it is not loaded."""
@@ -479,7 +696,8 @@ def people_finds(st: Any) -> list[dict[str, Any]]:
 
     db = accounts.get(st).db
     get(st, db)
-    rows = db._conn().execute("SELECT * FROM acc_people_jobs ORDER BY at")
+    # the checks of a moving object and the lookups that can make a find (a single mark's JPL question makes none)
+    rows = db._conn().execute("SELECT * FROM acc_people_jobs WHERE kind IN ('moves', 'lookup') ORDER BY at")
     out = []
     for r in rows:
         finding = r["finding_id"]
