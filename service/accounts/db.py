@@ -623,10 +623,16 @@ class AccountsDB:
             "SELECT * FROM acc_submissions WHERE user_id=? ORDER BY created DESC", (user_id,))]  # fmt: skip
         mine = {s["finding_id"] for s in out}
         status = {r["finding_id"]: r["status"] for r in c.execute("SELECT finding_id, status FROM acc_submissions")}
-        for r in c.execute("SELECT * FROM acc_credits WHERE user_id=? AND role!='submitted' ORDER BY at DESC", (user_id,)):
+        # a machine finding somebody else submitted first keeps that row; this user is credited as a submitter too, and sees it with
+        # the title of their own investigation (it was left out: only the first submitter saw it in My findings)
+        titles = {r["submitted"]: r["title"] for r in c.execute(
+            "SELECT submitted, title FROM acc_investigations WHERE user_id=? AND submitted IS NOT NULL", (user_id,))}  # fmt: skip
+        for r in c.execute("SELECT * FROM acc_credits WHERE user_id=? ORDER BY at DESC", (user_id,)):
             if r["finding_id"] not in mine:
+                mine.add(r["finding_id"])
                 out.append({"finding_id": r["finding_id"], "role": r["role"], "result": r["result"], "created": iso(r["at"]),
-                            "status": status.get(r["finding_id"], "in_review"), "title": "", "ra": None, "dec": None, "field_key": None})  # fmt: skip
+                            "status": status.get(r["finding_id"], "in_review"), "title": titles.get(r["finding_id"], ""),
+                            "ra": None, "dec": None, "field_key": None})  # fmt: skip
         return out
 
     def set_status(self, finding_id: str, status: str) -> int:

@@ -311,6 +311,22 @@ def test_finding_tasks_give_the_strong_kinds_before_the_many_red_sources(site: t
     assert got == ["film:1", "anomaly:hi", "red:unseen"]  # then the many: the high-promise one first among the equal
 
 
+def test_a_machine_finding_submitted_by_two_people_is_in_both_their_findings(site: tuple[FastAPI, _State, _Mail]) -> None:
+    """The first submitter keeps the finding's row; the second is credited as a submitter too, and sees it in My findings with the
+    title of their own investigation (only the first saw it before)."""
+    app, st, mail = site
+    st.checks_status = lambda job: {"state": "done", "checks": [{"id": "gaia", "state": "pass", "detail": ""}], "can_submit": True}  # type: ignore[attr-defined]
+    ann = _sign_in(app, mail)
+    bob = _sign_in(app, mail, "bob@example.org")
+    for who, title in ((ann, "Ann's mover"), (bob, "Bob's mover")):
+        inv = who.post("/api/me/investigations", json={"title": title, "finding_id": "mover:1"}).json()
+        out = who.post("/api/findings/submit", json={"investigation_id": inv["id"], "checks_job": "j1"}).json()
+        assert out["finding_id"] == "mover:1"
+    for who, title in ((ann, "Ann's mover"), (bob, "Bob's mover")):
+        mine = who.get("/api/me/findings").json()["findings"]
+        assert [(f["finding_id"], f["role"], f["title"]) for f in mine] == [("mover:1", "submitted", title)]
+
+
 def test_investigation_and_submit_only_when_the_checks_allow(site: tuple[FastAPI, _State, _Mail]) -> None:
     app, st, mail = site
     c = _sign_in(app, mail)
