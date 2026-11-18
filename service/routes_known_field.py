@@ -12,7 +12,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
+from service import cpu, known_stable
 from service.known_field import MAX_EPOCHS, KnownField
+from service.products.store import product_key
+from service.workers import fieldjob
 
 
 def known_field_of(st: Any) -> KnownField:
@@ -61,6 +64,66 @@ def make_known_field_router(st: Any, prefix: str = "/api") -> APIRouter:
 
             out = {**out, "objects": [o if o["label"] else thin(o) for o in out["objects"]]}
             out["match"] = [{k: m[k] for k in ("id", "catalogues", "ids", "positions", "mag") if k in m} for m in out.get("match", [])]
+        body = json.dumps(out, separators=(",", ":")).encode()
+        headers = {"Vary": "Accept-Encoding"}
+        if len(body) > 1000 and "gzip" in request.headers.get("accept-encoding", ""):
+            body = await asyncio.to_thread(gzip.compress, body, 5)
+            headers["Content-Encoding"] = "gzip"
+        return Response(body, media_type="application/json", headers=headers)
+
+    @r.get(f"{prefix}/known/field")
+    async def known_field_set(
+        request: Request,
+        ra: float = Query(..., ge=0.0, lt=360.0),
+        dec: float = Query(..., ge=-90.0, le=90.0),
+        fov: float = Query(..., ge=1.0, le=60.0),
+        wait: float = Query(2.0, ge=0.0, le=60.0),
+    ) -> Any:
+        """The field's known objects as one stable set, for rings that stay put from pass to pass (service/known_stable.py): every
+        catalogue source at the field's epoch (the middle pass) that the field shows, `seen` or not, with its magnitude; the field's
+        depth per band; and the measured sources (found in at least half of the passes) that no catalogue has. The field must be
+        built (`state: "no_field"` otherwise). `complete` is false while a catalogue is still being asked: ask again. Sent gzip."""
+        index, store = getattr(st, "index", None), getattr(st, "store", None)
+        if index is None or store is None:
+            raise HTTPException(503, "the service is not ready")
+        params = fieldjob.canonical(ra, dec, fov)
+        key = await asyncio.to_thread(lambda: product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(index, params),)))
+        meta = await asyncio.to_thread(store.read_meta, fieldjob.KIND, key) if store.is_complete(key) else None
+        if not meta or meta.get("stripped") or not meta.get("passes") or not meta.get("grid"):
+            return {"state": "no_field", "field_key": key, "detail": "the field is not built: open it in the lab first"}
+        measured = await asyncio.to_thread(known_stable.read_kept, st.cfg.store_dir, key)
+        if measured is None:
+            raws = []
+            for p in meta["passes"]:
+                raw = await asyncio.to_thread(store.read_part, fieldjob.KIND, key, f"quick_p{p['index']}.sxp")
+                if raw is None:
+                    return {"state": "no_field", "field_key": key, "detail": "a pass picture of the field is missing"}
+                raws.append(raw)
+            measured = await cpu.run(known_stable.measured_sources, raws, meta["grid"])
+            await asyncio.to_thread(known_stable.keep, st.cfg.store_dir, key, measured)
+        mjds = sorted(float(p["mjd_mid"]) for p in meta["passes"] if p.get("mjd_mid") is not None)
+        epoch = round(mjds[len(mjds) // 2], 4) if mjds else 61000.0
+        g = meta["grid"]
+        size = round(float(g["n"]) * float(g["step_arcsec"]) / 60.0, 1)
+        known = await known_field_of(st).objects(
+            round(float(g["ra0"]), 5), round(float(g["dec0"]), 5), size, [epoch], match=True, wait_s=wait
+        )
+        got = await asyncio.to_thread(known_stable.stable_set, measured, known, epoch)
+        status = known.get("status") or {}
+        # JPL is not in the stable set (its bodies move between passes): its state does not hold `complete`
+        pending = [k for k, v in status.items() if k not in ("jpl", "match") and isinstance(v, dict) and v.get("state") == "pending"]
+        pending += [f"match.{k}" for k, v in (status.get("match") or {}).items() if isinstance(v, dict) and v.get("state") == "pending"]
+        out = {
+            "state": "ok",
+            "field_key": key,
+            "epoch_mjd": epoch,
+            "passes": len(meta["passes"]),
+            "min_passes": max(known_stable.STABLE_MIN_PASSES, -(-len(meta["passes"]) // 2)),
+            "complete": not pending,
+            "pending": pending,
+            "answered": known.get("answered"),
+            **got,
+        }
         body = json.dumps(out, separators=(",", ":")).encode()
         headers = {"Vary": "Accept-Encoding"}
         if len(body) > 1000 and "gzip" in request.headers.get("accept-encoding", ""):
