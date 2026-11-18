@@ -664,7 +664,7 @@ def test_the_identification_loop_asks_the_workers_as_background(monkeypatch: pyt
         raise asyncio.CancelledError  # one turn is enough
 
     monkeypatch.setattr(fmod.cpu, "run", run)
-    me = SimpleNamespace(db=SimpleNamespace(path="x"), targets=[], front=())
+    me = SimpleNamespace(db=SimpleNamespace(path="x"), targets=[], front=("film:1",))
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(fmod.Findings.identify_loop(me))  # type: ignore[arg-type]
     assert seen == [3] and seen[0] >= cpu.LOW
@@ -903,3 +903,21 @@ def test_the_first_page_of_promising_is_identified_first(tmp_path: Path) -> None
     assert sorted(plain) == [f"film:{n}" for n in range(6)]
     got = pending_ids(str(db.path), 10, frozenset(), now, None, ("film:5", "film:3", "other:1"))
     assert got[:2] == ["film:5", "film:3"] and sorted(got[2:]) == ["film:0", "film:1", "film:2", "film:4"]
+
+
+def test_after_a_restart_the_loop_knows_the_first_page_itself(tmp_path: Path) -> None:
+    """Until a visitor loads Findings, the identification loop orders by the first page of Promising it works out itself."""
+    from types import SimpleNamespace
+
+    from service import findings as fmod
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 60.4, "rate": 36.7, "chance": 0.0, "data": {}, "scans": []}
+    db.write_finds([
+        {**base, "id": "film:weak", "kind": "film", "snr": 4.0, "score": 4.0},
+        {**base, "id": "film:strong", "kind": "film", "ra": 61.0, "snr": 9.0, "score": 9.0},
+        {**base, "id": "red:1", "kind": "red", "ra": 62.0, "snr": 30.0, "score": 30.0},  # behind a filter on the page
+    ])  # fmt: skip
+    db.db.commit()
+    front = fmod.Findings._front_now(SimpleNamespace(db=db))  # type: ignore[arg-type]
+    assert front[:2] == ("film:strong", "film:weak") and "red:1" not in front

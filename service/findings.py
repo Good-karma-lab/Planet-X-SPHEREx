@@ -983,6 +983,11 @@ class Findings:
         except (OSError, ValueError, KeyError):
             self.targets = []
 
+    def _front_now(self) -> tuple[str, ...]:
+        """The first 24 of Promising as the page orders them (without who has looked: the page's own list replaces it when served)."""
+        body = query(self.db, None, "all", None, 24, 0, sort="promise", kinds=PROMISING_KINDS)
+        return tuple(x["id"] for x in body["finds"])
+
     def cleanup(self) -> int:
         """Idempotent, at start: peaks the search itself did not mark ok (kept by an older build) leave the table, with their catalogue rows."""
         gone = []
@@ -1276,6 +1281,8 @@ class Findings:
         cpu.JOB.set(_Maintenance())
         while True:
             try:
+                if not self.front:  # after a restart, until a visitor loads Findings: the first page as the page would order it
+                    self.front = await asyncio.to_thread(self._front_now)
                 ids = await cpu.run(
                     pending_ids, str(self.db.path), 8, frozenset(t["n"] for t in self.targets), time.time(), None, self.front
                 )
