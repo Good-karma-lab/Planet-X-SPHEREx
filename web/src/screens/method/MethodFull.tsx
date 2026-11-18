@@ -33,7 +33,7 @@ const CHANGES: [string, string, string][] = [
   [
     'M41',
     '2026-11-18',
-    'The link of passes reports what chance links; the jump covers its corridor with one-pass searches of the other pass and can start the missing ones; a line track of the time-lapse search is not a lead until its light is checked in the exposures (the R Draconis track had none); the checks re-measured on the live service four days later, and why the time-lapse search misses two of eight known bodies.',
+    'The link of passes reports what chance links; the jump covers its corridor with one-pass searches of the other pass and can start the missing ones; a line track of the time-lapse search is not a lead until its light is checked in the exposures (the R Draconis track had none); the checks re-measured on the live service four days later, and why the time-lapse search misses two of eight known bodies (a summed search was tried and is not used).',
   ],
   [
     'M40',

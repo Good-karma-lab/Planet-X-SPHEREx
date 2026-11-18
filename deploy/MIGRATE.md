@@ -107,7 +107,7 @@ public: no DNS, only SSH open (`provision.sh` with `SKY_PRIVATE=1`). Its sweep s
   order with a 2 h lease. `POST /api/internal/result` takes back what the node made: the products' rows and metas (marked stripped, the
   pictures stay on the node), the searches' result files and the square's grid row. Findings collects them as if the main had built them.
 - Both sides hold `SKY_NODE_SECRET` in `/etc/sky/env` (HMAC of every request). The node also has `SKY_NODE_MAIN=https://www.spherex.space`,
-  `SKY_NODE_NAME=a1`, `SKY_SWEEP=1`, `SKY_QUARTER_STOCK=0`, `SKY_WARM=0`, `SKY_FINDINGS_READONLY=1`. It has none of the main service's other
+  `SKY_NODE_NAME=a1`, `SKY_SWEEP=force` (from r52 `1` is enough on a node; before, with `SKY_WARM=0`, it left the sweep off), `SKY_QUARTER_STOCK=0`, `SKY_WARM=0`, `SKY_FINDINGS_READONLY=1`. It has none of the main service's other
   keys (mail, Google sign-in).
 - The node's own index is a copy of the main service's (copied once through a dev machine; `sky-index.timer` keeps it current).
 
