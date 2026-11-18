@@ -5,6 +5,11 @@ import './responsive.css';
 import { installLegend, installLoupe, installPinch, installStrips } from './ui/touch';
 import { loadManifest, tiles } from './lib/hips';
 
+// one address for the site: spherex.space opens as www.spherex.space, with its place kept. Sign-in comes back to www (Google's return
+// address, the e-mail link), and a guest's marks live in the storage of the host they were made on: on two hosts a person signed in
+// on one and found their place and marks on the other gone
+if (location.hostname === 'spherex.space') location.replace(`https://www.spherex.space${location.pathname}${location.search}${location.hash}`);
+
 // a tab opened before a deploy asks for the old build's lazy parts: if one cannot load, the page reloads once onto the new build
 const RELOADED = 'spherex-reloaded-for-new-build';
 const reloadOnce = () => {

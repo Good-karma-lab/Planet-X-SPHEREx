@@ -1,5 +1,6 @@
 // The product-flow pieces of the lab (product spec §5 Lab): Known objects, marks, the ruler. One hook, `useLabFlow`, which lab.tsx
 // calls; it returns what the lab draws on its overlay, what it puts over the picture and in the Controls panel, and its status line.
+import { formatHash, parseHash } from '../../lib/route';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
@@ -37,7 +38,7 @@ import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, taskTrack, useLabTask, type NextTask } from './task';
 import { FindingClip, MoverView, StampsView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
-import { heldAt, KNOWN_SOURCES, placeAt, type Held } from './known';
+import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, type FieldKnown, type Held } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
 import { clearDo, pendingDo, useSignIn } from './signin';
 import { useRetry, type SearchInfo } from './progress';
@@ -266,6 +267,30 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     return followKnown(knownUrl(a.ra, a.dec, a.fov, a.epochs), setKnown);
   }, [a.ra, a.dec, a.fov, epochsKey, knownTry]);
 
+  // a sign-in that did not finish comes back here with signin=google (or expired): said on the status line for a while, then the
+  // address is cleaned (the person is still where they were)
+  const [signinNote, setSigninNote] = useState('');
+  useEffect(() => {
+    const why = a.params['signin'];
+    if (!why) return;
+    setSigninNote(why === 'expired' ? 'Sign-in link expired · ask for a new one' : 'Sign-in did not finish');
+    const r = parseHash(location.hash);
+    const params = { ...r.params };
+    delete params['signin'];
+    history.replaceState(null, '', formatHash({ ...r, params }));
+    const t = setTimeout(() => setSigninNote(''), 15000);
+    return () => clearTimeout(t);
+  }, [a.params['signin']]);
+  // the field's one set of known objects (the service matched it once over the passes): the rings stay from pass to pass
+  const [fieldKnown, setFieldKnown] = useState<FieldKnown>(FIELD_ASKING);
+  const fieldRef = useRef(fieldKnown);
+  fieldRef.current = fieldKnown;
+  useEffect(() => {
+    setFieldKnown(FIELD_ASKING);
+    if (!Number.isFinite(a.ra) || !Number.isFinite(a.dec)) return;
+    return followFieldKnown(a.ra, a.dec, a.fov, setFieldKnown);
+  }, [a.ra, a.dec, a.fov]);
+
   const [, tick] = useState(0);
   useEffect(() => onMarks(() => tick((x) => x + 1)), []);
   const marks = allMarks();
@@ -350,6 +375,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   // the sources of each pass picture (found once), and what the catalogues have of them at the date shown
   const peaksRef = useRef(new Map<string, Peak[]>());
   const matchRef = useRef<{ key: string; m: KnownMatch } | null>(null);
+  const unionRef = useRef<{ key: string; passes: Set<number>; shown: Set<string>; deep: Set<string>; lone: KnownMatch['noMatch'] }>({
+    key: '',
+    passes: new Set(),
+    shown: new Set(),
+    deep: new Set(),
+    lone: [],
+  });
   const [counts, setCounts] = useState<{ known: number; noMatch: number } | null>(null);
   const countsRef = useRef('');
   useEffect(() => {
@@ -370,10 +402,62 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         matchRef.current = { key: mk, m: matchKnown(kn.objects, peaks, pic.n, pic.step, uv, env.year, kn.deep) };
       match = matchRef.current.m;
     }
-    const ck = match ? `${match.shown.size}:${match.noMatch.length}` : '';
+    // one set of rings for the field, not one per pass: what any pass shown so far has at a catalogue's place is known, and stays
+    // ringed in every pass (a star too faint to be found in one pass blinked its ring off and on); the counts only grow, never flip
+    const uk = `${argsRef.current.ra},${argsRef.current.dec},${argsRef.current.fov}|${kn.objects.length}|${kn.deep.length}`;
+    let un = unionRef.current;
+    if (un.key !== uk) unionRef.current = un = { key: uk, passes: new Set(), shown: new Set(), deep: new Set(), lone: [] };
+    if (match && pic && !un.passes.has(pic.pass)) {
+      un.passes.add(pic.pass);
+      for (const id of match.shown) un.shown.add(id);
+      for (const id of match.deep ?? []) un.deep.add(id);
+      const tol = 2.5 / pic.n;
+      for (const q of match.noMatch) {
+        const same = un.lone.find((o) => Math.abs(o.u - q.u) <= tol && Math.abs(o.v - q.v) <= tol);
+        if (same) same.snr = Math.max(same.snr, q.snr);
+        else un.lone.push({ ...q });
+      }
+      // a place first without a match may be matched in another pass (a moving star's place): known wins
+    }
+    const fk = fieldRef.current;
+    let knDraw: KnownState = kn;
+    if (fk.state === 'ok' && argsRef.current.known) {
+      // the service's set: every catalogue source the field shows, ringed in every pass; the named and fast stars keep their motion
+      // and their names from /api/known, the Solar System bodies stay per pass
+      const keep = kn.state === 'ok' ? kn.objects.filter((o) => o.label || o.source === 'jpl') : [];
+      const kept = new Set(keep.map((o) => o.id));
+      // and the fainter catalogue stars a pass of this picture shows (the service keeps what half the passes show at S/N 8): the
+      // union over the passes seen, never one pass alone, so they stay too; a star already in the service's set is not ringed twice
+      const year = env.year;
+      const near3 = (o: KnownObject, list: KnownObject[]) => {
+        const at = placeAt(o, year);
+        if (!at) return true;
+        const c = Math.cos((at[1] * Math.PI) / 180);
+        return list.some((q) => {
+          const p = q.positions[0]!;
+          return Math.hypot((((p.ra - at[0] + 540) % 360) - 180) * c, p.dec - at[1]) * 3600 < 3;
+        });
+      };
+      const extra = kn.state === 'ok' ? kn.objects.filter((o) => un.shown.has(o.id) && !kept.has(o.id) && !near3(o, fk.objects)) : [];
+      const extraDeep = kn.state === 'ok' ? kn.deep.filter((o) => un.deep.has(o.id) && !near3(o, [...fk.deep, ...fk.objects])) : [];
+      const objects = [...keep, ...fk.objects.filter((o) => !kept.has(o.id)), ...extra];
+      const deepAll = [...fk.deep, ...extraDeep];
+      knDraw = { ...(kn.state === 'ok' ? kn : { ...KNOWN_OFF, answered: { gaia: true, simbad: true, jpl: false } }), state: 'ok', objects, deep: deepAll };
+      match = {
+        shown: new Set(objects.map((o) => o.id)),
+        deep: new Set(deepAll.map((o) => o.id)),
+        noMatch: fk.unmatched.map((q) => {
+          const [u, v] = uv(q.ra, q.dec);
+          return { u, v, snr: q.snr };
+        }),
+      };
+    } else {
+      match = un.passes.size ? { shown: un.shown, deep: un.deep, noMatch: un.lone } : match;
+    }
+    const ck = match ? `${match.shown.size + (match.deep?.size ?? 0)}:${match.noMatch.length}` : '';
     if (ck !== countsRef.current) {
       countsRef.current = ck;
-      setCounts(match ? { known: match.shown.size, noMatch: match.noMatch.length } : null);
+      setCounts(match ? { known: match.shown.size + (match.deep?.size ?? 0), noMatch: match.noMatch.length } : null);
     }
     // a task about one object rings nothing else; and while a deeper catalogue is still being asked no source is ringed as
     // unmatched (the ring would appear and go when the catalogue arrives): the count on the status line says how many so far
@@ -394,7 +478,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       const k = [...byPass.values()].filter(Boolean).length;
       return byPass.size ? [k, byPass.size] : null;
     };
-    drawKnown({ ...env, seenIn, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
+    drawKnown({ ...env, seenIn, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, knDraw);
     const z = env.zoom;
     if (z && !wall) {
       // the zoom on a find: the same rings and names at the zoom's scale (the sources without a match too: what is near the find)
@@ -861,17 +945,18 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
     if (tool === 'mark') {
       // a guest's first mark: the popup offers to keep the marks under a name (the mark is put all the same, in this browser)
+      const [ra, dec] = skyOf(x / a.side, y / a.side);
       if (!si.signedIn) {
         try {
           if (!sessionStorage.getItem('spherex.marks.asked')) {
             sessionStorage.setItem('spherex.marks.asked', '1');
-            si.ask('marks', '');
+            // the sign-in link comes back here with this mark in the address: it is put there again if this browser lost it
+            si.ask('marks', `mark:${ra.toFixed(5)},${dec.toFixed(5)},${a.pass ?? ''}`);
           }
         } catch {
           /* no store: no popup */
         }
       }
-      const [ra, dec] = skyOf(x / a.side, y / a.side);
       const n = marksRef.current.length + 1;
       const m = addMark({
         field_key: fieldKey(a.ra, a.dec, a.fov),
@@ -1316,6 +1401,32 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       </div>
     </>
   );
+  // after a sign-in link that came from a mark: the mark is there (put again if this browser did not keep it), its card open
+  useEffect(() => {
+    const want = pendingDo(a.params);
+    if (!want.startsWith('mark:') || !si.signedIn || !g) return;
+    clearDo();
+    const [mra, mdec, mpass] = want.slice(5).split(',');
+    const ra = Number(mra);
+    const dec = Number(mdec);
+    if (!Number.isFinite(ra) || !Number.isFinite(dec)) return;
+    const near = marksRef.current.find((q) => Math.hypot((q.ra - ra) * Math.cos((dec * Math.PI) / 180), q.dec - dec) * 3600 < 3);
+    const m =
+      near ??
+      addMark({
+        field_key: fieldKey(a.ra, a.dec, a.fov),
+        mjd: a.epochNow != null ? 51544.5 + (a.epochNow - 2000) * 365.25 : null,
+        cell_id: a.params['cell'] ?? null,
+        ra,
+        dec,
+        pass: mpass ? Number(mpass) : a.pass,
+        label: `Mark ${marksRef.current.length + 1}`,
+        level: 'suspicious',
+        note: '',
+      });
+    setOpen(m.id);
+    a.setTab('cand');
+  }, [si.signedIn, !!g, a.params['do']]);
   // after a sign-in link that came from "Add to investigation": the list opens once the selection is back
   useEffect(() => {
     if (pendingDo(a.params) === 'add' && si.signedIn && (a.sel || open)) {
@@ -1504,7 +1615,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       ptr.current = p;
     },
     click,
-    status: [status, awardNow].filter(Boolean).join(' · '),
+    status: [signinNote, status, awardNow].filter(Boolean).join(' · '),
     floats: strip,
     blinkPick,
     card: (
