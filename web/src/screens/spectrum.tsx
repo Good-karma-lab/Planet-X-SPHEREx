@@ -715,7 +715,7 @@ export function ObjectTab({ src, onSpectrum, held, compact = false }: { src: Sou
         <span class="faint">Position</span>
         <span class="mono-s">
           {formatRA(src.ra)} {formatDec(src.dec)}
-          {src.pmra || src.pmdec ? ' (J2000)' : ''}
+          {src.at ? ` (${src.at})` : src.pmra || src.pmdec ? ' (J2000)' : ''}
         </span>
       </div>
       {pm > 0 && (

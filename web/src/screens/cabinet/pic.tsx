@@ -18,6 +18,33 @@ export function clipUrl(p: { findingId?: string | null; ra?: number | null; dec?
 
 const seen = new Map<string, 'ready' | 'none'>();
 
+/** How a place's clip is shown brighter: the place clips come out of the service with the sky near black (median 0, the 99th
+ *  percentile of the pixels near 65 of 255), so a row's thumbnail read as a black square. The clip's own pixels are kept; only the
+ *  display is stretched, as the lab stretches its frames: a square-root curve, scaled so the clip's 99th percentile sits at 80 %
+ *  brightness, less a black point of 10 % so the faint compression blocks of the clip stay dark. A clip that is already bright (99th percentile over 55 %) is shown as it is. Measured once per address. */
+const stretchOf = new Map<string, number>();
+function measure(img: HTMLImageElement): number {
+  try {
+    const n = 48;
+    const c = document.createElement('canvas');
+    c.width = n;
+    c.height = n;
+    const g = c.getContext('2d', { willReadFrequently: true });
+    if (!g) return 0;
+    g.drawImage(img, 0, 0, n, n);
+    const d = g.getImageData(0, 0, n, n).data;
+    const lum: number[] = [];
+    for (let i = 0; i < d.length; i += 4) lum.push((0.2126 * d[i]! + 0.7152 * d[i + 1]! + 0.0722 * d[i + 2]!) / 255);
+    lum.sort((a, b) => a - b);
+    const p99 = lum[Math.floor(lum.length * 0.99)] ?? 1;
+    if (p99 >= 0.55) return 0;
+    return Math.min(3, Math.max(1, 0.9 / Math.sqrt(Math.max(p99, 1e-3))));
+  } catch {
+    return 0; // a picture the page may not read: shown as it is
+  }
+}
+let filterSeq = 0;
+
 /** A place with no SPHEREx time-lapse yet: the 2MASS colour picture of the same 3′, from the survey's HiPS tiles (lib/hips.ts),
  *  drawn again as tiles arrive. Never an empty frame. */
 function SurveyStamp({ ra, dec, size }: { ra: number; dec: number; size: number }) {
@@ -56,6 +83,17 @@ export function Pic({ findingId, ra, dec, size = 96, label, thumb }: { findingId
   const opened = useRef(0);
   const bigUrl = clipUrl({ findingId, ra, dec }, 320);
   const [state, setState] = useState<'idle' | 'ready' | 'none'>(() => (url ? (seen.get(url) ?? 'idle') : 'none'));
+  // a place's clip (not a finding's own, which the service stretches itself) is shown with the display stretch above
+  const place = !!url && url.startsWith(`${PLACE_CLIP ?? '-'}?`);
+  const [amp, setAmp] = useState(() => (url && place ? (stretchOf.get(url) ?? 0) : 0));
+  const fid = useRef(`cb-str-${++filterSeq}`).current;
+  const onPicLoad = (e: Event) => {
+    if (!place || !url) return;
+    const k = stretchOf.get(url) ?? measure(e.currentTarget as HTMLImageElement);
+    stretchOf.set(url, k);
+    setAmp(k);
+  };
+  const look = amp ? { filter: `url(#${fid})` } : undefined;
   useEffect(() => {
     const el = box.current;
     if (!el || typeof IntersectionObserver === 'undefined') return setNear(true);
@@ -122,8 +160,19 @@ export function Pic({ findingId, ra, dec, size = 96, label, thumb }: { findingId
     >
       {state === 'none' && thumb && <img src={thumb} alt={label} width={size} height={size} />}
       {state === 'none' && !thumb && ra != null && dec != null && <SurveyStamp ra={ra} dec={dec} size={size} />}
-      {state === 'ready' && url && <img src={url} alt={`Time-lapse of ${label}`} width={size} height={size} decoding="async" />}
-      {big && state === 'ready' && bigUrl && <img class="cb-pic-big" src={bigUrl} alt={`Larger time-lapse of ${label}`} width={320} height={320} data-testid="row-pic-big" />}
+      {state === 'ready' && url && <img src={url} alt={`Time-lapse of ${label}`} width={size} height={size} decoding="async" style={look} onLoad={onPicLoad} data-stretch={amp ? amp.toFixed(2) : undefined} />}
+      {big && state === 'ready' && bigUrl && <img class="cb-pic-big" src={bigUrl} alt={`Larger time-lapse of ${label}`} width={320} height={320} style={look} data-testid="row-pic-big" />}
+      {amp > 0 && (
+        <svg class="cb-str" width="0" height="0" aria-hidden="true" focusable="false">
+          <filter id={fid} color-interpolation-filters="sRGB">
+            <feComponentTransfer>
+              <feFuncR type="gamma" amplitude={amp} exponent={0.5} offset={-0.1} />
+              <feFuncG type="gamma" amplitude={amp} exponent={0.5} offset={-0.1} />
+              <feFuncB type="gamma" amplitude={amp} exponent={0.5} offset={-0.1} />
+            </feComponentTransfer>
+          </filter>
+        </svg>
+      )}
     </span>
   );
 }

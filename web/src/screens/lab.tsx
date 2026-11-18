@@ -2348,6 +2348,25 @@ export function Lab({ route }: { route: Route }) {
     setTab('obj');
   };
 
+  // a track chosen in the list before the Days view of its pass is here: chosen again, by its place, once that pass's tracks are
+  const pendingTrack = useRef<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    const want = pendingTrack.current;
+    if (!want || film === null || ft.state !== 'ok' || !ft.tracks.length) return;
+    pendingTrack.current = null;
+    let best = -1;
+    let bd = 12; // grid pixels: the same track, found again in the Days search
+    ft.tracks.forEach((t, k) => {
+      const m = t.pts[Math.floor(t.pts.length / 2)];
+      if (!m) return;
+      const d = Math.hypot(m.x - want.x, m.y - want.y);
+      if (d < bd) {
+        bd = d;
+        best = k;
+      }
+    });
+    if (best >= 0) selectTrack(best);
+  }, [ft.state, film, filmData?.key]);
   /** a track found inside a pass: selected as an object (at its middle place in the film's grid) and its passport opened */
   const selectTrack = (i: number) => {
     setTrackSel(i);
@@ -2361,6 +2380,8 @@ export function Lab({ route }: { route: Route }) {
         ra: g.ra0 - ((p.x + 0.5 - g.n / 2) * g.step_arcsec) / 3600 / cd,
         dec: g.dec0 - ((p.y + 0.5 - g.n / 2) * g.step_arcsec) / 3600,
         name: t.known?.name ?? `Track ${i + 1}`,
+        // a body moving ~20′ through a pass: its place is the one of its middle visit, and the card says which
+        at: ((fr) => (fr ? `at visit ${p.f + 1} of ${filmData!.meta.frames.length} · ${utc(fr.mjd)}` : undefined))(filmData?.meta.frames[p.f]),
         moving: {
           V: t.known?.V ?? null,
           visits: t.pts.map((q, n) => ({ n: n + 1, z: q.z ?? 0, how: q.how ?? 'found' })),
@@ -2567,7 +2588,12 @@ export function Lab({ route }: { route: Route }) {
       setFrame(q.index);
     },
     visit: film !== null ? visit : null,
+    daysPass:
+      film !== null && meta?.passes.length
+        ? meta.passes.reduce((b, q) => (Math.abs(q.mjd_mid - film) < Math.abs(b.mjd_mid - film) ? q : b)).index
+        : null,
     findIdents: selRecord && selRecord !== 'failed' && selRecord.id === sel?.finding ? (selRecord.idents ?? null) : null,
+    findStatus: selRecord && selRecord !== 'failed' && selRecord.id === sel?.finding ? (selRecord.status ?? null) : null,
     visitOf: (mjd) => {
       // the visit of the pass on show nearest a date, numbered as the time line numbers it (within two hours, else none)
       const fr = filmData?.meta.frames ?? [];
@@ -2579,6 +2605,12 @@ export function Lab({ route }: { route: Route }) {
       return Math.abs(fr[k]!.mjd - mjd) < 2 / 24 ? k + 1 : null;
     },
     nVisits: film !== null ? (filmData?.meta.frames.length ?? 0) : 0,
+    // the same test as the loading card's (made later in this render: inlined here)
+    ready: valid && !!meta && phase === '' && (film === null ? !!shown : !!filmData),
+    pause: () => {
+      // stop on the frame on show (the clock's frame, held)
+      setPlaying(false);
+    },
     showVisit: (mjd) => {
       const fr = filmData?.meta.frames ?? [];
       if (!fr.length) return;
@@ -3482,7 +3514,19 @@ export function Lab({ route }: { route: Route }) {
       })(t.pts[t.pts.length >> 1]),
       path: ((n) => (n ? t.pts.map((q) => [(q.x + 0.5) / n, (q.y + 0.5) / n] as [number, number]) : undefined))(filmData?.meta.grid.n ?? meta?.grid.n),
       pick: rowPick(`ast:${i}`, () => {
-        selectTrack(i);
+        // the list's track is the asteroid search's (Months): the Days view's own tracks are matched to it by place once they are here
+        const mid = t.pts[t.pts.length >> 1];
+        pendingTrack.current = mid ? { x: mid.x, y: mid.y } : null;
+        if (film !== null && ft.state === 'ok') {
+          const k = ft.tracks.findIndex((q) => {
+            const m = q.pts[q.pts.length >> 1];
+            return !!m && !!mid && Math.hypot(m.x - mid.x, m.y - mid.y) < 12;
+          });
+          if (k >= 0) {
+            pendingTrack.current = null;
+            selectTrack(k);
+          }
+        }
         // Days at the track's own pass (the one the search ran on), not at the pass on show
         if (film === null) {
           setFrame(null);

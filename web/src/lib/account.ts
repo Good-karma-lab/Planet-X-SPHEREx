@@ -32,6 +32,8 @@ export interface AccountMark {
   created: string;
   /** the date (MJD) of the frame the mark was put on, when the lab knows it */
   mjd?: number | null;
+  /** what the service concluded (known · no_match · needs_another_pass · waiting · checking · comment), its text ready to show */
+  verdict?: { state: string; text: string; name?: string } | null;
 }
 /** What lib/marks.ts takes in `setMarksSync`. */
 export interface AccountMarksRemote {

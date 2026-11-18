@@ -113,8 +113,19 @@ export function AccountMenu({ user, initiallyOpen }: { user: User; initiallyOpen
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(user.name);
   const [status, setStatus] = useState('');
+  /** the sign-out is on its way (the server and the marks sync take a few seconds): the control says so and takes no second click */
+  const [leaving, setLeaving] = useState(false);
   const [prefs, setPrefs] = useState<{ slug: string; public: boolean; hide: boolean } | null>(null);
   useEffect(() => setOpen(initiallyOpen), [initiallyOpen]);
+  const leave = () => {
+    if (leaving) return;
+    setLeaving(true);
+    setStatus('');
+    signOut().catch((x: Error) => {
+      setLeaving(false);
+      setStatus(x.message);
+    });
+  };
   useEffect(() => {
     if (!open || prefs) return;
     void Promise.all([api<{ slug: string; public: boolean }>('/api/me/profile'), api<{ hide_from_board: boolean }>('/api/me/score')]).then(
@@ -184,11 +195,13 @@ export function AccountMenu({ user, initiallyOpen }: { user: User; initiallyOpen
           Download my data
         </a>
         <hr />
-        <button class="cb-menuitem" data-testid="signout" onClick={() => void signOut().catch((x: Error) => setStatus(x.message))}>
-          Sign out
+        <button class={`cb-menuitem${leaving ? ' busy' : ''}`} data-testid="signout" disabled={leaving} aria-busy={leaving} onClick={leave}>
+          {leaving ? 'Signing out…' : 'Sign out'}
+          {leaving && <i class="cb-spin" aria-hidden="true" />}
         </button>
         <button
           class="cb-menuitem danger"
+          disabled={leaving}
           data-testid="delete-account"
           onClick={() =>
             confirm('Delete your account and all your data? Marks, squares, investigations, history and notifications are removed and cannot be restored. Findings you submitted stay, without your name.') &&

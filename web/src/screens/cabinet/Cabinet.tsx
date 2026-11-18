@@ -205,13 +205,42 @@ function InvCard({ inv, marks, finding }: { inv: Investigation; marks: AccountMa
   );
 }
 
+/** a mark's verdict in a word on its badge (the full text on hover) */
+const VERDICT_WORD: Record<string, string> = {
+  known: 'known',
+  no_match: 'no match',
+  needs_another_pass: 'one more pass',
+  waiting: 'waiting',
+  checking: 'checking',
+  comment: 'comment',
+};
+
+/** The open square task the person used last: the newest lab visit (view history) on an open square's task, or on its square and
+ *  quarter; else the newest open square taken. */
+function lastSquare(mine: Pick<Mine, 'tasks' | 'history'>): Task | undefined {
+  // a square task left open for hours is stale (the service says so): Continue offers the ones in use
+  const open = mine.tasks
+    .filter((t) => t.kind === 'cell' && t.state === 'open' && !(t as Task & { stale?: boolean }).stale)
+    .sort((a, b) => b.created.localeCompare(a.created));
+  if (open.length < 2) return open[0];
+  const visits = [...mine.history].sort((a, b) => b.at.localeCompare(a.at));
+  for (const h of visits) {
+    const [name = '', query = ''] = h.ref.replace(/^#\/?/, '').split('?');
+    if (name !== 'lab') continue;
+    const q = new URLSearchParams(query);
+    const hit = open.find((t) => t.id === q.get('task')) ?? open.find((t) => !!q.get('cell') && t.cell_id === q.get('cell') && (t.quarter ?? '') === (q.get('quarter') ?? ''));
+    if (hit) return hit;
+  }
+  return open[0];
+}
+
 /** Name, level and points, and the one next thing to do. */
 function Hero({ mine, take }: { mine: Mine; take: (k: 'cell' | 'finding') => void }) {
   const s = mine.score;
   const cur = s ? ([...s.levels].reverse().find((l) => s.points >= l.at) ?? s.levels[0]!) : null;
   const toNext = s && cur && s.next_level_at != null ? (s.points - cur.at) / (s.next_level_at - cur.at) : 1;
   const nextName = s?.levels.find((l) => l.at === s.next_level_at)?.name;
-  const openCell = mine.tasks.find((t) => t.kind === 'cell' && t.state === 'open');
+  const openCell = lastSquare(mine);
   const openCheck = mine.tasks.find((t) => t.kind !== 'cell' && t.state === 'open');
   const quarters = (s as (MyScore & { quarters?: number }) | null)?.quarters ?? mine.tasks.filter((t) => t.kind === 'cell' && t.state === 'done').length;
   return (
@@ -249,7 +278,7 @@ function Hero({ mine, take }: { mine: Mine; take: (k: 'cell' | 'finding') => voi
       </div>
       <div class="cb-next2">
         {openCell ? (
-          <a class="btn primary big" href={taskHash(openCell)} data-testid="next-square">
+          <a class="btn primary big" href={taskHash(openCell)} title={`The square you used last · taken ${ago(openCell.created)}`} data-testid="next-square">
             Continue · square {openCell.cell_id}
             {openCell.quarter ? ` ${openCell.quarter}` : ''}
           </a>
@@ -412,7 +441,14 @@ function WorkPanel({ mine, work, run }: { mine: Mine; work: Work; run: (p: Promi
                 line={`${place(m.ra, m.dec)}${m.pass != null ? ` · pass ${m.pass + 1}` : ''}${m.note ? ` · ${m.note}` : ''}`}
                 side={
                   <>
-                    <span class={`badge st-${m.level}`}>{m.level}</span>
+                    {/* what the service concluded about the mark (known: 12304 …, no catalogue match, waiting for JPL), else its level */}
+                    {m.verdict?.text ? (
+                      <span class={`badge v-${m.verdict.state}`} title={m.verdict.text}>
+                        {VERDICT_WORD[m.verdict.state] ?? m.verdict.state}
+                      </span>
+                    ) : (
+                      <span class={`badge st-${m.level}`}>{m.level}</span>
+                    )}
                     <a class="btn sm" href={markHash(m)}>
                       Lab
                     </a>

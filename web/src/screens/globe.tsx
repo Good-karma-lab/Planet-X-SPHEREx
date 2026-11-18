@@ -1531,8 +1531,15 @@ export function Globe() {
                 {given?.cell_id === cell.id && given.why?.kind && (
                   // the lead that made the service offer this square
                   <div class="cov-why" data-testid="cov-why">
-                    {WHY_WORD[given.why.kind] ?? 'a lead'} in {given.quarter ? `its ${given.quarter} quarter` : 'this square'}
-                    {given.why.promise != null ? ` · promise ${given.why.promise}` : ''}
+                    {WHY_WORD[given.why.kind] ?? 'Something to check'} in {given.quarter ? `its ${given.quarter} quarter` : 'this square'}
+                    {given.why.promise != null && (
+                      <span class="cov-nw">
+                        {' · '}
+                        <span class="cov-promise" title="Promise: how much this is worth looking at first, 0–100" tabIndex={0}>
+                          promise {given.why.promise}
+                        </span>
+                      </span>
+                    )}
                   </div>
                 )}
                 <div class="cov-state" data-testid="cov-state">
@@ -1947,15 +1954,15 @@ export function Globe() {
  *  (trying needs no account); the look counts once they sign in. */
 /** a lead's kind as the square's card says it */
 const WHY_WORD: Record<string, string> = {
-  mover: 'A mover',
-  track: 'A mover',
-  browndwarf: 'A brown-dwarf candidate',
-  brown_dwarf: 'A brown-dwarf candidate',
-  peak: 'A Planet X peak',
-  film: 'A body moving in one pass',
-  pair: 'A pair changing',
-  red: 'A red source',
-  anomaly: 'A spectral anomaly',
+  mover: 'Something moving',
+  track: 'Something moving',
+  browndwarf: 'A possible brown dwarf',
+  brown_dwarf: 'A possible brown dwarf',
+  peak: 'A possible distant body (Planet X search)',
+  film: 'Something moving within one pass',
+  pair: 'A source that changes between passes',
+  red: 'An unusually red source',
+  anomaly: 'An unusual spectrum',
 };
 
 function GiveSquare({ onSquare }: { onSquare: (t: Task) => void }) {
