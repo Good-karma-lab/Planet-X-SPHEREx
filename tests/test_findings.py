@@ -805,3 +805,29 @@ def test_stage_view_counts_the_stage_chips_under_the_kind_filter(tmp_path: Path)
     sv = query(db, None, "all", None, 50, 0, kinds=("red",))["stage_view"]
     assert sv["waiting"] == 2 and sv["new"] == 2 and sv["noted"] == 0  # the anomaly is another kind: not counted
     assert query(db, None, "all", None, 50, 0, kinds=("red",), stage="known")["stage_view"]["waiting"] == 2  # not under its own stage
+
+
+def test_sbident_asks_jpl_for_its_precise_second_pass() -> None:
+    """Explorer round 3: the top time-lapse lead (unexplained, "JPL lists no known body there") is 12304 (1991 SR1). JPL's quick first
+    pass put it 17.7″ away (beyond the 15″ match), its precise second pass 4.4″: the identification asks for the second pass and
+    measures the separation from the body's own astrometric place."""
+    from service.findings import Findings
+    from service.upstream.breaker import Breaker
+
+    asked: dict[str, str] = {}
+    fields = ["Object name", "Astrometric RA (hh:mm:ss)", "Astrometric Dec (dd mm'ss\")", "Visual magnitude (V)",
+              'RA rate ("/h)', 'Dec rate ("/h)']  # fmt: skip
+    # the film at 60.6088571 +8.3985333 (04 02 26.13 +08 23 54.7); 12304 4.4″ away, moving like the track (36.7″/h toward 70°)
+    body = {"fields_second": fields, "data_second_pass": [["12304 (1991 SR1)", "04 02 26.38", "+08 23 56.1", "18.1", "34.5", "12.6"]]}
+
+    class Client:
+        async def get(self, url: str, params: dict[str, str], **_kw: object) -> _Resp:
+            asked.update(params)
+            return _Resp(body)
+
+    f = Findings.__new__(Findings)
+    f.breaker = Breaker("JPL")
+    f.catalogue = type("C", (), {"client": Client()})()
+    got = asyncio.run(f.sbident(60.6088571, 8.3985333, 61085.955, 36.72, 70.3))
+    assert asked["two-pass"] == "true" and asked["suppress-first-pass"] == "true"
+    assert got["state"] == "ok" and got["name"] == "12304 (1991 SR1)" and 3.0 < got["sep"] < 6.0 and got["two_pass"] is True
