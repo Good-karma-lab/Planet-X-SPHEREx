@@ -926,7 +926,8 @@ class Clips:
                 if not row["complete"]:
                     continue
                 meta = st.read_meta(FIELD, row["key"])
-                if meta and meta.get("passes") and meta.get("grid"):
+                # a field the sweep stripped has no pictures left to cut a clip from
+                if meta and meta.get("passes") and meta.get("grid") and not meta.get("stripped"):
                     out.append(Source(st, row["key"], meta, own))
         self._fields = (time.time(), out)
         return out
@@ -1041,6 +1042,9 @@ class Clips:
                 self.pre.update({"running": True, "left": len(todo)})
                 for f in todo:
                     self.pre["now"] = f["id"]
+                    # the list of finished fields is read again every 20 s (every field's meta): in a thread, so the calls below and
+                    # a person's on the event loop find it fresh (read on the event loop it held it a second)
+                    await asyncio.to_thread(self.sources)
                     if f.get("kind") != "film" and f.get("kind") not in build_kinds and self.wants_own(f, self.source_for(f)):
                         continue
                     try:

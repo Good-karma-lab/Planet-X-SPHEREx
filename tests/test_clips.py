@@ -384,3 +384,15 @@ def test_visible_needs_the_ring_to_stand_out_from_its_own_neighbourhood() -> Non
     assert measured >= 12 and not is_visible(sn, beaten, measured, contrast)
     crowded[40, 40] = 60.0  # the same field with a source far above its neighbourhood: visible
     assert is_visible(*stands_out(crowded, 40, 40, 3, speckled=True))
+
+
+def test_a_field_the_sweep_stripped_is_not_a_source(tmp_path: Path) -> None:
+    """Its pictures are gone: a clip is never cut from it (the next finished field is used, or a 5′ field of the find's own)."""
+    store = Store(tmp_path / "main")
+    _field(store, "w" * 24, 60.0)
+    clips = Clips(store, tmp_path / "clips")
+    assert [s.key for s in clips.sources()] == ["w" * 24]
+    meta = store.read_meta("field", "w" * 24) or {}
+    store.write_meta("field", "w" * 24, {**meta, "stripped": True})
+    clips._fields = (0.0, [])
+    assert clips.sources() == [] and clips.source_for(_mover()) is None
