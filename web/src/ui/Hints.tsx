@@ -16,14 +16,16 @@ export interface Hint {
   text: string;
   /** only in a lab with a task of this kind */
   task?: string;
+  /** the card the control belongs to: the hint stands clear of all of it (its header, the sheet's tabs), not only of the control */
+  around?: string;
 }
 
 export const HINTS: Hint[] = [
   { id: 'start', screen: 'landing', at: '[data-testid=landing-start]', title: 'Real SPHEREx pictures', text: 'Start here. No account needed to look.' },
   { id: 'square', screen: 'explore', at: '[data-testid=give-square]', title: 'Give me a square', text: 'A piece of sky nobody has looked through yet.' },
   { id: 'play', screen: 'lab', at: '[data-testid=picture]', title: 'Watch it play', text: 'The passes take turns. Find a dot that steps while the stars stay.', task: 'cell' },
-  { id: 'mark', screen: 'lab', at: '[data-testid=task-missed]', title: 'It moves and has no ring?', text: 'Mark it here, then click it on the picture.', task: 'cell' },
-  { id: 'answer', screen: 'lab', at: '[data-testid=task-panel] .tp-btns', title: 'Then answer', text: 'Nothing here, or Done, with marks. After a minute and every pass.', task: 'cell' },
+  { id: 'mark', screen: 'lab', at: '[data-testid=task-missed]', title: 'It moves and has no ring?', text: 'Mark it here, then click it on the picture.', task: 'cell', around: '.lab .panel' },
+  { id: 'answer', screen: 'lab', at: '[data-testid=task-panel] .tp-btns', title: 'Then answer', text: 'Nothing here, or Done, with marks. After a minute and every pass.', task: 'cell', around: '.lab .panel' },
   { id: 'finds', screen: 'findings', at: '.fcard', title: 'What the machine found', text: 'Each is a lead, not a discovery. Check one: a few questions.' },
   { id: 'cabinet', screen: 'me', at: '.cb-work', title: 'Your work', text: 'Squares you looked through, your marks, findings and points.' },
 ];
@@ -55,17 +57,30 @@ const taskOf = (hash: string) => {
   return q.get('kind') || q.get('task') || '';
 };
 
-/** where the card goes: under the control, else above it, kept inside the window (16 px gutter) */
-function place(r: DOMRect, w: number, h: number): { left: number; top: number; up: boolean } {
+/** where the card goes: never over the control itself (nor over the sheet it is in); kept inside the window (16 px gutter). A big
+ *  control (the picture) has the card inside it, under its title row. */
+function place(r: DOMRect, w: number, h: number, upFirst: boolean): { left: number; top: number; up: boolean } {
   const W = window.innerWidth;
   const H = window.innerHeight;
   const left = Math.max(16, Math.min(W - w - 16, r.left + r.width / 2 - w / 2));
-  // a big control (the picture): the card sits inside it, near its top, not off the screen
   if (r.height > H * 0.45) return { left, top: Math.max(16, r.top + 56), up: false };
+  const above = r.top - h - 12;
   const below = r.bottom + 12;
-  if (below + h <= H - 16) return { left, top: below, up: false };
-  return { left, top: Math.max(16, r.top - h - 12), up: true };
+  const fitsUp = above >= 16;
+  const fitsDown = below + h <= H - 16;
+  // a bottom sheet (a phone, a tablet): above it, over the picture; elsewhere under the control, as the eye reads on
+  if (fitsUp && (upFirst || !fitsDown)) return { left, top: above, up: true };
+  if (fitsDown) return { left, top: below, up: false };
+  // neither fits whole: the side with more room
+  return r.top > H - r.bottom ? { left, top: 16, up: true } : { left, top: Math.max(16, H - h - 16), up: false };
 }
+
+/** something else holds the person's eyes: the lab's loading card, or a sign-in popup */
+const busy = () =>
+  [...document.querySelectorAll<HTMLElement>('[data-testid=load-block], [data-testid=signin-popup], .sx-back')].some((e) => {
+    const r = e.getBoundingClientRect();
+    return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.classList.contains('fading');
+  });
 
 export function Hints() {
   const [hash, setHash] = useState(typeof location === 'undefined' ? '' : location.hash);
@@ -87,6 +102,7 @@ export function Hints() {
     }
   });
   const [box, setBox] = useState<DOMRect | null>(null);
+  const [room, setRoom] = useState<DOMRect | null>(null);
   const card = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number; up: boolean } | null>(null);
   useEffect(() => {
@@ -124,7 +140,7 @@ export function Hints() {
     let last = '';
     const tick = () => {
       let pick: { h: Hint; r: DOMRect } | null = null;
-      for (const h of due) {
+      for (const h of busy() ? [] : due) {
         const r = document.querySelector<HTMLElement>(h.at)?.getBoundingClientRect();
         if (r && r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < window.innerHeight) {
           pick = { h, r };
@@ -132,10 +148,15 @@ export function Hints() {
         }
       }
       const k = pick ? `${pick.h.id}:${Math.round(pick.r.left)},${Math.round(pick.r.top)},${Math.round(pick.r.width)},${Math.round(pick.r.height)}` : '';
-      if (k !== last) {
-        last = k;
+      // the room to keep clear: the control's card, when it is a sheet at the bottom (a phone or a tablet); else the control alone
+      const a = pick?.h.around ? document.querySelector<HTMLElement>(pick.h.around)?.getBoundingClientRect() : undefined;
+      const clear = a && pick && a.height < window.innerHeight * 0.6 && a.top > window.innerHeight * 0.3 ? a : null;
+      const k2 = `${k}|${clear ? Math.round(clear.top) : ''}`;
+      if (k2 !== last) {
+        last = k2;
         setCurId(pick?.h.id ?? null);
         setBox(pick?.r ?? null);
+        setRoom(clear);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -149,8 +170,8 @@ export function Hints() {
   useLayoutEffect(() => {
     const c = card.current;
     if (!box || !c) return setPos(null);
-    setPos(place(box, c.offsetWidth, c.offsetHeight));
-  }, [box]);
+    setPos(place(room ?? box, c.offsetWidth, c.offsetHeight, !!room));
+  }, [box, room]);
   useEffect(() => {
     if (!hint || !box) return;
     const k = (e: KeyboardEvent) => {
