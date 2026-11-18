@@ -565,6 +565,8 @@ interface CardReply {
   total: number;
   counts: Record<string, { all: number; leads?: number }>;
   stages: Record<string, number>;
+  /** every status's count under the request's other filters (kind, status, place, visibility): the status chips' numbers */
+  stage_view?: Record<string, number>;
   waiting: number;
   waiting_promising: number;
   promising: number;
@@ -674,28 +676,6 @@ function stageQuery(q: URLSearchParams, stage: StageSel, mine: string[]) {
   else if (stage === 'waiting') q.set('waiting', '1');
   else if (stage !== 'any') q.set('stage', stage);
 }
-/**
- * The numbers on the chips under the other filters: one small reply per chip (a single card), whose `in_view` splits its count into
- * visible / not visible. The last numbers stay while the next are on their way.
- */
-function useTally<K extends string>(names: K[], query: (k: K, q: URLSearchParams) => void, dep: string) {
-  const [t, setT] = useState<Partial<Record<K, InView>>>({});
-  useEffect(() => {
-    let stop = false;
-    for (const k of names) {
-      const q = new URLSearchParams({ lite: '1', status: 'all', limit: '1' });
-      query(k, q);
-      void fetch(`/api/v1/findings?${q}`)
-        .then((r) => (r.ok ? (r.json() as Promise<CardReply>) : null))
-        .then((d) => d && !stop && setT((s) => ({ ...s, [k]: d.visibility.in_view })))
-        .catch(() => {});
-    }
-    return () => {
-      stop = true;
-    };
-  }, [dep]);
-  return t;
-}
 /** The kind chips' numbers under the active status and visibility: GET /api/v1/findings' counts_view, one small reply. The last
  *  numbers stay while the next are on their way. */
 function useKindCounts(stage: StageSel, mine: string[], unseen: boolean): Record<string, number> | null {
@@ -785,14 +765,6 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   // every number on a chip is what that chip gives under the other filters: one reply's counts_view has it for every kind (the
   // service counts under the status, stage and visibility asked, the kinds left out)
   const byKind = useKindCounts(stage, mine, unseen);
-  const byStage = useTally<StageSel>(
-    kind === 'submitted' ? [] : ['waiting', 'noted'],
-    (st, q) => {
-      kindQuery(q, kind);
-      stageQuery(q, st, mine);
-    },
-    kind,
-  );
   const cnt = (k: KindSel) =>
     k === 'submitted' || !byKind ? null : k === 'promising' ? PROMISING.reduce((n, x) => n + (byKind[x] ?? 0), 0) : (byKind[k] ?? 0);
   const kinds: [KindSel, string][] = [
@@ -808,19 +780,13 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
     ['anomaly', KIND_SHORT.anomaly!],
   ];
   const stages: StageSel[] = ['any', 'mine', 'waiting', 'noted', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
-  // the numbers on the status buttons are of the whole list, so they are shown only where they are what the button gives
+  // the numbers on the status buttons: the list's own reply counts every status under the kind and visibility chosen (stage_view)
   const stageTotal = (s: StageSel) =>
-    !h || s === 'any' || s === 'mine' || s === 'noted' ? 0 : s === 'waiting' ? h.waiting : (h.stages[s] ?? 0);
+    !h || s === 'any' || s === 'mine' ? 0 : (h.stage_view?.[s] ?? (s === 'waiting' ? h.waiting : s === 'noted' ? 0 : (h.stages[s] ?? 0)));
   // until the first reply every number is a dash of its own place: the chips keep their size and nothing moves when the numbers come
   const NONE = '—';
   const stageCount = (s: StageSel) =>
-    s === 'mine'
-      ? mine.length
-      : s === 'noted' || s === 'waiting'
-        ? kind === 'submitted'
-          ? null
-          : (underView(byStage[s], unseen, false) ?? NONE)
-        : null;
+    s === 'mine' ? mine.length : s === 'any' || kind === 'submitted' ? null : h ? (h.stage_view?.[s] ?? null) : NONE;
   const stageName = (s: StageSel) =>
     s === 'any'
       ? 'Any status'
