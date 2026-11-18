@@ -360,4 +360,4 @@ def control_trial(u, v, vis, t, R, rac, decc, seed, tol=None):
     rng = np.random.default_rng(seed)
     flip = np.where(rng.random(len(u)) < 0.5, -1.0, 1.0)
     u2, v2 = u * flip + rng.normal(0, 60, len(u)), v * flip + rng.normal(0, 60, len(u))
-    return [dict(nvis=r["nvis"], rms=r["rms"], hours=r["hours"]) for r in link(u2, v2, vis, t, R, Plane(rac, decc), tol=tol)]
+    return [dict(nvis=r["nvis"], rms=r["rms"], hours=r["hours"], idx=r["idx"]) for r in link(u2, v2, vis, t, R, Plane(rac, decc), tol=tol)]
