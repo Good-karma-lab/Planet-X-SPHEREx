@@ -1,5 +1,6 @@
 // The product-flow pieces of the lab (product spec §5 Lab): Known objects, marks, the ruler. One hook, `useLabFlow`, which lab.tsx
 // calls; it returns what the lab draws on its overlay, what it puts over the picture and in the Controls panel, and its status line.
+import { formatHash, parseHash } from '../../lib/route';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
@@ -37,7 +38,7 @@ import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, taskTrack, useLabTask, type NextTask } from './task';
 import { FindingClip, MoverView, StampsView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
-import { heldAt, KNOWN_SOURCES, placeAt, type Held } from './known';
+import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, type FieldKnown, type Held } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
 import { clearDo, pendingDo, useSignIn } from './signin';
 import { useRetry, type SearchInfo } from './progress';
@@ -266,6 +267,30 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     return followKnown(knownUrl(a.ra, a.dec, a.fov, a.epochs), setKnown);
   }, [a.ra, a.dec, a.fov, epochsKey, knownTry]);
 
+  // a sign-in that did not finish comes back here with signin=google (or expired): said on the status line for a while, then the
+  // address is cleaned (the person is still where they were)
+  const [signinNote, setSigninNote] = useState('');
+  useEffect(() => {
+    const why = a.params['signin'];
+    if (!why) return;
+    setSigninNote(why === 'expired' ? 'Sign-in link expired · ask for a new one' : 'Sign-in did not finish');
+    const r = parseHash(location.hash);
+    const params = { ...r.params };
+    delete params['signin'];
+    history.replaceState(null, '', formatHash({ ...r, params }));
+    const t = setTimeout(() => setSigninNote(''), 15000);
+    return () => clearTimeout(t);
+  }, [a.params['signin']]);
+  // the field's one set of known objects (the service matched it once over the passes): the rings stay from pass to pass
+  const [fieldKnown, setFieldKnown] = useState<FieldKnown>(FIELD_ASKING);
+  const fieldRef = useRef(fieldKnown);
+  fieldRef.current = fieldKnown;
+  useEffect(() => {
+    setFieldKnown(FIELD_ASKING);
+    if (!Number.isFinite(a.ra) || !Number.isFinite(a.dec)) return;
+    return followFieldKnown(a.ra, a.dec, a.fov, setFieldKnown);
+  }, [a.ra, a.dec, a.fov]);
+
   const [, tick] = useState(0);
   useEffect(() => onMarks(() => tick((x) => x + 1)), []);
   const marks = allMarks();
@@ -394,8 +419,41 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       }
       // a place first without a match may be matched in another pass (a moving star's place): known wins
     }
-    const field: KnownMatch | null = un.passes.size ? { shown: un.shown, deep: un.deep, noMatch: un.lone } : match;
-    match = field;
+    const fk = fieldRef.current;
+    let knDraw: KnownState = kn;
+    if (fk.state === 'ok' && argsRef.current.known) {
+      // the service's set: every catalogue source the field shows, ringed in every pass; the named and fast stars keep their motion
+      // and their names from /api/known, the Solar System bodies stay per pass
+      const keep = kn.state === 'ok' ? kn.objects.filter((o) => o.label || o.source === 'jpl') : [];
+      const kept = new Set(keep.map((o) => o.id));
+      // and the fainter catalogue stars a pass of this picture shows (the service keeps what half the passes show at S/N 8): the
+      // union over the passes seen, never one pass alone, so they stay too; a star already in the service's set is not ringed twice
+      const year = env.year;
+      const near3 = (o: KnownObject, list: KnownObject[]) => {
+        const at = placeAt(o, year);
+        if (!at) return true;
+        const c = Math.cos((at[1] * Math.PI) / 180);
+        return list.some((q) => {
+          const p = q.positions[0]!;
+          return Math.hypot((((p.ra - at[0] + 540) % 360) - 180) * c, p.dec - at[1]) * 3600 < 3;
+        });
+      };
+      const extra = kn.state === 'ok' ? kn.objects.filter((o) => un.shown.has(o.id) && !kept.has(o.id) && !near3(o, fk.objects)) : [];
+      const extraDeep = kn.state === 'ok' ? kn.deep.filter((o) => un.deep.has(o.id) && !near3(o, [...fk.deep, ...fk.objects])) : [];
+      const objects = [...keep, ...fk.objects.filter((o) => !kept.has(o.id)), ...extra];
+      const deepAll = [...fk.deep, ...extraDeep];
+      knDraw = { ...(kn.state === 'ok' ? kn : { ...KNOWN_OFF, answered: { gaia: true, simbad: true, jpl: false } }), state: 'ok', objects, deep: deepAll };
+      match = {
+        shown: new Set(objects.map((o) => o.id)),
+        deep: new Set(deepAll.map((o) => o.id)),
+        noMatch: fk.unmatched.map((q) => {
+          const [u, v] = uv(q.ra, q.dec);
+          return { u, v, snr: q.snr };
+        }),
+      };
+    } else {
+      match = un.passes.size ? { shown: un.shown, deep: un.deep, noMatch: un.lone } : match;
+    }
     const ck = match ? `${match.shown.size + (match.deep?.size ?? 0)}:${match.noMatch.length}` : '';
     if (ck !== countsRef.current) {
       countsRef.current = ck;
@@ -420,7 +478,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       const k = [...byPass.values()].filter(Boolean).length;
       return byPass.size ? [k, byPass.size] : null;
     };
-    drawKnown({ ...env, seenIn, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, kn);
+    drawKnown({ ...env, seenIn, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, knDraw);
     const z = env.zoom;
     if (z && !wall) {
       // the zoom on a find: the same rings and names at the zoom's scale (the sources without a match too: what is near the find)
@@ -1557,7 +1615,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       ptr.current = p;
     },
     click,
-    status: [status, awardNow].filter(Boolean).join(' · '),
+    status: [signinNote, status, awardNow].filter(Boolean).join(' · '),
     floats: strip,
     blinkPick,
     card: (

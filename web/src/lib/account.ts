@@ -52,6 +52,8 @@ export interface Task {
   field_key: string | null;
   ra: number | null;
   dec: number | null;
+  /** a square handed out for a lead in it: which find, its kind and promise (GET /api/tasks/next) */
+  why?: { finding_id?: string; kind?: string; promise?: number } | null;
   state: 'open' | 'done';
   result: string | null;
   mark_ids: string[];
