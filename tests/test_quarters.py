@@ -208,3 +208,6 @@ def test_an_old_open_square_task_is_not_given_again(
     )
     again = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
     assert again["id"] != first["id"] and (again["cell_id"], again["quarter"]) != (first["cell_id"], first["quarter"])
+    # the cabinet's Continue skips the old one (m-8: "Continue · square 099-0543 SW" pointed to a square of the day before)
+    listed = {t["id"]: t for t in c.get("/api/me/tasks").json()["tasks"]}
+    assert listed[first["id"]]["stale"] is True and listed[again["id"]]["stale"] is False
