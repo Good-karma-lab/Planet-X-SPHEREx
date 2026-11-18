@@ -53,6 +53,26 @@ import { CandList, unexplainedCount, useJplState, type FindRow } from './lab/can
 import { SheetGrip } from '../ui/Sheet';
 
 const SIZES = [2, 5, 10, 20, 60];
+/** Where the first look lies on the picture's box: by its own grid against the field's (the same unless one snapped to a nearby
+ *  centre: then it is shifted and scaled so that both skies agree). Fractions of the box, as CSS. */
+export function quickPlace(
+  q: { ra0: number; dec0: number; step_arcsec: number; n: number } | null,
+  f: { ra0: number; dec0: number; step_arcsec: number; n: number } | null,
+): Record<string, string> | undefined {
+  if (!q || !f) return undefined;
+  const fa = f.n * f.step_arcsec;
+  const qa = q.n * q.step_arcsec;
+  if (!(fa > 0 && qa > 0)) return undefined;
+  const cd = Math.cos((f.dec0 * Math.PI) / 180);
+  // east is left: a centre further east (larger RA) lies left of the field's
+  const du = (-(((q.ra0 - f.ra0 + 540) % 360) - 180) * cd * 3600) / fa;
+  const dv = (-(q.dec0 - f.dec0) * 3600) / fa;
+  const s = qa / fa;
+  if (Math.abs(du) < 1e-4 && Math.abs(dv) < 1e-4 && Math.abs(s - 1) < 1e-4) return undefined;
+  const pc = (x: number) => `${Math.round(x * 1e5) / 1e3}%`;
+  return { left: pc(0.5 + du - s / 2), top: pc(0.5 + dv - s / 2), width: pc(s), height: pc(s), inset: 'auto' };
+}
+
 /** a find opened in a wide field: the zoom shows this much around it (arcminutes across), large */
 const AROUND_ARCMIN = 5;
 /** the zoom's side in CSS px: 2′ small; around a find, large */
@@ -3130,13 +3150,25 @@ export function Lab({ route }: { route: Route }) {
   // a cold field's first look (GET /api/v1/fields/quick: the all-sky cube cut to the field's own grid), asked once per field while it
   // loads; a 502 (the bucket did not answer) keeps the usual card
   const [quick, setQuick] = useState<string | null>(null);
+  // the first look's own grid (its X-Quick header): placed by it, so that a field that snapped to a nearby centre still agrees
+  const [quickGrid, setQuickGrid] = useState<{ ra0: number; dec0: number; step_arcsec: number; n: number } | null>(null);
   useEffect(() => {
     setQuick(null);
+    setQuickGrid(null);
     if (!valid || film !== null) return;
     let stop = false;
     let url = '';
     void fetch(`/api/v1/fields/quick?ra=${ra.toFixed(5)}&dec=${dec.toFixed(5)}&fov=${fov}`)
-      .then((r) => (r.ok && /^image\//.test(r.headers.get('content-type') ?? '') ? r.blob() : null))
+      .then((r) => {
+        if (!r.ok || !/^image\//.test(r.headers.get('content-type') ?? '')) return null;
+        try {
+          const g = (JSON.parse(r.headers.get('x-quick') ?? '{}') as { grid?: { ra0: number; dec0: number; step_arcsec: number; n: number } }).grid;
+          if (g && [g.ra0, g.dec0, g.step_arcsec, g.n].every(Number.isFinite)) setQuickGrid(g);
+        } catch {
+          // no header: drawn on the field's box as it is
+        }
+        return r.blob();
+      })
       .then((b) => {
         if (!b || stop) return;
         url = URL.createObjectURL(b);
@@ -3762,7 +3794,13 @@ export function Lab({ route }: { route: Route }) {
               <canvas ref={overlay} class="ov" />
               {quick && loadNow && view === 'picture' && (
                 // the field's first look while it is built: the SPHEREx all-sky map cut to this very grid, dimmed, still
-                <img class="quickframe" src={quick} alt="SPHEREx all-sky map of this field: a first look while the field is built" data-testid="quick-frame" />
+                <img
+                  class="quickframe"
+                  src={quick}
+                  alt="SPHEREx all-sky map of this field: a first look while the field is built"
+                  style={quickPlace(quickGrid, meta?.grid ?? null)}
+                  data-testid="quick-frame"
+                />
               )}
               <LoadOverlay step={loadNow} field={`${ra},${dec},${fov}`} firstLook={!!quick && !!loadNow && view === 'picture'} />
               {flow.floats}

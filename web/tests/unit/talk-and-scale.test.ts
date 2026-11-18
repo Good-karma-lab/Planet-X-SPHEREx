@@ -20,3 +20,15 @@ describe('the scale bar', () => {
     expect(scaleBar(2, 400).word).toBe('30″');
   });
 });
+
+import { quickPlace } from '../../src/screens/lab';
+describe("the first look's place on the picture", () => {
+  it('lies on the box when both grids agree, and is shifted by the snap when they do not', () => {
+    const g = { ra0: 100, dec0: 0, step_arcsec: 6, n: 100 }; // a 10′ field
+    expect(quickPlace(g, g)).toBeUndefined();
+    // the first look's centre 30″ north of the field's: its box lies 5 % higher
+    const p = quickPlace({ ...g, dec0: 30 / 3600 }, g)!;
+    expect(p.top).toBe('-5%');
+    expect(p.left).toBe('0%');
+  });
+});
