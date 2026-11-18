@@ -30,6 +30,9 @@ GAIA_TAPS = (
 )
 IRSA_TAP = "https://irsa.ipac.caltech.edu/TAP/sync"
 VIZIER_TAP = "https://tapvizier.cds.unistra.fr/TAPVizieR/tap/sync"
+# VizieR's plain cone search on two hosts beside the TAP service: TAPVizieR did not answer for days (every VSX question failed), the
+# CfA mirror and CDS's own server are asked as well and the first answer wins
+VIZIER_ASU = ("https://vizier.cfa.harvard.edu/viz-bin/asu-tsv", "https://vizier.cds.unistra.fr/viz-bin/asu-tsv")
 NED_URL = "https://ned.ipac.caltech.edu/cgi-bin/objsearch"
 SIMBAD_EPOCH, GAIA_EPOCH = 2000.0, 2016.0
 SIMBAD_HEDGE_S = 1.0  # the second SIMBAD mirror is asked as well when the first has not answered by then
@@ -227,6 +230,32 @@ def parse_vsx(body: str, ra: float, dec: float) -> dict[str, Any]:
     return best[1] if best else {"state": "none"}
 
 
+def parse_vsx_tsv(body: str, ra: float, dec: float) -> dict[str, Any]:
+    """VizieR's cone search (asu-tsv, decimal degrees): the nearest VSX star, or none. VizieR says an error of its own (its database
+    not reachable) in a 200 answer: that is not "no variable here" but no answer (ValueError)."""
+    if "QUERY_STATUS=ERROR" in body:
+        raise ValueError(
+            "VizieR: " + next((ln.split("=", 1)[1].strip() for ln in body.splitlines() if ln.startswith("#INFO\tError=")), "error")
+        )
+    lines = [ln for ln in body.splitlines() if ln.strip() and not ln.startswith("#")]
+    head = next((i for i, ln in enumerate(lines) if ln.split("\t")[0].strip() == "Name"), None)
+    if head is None:
+        return {"state": "none"}
+    cols = [c.strip() for c in lines[head].split("\t")]
+    rows = []
+    for ln in lines[head + 1 :]:
+        cells = [c.strip() for c in ln.split("\t")]
+        if not cells or set(cells[0]) <= {"-", " "} or (len(cells) > 3 and cells[3] in ("deg", "")):
+            continue  # the units line and the line of dashes under the header
+        rows.append(dict(zip(cols, cells, strict=False)))
+    out = io.StringIO()
+    w = csv.DictWriter(out, fieldnames=["Name", "Type", "Period", "RAJ2000", "DEJ2000"])
+    w.writeheader()
+    for r in rows:
+        w.writerow({k: r.get(k, "") for k in w.fieldnames})
+    return parse_vsx(out.getvalue(), ra, dec)
+
+
 def parse_ned(body: str) -> dict[str, Any]:
     rows = [ln.split("|") for ln in body.splitlines() if ln.count("|") >= 8 and not ln.lower().startswith("no.")]
     best: tuple[float, dict[str, Any]] | None = None
@@ -320,7 +349,7 @@ class CatalogueContext:
 
     def __init__(self, client: httpx.AsyncClient | None = None) -> None:
         self.client = client or httpx.AsyncClient(timeout=httpx.Timeout(DEADLINE_S, connect=4.0), headers={"User-Agent": "spherex-sky/0.1"})
-        self.breakers = {k: Breaker(k) for k in ("simbad", "simbad2", "gaia", "irsa", "vizier", "ned")}
+        self.breakers = {k: Breaker(k) for k in ("simbad", "simbad2", "gaia", "irsa", "vizier", "vizier_cfa", "vizier_cds", "ned")}
         self.cache: OrderedDict[str, tuple[float, dict[str, Any]]] = OrderedDict()
         self._background: set[asyncio.Task[None]] = set()
 
@@ -572,11 +601,36 @@ class CatalogueContext:
             return answer
 
     async def _vsx(self, ra: float, dec: float, radius: float) -> dict[str, Any]:
+        """AAVSO's VSX within `radius` ″: TAPVizieR and VizieR's cone search on two hosts, asked together; the first answer wins."""
         adql = (
             'SELECT TOP 5 "Name", "Type", "Period", "RAJ2000", "DEJ2000" FROM "B/vsx/vsx" '
             f"WHERE 1=CONTAINS(POINT('ICRS', \"RAJ2000\", \"DEJ2000\"), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {radius / 3600.0:.6f}))"
         )
-        return parse_vsx(await self._tap("vizier", VIZIER_TAP, adql), ra, dec)
+
+        async def tap() -> dict[str, Any]:
+            return parse_vsx(await self._tap("vizier", VIZIER_TAP, adql), ra, dec)
+
+        async def asu(which: str, url: str) -> dict[str, Any]:
+            params = {"-source": "B/vsx/vsx", "-c": f"{ra:.6f} {dec:+.6f}", "-c.rs": f"{radius:.2f}",
+                      "-out": "Name,Type,Period,RAJ2000,DEJ2000", "-oc.form": "dec", "-out.max": "5"}  # fmt: skip
+            return parse_vsx_tsv(await self._get(which, url, params), ra, dec)
+
+        tasks = [
+            asyncio.create_task(tap()),
+            *(asyncio.create_task(asu(w, u)) for w, u in zip(("vizier_cfa", "vizier_cds"), VIZIER_ASU, strict=True)),
+        ]
+        err: Exception | None = None
+        try:
+            for fut in asyncio.as_completed(tasks):
+                try:
+                    return await fut
+                except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
+                    err = e
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+        raise err or RuntimeError("no VizieR answered")
 
     async def _ned(self, ra: float, dec: float, radius: float) -> dict[str, Any]:
         params = {

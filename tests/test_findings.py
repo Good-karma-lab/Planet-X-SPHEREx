@@ -720,6 +720,10 @@ def test_a_deciding_catalogue_is_asked_again_until_it_answers(tmp_path: Path) ->
     later = _time.time() + RETRY_S * 32 + 1
     assert pending_ids(str(db.path), 10, frozenset(), later) == ["film:1"]  # JPL again; the red source's extras gave up
     assert pending_ids(str(db.path), 10, frozenset(), _time.time()) == []  # not before its wait
+    # past their tries, the catalogues that only add detail are still asked every EXTRA_RETRY_S (VSX did not answer for days)
+    from service.findings import EXTRA_RETRY_S
+
+    assert "red:1" in pending_ids(str(db.path), 10, frozenset(), _time.time() + EXTRA_RETRY_S + 1)
     idents = [{"catalogue": "sbident", "state": "unavailable", "attempts": MAX_ATTEMPTS + 3}]
     assert status_of({"kind": "film", "data": {}}, idents) == "unchecked"
 
