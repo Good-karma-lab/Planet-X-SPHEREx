@@ -298,6 +298,8 @@ export interface TaskArgs {
   showPicture: (mjd: number) => void;
   /** a date's visit number in the pass on show (the time line's numbering), null when not known */
   visitOf?: (mjd: number) => number | null;
+  /** the picture is drawn: until then a question is shown but not answered (nobody can answer it honestly yet) */
+  ready?: boolean;
 }
 
 /** The task as the lab works with it: the panel, the step on show, the service's body, and the taps. */
@@ -453,7 +455,9 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       const ag = got.agreement;
       if (!r.ok && r.status !== 401) {
         setBusy(false);
-        return setLine(r.status === 422 ? 'The service did not take the answer' : 'The service did not answer');
+        // the service's own words when it answered with a refusal; "did not answer" only when it did not
+        const why = typeof (r.json as { detail?: unknown } | null)?.detail === 'string' ? String((r.json as { detail: string }).detail) : '';
+        return setLine(r.status >= 400 && r.status < 500 ? `Not taken: ${why || `the service said ${r.status}`}` : 'The service did not answer');
       }
       gotWords = [
         ...((got.result?.label ?? got.class?.label) ? [`Your answers say: ${got.result?.label ?? got.class?.label}`] : []),
@@ -609,7 +613,12 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           (task.kind === 'cell'
             ? [`${n} mark${n === 1 ? '' : 's'}`, a.square?.why ?? ''].filter(Boolean).join(' · ')
             : step && steps
-              ? [`Question ${path.length + 1} · up to ${steps.length}`, step.tap ? `${missing.length} missing` : ''].filter(Boolean).join(' · ')
+              ? [
+                  `Question ${path.length + 1} · up to ${steps.length}`,
+                  a.ready === false ? 'answers open when the passes are drawn' : step.tap ? `${missing.length} missing` : '',
+                ]
+                  .filter(Boolean)
+                  .join(' · ')
               : tapping
                 ? `${taps.length} tapped`
                 : '')}
@@ -625,7 +634,9 @@ export function useLabTask(a: TaskArgs): LabTaskView {
             <button
               key={x.id}
               class={`btn sm tp-ans${k === 0 ? ' primary' : ''}${x.id === 'not_sure' ? ' quiet' : ''}`}
-              disabled={busy}
+              // "missing in some" needs at least one picture tapped (the service refuses an empty list)
+              disabled={busy || a.ready === false || (!!step.tap && x.id === 'done' && missing.length === 0)}
+              title={step.tap && x.id === 'done' && missing.length === 0 ? 'Tap at least one picture where it is missing' : undefined}
               onClick={() => answer(x)}
               data-testid={`task-answer-${x.id}`}
             >

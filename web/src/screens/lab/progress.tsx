@@ -124,8 +124,17 @@ export function SearchRow({ list }: { list: SearchInfo[] }) {
       {list.map((s, k) => (
         <span key={s.name} class={`sr-item s-${s.state}`}>
           {k > 0 && <em aria-hidden="true">·</em>}
-          {s.name}{' '}
-          <b>{s.state === 'done' ? (s.count ?? '✓') : s.state === 'running' ? (s.frac != null ? `${Math.round(s.frac * 100)}%` : '…') : s.state === 'failed' ? <SearchMark s={s} /> : '–'}</b>
+          {/* the red sources and the anomalies are the folded group of the list below: their count opens it */}
+          {(s.name === 'red sources' || s.name === 'anomalies') && s.state === 'done' && Number(s.count) > 0 ? (
+            <button class="sr-open" onClick={() => window.dispatchEvent(new CustomEvent('spherex:open-group'))} title={`Show the ${s.name} in the list`}>
+              {s.name} <b>{s.count}</b>
+            </button>
+          ) : (
+            <>
+              {s.name}{' '}
+              <b>{s.state === 'done' ? (s.count ?? '✓') : s.state === 'running' ? (s.frac != null ? `${Math.round(s.frac * 100)}%` : '…') : s.state === 'failed' ? <SearchMark s={s} /> : '–'}</b>
+            </>
+          )}
         </span>
       ))}
     </div>

@@ -1,5 +1,6 @@
 import { render } from 'preact';
 import { App } from './app';
+import { handOver, listenTabs } from './lib/tabs';
 import './style.css';
 import './responsive.css';
 import { installLegend, installLoupe, installPinch, installStrips } from './ui/touch';
@@ -48,7 +49,28 @@ installLoupe();
 installLegend();
 
 const root = document.getElementById('app');
+// the address the sign-in link came back to, before the lab takes its `do=` out
+const startHash = location.hash;
+listenTabs();
+// a sign-in link's tab whose place is already open in another tab: that tab goes on (signed in, with the pending click), this one says so
 if (root) render(<App />, root);
+void handOver(startHash).then((taken) => {
+  // the lab stops at once (its loading is undone with it): the other tab already has the field
+  if (root && taken) render(<SignedElsewhere />, root);
+});
+
+/** the sign-in link's own tab when the lab goes on in the other one */
+function SignedElsewhere() {
+  return (
+    <div class="signed-elsewhere" data-testid="signed-elsewhere">
+      <b>Signed in</b>
+      <span class="mono-s">your lab is open in the other tab, where it goes on</span>
+      <button class="btn sm" onClick={() => render(<App />, root!)}>
+        Open the lab here too
+      </button>
+    </div>
+  );
+}
 
 // the whole-sky pictures of the surveys are fetched before the globe asks, once the page itself has loaded (the landing paints first):
 // the default first, the others a moment later, the SPHEREx frames last

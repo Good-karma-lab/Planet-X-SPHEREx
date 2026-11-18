@@ -278,12 +278,12 @@
 .lp-pyear small { display: block; font: 500 11px var(--lp-mono); color: #a3bcc5; margin-top: 4px; }
 
 /* step 3: then and now */
-.lp-then img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .6s; }
+/* a blink is a cut: the frame, its caption and the ring change in the same instant */
+.lp-then img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
 .lp-then img.on { opacity: 1; }
 .lp-then svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
 .lp-yr { position: absolute; top: 12px; left: 12px; z-index: 2; font: 500 12px var(--lp-mono); color: #fff; background: rgba(0, 0, 0, 0.66); padding: 6px 9px; border-radius: 999px; }
 @media (max-width: 560px) { .lp-plab { font-size: 10.5px; padding: 2px 5px; } .lp-pnow { font-size: 11.5px; } .lp-pyear { font-size: 18px; } }
-@media (prefers-reduced-motion: reduce) { .lp-then img { transition: none; } }
 
 /* hero legibility over the sky: a scrim behind the text column (the Milky Way crosses it on wide screens), glass on the outline button */
 .lp-hero {
@@ -342,3 +342,25 @@
 /* the bar (and its menu) above the page's sections, which sit on the same layer */
 .lp > header.lp-top { z-index: 4; }
 :root .lp-nav .lp-menu-list a { justify-content: flex-start; min-width: 0; }
+/* ---- signed in: the Cabinet in the top bar (the person's initial and "Cabinet"); on a phone it moves into the menu, whose button then
+   carries the initial ---- */
+.lp-nav > a.lp-me { gap: 8px; padding: 0 14px 0 5px; }
+.lp-me-ini { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 50%; background: rgba(255, 180, 84, 0.18); border: 1px solid rgba(255, 180, 84, 0.55); color: #ffd9a0; font: 600 14px/1 var(--lp-font); }
+.lp-menu-btn { position: relative; }
+.lp-menu-ini { display: none; position: absolute; right: -4px; top: -4px; width: 20px; height: 20px; border-radius: 50%; place-items: center; background: #3a2a14; border: 1px solid rgba(255, 180, 84, 0.8); color: #ffd9a0; font: 700 11px/1 var(--lp-font); }
+.lp-menu-list a.lp-menu-me { gap: 10px; color: var(--lp-text); border-bottom: 1px solid var(--lp-line); border-radius: 9px 9px 0 0; margin-bottom: 4px; min-height: 52px; }
+.lp-menu-me small { display: block; font-size: 12px; color: var(--lp-muted); max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+.lp-menu-me > span:last-child { display: flex; flex-direction: column; line-height: 1.25; }
+@media (min-width: 560px) { :root .lp-nav .lp-menu-list a.lp-menu-me { display: none; } }
+@media (max-width: 559.98px) {
+  :root .lp-nav > a.lp-me { display: none; }
+  .lp-menu-ini { display: grid; }
+}
+/* 1080–1280 px: all the section links are in the bar, so the Cabinet is the initial alone (its name on hover) */
+@media (min-width: 1080px) and (max-width: 1279.98px) {
+  .lp-nav { gap: 20px; }
+  .lp-nav > a.lp-me { padding: 0 4px; width: 40px; }
+  .lp-me-word { display: none; }
+}
+/* a trust line that wraps (a phone) keeps its dot beside its first line */
+.lp-trust li::before { flex: none; align-self: flex-start; margin-top: 8px; }

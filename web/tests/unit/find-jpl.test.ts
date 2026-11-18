@@ -12,3 +12,12 @@ describe("a find's catalogue line takes JPL's answer from the find's own check",
     expect(withFindJpl('known · SIMBAD Barnard’s star', 'none')).toBe('known · SIMBAD Barnard’s star');
   });
 });
+
+import { withFindStatus } from '../../src/screens/lab/known';
+describe("an unexplained find's catalogue line never says known for a catalogue that names nothing", () => {
+  it('says what the catalogue did', () => {
+    expect(withFindStatus('known · in CatWISE2020', 'unexplained')).toBe('in CatWISE2020, which does not say what it is');
+    expect(withFindStatus('known · SIMBAD Barnard’s star', 'unexplained')).toBe('known · SIMBAD Barnard’s star');
+    expect(withFindStatus('known · in CatWISE2020', 'known')).toBe('known · in CatWISE2020');
+  });
+});

@@ -182,8 +182,11 @@ export function hitTrack(tracks: FilmTrack[], k: number, scale: number, x: numbe
   tracks.forEach((tr, i) => {
     const here = trackPlace(tr, k, mjd);
     if (!here) return;
-    const [bx, by] = badgeAt((here.x + 0.5) * scale, (here.y + 0.5) * scale);
-    const dd = Math.hypot(x - bx, y - by);
+    const cx = (here.x + 0.5) * scale;
+    const cy = (here.y + 0.5) * scale;
+    const [bx, by] = badgeAt(cx, cy);
+    // the badge, or the ring itself (a click on the object chooses its track)
+    const dd = Math.min(Math.hypot(x - bx, y - by), Math.max(0, Math.hypot(x - cx, y - cy) - RING + BADGE / 2));
     if (dd < bd) {
       bd = dd;
       best = i;
