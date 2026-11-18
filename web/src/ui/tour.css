@@ -13,3 +13,4 @@
 .hint-f .lnk { background: none; border: 0; padding: 0; color: var(--muted); font: 500 12px var(--font); cursor: pointer; }
 .hint-f .lnk:hover { color: var(--ink); }
 @media (prefers-reduced-motion: reduce) { .hint-ring { transition: none; } }
+.hint-f .hint-skip { background: none; color: var(--muted); border: 1px solid var(--edge); }

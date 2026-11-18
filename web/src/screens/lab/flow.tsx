@@ -1378,7 +1378,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           class="btn sm primary"
           aria-expanded={!!invList}
           onClick={() => void openInvList()}
-          title="Add to investigation: this object with its marks, the ruler's result, the catalogue match and this view"
+          title="An investigation is your find with its evidence (marks, the ruler, catalogue answers, this view): the checks run on it and you submit it from the Cabinet"
           data-testid="tool-add"
         >
           Add to investigation
@@ -1398,6 +1398,15 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       </div>
       <div class="oc-line" data-testid="tools-line">
         {invLine}
+        {inv && invLine.startsWith('Added') && (
+          // where a find goes from here: its checks, then the submit, in the Cabinet
+          <>
+            {' · '}
+            <a class="cb-link" href={`#/me?tab=investigations&inv=${encodeURIComponent(inv.id)}`} data-testid="inv-submit">
+              Check and submit ›
+            </a>
+          </>
+        )}
       </div>
     </>
   );
@@ -1434,6 +1443,16 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       void openInvList();
     }
   }, [si.signedIn, !!a.sel, open]);
+  // a mark's way to the checks, in three steps: marked · what it is · what the service does with it (spec §5g)
+  const markEff = lastMarkEffect();
+  const stepThree = (m: Mark): { text: string; state: 'wait' | 'now' | 'done'; signIn?: boolean } => {
+    if (!m.kind) return { text: 'Checks', state: 'wait' };
+    if (tapHere && tapHere.id === m.id) return { text: `Tap it in ${tapHere.passLabel}`, state: 'now' };
+    if (!si.signedIn) return { text: 'Sign in to send it', state: 'now', signIn: true };
+    const mine = markEff && (markEff.id === m.id || marks.some((q) => q.id === markEff.id && headOf(q, marks)?.id === m.id));
+    const w = mine ? effectWord(markEff) : '';
+    return w ? { text: w.replace(/^It moves · /, ''), state: 'done' } : { text: 'sending…', state: 'now' };
+  };
   const card =
     cur || a.sel ? (
       <div class="objcard" data-testid="flow-card">
@@ -1463,6 +1482,24 @@ export function useLabFlow(a: FlowArgs): LabFlow {
                 Remove
               </button>
             </div>
+            {(() => {
+              const s3 = stepThree(cur);
+              return (
+                <ol class="oc-steps" aria-label="The way to the checks" data-testid="mark-steps">
+                  <li class="done">Marked</li>
+                  <li class={cur.kind ? 'done' : 'now'}>{cur.kind ? KIND_SHORT[cur.kind] : 'What is it?'}</li>
+                  <li class={s3.state} title="What the service does with it: a search on two passes, a catalogue lookup, a count of artefacts, the Talk">
+                    {s3.signIn ? (
+                      <button class="lnk" onClick={() => si.ask('marks', `mark:${cur.ra.toFixed(5)},${cur.dec.toFixed(5)},${cur.pass ?? ''}`)}>
+                        {s3.text}
+                      </button>
+                    ) : (
+                      s3.text
+                    )}
+                  </li>
+                </ol>
+              );
+            })()}
             <div class="oc-kinds" role="group" aria-label="What it is" data-testid="mark-kinds">
               {MARK_KINDS.map((k) => (
                 <button
@@ -1567,7 +1604,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       title={`Open “${inv.title}” in the Cabinet`}
       data-testid="inv-chip"
     >
-      Investigation · {inv.marks} mark{inv.marks === 1 ? '' : 's'}
+      Investigation · {inv.marks} mark{inv.marks === 1 ? '' : 's'} · check and submit ›
     </a>
   ) : null;
 

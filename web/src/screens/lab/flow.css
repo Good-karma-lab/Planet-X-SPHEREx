@@ -127,7 +127,7 @@
 .tv .tv-det.on span { color: var(--ink); }
 /* "Add to investigation": a new one, or one of mine */
 .objcard .oc-add { position: relative; }
-.objcard .oc-menu { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; padding: 4px; border-radius: 10px; background: rgba(8, 18, 24, 0.97); border: 1px solid var(--edge); box-shadow: var(--shadow); max-height: 190px; overflow-y: auto; }
+.objcard .oc-menu { position: static; margin-top: 4px; z-index: 5; display: flex; flex-direction: column; padding: 4px; border-radius: 10px; background: rgba(8, 18, 24, 0.97); border: 1px solid var(--edge); box-shadow: var(--shadow); max-height: 190px; overflow-y: auto; }
 .objcard .oc-menu button { text-align: left; padding: 6px 9px; border-radius: 7px; border: 0; background: none; color: var(--ink); font-size: 12px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .objcard .oc-menu button:hover { background: rgba(95, 227, 214, 0.14); color: var(--accent-l); }
 /* the finding's own clip in its task: a fixed square, so the panel never changes height while it is made */
@@ -332,8 +332,9 @@
 .panel .pcol #sec-obj .ctxbox > .mono-s { font-size: 10.5px; color: var(--faint); }
 /* lab v2: the panel's three tabs (Task · Object · View), the bar always at the top */
 .lab .panel .ptabs { flex: none; display: flex; gap: 2px; margin: 10px 14px 0; padding: 3px; border-radius: 11px; border: 1px solid var(--edge); background: rgba(0, 0, 0, 0.3); }
-.lab .panel .ptabs button { position: relative; flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: 600 12.5px var(--font); cursor: pointer; transition: 0.15s; }
-.lab .panel .ptabs button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.05); }
+.lab .panel .ptabs button { position: relative; flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 32px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: 600 12.5px var(--font); cursor: pointer; transition: color 0.15s; }
+/* a tab left by a touch keeps no hover light (it looked still chosen); the switch itself is instant */
+@media (hover: hover) { .lab .panel .ptabs button:hover:not(.on) { color: var(--ink); background: rgba(255, 255, 255, 0.05); } }
 .lab .panel .ptabs button.on { color: var(--accent-l); background: rgba(95, 227, 214, 0.16); box-shadow: inset 0 0 0 1px rgba(95, 227, 214, 0.55); }
 .lab .panel .ptabs .ptab-n { min-width: 17px; height: 17px; padding: 0 5px; border-radius: 9px; background: rgba(255, 180, 84, 0.9); color: #1a1205; font: 700 10.5px/17px var(--mono); }
 .lab .panel .ptabs .ptab-dot { position: absolute; top: 6px; right: 10px; width: 7px; height: 7px; border-radius: 50%; background: var(--amber); box-shadow: 0 0 6px rgba(255, 180, 84, 0.7); }
@@ -415,3 +416,21 @@
 
 /* what the data says about a place that may be an artefact */
 .obj-hint { margin: 4px 0; padding: 4px 8px; border-radius: 8px; border: 1px solid rgba(255, 180, 84, 0.4); background: rgba(255, 180, 84, 0.07); color: #ffd08a; font: 500 12px var(--font); }
+
+/* a mark's way to the checks: marked · what it is · what the service does */
+.objcard .oc-steps { list-style: none; margin: 2px 0 8px; padding: 0; display: flex; gap: 4px; counter-reset: st; }
+.objcard .oc-steps li { counter-increment: st; flex: 1 1 0; min-width: 0; padding: 4px 6px; border-radius: 7px; border: 1px solid var(--edge-soft); font: 500 11.5px var(--font); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.objcard .oc-steps li::before { content: counter(st) ' '; font: 700 10.5px var(--mono); margin-right: 2px; }
+.objcard .oc-steps li.done { color: var(--muted); }
+.objcard .oc-steps li.done::before { content: '✓ '; color: var(--accent); }
+.objcard .oc-steps li.now { color: #ffd08a; border-color: rgba(255, 180, 84, 0.5); background: rgba(255, 180, 84, 0.07); }
+.objcard .oc-steps li:last-child { flex: 1.6 1 0; }
+.objcard .oc-steps .lnk { background: none; border: 0; padding: 0; color: inherit; font: inherit; text-decoration: underline; cursor: pointer; }
+/* the Mark button names the way: mark · what it is · the checks */
+.tp-missed .tp-path, .mini .tp-path { display: block; margin-top: 1px; font: 500 10.5px var(--mono); color: var(--faint); letter-spacing: 0.01em; }
+/* the list of investigations opens under the button, in the card's flow: it never covers the line under it */
+.objcard .oc-add { flex-wrap: wrap; }
+.objcard .oc-add .oc-menu { flex: 1 1 100%; }
+/* a word with its meaning on hover: a dotted underline says so */
+.hov[title] { text-decoration: underline dotted rgba(160, 190, 200, 0.45); text-underline-offset: 3px; cursor: help; }
+.look-missed { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; height: auto; padding-top: 5px; padding-bottom: 5px; }

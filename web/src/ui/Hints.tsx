@@ -21,7 +21,6 @@ export interface Hint {
 }
 
 export const HINTS: Hint[] = [
-  { id: 'start', screen: 'landing', at: '[data-testid=landing-start]', title: 'Real SPHEREx pictures', text: 'Start here. No account needed to look.' },
   { id: 'square', screen: 'explore', at: '[data-testid=give-square]', title: 'Give me a square', text: 'A piece of sky nobody has looked through yet.' },
   { id: 'play', screen: 'lab', at: '[data-testid=picture]', title: 'Watch it play', text: 'The passes take turns. Find a dot that steps while the stars stay.', task: 'cell' },
   { id: 'mark', screen: 'lab', at: '[data-testid=task-missed]', title: 'It moves and has no ring?', text: 'Mark it here, then click it on the picture.', task: 'cell', around: '.lab .panel' },
@@ -222,7 +221,7 @@ export function Hints() {
           <span class="mono-s">
             {n} of {HINTS.length}
           </span>
-          <button class="lnk" onClick={skipAll} data-testid="hint-skip">
+          <button class="btn sm hint-skip" onClick={skipAll} data-testid="hint-skip" title="No more hints (About: Show the hints again)">
             Skip all
           </button>
           <button class="btn sm primary" onClick={next} data-testid="hint-next">
