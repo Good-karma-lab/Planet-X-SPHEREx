@@ -42,7 +42,7 @@ from engine.spx import flags as spxflags
 from engine.spx import psf as spxpsf
 from engine.spx import wcs as spxwcs
 from indexer.store import Exposure, Index
-from service import jsonsafe
+from service import cpu, jsonsafe
 from service.jobs.scheduler import Context
 from service.reader.calib import WavelengthMaps
 from service.reader.files import FileReader
@@ -357,27 +357,57 @@ class PointMeter:
             except Exception:  # the calibration map could not be read: such places are left out
                 cw = None
 
-        def fit_all() -> None:  # the PSF stamps and fits: CPU work, in a thread (on the event loop it held the service for a second)
-            for k in np.flatnonzero(ok):
-                x, y = float(px[k]), float(py[k])
-                xi, yi = round(x), round(y)
-                sl = (slice(yi - HALF - y0, yi + HALF + 1 - y0), slice(xi - HALF, xi + HALF + 1))
-                st = img[sl]
-                if st.shape != (2 * HALF + 1, 2 * HALF + 1):
-                    continue
-                usable = good[sl]
-                saturated = overflow[sl] | (~np.isfinite(st) & ~bad[sl])
-                fx, fy = x - xi, y - yi
-                psf = spxpsf.stamp(ps, ps.zone_index(x, y), fx, fy, HALF)
-                pt = photometry.fit(st, var, usable, saturated, psf, fx, fy, OMEGA_SR)
-                if not pt.ok or pt.flux_mjy is None or pt.err_mjy is None or cw is None:
-                    continue
-                lam = float(cw[yi, xi])
-                if np.isfinite(lam) and lam > 0 and np.isfinite(pt.flux_mjy):
-                    out[k] = (lam, pt.flux_mjy, pt.err_mjy)
-
-        await asyncio.to_thread(fit_all)
+        # the PSF stamps and fits run in a worker process (service/cpu.py): in the API process they held the event loop, and in a
+        # thread they still took the GIL from it. Only what they need goes over: the box of rows and columns around the places, the
+        # PSF zones those places use, and the places in the box's pixels; the wavelengths are looked up here.
+        idx = np.flatnonzero(ok)
+        xi_all = np.round(px[idx]).astype(int)
+        x0 = max(0, int(xi_all.min()) - HALF - 1)
+        x1 = min(nx, int(xi_all.max()) + HALF + 2)
+        zone_of = {int(k): ps.zone_index(float(px[k]), float(py[k])) for k in idx}
+        places = [(int(k), float(px[k]) - x0, float(py[k]) - y0, zone_of[int(k)]) for k in idx]
+        zones = {z: ps.zones[z] for z in set(zone_of.values())}
+        box = (slice(None), slice(x0, x1))
+        fits = await cpu.run(fit_places, img[box], good[box], overflow[box], bad[box], var, places, zones, ps.oversampling)
+        for k, flux, err in fits:
+            if cw is None:
+                continue
+            lam = float(cw[round(float(py[k])), round(float(px[k]))])
+            if np.isfinite(lam) and lam > 0 and np.isfinite(flux):
+                out[k] = (lam, flux, err)
         return out
+
+
+def fit_places(
+    img: NDArray[np.float64],
+    good: NDArray[np.bool_],
+    overflow: NDArray[np.bool_],
+    bad: NDArray[np.bool_],
+    var: NDArray[np.float64],
+    places: list[tuple[int, float, float, int]],
+    zones: dict[int, NDArray[np.float64]],
+    osf: int,
+) -> list[tuple[int, float, float]]:
+    """The PSF fits of places in a box of an exposure (a worker process: service/cpu.py): places are (index, x, y, PSF zone) in the
+    box's pixels -> (index, flux mJy, error mJy) for each place fitted."""
+    from types import SimpleNamespace
+
+    psfs: Any = SimpleNamespace(zones=zones, oversampling=osf)
+    got: list[tuple[int, float, float]] = []
+    for k, x, y, zone in places:
+        xi, yi = round(x), round(y)
+        sl = (slice(yi - HALF, yi + HALF + 1), slice(xi - HALF, xi + HALF + 1))
+        st = img[sl]
+        if yi - HALF < 0 or xi - HALF < 0 or st.shape != (2 * HALF + 1, 2 * HALF + 1):
+            continue
+        usable = good[sl]
+        saturated = overflow[sl] | (~np.isfinite(st) & ~bad[sl])
+        fx, fy = x - xi, y - yi
+        psf = spxpsf.stamp(psfs, zone, fx, fy, HALF)
+        pt = photometry.fit(st, var, usable, saturated, psf, fx, fy, OMEGA_SR)
+        if pt.ok and pt.flux_mjy is not None and pt.err_mjy is not None:
+            got.append((k, float(pt.flux_mjy), float(pt.err_mjy)))
+    return got
 
 
 def track_stats(rows: list[tuple[float, int, float, float, float]]) -> dict[str, Any]:
