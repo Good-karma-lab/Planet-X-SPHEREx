@@ -65,6 +65,7 @@ from service.routes_known import make_known_router
 from service.routes_known_field import make_known_field_router
 from service.routes_known_field import prewarm as known_prewarm
 from service.routes_legal import make_legal_router
+from service.routes_node import make_node_router
 from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
 from service.routes_search import make_router
@@ -699,6 +700,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     app.include_router(make_pairs_router(st))
     app.include_router(make_dwarfs_router(st))
     app.include_router(make_searched_router(st))
+    app.include_router(make_node_router(st))  # a second node's leases and results (service/node.py)
     app.include_router(make_findings_router(st))
     app.include_router(make_clips_router(st))  # the time-lapse clips of findings (stream F3)
     app.include_router(make_brightness_router(st))
