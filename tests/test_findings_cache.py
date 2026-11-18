@@ -42,3 +42,27 @@ def test_a_crowd_costs_one_query_and_another_question_its_own(monkeypatch: pytes
 
     codes = asyncio.run(go())
     assert set(codes) == {200} and calls == [(None, "all"), (None, "known")]
+
+
+def test_a_find_kept_out_of_the_lists_as_a_blend_still_has_its_page(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A brown-dwarf candidate that turned out a blend leaves the lists, not its address (History, a lab link): its page answers,
+    by id or by slug."""
+    find = {"id": "browndwarf:b5e2f0136331", "kind": "browndwarf", "status": "blend", "credit": {}}
+
+    def query(db: Any, kind: Any, status: Any, *a: Any, **k: Any) -> dict[str, Any]:
+        return {"count": 0, "total": 0, "finds": [find] if status == "blend" else []}
+
+    monkeypatch.setattr(routes_findings, "query", query)
+    monkeypatch.setattr(routes_findings, "find_row", lambda db, fid: {"id": fid} if fid == find["id"] else None)
+    st = SimpleNamespace(
+        findings=SimpleNamespace(db=object()), fpx_known=None, accounts=None, clips=None, store=None, findings_flow=object()
+    )
+    app = FastAPI()
+    app.include_router(routes_findings.make_findings_router(st))
+    from fastapi.testclient import TestClient
+
+    c = TestClient(app)
+    for name in ("browndwarf:b5e2f0136331", "browndwarf-b5e2f0136331"):
+        r = c.get(f"/api/v1/findings/{name}")
+        assert r.status_code == 200 and r.json()["status"] == "blend"
+    assert c.get("/api/v1/findings", params={"status": "blend"}).status_code == 200

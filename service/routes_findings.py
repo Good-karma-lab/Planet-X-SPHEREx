@@ -18,7 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from service.findings import KINDS, LITE_KEYS, PROMISING_KINDS, STAGES, VIEW_RESULTS, FlowDB, find_row, id_of, query
+from service.findings import HIDDEN, KINDS, LITE_KEYS, PROMISING_KINDS, STAGES, VIEW_RESULTS, FlowDB, find_row, id_of, query
 
 
 def flow_of(st: Any) -> FlowDB:
@@ -147,7 +147,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     async def findings(
         kind: str | None = Query(None),
-        status: str | None = Query(None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside)$"),
+        status: str | None = Query(None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside|blend)$"),
         place: str | None = Query(None),
         limit: int = Query(300, ge=1, le=2000),
         offset: int = Query(0, ge=0),
@@ -249,7 +249,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         )
         hidden: dict[str, Any] = {"finds": []}
         if not any(x["id"] == find_id for x in body["finds"]) and find_row(f.db, find_id) is not None:
-            for hs in ("residual", "galaxy", "below", "halo", "set_aside"):  # a find kept out of the lists still has its page
+            for hs in HIDDEN:  # a find kept out of the lists (a blend too) still has its page
                 hidden = await asyncio.to_thread(
                     partial(query, f.db, None, hs, None, 5000, 0, flow=flow_of(st), aside=aside, tracks=tracks)
                 )
