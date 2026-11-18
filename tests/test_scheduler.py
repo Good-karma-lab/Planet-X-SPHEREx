@@ -158,3 +158,22 @@ def test_blocks_of_one_background_job_pause_together_and_its_phase_comes_back() 
         await s.stop()
 
     asyncio.run(run())
+
+
+def test_the_snapshot_counts_the_running_jobs_of_people_apart() -> None:
+    """deploy/push.sh waits for a person's job only; the sweep's and the warm runner's are made again after a restart."""
+
+    async def run() -> None:
+        s = Scheduler(slots={"light": 2, "heavy": 2})
+        s.start()
+        bg = s.submit("field", "sweep", {}, sleeper(0.5), Priority.P2, "heavy")
+        await until(lambda: bg.state == "running")
+        snap = s.snapshot()
+        assert snap["running"] == 1 and snap["running_people"] == 0
+        person = s.submit("field", "person", {}, sleeper(0.5), Priority.P0, "heavy")
+        await until(lambda: person.state == "running")
+        assert s.snapshot()["running_people"] == 1
+        await until(lambda: bg.state == "done" and person.state == "done", timeout=10)
+        await s.stop()
+
+    asyncio.run(run())

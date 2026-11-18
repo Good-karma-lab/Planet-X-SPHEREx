@@ -2,7 +2,7 @@
 # Release from a development machine to the VM: build the web app here (it is the same on every architecture), copy the code,
 # sync the Python environment there and restart the API. The store on the VM (index, products) stays.
 #   deploy/push.sh ubuntu@HOST [--index] [--now]   --index also copies a consistent snapshot of the local exposure index;
-#                                                  without --now the main instance restarts only when no job is running (up to 20 min)
+#                                                  without --now the main instance restarts only when no job of a person is running (up to 20 min)
 #   deploy/push.sh ubuntu@HOST --web-only            only the web bundle (the API serves it from disk): no restart, running jobs go on
 set -euo pipefail
 HOST="${1:?usage: deploy/push.sh user@host [--index]}"
@@ -49,9 +49,9 @@ sudo systemctl enable --now sky-api-standby.service
 sudo systemctl restart sky-api-standby.service && healthy 8781
 if [ "'"$NOW"'" != 1 ]; then
   for i in $(seq 1 240); do
-    running=$(curl -sf -m 5 http://127.0.0.1:8780/api/v1/health | python3 -c "import json,sys; print(json.load(sys.stdin)[\"jobs\"][\"running\"])" 2>/dev/null || echo 0)
+    running=$(curl -sf -m 5 http://127.0.0.1:8780/api/v1/health | python3 -c "import json,sys; j=json.load(sys.stdin)[\"jobs\"]; print(j.get(\"running_people\", j[\"running\"]))" 2>/dev/null || echo 0)
     [ "$running" = "0" ] && break
-    [ "$i" = 1 ] && echo "waiting until no job is running (a half-built field would be lost)…"
+    [ "$i" = 1 ] && echo "waiting until no job of a person is running (a half-built field would be lost; sweep and warm jobs are made again)…"
     sleep 5
   done
 fi

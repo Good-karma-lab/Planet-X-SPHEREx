@@ -312,6 +312,8 @@ class Scheduler:
         live = [j for j in self.jobs.values() if j.state in ("queued", "running", "paused")]
         return {
             "running": sum(1 for j in live if j.state == "running"),
+            # a person's jobs (P0/P1) running: a deploy waits for these only (deploy/push.sh); the background's are made again
+            "running_people": sum(1 for j in live if j.state == "running" and j.priority <= Priority.P1),
             "paused": sum(1 for j in live if j.state == "paused"),
             "queued": sum(1 for j in live if j.state == "queued"),
             "abandoned": sum(1 for j in live if j.abandoned),
