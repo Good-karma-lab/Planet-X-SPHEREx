@@ -259,8 +259,9 @@ def cell_field_key(acc: accounts.Accounts, cell_id: str) -> str | None:
     return None if r is None else r["field_key"]
 
 
-def lead_findings(st: Any) -> list[dict[str, Any]] | None:
-    """The machine findings in the order of the Findings page. None when the findings database is not loaded."""
+def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | None:
+    """The machine findings in the order of the Findings page (`status` "all": the hidden ones too). None when the findings
+    database is not loaded."""
     f = getattr(st, "findings", None)
     if f is None:
         return None
@@ -273,7 +274,7 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
     except Exception:
         aside, raised = {}, {}
     clips = getattr(st, "clips", None)
-    body = query(f.db, None, None, None, 100000, 0, aside=aside, raised=raised, seen=getattr(clips, "seen", None))
+    body = query(f.db, None, status, None, 100000, 0, aside=aside, raised=raised, seen=getattr(clips, "seen", None))
     return [
         {
             "finding_id": x["id"],
@@ -300,9 +301,27 @@ def find_rows(st: Any) -> list[dict[str, Any]]:
     return list(rows)
 
 
+def control_rows(st: Any) -> list[dict[str, Any]]:
+    """The finds the default list hides (a star's residual, a galaxy, below the bar, a halo, a blend) as control objects of the
+    question series: their right answer is known (people.CONTROL_EXPECT by their stage, "artefact"), and their stage keeps them
+    out of the open tasks. Without them every control whose answer is "artefact" was missing from the pool. Not the finds people
+    set aside: a control must not be judged by people's own answers. A test may put its own list in `st.task_controls`."""
+    source = getattr(st, "task_controls", None)
+    if callable(source):
+        return list(source())
+    if callable(getattr(st, "task_findings", None)):
+        return []  # a test's own list of finds stands for the whole pool
+    from service.findings import HIDDEN
+
+    hidden = set(HIDDEN) - {"set_aside"}
+    return [r for r in (lead_findings(st, "all") or []) if r.get("status") in hidden]
+
+
 def find_row(st: Any, finding_id: str) -> dict[str, Any] | None:
     """One machine find as a task needs it, with its data (the visits of a track), or None."""
     row = next((r for r in find_rows(st) if r["finding_id"] == finding_id), None)
+    if row is None:  # a control object of the question series (a hidden find): its status says what the right answer is
+        row = next((r for r in control_rows(st) if r["finding_id"] == finding_id), None)
     if row is None or "data" in row:
         return row
     f = getattr(st, "findings", None)
@@ -520,7 +539,7 @@ def make_tasks_router(st: Any) -> APIRouter:
                 raise HTTPException(404, "no such finding")
             return one
         seen = acc.db.task_refs(user_id, kind) if user_id else set()
-        return people.get(st, acc.db).pick(kind, rows, user_id, seen)
+        return people.get(st, acc.db).pick(kind, rows + control_rows(st), user_id, seen)
 
     def next_other(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
         """find_again, recentre, bad_picture, second_look."""
