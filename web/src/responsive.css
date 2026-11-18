@@ -2322,8 +2322,8 @@
 /* ----- phones: a task's example picture belongs to the sheet pulled up; at rest the task is its question, one line and its
    answers, so that the lab's own picture keeps its size ----- */
 @media (max-width: 599.98px) and (min-height: 480px) {
-  :root .lab .panel[data-detent='peek'] .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done),
-  :root .lab .panel:not([data-detent]) .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done) {
+  :root .lab .panel[data-detent='peek'] .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done):not(.tp-pics),
+  :root .lab .panel:not([data-detent]) .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done):not(.tp-pics) {
     display: none;
   }
   :root .taskpanel .tp-tree,
@@ -2382,3 +2382,20 @@
   :root .lab .taskpanel.k-cell > .tp-btns { flex: 2 1 0; }
   :root .lab .taskpanel.k-cell > .tp-missed { flex: 1 1 0; align-self: stretch; margin: 0; }
 }
+
+/* ----- the phone's lab (explore round 2): the picture full width, every control in sight ----- */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  /* the lab centres the picture itself (a whole-pixel margin): the stage must not centre it a second time */
+  :root .lab .vstage { justify-content: flex-start; }
+  /* the time modes without their icons and a little tighter: Months, Days, Blink, Difference and Co-add all in sight */
+  :root .lab .tbar .seg button { padding: 0 8px; font-size: 13px; gap: 0; }
+  :root .lab .tbar .seg button svg, :root .lab .tbar .seg button .ico { display: none; }
+  /* a find's questions: the answers two by two, so the sheet at rest leaves the picture its width */
+  :root .lab .taskpanel .tp-tree { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; min-height: 0; }
+  :root .lab .taskpanel .tp-tree .tp-ans { min-height: 42px; padding: 6px 10px; font-size: 14px; }
+  :root .lab .taskpanel .tp-tree .tp-ans .tp-ex { display: none; }
+  :root .lab .taskpanel .tp-tree .tp-missed { grid-column: 1 / -1; }
+  :root .lab .taskpanel .tp-missed { flex-direction: column; min-height: 40px; }
+}
+/* the Mark button's way under its words, at every width */
+.taskpanel .tp-missed, .candlist .tp-missed { flex-direction: column; }

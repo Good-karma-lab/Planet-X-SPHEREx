@@ -571,7 +571,9 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
     };
     // names where the service says so: the fastest and the brightest first, never over a name already there
     named.sort((a, b) => (motionOf(b.o)?.rate ?? 0) - (motionOf(a.o)?.rate ?? 0) || (a.o.mag ?? 99) - (b.o.mag ?? 99));
-    for (const q of named) if (q.o !== hover?.o) put(q, false);
+    // a wide field names its fastest and brightest dozen only (60′ named every bright star, and the names ran into each other)
+    const many = fovArc > 1300 ? named.slice(0, 12) : named;
+    for (const q of many) if (q.o !== hover?.o) put(q, false);
     if (hover) {
       const h = hover;
       ctx.strokeStyle = '#ffffff';

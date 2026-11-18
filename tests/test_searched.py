@@ -87,3 +87,22 @@ def test_a_field_whose_only_brown_dwarf_is_a_known_one_is_not_empty(tmp_path: Pa
     dwarfs.put(k, {"candidates": [], "known": [{"status": "known brown dwarf"}], "counts": {"known_brown_dwarfs": 1}})
     f = asyncio.run(s.get())["fields"][0]
     assert f["nothing"] is False and f["found"] == 1 and f["best"]["label"] == "1 known brown dwarf"
+
+
+def test_a_smaller_field_made_later_at_the_same_place_does_not_shrink_it(tmp_path: Path) -> None:
+    """The Findings header's area (the fields' sizes added) never goes down as fields are added: a 10′ quarter made after a 60′ field
+    at the same place leaves the place 60′ (it went 124 fields / 14 sq deg -> 126 / 13)."""
+    import time as _time
+
+    store, movers, _pairs, _dwarfs, s = build(tmp_path)
+    keys = []
+    for fov in (60.0, 10.0):
+        params = {"ra": 200.0, "dec": 10.0, "fov": fov}
+        k = product_key("field", params)
+        store.begin("field", k, params)
+        store.complete(k)
+        movers.put(k, {"tracks": []})
+        keys.append(k)
+        _time.sleep(0.01)  # the 10′ one is the newer
+    body = asyncio.run(s.get())
+    assert [f["fov"] for f in body["fields"]] == [60.0] and body["fields"][0]["open"]["fov"] == 60.0

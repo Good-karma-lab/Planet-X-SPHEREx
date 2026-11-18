@@ -312,10 +312,16 @@ class AccountsDB:
         r = self._conn().execute("SELECT * FROM acc_tasks WHERE id=?", (task_id,)).fetchone()
         return None if r is None else (self._task(r), r["user_id"])
 
-    def open_task(self, user_id: str, kind: str) -> dict[str, Any] | None:
+    def open_task(self, user_id: str, kind: str, max_age_s: float | None = None) -> dict[str, Any] | None:
+        """The user's newest open task of this kind; with `max_age_s`, only one taken that recently (an old one stays open in the
+        cabinet but is not handed out again as "a piece of sky nobody has looked through")."""
+        since = time.time() - max_age_s if max_age_s is not None else 0.0
         r = (
             self._conn()
-            .execute("SELECT * FROM acc_tasks WHERE user_id=? AND kind=? AND state='open' ORDER BY created DESC LIMIT 1", (user_id, kind))
+            .execute(
+                "SELECT * FROM acc_tasks WHERE user_id=? AND kind=? AND state='open' AND created>=? ORDER BY created DESC LIMIT 1",
+                (user_id, kind, since),
+            )
             .fetchone()
         )
         return None if r is None else self._task(r)

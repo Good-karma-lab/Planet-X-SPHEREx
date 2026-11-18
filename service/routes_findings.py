@@ -18,7 +18,7 @@ from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from service.findings import KINDS, LITE_KEYS, PROMISING_KINDS, STAGES, VIEW_RESULTS, FlowDB, find_row, query
+from service.findings import KINDS, LITE_KEYS, PROMISING_KINDS, STAGES, VIEW_RESULTS, FlowDB, find_row, id_of, query
 
 
 def flow_of(st: Any) -> FlowDB:
@@ -240,6 +240,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         return body
 
     async def one(find_id: str) -> Any:
+        find_id = id_of(find_id)  # its slug too (track-…)
         f = need()
         aside = await asyncio.to_thread(people_aside)
         tracks = await asyncio.to_thread(people_tracks_said)
@@ -262,6 +263,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
     async def viewed(find_id: str, body: dict[str, Any] = Body(default={})) -> Any:  # noqa: B008
         """A person looked at the finding (the lab calls it when the task "Check a machine finding" is closed): {result?: moves | artefact |
         known | nothing | marks, user_id?, user_name?} → {viewers}. The name is given by the service's own login, never by the page."""
+        find_id = id_of(find_id)
         f = need()
         if await asyncio.to_thread(find_row, f.db, find_id) is None:
             raise HTTPException(404, "no such find")

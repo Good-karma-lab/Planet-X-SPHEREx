@@ -186,3 +186,25 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
     monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
     t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
     assert "why" not in t
+
+
+def test_an_old_open_square_task_is_not_given_again(
+    site: tuple[FastAPI, _State, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Explorer round 2: "Give me a square" gave this account the quarter it had taken 11 h earlier. A recent open task is still its
+    task (the lab asks again after a reload); one older than OPEN_TASK_KEEP_S is left open in the cabinet but not handed out again,
+    and nor is its quarter."""
+    from service import accounts, routes_tasks
+
+    app, st, mail = site
+    _fake_grid(st)
+    fake(st, set())
+    c = _sign_in(app, mail)
+    first = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    assert c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]["id"] == first["id"]  # a recent one: the same task
+    accounts.get(st).db._conn().execute(
+        "UPDATE acc_tasks SET created=created-? WHERE id=?", (routes_tasks.OPEN_TASK_KEEP_S + 60, first["id"])
+    )
+    again = c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    assert again["id"] != first["id"] and (again["cell_id"], again["quarter"]) != (first["cell_id"], first["quarter"])

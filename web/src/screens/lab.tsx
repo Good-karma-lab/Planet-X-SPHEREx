@@ -2565,6 +2565,17 @@ export function Lab({ route }: { route: Route }) {
       setFrame(q.index);
     },
     visit: film !== null ? visit : null,
+    visitOf: (mjd) => {
+      // the visit of the pass on show nearest a date, numbered as the time line numbers it (within two hours, else none)
+      const fr = filmData?.meta.frames ?? [];
+      if (film === null || !fr.length) return null;
+      let k = 0;
+      fr.forEach((f, i) => {
+        if (Math.abs(f.mjd - mjd) < Math.abs(fr[k]!.mjd - mjd)) k = i;
+      });
+      return Math.abs(fr[k]!.mjd - mjd) < 2 / 24 ? k + 1 : null;
+    },
+    nVisits: film !== null ? (filmData?.meta.frames.length ?? 0) : 0,
     showVisit: (mjd) => {
       const fr = filmData?.meta.frames ?? [];
       if (!fr.length) return;
@@ -3469,7 +3480,11 @@ export function Lab({ route }: { route: Route }) {
       path: ((n) => (n ? t.pts.map((q) => [(q.x + 0.5) / n, (q.y + 0.5) / n] as [number, number]) : undefined))(filmData?.meta.grid.n ?? meta?.grid.n),
       pick: rowPick(`ast:${i}`, () => {
         selectTrack(i);
-        if (film === null) toDays();
+        // Days at the track's own pass (the one the search ran on), not at the pass on show
+        if (film === null) {
+          setFrame(null);
+          set({ film: astMjd ? astMjd.toFixed(1) : passMjd ? passMjd.toFixed(1) : '0', view: null });
+        }
         setFrame(t.pts[0]?.f ?? 0);
         setPlaying(false);
       }),
@@ -4122,6 +4137,7 @@ export function Lab({ route }: { route: Route }) {
                   data-testid="look-missed"
                 >
                   Mark something the machine missed
+                  <small class="tp-path">mark it · say what it is · the checks run</small>
                 </button>
               )}
               <SearchRow list={searches} />
@@ -4687,11 +4703,20 @@ export function Lab({ route }: { route: Route }) {
                                 <>
                                   <div class="orow">
                                     <span class="faint">Measured</span>
-                                    <span>{t ? `${rateText(t)} toward ${t.pa.toFixed(0)}° · ${t.passes.length} passes` : mv?.state === 'done' ? 'no motion between our passes' : 'the mover search is running'}</span>
+                                    <span>
+                                      {t
+                                        ? `${rateText(t)} toward ${t.pa.toFixed(0)}° · ${t.passes.length} passes`
+                                        : sel.finding?.startsWith('film:') || sel.moving
+                                          ? // a body moving within one pass (a time-lapse track): its speed there; between passes it is elsewhere
+                                            `${openFind && openFind !== 'failed' && openFind.id === sel.finding ? rateWord(openFind) || 'moves' : 'moves'} within one pass`
+                                          : mv?.state === 'done'
+                                            ? 'no motion between our passes'
+                                            : 'the mover search is running'}
+                                    </span>
                                   </div>
                                   {(sel.pmra || sel.pmdec) && sel.pmKind !== 'measured' ? (
                                     <div class="orow">
-                                      <span class="faint">pmRA, pmDec</span>
+                                      <span class="faint hov" title="Its motion along right ascension and declination, milliarcseconds a year">pmRA, pmDec</span>
                                       <span class="mono-s">
                                         {(sel.pmra ?? 0).toFixed(1)}, {(sel.pmdec ?? 0).toFixed(1)} mas/yr
                                       </span>

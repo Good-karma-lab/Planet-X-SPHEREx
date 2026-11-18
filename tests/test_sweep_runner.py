@@ -214,6 +214,12 @@ def test_the_top_finds_fields_are_the_labs_and_built_ones_are_left(tmp_path: Pat
     store.write_meta("field", key, {"passes": [{}, {}]})
     store.complete(key)
     assert film not in sweep_runner.top_find_fields(st)  # built: left
+    # a mover with a long track: its task opens at the field that holds the whole track (20′), so that one is kept built too
+    long_track = {"kind": "mover", "ra": 120.0, "dec": -30.0, "id": "mover:long",
+                  "data": {"track": {"ra": [120.0, 120.0, 120.0], "dec": [-30.1, -30.0, -29.9]}}}  # fmt: skip
+    finds[:] = [long_track]
+    got = sweep_runner.top_find_fields(st)
+    assert fieldjob.canonical(120.0, -30.0, 10.0) in got and any(p["fov"] == 20.0 for p in got)
 
 
 def test_the_step_said_is_this_squares(tmp_path: Path) -> None:

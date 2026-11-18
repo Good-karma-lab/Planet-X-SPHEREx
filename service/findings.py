@@ -148,7 +148,7 @@ GALAXY_TYPES = frozenset(
     }
 )
 GALAXY_NAMES = ("ACS-GC", "2MASX", "LEDA", "SDSS")  # catalogues of galaxies: a match to one is a galaxy, never a brown dwarf or a mover
-HIDDEN = ("residual", "galaxy", "below", "halo", "set_aside")  # statuses kept out of the leads and the default list
+HIDDEN = ("residual", "galaxy", "below", "halo", "set_aside", "blend")  # statuses kept out of the leads and the default list
 
 
 def is_galaxy(name: str | None, typ: str | None) -> bool:
@@ -156,6 +156,12 @@ def is_galaxy(name: str | None, typ: str | None) -> bool:
 
 
 RADIUS = 6.0  # arcsec: how far from a find a catalogue entry may stand and still be named
+# a mover or brown-dwarf candidate is asked this far: a catalogue source beyond RADIUS but within 1.5 SPHEREx pixels is its neighbour,
+# blended with it in the picture; a claimed motion no larger than the gap is the centroid moving inside the blend, not a body
+BLEND_ARCSEC = 10.0
+BLEND_KINDS = ("mover", "browndwarf")
+STILL_FACTOR = 3.0  # a survey source at today's place where the claimed motion would have carried it this many RADIUS away: it stood
+SURVEY_EPOCH = {"allwise": 2010.5, "twomass": 1999.5}
 SWEEP_S = 120.0  # a sweep reads every product file (each parse holds the GIL): new finds also kick it at once
 RETRY_S = 90.0
 MAX_ATTEMPTS = 8
@@ -165,6 +171,24 @@ RESULT_DIRS = ("movers", "pairs", "browndwarfs", "red", "anomalies")
 def _cell(ra: float, dec: float) -> str:
     c = math.cos(math.radians(dec))
     return f"{round(ra * c * 3600 / 6)}:{round(dec * 3600 / 6)}"
+
+
+SLUG_WORD = {"film": "track"}  # the page's words for a kind, where the id's is a machine word ("film" is a time-lapse track)
+
+
+def slug_of(fid: str) -> str:
+    """A find's id in the page's words, for addresses and titles: film:8dcb8e38bc95 -> track-8dcb8e38bc95 (the id stays the key)."""
+    kind, _, h = fid.partition(":")
+    return f"{SLUG_WORD.get(kind, kind)}-{h}" if h else fid
+
+
+def id_of(name: str) -> str:
+    """A find's id from its id or its slug (track-8dcb8e38bc95 -> film:8dcb8e38bc95)."""
+    if ":" in name or "-" not in name:
+        return name
+    word, _, h = name.rpartition("-")
+    kind = next((k for k, w in SLUG_WORD.items() if w == word), word)
+    return f"{kind}:{h}"
 
 
 def find_id(kind: str, ra: float, dec: float, extra: str = "") -> str:
@@ -630,7 +654,9 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
     try:
         db.row_factory = sqlite3.Row
         rows = db.execute("SELECT id, kind, place, ra, dec, data FROM finds").fetchall()
-        done = {(r["find_id"], r["catalogue"]): r for r in db.execute("SELECT find_id, catalogue, state, attempts, tried FROM idents")}
+        done = {
+            (r["find_id"], r["catalogue"]): r for r in db.execute("SELECT find_id, catalogue, state, attempts, tried, detail FROM idents")
+        }
     finally:
         if conn is None:
             db.close()
@@ -642,8 +668,10 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
         worst = None
         for c in want:
             d = done.get((r["id"], c))
-            if d is None:
-                worst = 0.0 if worst is None else min(worst, 0.0)
+            if d is None or (
+                r["kind"] in BLEND_KINDS and c == "gaia" and d["state"] != "unavailable" and '"blend_r"' not in (d["detail"] or "")
+            ):
+                worst = 0.0 if worst is None else min(worst, 0.0)  # never asked, or asked before neighbours were looked for
             # one that adds detail gives up after MAX_ATTEMPTS; a deciding one is asked until it answers (the wait grows to 32 RETRY_S)
             elif (
                 d["state"] == "unavailable"
@@ -1178,10 +1206,16 @@ class Findings:
             except (httpx.HTTPError, BreakerOpenError, ValueError, RuntimeError) as e:
                 self.db.put_ident(row["id"], "halo", "unavailable", None, None, None, {"error": str(e)[:120]})
         if "simbad" in want:
-            ctx = await self.catalogue.context(row["ra"], row["dec"], EPOCH, RADIUS)
+            blend = row["kind"] in BLEND_KINDS
+            ctx = await self.catalogue.context(row["ra"], row["dec"], EPOCH, BLEND_ARCSEC if blend else RADIUS)
             for cat in CATALOGUES:
                 a = ctx.get(cat) or {"state": "unavailable", "error": "no answer"}
                 state, name, sep, typ, detail = _ident_from(cat, a)
+                if blend:
+                    detail = {**detail, "blend_r": BLEND_ARCSEC}
+                    if state == "ok" and sep is not None and sep > RADIUS:  # not this find: its neighbour in the picture
+                        detail = {"blend_r": BLEND_ARCSEC, "neighbour": {"name": name, "sep": sep, "type": typ}}
+                        state, name, sep, typ = "none", None, None, None
                 self.db.put_ident(row["id"], cat, state, name, sep, typ, detail, a)
         self.db.db.commit()
 
@@ -1270,6 +1304,37 @@ def _motion_identity(f: dict[str, Any], idents: list[dict[str, Any]]) -> None:
             f["identity"] = {"name": g["name"], "catalogue": "Gaia DR3", "type": None, "basis": "same proper motion"}
 
 
+def _claimed_motion(f: dict[str, Any]) -> tuple[float | None, float | None]:
+    """(″/yr, ″ over the baseline) the search claims for a mover or brown-dwarf candidate."""
+    d = f.get("data") or {}
+    src, t = d.get("source") or {}, d.get("track") or {}
+    pm = src.get("pm")
+    rate = float(pm) / 1000.0 if pm is not None else (float(t["speed"]) if t.get("speed") is not None else None)
+    shift = src.get("shift_arcsec", t.get("shift_arcsec"))
+    if shift is None and rate is not None:
+        shift = rate * float(src.get("baseline_years") or t.get("baseline_years") or 1.0)
+    return rate, (float(shift) if shift is not None else None)
+
+
+def blend_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str | None:
+    """Why a mover or brown-dwarf candidate did not really move, or None: a catalogue neighbour within BLEND_ARCSEC and a claimed shift
+    within BLEND_ARCSEC too (the centroid moves inside the blend), or an AllWISE / 2MASS source at today's place where the claimed motion would
+    have carried it at least STILL_FACTOR x RADIUS away since that survey (it was there then)."""
+    rate, shift = _claimed_motion(f)
+    for i in idents:
+        nb = (i.get("detail") or {}).get("neighbour")
+        # both within 1.5 pixels: the neighbour blends with it, and a claimed shift that small (noisy on a short baseline) is the
+        # centroid moving inside the blend
+        if nb and nb.get("sep") is not None and shift is not None and float(nb["sep"]) <= BLEND_ARCSEC and shift <= BLEND_ARCSEC:
+            return f"neighbour:{i.get('label', i['catalogue'])}:{nb.get('name')}:{float(nb['sep']):.1f}"
+    for c, epoch in SURVEY_EPOCH.items():
+        hit = next((x for x in idents if x["catalogue"] == c), None)
+        here = hit is not None and hit["state"] == "ok" and hit.get("sep") is not None and hit["sep"] <= RADIUS
+        if hit is not None and here and rate is not None and rate * (EPOCH - epoch) >= STILL_FACTOR * RADIUS:
+            return f"still:{hit.get('label', c)}:{hit.get('name')}:{float(hit['sep']):.1f}:{epoch}"
+    return None
+
+
 def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
     """`known` (a catalogue or the scan itself names what it is), `unchecked` (catalogues still to answer or that did not answer, and none explains
     it yet) or `unexplained` (every catalogue answered and none explains it)."""
@@ -1306,6 +1371,8 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         known = True
     if known:
         return "known"
+    if kind in BLEND_KINDS and blend_of(f, idents):
+        return "blend"  # a neighbour star or a survey source at its place says it did not move: not a lead
     if kind == "peak" and ok("halo"):
         return "halo"  # inside the halo of a bright star: its glare, not a body
     if kind == "peak":
@@ -1361,6 +1428,17 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         return "Not yet checked: the catalogues have not been asked yet."
     decisive = decisive_of(f["kind"], f.get("ra") or 0.0, f.get("dec") or 90.0, f.get("data") or {})
     waiting = [i.get("label", i["catalogue"]) for i in idents if i["state"] == "pending" and i["catalogue"] in decisive]
+    if status == "blend":
+        why = (blend_of(f, idents) or "").split(":")
+        if why[0] == "neighbour" and len(why) >= 4:
+            return (f"It moves only as far as a neighbour {why[3]}″ away ({why[1]}: {why[2]}): most likely the light of the two blending, "
+                    "not a body. Not counted as a lead.")  # fmt: skip
+        if why[0] == "still" and len(why) >= 5:
+            rate, _ = _claimed_motion(f)
+            far = f", {rate * (EPOCH - float(why[4])):.0f}″ away by now" if rate else ""
+            return (f"{why[1]} has a source at this place ({why[2]}, {why[3]}″ away) in {float(why[4]):.0f}; moving as claimed it would be"
+                    f"{far or ' far from it'}: it stood still. Not counted as a lead.")  # fmt: skip
+        return "A blend or a source that stood still, not a body. Not counted as a lead."
     if status == "residual":
         star = next(
             (
@@ -1399,6 +1477,11 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         text = base + who + "."
     else:
         none = [i.get("label", i["catalogue"]) for i in idents if i["state"] == "none"]
+        if named and kind in BLEND_KINDS:
+            # a catalogue does have a source at its place, only one that does not move like it: never "no catalogue names it"
+            what = "a red mover" if kind == "browndwarf" else "it moves between the passes"
+            return (f"{what[0].upper() + what[1:]}; {'; '.join(named[:2])} is at its place but does not move like it. "
+                    "A lead to look at, not a discovery." + (f" Did not answer: {', '.join(failed)}." if failed else ""))  # fmt: skip
         text = {
             "mover": "It moves between the passes and no catalogue names it. A lead to look at, not a discovery.",
             "browndwarf": "A red mover no catalogue names: a brown dwarf candidate, not a confirmed one.",
@@ -1427,6 +1510,7 @@ STAGE_OF_STATUS = {
     "galaxy": "artefact",
     "below": "artefact",
     "halo": "artefact",
+    "blend": "artefact",  # a neighbour blending, or a survey source at its place: it did not move
     "set_aside": "artefact",  # people agreed it is an artefact (service/accounts/field_people.py)
 }
 VIEW_RESULTS = ("moves", "artefact", "known", "nothing", "marks")
@@ -1542,7 +1626,7 @@ def rate_unit(kind: str) -> str:
 
 
 LITE_KEYS = (
-    "id", "kind", "place", "fov", "ra", "dec", "rate", "rate_unit", "snr", "score", "chance", "status", "verdict", "identity", "updated",
+    "id", "slug", "kind", "place", "fov", "ra", "dec", "rate", "rate_unit", "snr", "score", "chance", "status", "verdict", "identity", "updated",
     "stage", "promise", "viewers", "credit", "clip", "note", "visible", "visible_sn",
 )  # fmt: skip
 
@@ -1597,7 +1681,7 @@ def query(
     items: list[dict[str, Any]] = []
     for r in rows:
         f = {
-            "id": r["id"], "kind": r["kind"], "place": r["place"], "fov": r["fov"], "ra": r["ra"], "dec": r["dec"], "epoch": r["epoch"],
+            "id": r["id"], "slug": slug_of(r["id"]), "kind": r["kind"], "place": r["place"], "fov": r["fov"], "ra": r["ra"], "dec": r["dec"], "epoch": r["epoch"],
             "rate": r["rate"], "rate_unit": rate_unit(r["kind"]), "snr": r["snr"], "score": r["score"], "chance": r["chance"],
             "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "updated": r["updated"],
             "versions": json.loads(r["versions"] or "{}"), **rel[r["id"]],
@@ -1653,6 +1737,7 @@ def query(
             "below": 0,
             "halo": 0,
             "set_aside": 0,
+            "blend": 0,
             "leads": 0,
         }
         for k in KINDS
@@ -1670,6 +1755,7 @@ def query(
                 "below": 0,
                 "halo": 0,
                 "set_aside": 0,
+                "blend": 0,
                 "leads": 0,
             },
         )
