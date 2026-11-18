@@ -165,6 +165,8 @@ SURVEY_EPOCH = {"allwise": 2010.5, "twomass": 1999.5}
 SWEEP_S = 120.0  # a sweep reads every product file (each parse holds the GIL): new finds also kick it at once
 RETRY_S = 90.0
 MAX_ATTEMPTS = 8
+EXTRA_RETRY_S = 6 * 3600.0  # a catalogue that only adds detail, past MAX_ATTEMPTS, is still asked this often (a card stops saying it did
+# not answer once the service is back: VizieR's TAP did not answer VSX for days)
 RESULT_DIRS = ("movers", "pairs", "browndwarfs", "red", "anomalies")
 
 
@@ -680,11 +682,11 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
             )
             if d is None or old:
                 worst = 0.0 if worst is None else min(worst, 0.0)  # never asked, or asked the old way
-            # one that adds detail gives up after MAX_ATTEMPTS; a deciding one is asked until it answers (the wait grows to 32 RETRY_S)
-            elif (
-                d["state"] == "unavailable"
-                and (d["attempts"] < MAX_ATTEMPTS or c in deciding)
-                and now - d["tried"] >= RETRY_S * (2 ** min(d["attempts"], 5))
+            # a deciding one is asked until it answers (the wait grows to 32 RETRY_S); one that adds detail too, but past MAX_ATTEMPTS
+            # only every EXTRA_RETRY_S
+            elif d["state"] == "unavailable" and (
+                ((d["attempts"] < MAX_ATTEMPTS or c in deciding) and now - d["tried"] >= RETRY_S * (2 ** min(d["attempts"], 5)))
+                or now - d["tried"] >= EXTRA_RETRY_S
             ):
                 worst = d["tried"] if worst is None else min(worst, d["tried"])
         if worst is not None:
