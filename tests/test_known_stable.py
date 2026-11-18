@@ -59,3 +59,15 @@ def test_the_stable_set_rings_what_the_field_shows_in_most_passes() -> None:
     assert "gaia:faint" not in by and "jpl:1" not in by  # below the depth; a body that moves
     assert 16.0 < got["depth"]["G"] <= 16.8
     assert len(got["unmatched"]) == 5  # the stars no catalogue has (jpl's place does not count as a catalogue source)
+
+
+def test_a_saturated_stars_infinite_snr_goes_out_as_null() -> None:
+    """JSON has no Infinity: the browser's JSON.parse failed on the whole reply (a saturated star in 283-0508 SW)."""
+    import json
+
+    from service import jsonsafe
+
+    out = {"sources": [{"id": "gaia:1", "snr": float("inf")}], "unmatched": [{"snr": float("nan")}]}
+    text = jsonsafe.dumps(out, separators=(",", ":"))
+    assert json.loads(text) == {"sources": [{"id": "gaia:1", "snr": None}], "unmatched": [{"snr": None}]}
+    assert "Infinity" not in text and "NaN" not in text

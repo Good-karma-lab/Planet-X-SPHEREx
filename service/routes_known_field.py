@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import gzip
-import json
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 
-from service import cpu, known_stable
+from service import cpu, jsonsafe, known_stable
 from service.known_field import MAX_EPOCHS, KnownField
 from service.products.store import product_key
 from service.workers import fieldjob
@@ -64,7 +63,7 @@ def make_known_field_router(st: Any, prefix: str = "/api") -> APIRouter:
 
             out = {**out, "objects": [o if o["label"] else thin(o) for o in out["objects"]]}
             out["match"] = [{k: m[k] for k in ("id", "catalogues", "ids", "positions", "mag") if k in m} for m in out.get("match", [])]
-        body = json.dumps(out, separators=(",", ":")).encode()
+        body = jsonsafe.dumps(out, separators=(",", ":")).encode()  # a saturated star's S/N is infinite: null, never Infinity
         headers = {"Vary": "Accept-Encoding"}
         if len(body) > 1000 and "gzip" in request.headers.get("accept-encoding", ""):
             body = await asyncio.to_thread(gzip.compress, body, 5)
@@ -124,7 +123,7 @@ def make_known_field_router(st: Any, prefix: str = "/api") -> APIRouter:
             "answered": known.get("answered"),
             **got,
         }
-        body = json.dumps(out, separators=(",", ":")).encode()
+        body = jsonsafe.dumps(out, separators=(",", ":")).encode()  # a saturated star's S/N is infinite: null, never Infinity
         headers = {"Vary": "Accept-Encoding"}
         if len(body) > 1000 and "gzip" in request.headers.get("accept-encoding", ""):
             body = await asyncio.to_thread(gzip.compress, body, 5)
