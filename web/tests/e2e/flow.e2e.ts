@@ -19,6 +19,7 @@ interface Find {
 
 test.beforeAll(async ({ browser }) => {
   page = await (await browser.newContext()).newPage();
+  await page.addInitScript(() => localStorage.setItem('spherex-hints-seen-off', '1')); // the newcomer's hints have their own test
 });
 test.afterAll(async () => {
   await page.context().close();
