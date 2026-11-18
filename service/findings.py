@@ -636,14 +636,19 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
             db.close()
     out: list[tuple[tuple[int, int, float], str]] = []
     for r in rows:
-        want = want_of(r["kind"], r["ra"], r["dec"], json.loads(r["data"] or "{}"))
+        data = json.loads(r["data"] or "{}")
+        want = want_of(r["kind"], r["ra"], r["dec"], data)
+        deciding = set(decisive_of(r["kind"], r["ra"] or 0.0, r["dec"] or 90.0, data))
         worst = None
         for c in want:
             d = done.get((r["id"], c))
             if d is None:
                 worst = 0.0 if worst is None else min(worst, 0.0)
+            # one that adds detail gives up after MAX_ATTEMPTS; a deciding one is asked until it answers (the wait grows to 32 RETRY_S)
             elif (
-                d["state"] == "unavailable" and d["attempts"] < MAX_ATTEMPTS and now - d["tried"] >= RETRY_S * (2 ** min(d["attempts"], 5))
+                d["state"] == "unavailable"
+                and (d["attempts"] < MAX_ATTEMPTS or c in deciding)
+                and now - d["tried"] >= RETRY_S * (2 ** min(d["attempts"], 5))
             ):
                 worst = d["tried"] if worst is None else min(worst, d["tried"])
         if worst is not None:
@@ -1317,8 +1322,9 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
     def open_(c: str) -> bool:
         i = by.get(c, {})
         st = i.get("state", "pending")
-        # a catalogue that did not answer after every retry counts as asked (the verdict says it did not answer); one still being retried does not
-        return st == "pending" or (st == "unavailable" and int(i.get("attempts") or 0) < MAX_ATTEMPTS)
+        # a deciding catalogue that has not answered keeps a find unchecked, however many times it was asked: "unexplained" says the
+        # check was made ("JPL lists no known body there"), so it is never said while that check did not answer (it is asked again)
+        return st in ("pending", "unavailable")
 
     if any(open_(c) for c in want):
         return "unchecked"

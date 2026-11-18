@@ -278,7 +278,7 @@ def test_slow_motions_are_not_finds(tmp_path: Path) -> None:
     assert len([f for f in finds if f["kind"] == "mover"]) == 1  # the same-motion track stays, the slow one is out
 
 
-def test_a_catalogue_that_never_answers_does_not_hold_a_find_unchecked_forever() -> None:
+def test_a_deciding_catalogue_that_has_not_answered_keeps_a_find_unchecked() -> None:
     from service.findings import MAX_ATTEMPTS
 
     red = {"kind": "red", "data": {}}
@@ -286,7 +286,7 @@ def test_a_catalogue_that_never_answers_does_not_hold_a_find_unchecked_forever()
     retrying = [*ids, {"catalogue": "gaia", "state": "unavailable", "attempts": 2}]
     gave_up = [*ids, {"catalogue": "gaia", "state": "unavailable", "attempts": MAX_ATTEMPTS}]
     assert status_of(red, retrying) == "unchecked"  # Gaia decides a red source and is still being retried
-    assert status_of(red, gave_up) == "unexplained"
+    assert status_of(red, gave_up) == "unchecked"  # a deciding catalogue that has not answered never makes it unexplained
     # VSX, NED and 2MASS only add detail: SIMBAD and Gaia having answered, a find is final whatever they did
     decided = [
         {"catalogue": "simbad", "state": "none"},
@@ -695,3 +695,30 @@ def test_the_collector_runs_in_a_worker_process_as_background(tmp_path: Path, mo
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(fmod.Findings.sweep_loop(me))  # type: ignore[arg-type]
     assert seen == [3]
+
+
+def test_a_deciding_catalogue_is_asked_again_until_it_answers(tmp_path: Path) -> None:
+    """JPL decides a time-lapse track: past MAX_ATTEMPTS it is still asked (after the longest wait), while a catalogue that only adds
+    detail gives up; and the track stays unchecked meanwhile, never "unexplained"."""
+    import time as _time
+
+    from service.findings import MAX_ATTEMPTS, RETRY_S, pending_ids
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    film = {"id": "film:1", "kind": "film", "place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": 36.7, "snr": 19.0,
+            "score": 19.0, "chance": 0.0, "data": {}, "scans": []}  # fmt: skip
+    red = {**film, "id": "red:1", "kind": "red"}
+    db.write_finds([film, red])
+    for _ in range(MAX_ATTEMPTS):
+        db.put_ident("film:1", "sbident", "unavailable", None, None, None, {})
+    for c in ("simbad", "gaia"):
+        db.put_ident("red:1", c, "none", None, None, None, {})
+    for c in ("twomass", "allwise", "vsx", "ned"):
+        for _ in range(MAX_ATTEMPTS):
+            db.put_ident("red:1", c, "unavailable", None, None, None, {})
+    db.db.commit()  # as the identification loop does after each batch (the scan reads on its own connection)
+    later = _time.time() + RETRY_S * 32 + 1
+    assert pending_ids(str(db.path), 10, frozenset(), later) == ["film:1"]  # JPL again; the red source's extras gave up
+    assert pending_ids(str(db.path), 10, frozenset(), _time.time()) == []  # not before its wait
+    idents = [{"catalogue": "sbident", "state": "unavailable", "attempts": MAX_ATTEMPTS + 3}]
+    assert status_of({"kind": "film", "data": {}}, idents) == "unchecked"
