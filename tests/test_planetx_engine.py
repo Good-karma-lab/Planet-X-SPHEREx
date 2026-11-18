@@ -168,3 +168,16 @@ def test_honest_words_carry_the_limits() -> None:
     assert "bar of the sum of the passes" in h["limit"] and "mJy" not in h["limit"] and "lead" in h
     assert "did not use D4" in h["planet_nine"]
     assert "did not use D4" not in px.honest_words("distant", (1, 2, 3, 4))["planet_nine"]
+
+
+def test_the_link_reports_what_chance_links() -> None:
+    """The real body links across three passes; with its second pass moved to chance places of the field (±N·S/2) no orbit fits
+    within 6″, so the chance control says 0 links per trial, and the result carries it next to the real link."""
+    X0, V0 = circular_body(27.378, -0.12, T1, 95.0)
+    passes = []
+    for t0 in (T1, T2, T3):
+        grid, c = candidate_of(X0, V0, T1, t0, float(np.linalg.norm(eorbit.kepler(X0, V0, np.float64((t0 - T1) * 86400.0))) / eorbit.AU))
+        passes.append([({"i": 0}, elink.candidate_points(c, grid, t0, SPAN))])
+    ch = linkjob.chance_links(passes, [N * edist.S / 2.0] * 3, 6.0, trials=4)
+    assert ch == {"trials": 4, "pairs": 1, "one_body": ch["one_body"], "confirmed": 0.0}
+    assert ch["one_body"] <= 0.25  # a chance place hardly ever fits one orbit with the first pass within 6″

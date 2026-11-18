@@ -67,6 +67,42 @@ def _num(v: Any) -> float | None:
     return None if v is None or (isinstance(v, float) and not math.isfinite(v)) else round(float(v), 3)
 
 
+LINK_TRIALS = 10  # the chance control: the second pass's candidates at chance places of its field, linked the same way
+LINK_PAIRS_MAX = 600  # a trial links at most this many pairs (a random choice; the counts are scaled to all pairs)
+
+
+def _moved(pts: list[Any], du: float, dv: float) -> list[Any]:
+    """A candidate's track points moved by (du, dv) arcsec on the sky (east, north), times and observer kept."""
+    out = []
+    for tm, rr, ra, dec in pts:
+        out.append((tm, rr, ra + du / 3600.0 / max(math.cos(math.radians(dec)), 1e-3), dec + dv / 3600.0))
+    return out
+
+
+def chance_links(passes: list[list[Any]], halves: list[float], tol: float, trials: int = LINK_TRIALS, seed: int = 7) -> dict[str, Any]:
+    """What chance alone links: the candidates of the second pass are put at uniform chance places of their field (±`halves[1]`
+    arcsec from where they are, their tracks' shape kept), the first and third passes stay, and the passes are linked the same way.
+    -> {trials, pairs, one_body (chance links per trial, misfit <= tol and bound), confirmed (chance links the third pass confirms)}."""
+    rng = np.random.default_rng(seed)
+    a, b = passes[0], passes[1]
+    pairs_all = len(a) * len(b)
+    one = conf = 0.0
+    for _ in range(trials):
+        moved = [(info, _moved(pts, *rng.uniform(-halves[1], halves[1], 2))) for info, pts in b]
+        aa, bb = a, moved
+        scale = 1.0
+        if pairs_all > LINK_PAIRS_MAX:  # a random subset of both sides, scaled back to every pair
+            ka = max(1, round(len(a) * (LINK_PAIRS_MAX / pairs_all) ** 0.5))
+            kb = max(1, LINK_PAIRS_MAX // ka)
+            aa = [a[i] for i in rng.choice(len(a), min(ka, len(a)), replace=False)]
+            bb = [moved[i] for i in rng.choice(len(moved), min(kb, len(moved)), replace=False)]
+            scale = pairs_all / max(1, len(aa) * len(bb))
+        got = elink.link_passes([aa, bb, *passes[2:]], tol=tol)
+        one += scale * sum(1 for lk in got if lk["ok"])
+        conf += scale * sum(1 for lk in got if lk.get("ok3"))
+    return {"trials": trials, "pairs": pairs_all, "one_body": round(one / trials, 3), "confirmed": round(conf / trials, 3)}
+
+
 def link_results(
     results: dict[str, dict[str, Any] | None], params: dict[str, Any], progress: Any = None, cancel: Any = None
 ) -> dict[str, Any]:
@@ -100,10 +136,11 @@ def link_results(
                 "flux_mjy": c.get("flux_mjy"),
             }
             pts.append((info, elink.candidate_points(c, r["grid"], r["t0"], r["span_days"])))
-        passes.append((float(r["t0"]), k, pts, len(cands)))
+        half = float(r["grid"].get("n") or 0) * edist.S / 2.0  # arcsec: half the field of the pass's search
+        passes.append((float(r["t0"]), k, pts, len(cands), half))
     passes.sort(key=lambda x: x[0])
-    res["passes"] = [{"key": k, "t0": round(t0, 3), "candidates": n} for t0, k, _, n in passes]
-    if any(n == 0 for _, _, _, n in passes[:2]):
+    res["passes"] = [{"key": k, "t0": round(t0, 3), "candidates": n} for t0, k, _, n, _ in passes]
+    if any(n == 0 for _, _, _, n, _ in passes[:2]):
         res["status"] = "nothing-to-link"
         res["notes"].append("a pass has no confirmed candidate: nothing to link")
         return res
@@ -141,6 +178,8 @@ def link_results(
             "b": best["b"],
             "c": best.get("c"),
         }
+    # what chance links with the same candidates (the second pass moved to chance places): the real links are read against it
+    res["chance"] = chance_links([x[2] for x in passes], [x[4] for x in passes], params["tol"])
     res["tolerance_arcsec"] = params["tol"]
     res["honest"] = honest_words("link")
     res["status"] = "ok"
