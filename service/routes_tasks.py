@@ -36,6 +36,20 @@ from service.quarters import Quarters
 
 REF_ID = re.compile(r"^[A-Za-z0-9_\-:.]{1,80}$")
 LEADS = ("unexplained", "unchecked")
+WEAK_HIGH = 30  # a red source or anomaly this promising (unexplained, σ ≥ 10) and visible in its picture joins the strong kinds' turn
+
+
+def finding_group(r: dict[str, Any]) -> int:
+    """The turn of a find among the "check a finding" tasks: the moving kinds and dwarfs first (Findings' Promising), then a red source or
+    anomaly that is visible in its picture and scores high, then the hundreds of other red sources and anomalies (the sweep adds
+    ~10-30 a square): they never push a mover, dwarf, peak or track out of the tasks."""
+    from service.findings import PROMISING_KINDS
+
+    if r.get("kind") in PROMISING_KINDS:
+        return 0
+    if r.get("visible") is True and int(r.get("promise") or 0) >= WEAK_HIGH:
+        return 1
+    return 2
 
 
 def _grid() -> Any:
@@ -212,7 +226,8 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
         aside, raised = field_people.set_aside(st), people.raised(st)
     except Exception:
         aside, raised = {}, {}
-    body = query(f.db, None, None, None, 100000, 0, aside=aside, raised=raised)
+    clips = getattr(st, "clips", None)
+    body = query(f.db, None, None, None, 100000, 0, aside=aside, raised=raised, seen=getattr(clips, "seen", None))
     return [
         {
             "finding_id": x["id"],
@@ -222,6 +237,8 @@ def lead_findings(st: Any) -> list[dict[str, Any]] | None:
             "status": x["status"],
             "kind": x["kind"],
             "stage": STAGE_OF_STATUS.get(x["status"]),
+            "visible": x.get("visible"),
+            "promise": x.get("promise") or 0,
             **({"raised": x["people_raised"]} if "people_raised" in x else {}),
         }
         for x in body["finds"]
@@ -420,8 +437,9 @@ def make_tasks_router(st: Any) -> APIRouter:
         seen = acc.db.task_refs(user_id, "finding") if user_id else set()
         checked = acc.db.check_counts()
         leads = [r for r in rows if r.get("status") in LEADS and r["finding_id"] not in seen]
-        # a find people raised first, then the least checked; stable: the page's order among the equal
-        leads.sort(key=lambda r: ("raised" not in r, checked.get(r["finding_id"], 0)))
+        # a find people raised first, then the strong kinds before the many red sources and anomalies (finding_group), then the
+        # least checked, then the most promising; stable: the page's order among the equal
+        leads.sort(key=lambda r: ("raised" not in r, finding_group(r), checked.get(r["finding_id"], 0), -int(r.get("promise") or 0)))
         return leads[0] if leads else None
 
     def next_judged(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:

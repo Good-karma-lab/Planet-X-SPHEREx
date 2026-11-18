@@ -292,6 +292,25 @@ def test_finding_tasks_and_the_credit(site: tuple[FastAPI, _State, _Mail]) -> No
     assert [(f["finding_id"], f["role"], f["status"]) for f in mine] == [("mover:2", "checked", "in_review")]
 
 
+def test_finding_tasks_give_the_strong_kinds_before_the_many_red_sources(site: tuple[FastAPI, _State, _Mail]) -> None:
+    app, st, mail = site
+    c = _sign_in(app, mail)
+    row = {"field_key": "k", "ra": 1.0, "dec": 2.0, "status": "unexplained"}
+    finds = [
+        *({**row, "finding_id": f"red:{i}", "kind": "red", "visible": True, "promise": 15} for i in range(5)),  # the sweep's many
+        {**row, "finding_id": "anomaly:hi", "kind": "anomaly", "visible": True, "promise": 35},  # visible and scoring high
+        {**row, "finding_id": "red:unseen", "kind": "red", "visible": None, "promise": 35},  # high, but not shown visible
+        {**row, "finding_id": "film:1", "kind": "film", "visible": None, "promise": 50},
+    ]
+    st.task_findings = lambda: finds  # type: ignore[attr-defined]
+    got = []
+    for _ in range(3):
+        t = c.get("/api/tasks/next", params={"kind": "finding"}).json()["task"]
+        got.append(t["finding_id"])
+        c.post(f"/api/me/tasks/{t['id']}/done", json={"result": "moves", "mark_ids": []})
+    assert got == ["film:1", "anomaly:hi", "red:unseen"]  # then the many: the high-promise one first among the equal
+
+
 def test_investigation_and_submit_only_when_the_checks_allow(site: tuple[FastAPI, _State, _Mail]) -> None:
     app, st, mail = site
     c = _sign_in(app, mail)
