@@ -8,6 +8,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from service.findings import SCHEMA, FindingsDB, collect, query, status_of, verdict_of
 from service.products.store import product_key
 
@@ -644,3 +646,25 @@ def test_every_find_says_the_unit_of_its_rate() -> None:
 
     assert rate_unit("film") == "″/h" and rate_unit("mover") == "″/yr" and rate_unit("browndwarf") == "″/yr"
     assert "rate_unit" in LITE_KEYS
+
+
+def test_the_identification_loop_asks_the_workers_as_background(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Its pending scan goes to a worker process as a background (maintenance) call: as a person's call, every 15 s, it held the
+    sweep's share of the workers at service.cpu.PERSON_LOW_CAP."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from service import cpu
+    from service import findings as fmod
+
+    seen: list[int] = []
+
+    async def run(fn: Any, *args: Any) -> Any:
+        seen.append(cpu.priority())
+        raise asyncio.CancelledError  # one turn is enough
+
+    monkeypatch.setattr(fmod.cpu, "run", run)
+    me = SimpleNamespace(db=SimpleNamespace(path="x"), targets=[])
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(fmod.Findings.identify_loop(me))  # type: ignore[arg-type]
+    assert seen == [3] and seen[0] >= cpu.LOW

@@ -616,6 +616,10 @@ def _red_key(field_key: str) -> str:
     return product_key("red", {"field": field_key})
 
 
+class _Maintenance:
+    priority = 3  # service.cpu reads it: P3, a background call that gives way to people (service.jobs.scheduler.Priority.P3)
+
+
 def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn: sqlite3.Connection | None = None) -> list[str]:
     """The ids of the finds with a catalogue not yet answered (or that did not answer and may be asked again). The few that matter most
     are asked first (Find Planet X peaks, movers, brown dwarfs, film tracks, then pairs; the hundreds of anomalies and red sources last),
@@ -1174,6 +1178,9 @@ class Findings:
         self.db.db.commit()
 
     async def identify_loop(self) -> None:
+        # maintenance: its compute calls (the pending scan) are background ones; outside any job they counted as a person's call, and a
+        # person's call every 15 s held the sweep's share of the workers at service.cpu.PERSON_LOW_CAP
+        cpu.JOB.set(_Maintenance())
         while True:
             try:
                 ids = await cpu.run(pending_ids, str(self.db.path), 8, frozenset(t["n"] for t in self.targets), time.time())
