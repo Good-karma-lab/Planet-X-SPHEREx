@@ -36,6 +36,7 @@ const STATUS_WORD: Record<string, string> = {
   galaxy: 'a galaxy',
   below: 'below the bar',
   set_aside: 'set aside by people',
+  unverified: 'not checked in the exposures',
 };
 const STATUS_WHY: Record<string, string> = {
   blend: 'Two sources side by side: their blend stood still while the ring moved. Not a lead',
@@ -43,6 +44,7 @@ const STATUS_WHY: Record<string, string> = {
   residual: 'What is left after a known source is taken away. Not a lead',
   below: 'Below the bar this field sets for a find',
   set_aside: 'People agreed it is an artefact',
+  unverified: 'A straight line through the visits whose light was never checked in the exposures. Not a lead',
 };
 
 export interface Find {
@@ -58,7 +60,7 @@ export interface Find {
   snr: number | null;
   score: number | null;
   chance: number | null;
-  status: 'unexplained' | 'unchecked' | 'known' | 'residual' | 'blend' | 'halo' | 'galaxy' | 'below' | 'set_aside';
+  status: 'unexplained' | 'unchecked' | 'known' | 'residual' | 'blend' | 'halo' | 'galaxy' | 'below' | 'set_aside' | 'unverified';
   verdict: string;
   idents: Ident[];
   data: Record<string, any>;

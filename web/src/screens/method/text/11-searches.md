@@ -205,6 +205,8 @@ A track that lies within 30″ of a known body's predicted place (median over th
 
 The time-lapse of the 60′ ecliptic field (RA 169.8917, Dec +4.3514; pass 2025-12-02 to 2025-12-20, MJD 61011.71–61029.77; D1–D3, 24 visits, 178 exposures of which 166 were read) was searched blind. Of the 8 known bodies with at least 4 frames inside the time-lapse and V ≤ 19.1 the search recovered 6, each matched to JPL positions within 2.5″, and all 6 drawn tracks are matched to a known body.
 
+**A line track is checked in the exposures before it is a lead.** Orbit tracks are built only from candidates that on − off photometry finds positive in every exposure of their visit. A track linked as a straight line is not, so in Findings it is `unverified`, shown but not counted as a lead, until its light is checked. Measured on 18 November 2026: the R Draconis 20′ track (`film:c6e7d99340e0`, 3.64″/h through 7 visits, 101σ together, 10′ from the star) has its four strongest points at 39–62σ in the motion maps, yet in every exposure that covers them the pixel at the point holds −0.6 to +0.6σ against its surroundings. The same measurement on 9952 (1991 AK) gives 2–10σ at each of its points. The track is made by the motion maps around a bright variable star, not by light that moved. 25 film finds were line tracks; all are `unverified` now, none had a catalogue answer naming it.
+
 **Result:** the time-lapse search recovers 6 of 8 known bodies blind with 0 unexplained tracks in the 60′ December ecliptic field (live service, /api/v1/film/48c5bbb2c5e028b847075c51/tracks, product `filmsearch` version t4, 2026-11-14 21:04 UTC).
 
 | Body | V | Result |

@@ -149,7 +149,7 @@ GALAXY_TYPES = frozenset(
     }
 )
 GALAXY_NAMES = ("ACS-GC", "2MASX", "LEDA", "SDSS")  # catalogues of galaxies: a match to one is a galaxy, never a brown dwarf or a mover
-HIDDEN = ("residual", "galaxy", "below", "halo", "set_aside", "blend")  # statuses kept out of the leads and the default list
+HIDDEN = ("residual", "galaxy", "below", "halo", "set_aside", "blend", "unverified")  # statuses kept out of the leads and the default list
 
 
 def is_galaxy(name: str | None, typ: str | None) -> bool:
@@ -1456,6 +1456,10 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         known = True
     if known:
         return "known"
+    if kind == "film" and (d.get("track") or {}).get("method") == "line" and not (d.get("track") or {}).get("verified"):
+        # linked as a straight line, its light never checked in the exposures (on - off): on 18 Nov 2026 the R Draconis track's four
+        # strongest points (39-62 sigma in the motion map) held no light at all in the exposures. Not a lead until it is checked
+        return "unverified"
     if kind in BLEND_KINDS and blend_of(f, idents):
         return "blend"  # a neighbour star or a survey source at its place says it did not move: not a lead
     if kind == "peak" and ok("halo"):
@@ -1513,6 +1517,10 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         return "Not yet checked: the catalogues have not been asked yet."
     decisive = decisive_of(f["kind"], f.get("ra") or 0.0, f.get("dec") or 90.0, f.get("data") or {})
     waiting = [i.get("label", i["catalogue"]) for i in idents if i["state"] == "pending" and i["catalogue"] in decisive]
+    if status == "unverified":
+        return ("Linked as a straight line through the visits, but its light was never checked in the exposures themselves (on − off "
+                "photometry, which every orbit track passes): near bright stars such tracks can be built from the motion maps alone. "
+                "Not counted as a lead.")  # fmt: skip
     if status == "blend":
         why = (blend_of(f, idents) or "").split(":")
         if why[0] == "neighbour" and len(why) >= 4:
@@ -1830,6 +1838,7 @@ def query(
             "halo": 0,
             "set_aside": 0,
             "blend": 0,
+            "unverified": 0,
             "leads": 0,
         }
         for k in KINDS
@@ -1848,12 +1857,13 @@ def query(
                 "halo": 0,
                 "set_aside": 0,
                 "blend": 0,
+                "unverified": 0,
                 "leads": 0,
             },
         )
         if f["status"] not in HIDDEN:  # a star's residual and a galaxy are not leads: counted apart
             tally["all"] += 1
-        tally[f["status"]] += 1
+        tally[f["status"]] = tally.get(f["status"], 0) + 1  # a status these lists do not know is counted, never a KeyError
         if f["status"] in ("unexplained", "unchecked"):
             tally["leads"] += 1  # what is still a lead: not a known body, a galaxy, a star's residual or below the bar
 
@@ -1937,7 +1947,18 @@ def query(
         sel = [f for f in sel if f["visible"] is not False]
     elif visibility == "unseen":
         sel = [f for f in sel if f["visible"] is False]
-    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6, "set_aside": 7, "blend": 8}
+    rank = {
+        "unexplained": 0,
+        "unchecked": 1,
+        "known": 2,
+        "residual": 3,
+        "galaxy": 4,
+        "below": 5,
+        "halo": 6,
+        "set_aside": 7,
+        "blend": 8,
+        "unverified": 9,
+    }
     # a status this list does not know goes last, never a KeyError (a blend broke every list it was in)
     sel.sort(
         key=lambda f: (rank.get(f["status"], 99), KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0))
