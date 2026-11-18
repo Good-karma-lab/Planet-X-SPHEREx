@@ -75,7 +75,10 @@ def summarize(rows: list[dict[str, Any]], dirs: dict[str, str], keys: dict[str, 
         )
         pl["t"] = max(pl["t"], row["created"])
         if row["kind"] == "field":
-            pl["ra"], pl["dec"], pl["fov"], pl["key"] = ra, dec, fov, row["key"]
+            # a place is as large as the largest field searched there: a smaller field made later at the same place (a 10′ quarter
+            # in a 60′ field) does not shrink it, so the area searched never goes down as fields are added
+            if fov >= float(pl.get("field_fov") or 0.0):
+                pl["ra"], pl["dec"], pl["fov"], pl["key"], pl["field_fov"] = ra, dec, fov, row["key"], fov
             movers = _read(Path(dirs["movers"]) / f"{keys[row['key']]['movers']}.json")
             pairs = _read(Path(dirs["pairs"]) / f"{keys[row['key']]['pairs']}.json")
             dwarfs = _read(Path(dirs["browndwarfs"]) / f"{keys[row['key']]['browndwarfs']}.json")
