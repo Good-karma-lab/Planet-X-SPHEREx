@@ -254,6 +254,8 @@ def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any]) ->
     user = _people(app)
     ann = user("ann")
     t = ann.get("/api/tasks/next", params={"kind": "moves", "finding_id": "film:2"}).json()["task"]
+    # the page's slug names the same find (track-2 is film:2) and gives the same open task
+    assert ann.get("/api/tasks/next", params={"kind": "moves", "finding_id": "track-2"}).json()["task"]["finding_id"] == "film:2"
     assert t["series"]["id"] == "track" and [s["id"] for s in t["series"]["steps"]] == ["steps", "missing", "shape"]
     assert [p["i"] for p in t["pictures"]] == [0, 1, 2, 3, 4] and t["pictures"][2]["mjd"] == 61102.0
     assert "question" not in t and "answers" not in t and "tree" not in t  # no one-click classes any more

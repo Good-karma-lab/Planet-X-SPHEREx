@@ -633,6 +633,10 @@ def make_tasks_router(st: Any) -> APIRouter:
         acc = accounts.get(st)
         u = acc.current_user(request)
         uid = u["id"] if u else None
+        if finding_id is not None and kind != "cell":
+            from service.findings import id_of
+
+            finding_id = id_of(finding_id)  # a slug too (track-…), as the page's addresses use
         asked = cell_id if kind == "cell" else finding_id
         if asked is not None and not REF_ID.match(asked):
             raise HTTPException(422, "this is not an id")
