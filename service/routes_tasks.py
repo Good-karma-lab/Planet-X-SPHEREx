@@ -160,7 +160,9 @@ def open_quarters(viewed: dict[str, int], taken: set[str]) -> list[str]:
 
 READY_SCAN = 40  # quarters looked at for a built one before a cold one is given
 SPREAD = 8  # people are given a random one of the first SPREAD quarters (built ones first), so not everyone gets the same square
-PROMISING_TTL_S = 60.0  # the promising quarters are worked out again at most this often
+PROMISING_TTL_S = 60.0
+# a square task this old is not handed back, nor its square continued: the person moved on (it was given again 11 h later)
+OPEN_TASK_KEEP_S = 2 * 3600.0  # the promising quarters are worked out again at most this often
 _promising: dict[str, Any] = {"at": 0.0, "rows": []}
 
 
@@ -417,8 +419,9 @@ def make_tasks_router(st: Any) -> APIRouter:
             last = (
                 acc.db._conn()
                 .execute(
-                    "SELECT cell_id FROM acc_tasks WHERE user_id=? AND kind='cell' AND quarter IS NOT NULL ORDER BY created DESC LIMIT 1",
-                    (user_id,),
+                    "SELECT cell_id FROM acc_tasks WHERE user_id=? AND kind='cell' AND quarter IS NOT NULL AND created>=?"
+                    " ORDER BY created DESC LIMIT 1",
+                    (user_id, time.time() - OPEN_TASK_KEEP_S),
                 )
                 .fetchone()
             )
@@ -599,7 +602,7 @@ def make_tasks_router(st: Any) -> APIRouter:
         if asked is not None and not REF_ID.match(asked):
             raise HTTPException(422, "this is not an id")
         if asked is None and uid is not None and not (kind == "cell" and quarter):
-            have = acc.db.open_task(uid, kind)
+            have = acc.db.open_task(uid, kind, OPEN_TASK_KEEP_S if kind == "cell" else None)
             if have is not None:
                 if kind == "cell" and have.get("cell_id") and have.get("quarter"):
                     prebuild_after(acc, have["cell_id"], have["quarter"], quarters_looked(acc, uid))
