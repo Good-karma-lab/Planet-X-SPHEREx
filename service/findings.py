@@ -1786,6 +1786,29 @@ def query(
     for f in items:
         if passes(f):
             counts_view[f["kind"]] = counts_view.get(f["kind"], 0) + 1
+
+    def passes_but_stage(f: dict[str, Any]) -> bool:
+        """Every filter of the request but the stage ones (stage, waiting, noted): the stage chips count under the others."""
+        return (
+            (not kind or f["kind"] == kind)
+            and (not kinds or f["kind"] in kinds)
+            and (
+                (f["status"] in HIDDEN) == (status in HIDDEN) and (status not in HIDDEN or f["status"] == status)
+                if status in (None, "all") or status in HIDDEN
+                else f["status"] == status
+            )
+            and (not place or f["place"] == place)
+            and (only is None or f["id"] in only)
+            and (visibility != "seen" or f["visible"] is not False)
+            and (visibility != "unseen" or f["visible"] is False)
+        )
+
+    stage_view: dict[str, int] = {"waiting": 0, "noted": 0, **dict.fromkeys(STAGES, 0)}
+    for f in items:
+        if passes_but_stage(f):
+            stage_view["waiting"] += int(f["viewers"] == 0 and f["stage"] == "new")
+            stage_view["noted"] += int(f["note"] is not None)
+            stage_view[f["stage"]] = stage_view.get(f["stage"], 0) + 1
     sel = [
         f
         for f in items
@@ -1855,6 +1878,8 @@ def query(
         # per kind, the finds that pass this request's every filter but the kind ones (status, stage, waiting, visibility, …): the
         # numbers of the kind chips under the filters in use
         "counts_view": counts_view,
+        # the stage chips' numbers (waiting for a look, noted, each stage) under the request's every filter but the stage ones
+        "stage_view": stage_view,
         "labels": KIND_LABEL,
         "stages": stages,
         "waiting": sum(1 for f in shown if f["viewers"] == 0 and f["stage"] == "new"),
