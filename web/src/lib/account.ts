@@ -8,6 +8,8 @@ export interface User {
   id: string;
   name: string;
   email: string;
+  /** granted on the server (python -m service.accounts.verdict --grant): the cabinet links the review page */
+  reviewer?: boolean;
 }
 export interface AuthInfo {
   /** e-mail sign-in is open (a mail sender is set up, or dev mode); false with google false: "Sign-in opens soon" */

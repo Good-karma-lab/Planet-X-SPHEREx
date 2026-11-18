@@ -71,8 +71,13 @@ def make_auth_router(st: Any) -> APIRouter:
     @router.get("/api/me")
     def me(request: Request) -> Any:
         acc = accounts.get(st)
+        u = acc.current_user(request)
+        if u is not None:
+            from service.accounts.review import Review
+
+            u = {**u, "reviewer": Review(acc.db).is_reviewer(u["id"])}  # the cabinet shows the review page's link
         return {
-            "user": acc.current_user(request),
+            "user": u,
             "auth": {"email": acc.email, "google": acc.google is not None and google_public(), "dev": acc.dev},
         }
 

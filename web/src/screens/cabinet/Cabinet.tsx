@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useState } from 'preact/hooks';
 import { api, describeHash, nextTask, refreshUnread, taskHash, useUser, type AccountMark, type Task, type User } from '../../lib/account';
 import { InvestigationPage } from './Investigation';
+import { ReviewPanel } from './Review';
 import { SignInCard } from '../../ui/SignInCard';
 import { lastLab } from '../../lib/place';
 import { Pic } from './pic';
@@ -496,7 +497,7 @@ export function Cabinet({ route }: { route: Route }) {
   // older addresses (#/me?tab=…) still land on the right place
   const tab = p['tab'] ?? '';
   const invId = p['inv'] ?? '';
-  const view = p['view'] === 'badges' || tab === 'score' ? 'badges' : invId ? 'inv' : 'home';
+  const view = p['view'] === 'badges' || tab === 'score' ? 'badges' : p['view'] === 'review' ? 'review' : invId ? 'inv' : 'home';
   const work: Work = (WORK as readonly string[]).includes(p['work'] ?? '') ? (p['work'] as Work) : tab === 'tasks' ? 'squares' : (WORK as readonly string[]).includes(tab) ? (tab as Work) : 'squares';
   const { mine, error, reload } = useMine(user, `${view}${work}`, invId);
   const stale = p['signin'] === 'expired' && !!user;
@@ -521,6 +522,11 @@ export function Cabinet({ route }: { route: Route }) {
           </span>
           {user && (
             <div class="cb-corner">
+              {user.reviewer && (
+                <a class="btn sm" href="#/me?view=review" data-testid="cabinet-review">
+                  Review
+                </a>
+              )}
               <Bell notices={mine?.notifications ?? null} initiallyOpen={tab === 'notifications'} reload={reload} />
               <AccountMenu user={user} initiallyOpen={tab === 'account'} />
             </div>
@@ -536,6 +542,13 @@ export function Cabinet({ route }: { route: Route }) {
               ← Cabinet
             </a>
             <ScorePanel />
+          </div>
+        ) : view === 'review' ? (
+          <div class="card glass cb-card">
+            <a class="btn sm cb-back" href="#/me">
+              ← Cabinet
+            </a>
+            <ReviewPanel />
           </div>
         ) : view === 'inv' ? (
           <div class="card glass cb-card" data-testid="panel-investigations">

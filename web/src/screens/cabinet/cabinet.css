@@ -311,3 +311,17 @@ a.cb-row2:hover { background: rgba(95, 227, 214, 0.07); }
 .badge.v-no_match { color: #9fe6c4; border-color: rgba(120, 220, 170, 0.5); }
 .badge.v-waiting, .badge.v-checking, .badge.v-needs_another_pass { color: #ffd08a; border-color: rgba(255, 180, 84, 0.45); }
 .badge.v-comment { color: #d7a6ff; border-color: rgba(215, 166, 255, 0.45); }
+
+/* the review page (#/me?view=review) */
+.rv-list { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 14px; }
+.rv-one { border: 1px solid var(--line, rgba(255, 255, 255, 0.12)); border-radius: 10px; padding: 12px 14px; display: grid; gap: 8px; }
+.rv-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.rv-links { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.rv-checks { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; }
+.rv-check.pass { color: var(--ok, #7ddc9a); }
+.rv-check.warn { color: var(--warn, #f2c46d); }
+.rv-check.fail { color: var(--bad, #ff6f6f); }
+.rv-note { width: 100%; min-height: 54px; box-sizing: border-box; resize: vertical; font: inherit; padding: 8px; border-radius: 8px;
+  background: rgba(0, 0, 0, 0.25); color: inherit; border: 1px solid var(--line, rgba(255, 255, 255, 0.15)); }
+.rv-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.rv-log { list-style: none; padding: 0; display: grid; gap: 4px; }

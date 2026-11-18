@@ -124,3 +124,14 @@ A person's marks are checked before anything is submitted. The marks decide whic
 **The NEOWISE stack.** For a distant-body candidate with an orbit, the NEOWISE W1 single exposures of 2014–2024 over a 1° × 0.3° strip are made into epoch images (gaps of 30 days), the static sky is subtracted and masked, and the differences are added along the orbit, with the flux scale from isolated CatWISE stars of W1 13.5–15.8. Expected at ≥ 5σ and measured below the expectation by 3σ: fail (ruled out); measured above 3σ: pass (seen); else warn (not deep enough).
 
 The checks run in the background; JPL takes minutes and NEOWISE up to about 20 minutes. The person declares the submit once; the finding is submitted by itself when every check has answered without a fail and every warning has a comment, and the person is told the result.
+
+## Who gives a verdict
+
+Most stages are set by the machine, from rules on this page, with nobody's judgement in between:
+
+- **A find's status in Findings** (known, unexplained, not yet checked, a star's residual, a halo, a galaxy, a blend, below the bar) comes from the catalogues' answers and the rules above. It changes by itself when a catalogue answers again.
+- **Set aside.** A find people agree is an artefact (a ghost, a streak, a glow), by the agreement rule of their question series, leaves the leads by itself.
+- **A mark's verdict** (a known body, no match in any catalogue, set aside, not yet checked) comes from JPL and the catalogues at the mark's own date.
+- **Submitted.** A person's investigation is submitted by the server, never by a person, once every check before submit has answered with no fail and every warning has a comment.
+
+Only a **reviewer** gives a submitted finding its stage: in review, known (with the catalogue's name), artefact (with what it is), candidate, or confirmed. Confirmed means another telescope saw it again or the Minor Planet Center accepted it. A reviewer is an account the project grants on the server; the project's own account is the first. Every verdict is kept with the reviewer's name, the stage, the time and a note. Known and artefact must say why, because everyone credited reads the note. The finding's page lists them (`GET /api/findings/{id}/verdicts`). A verdict tells everyone credited on the finding. It pays the submitter's candidate (500) or confirmed (5000) points and settles every answer that waited for the stage (the score of part 6). Nobody reviews their own submission by being its submitter alone: a reviewer is a role given on the server, not something a submit earns.
