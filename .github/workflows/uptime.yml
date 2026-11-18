@@ -1,0 +1,73 @@
+# An outside check of https://www.spherex.space, from GitHub's machines (not the VM): no account, no secret beyond the workflow's own
+# token. When the site does not answer it opens one issue labelled "uptime" (GitHub notifies the repository's watchers, the owner by
+# e-mail per their notification settings) and comments on it while it stays down; when the site answers again it closes that issue.
+name: uptime
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"  # GitHub runs schedules late under load; 10 minutes is the aim, not a promise
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Ask the site
+        id: ask
+        shell: bash
+        run: |
+          set -u
+          B=https://www.spherex.space
+          fails=""
+          check() {  # name, url, what the body must contain; three tries 20 s apart so a restart is not an outage
+            local name=$1 url=$2 want=$3 code body
+            for i in 1 2 3; do
+              body=$(curl -sS -m 25 -A "spherex-uptime-check" -w '\n%{http_code}' "$url" 2>&1) || true
+              code=${body##*$'\n'}
+              if [ "$code" = 200 ] && grep -q -- "$want" <<<"$body"; then echo "ok   $name"; return 0; fi
+              sleep 20
+            done
+            echo "FAIL $name: HTTP $code"
+            fails="$fails- $name ($url): HTTP $code"$'\n'
+          }
+          check "health" "$B/api/v1/health" '"ok":true'
+          check "home page" "$B/" "<html"
+          check "Findings" "$B/api/v1/findings?lite=1&limit=1" '"finds"'
+          {
+            echo "fails<<EOF"
+            printf '%s' "$fails"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Open, comment on or close the uptime issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FAILS: ${{ steps.ask.outputs.fails }}
+        shell: bash
+        run: |
+          set -eu
+          gh label create uptime --color B60205 --description "The outside uptime check" 2>/dev/null || true
+          open=$(gh issue list --label uptime --state open --json number --jq '.[0].number // empty')
+          now=$(date -u +'%Y-%m-%d %H:%M UTC')
+          run="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ -n "$FAILS" ]; then
+            body=$(printf 'The outside check could not reach the site at %s (three tries each, 20 s apart):\n\n%s\nRun: %s\n' "$now" "$FAILS" "$run")
+            if [ -n "$open" ]; then
+              gh issue comment "$open" --body "Still down. $body"
+            else
+              gh issue create --label uptime --title "spherex.space is not answering ($now)" --body "$body"
+            fi
+            exit 1  # the run shows red as well
+          elif [ -n "$open" ]; then
+            gh issue close "$open" --comment "Answering again at $now. Run: $run"
+          fi
