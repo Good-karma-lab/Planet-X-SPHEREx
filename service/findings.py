@@ -32,6 +32,7 @@ from service import cpu, people_tracks
 from service.bodies import SB_IDENT, _iso, _sexa_dec, _sexa_ra
 from service.products.store import Store
 from service.products.versions import VERSIONS
+from service.storage import atomic_write_bytes
 from service.upstream import jpl
 from service.upstream.breaker import Breaker, BreakerOpenError
 
@@ -973,7 +974,10 @@ class Findings:
         self.kick = asyncio.Event()
         # the ids of the first page of Promising as last served (service/routes_findings.py): what a visitor sees first is identified
         # first, in that order
-        self.front: tuple[str, ...] = ()
+        self.front: tuple[str, ...] = self._front_saved()
+        # one find's JPL asks at a time (its visits one after another): interleaved with three other finds' asks on JPL's one lane,
+        # each answer came after about 14 minutes, and a restart in between lost them all
+        self.visits_gate = asyncio.Semaphore(1)
         try:
             self.targets = [
                 {"n": o["n"], "ra": o["ra"], "dec": o["dec"]}
@@ -982,6 +986,25 @@ class Findings:
             ]
         except (OSError, ValueError, KeyError):
             self.targets = []
+
+    def _front_path(self) -> Path:
+        return Path(self.store_dir) / "findings-front.json"
+
+    def _front_saved(self) -> tuple[str, ...]:
+        """The first page of Promising as last served, kept across restarts (the page's order: who has looked counts in it)."""
+        try:
+            got = json.loads(self._front_path().read_text())
+            return tuple(str(x) for x in got)[:24] if isinstance(got, list) else ()
+        except (OSError, ValueError, AttributeError, TypeError):
+            return ()
+
+    def set_front(self, ids: tuple[str, ...]) -> None:
+        """The first page of Promising, as the page served it: identified first, and kept for the next start."""
+        if ids == self.front:
+            return
+        self.front = ids
+        with contextlib.suppress(OSError):
+            atomic_write_bytes(self._front_path(), json.dumps(list(ids)).encode())
 
     def _front_now(self) -> tuple[str, ...]:
         """The first 24 of Promising as the page orders them (without who has looked: the page's own list replaces it when served)."""
@@ -1235,7 +1258,9 @@ class Findings:
         want = want_of(row["kind"], row["ra"], row["dec"], json.loads(row["data"] or "{}"))
         if "sbident" in want:
             try:
-                a = await self.sbident_visits(row)
+                gate = getattr(self, "visits_gate", None) or asyncio.Semaphore(1)
+                async with gate:
+                    a = await self.sbident_visits(row)
                 keep = (
                     "v",
                     "n_bodies",

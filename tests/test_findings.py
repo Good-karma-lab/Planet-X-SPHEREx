@@ -921,3 +921,18 @@ def test_after_a_restart_the_loop_knows_the_first_page_itself(tmp_path: Path) ->
     db.db.commit()
     front = fmod.Findings._front_now(SimpleNamespace(db=db))  # type: ignore[arg-type]
     assert front[:2] == ("film:strong", "film:weak") and "red:1" not in front
+
+
+def test_the_served_first_page_is_kept_across_a_restart(tmp_path: Path) -> None:
+    """The page's own first page (its order counts who has looked) is saved when served and read back at the next start."""
+    from types import SimpleNamespace
+
+    from service import findings as fmod
+
+    me = SimpleNamespace(store_dir=tmp_path, front=())
+    me._front_path = lambda: fmod.Findings._front_path(me)  # type: ignore[arg-type]
+    fmod.Findings.set_front(me, ("film:b", "peak:a"))  # type: ignore[arg-type]
+    assert me.front == ("film:b", "peak:a")
+    assert fmod.Findings._front_saved(me) == ("film:b", "peak:a")  # type: ignore[arg-type]
+    (tmp_path / "findings-front.json").write_text("not json")
+    assert fmod.Findings._front_saved(me) == ()  # type: ignore[arg-type]
