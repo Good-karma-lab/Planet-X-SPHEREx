@@ -35,9 +35,16 @@ def test_leases_lend_in_order_and_take_back_an_expired_one(tmp_path: Path) -> No
     g.put(order[0].id, "searched", source="sweep")
     a = lz.lend(g, iter(order), "a1")
     assert a.id == order[1].id and g.get(a.id)["state"] == "searching" and g.get(a.id)["source"] == "node:a1"
-    b = lz.lend(g, iter(order), "a1")
-    assert b.id == order[2].id  # the held square is not lent twice
-    assert lz.lend(g, iter(order), "a1") is None
+    assert lz.lend(g, iter(order), "a1").id == order[1].id  # asked again (a restart): the square it holds
+    b = lz.lend(g, iter(order), "b2")
+    assert b.id == order[2].id  # a held square is not lent to another node
+    assert lz.lend(g, iter(order), "c3") is None
+    lz.release(order[1].id)
+    lz.release(order[2].id)
+    g.put(order[1].id, "searching", source="node:a1")
+    g.put(order[2].id, "searching", source="node:b2")
+    lz.db.execute("INSERT INTO node_leases VALUES (?,?,?,?)", (order[1].id, "a1", time.time() + 60, time.time()))
+    lz.db.execute("INSERT INTO node_leases VALUES (?,?,?,?)", (order[2].id, "b2", time.time() + 60, time.time()))
     later = time.time() + node.LEASE_S + 1
     c = lz.lend(g, iter(order), "a1", now=later)  # both leases ended: their squares are new again and lent again
     assert c.id == order[1].id and lz.holds(order[1].id, "a1") and not lz.holds(order[2].id, "a1")
