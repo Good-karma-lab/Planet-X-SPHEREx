@@ -2376,4 +2376,9 @@
   :root .lab .taskpanel .tp-tree { min-height: 92px; align-content: flex-start; }
   :root .lab .panel[data-detent='peek'] .taskpanel .tv-line { display: none; }
   :root .lab .taskpanel .tp-done { min-height: 164px; }
+  /* a square's task: its two answers and "Mark something the machine missed" side by side in one row */
+  :root .lab .taskpanel.k-cell { flex-direction: row; flex-wrap: wrap; }
+  :root .lab .taskpanel.k-cell > * { flex: 1 1 100%; min-width: 0; }
+  :root .lab .taskpanel.k-cell > .tp-btns { flex: 2 1 0; }
+  :root .lab .taskpanel.k-cell > .tp-missed { flex: 1 1 0; align-self: stretch; margin: 0; }
 }
