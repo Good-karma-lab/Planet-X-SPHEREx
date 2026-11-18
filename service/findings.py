@@ -645,22 +645,22 @@ class _Maintenance:
 
 
 def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn: sqlite3.Connection | None = None) -> list[str]:
-    """The ids of the finds with a catalogue not yet answered (or that did not answer and may be asked again). The few that matter most
-    are asked first (Find Planet X peaks, movers, brown dwarfs, film tracks, then pairs; the hundreds of anomalies and red sources last),
+    """The ids of the finds with a catalogue not yet answered (or that did not answer and may be asked again). The most promising first
+    (as Findings orders them), then the kinds that matter most (Find Planet X peaks, movers, brown dwarfs, film tracks, then pairs),
     the test targets' before the rest within each rank, and within that the longest waiting. It reads every find and what each catalogue
     said, so the identification loop runs it in a worker process (service/cpu.py) on its own read-only connection: in the API process it
     took the GIL from the event loop."""
     db = conn or sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10.0)
     try:
         db.row_factory = sqlite3.Row
-        rows = db.execute("SELECT id, kind, place, ra, dec, data FROM finds").fetchall()
+        rows = db.execute("SELECT id, kind, place, ra, dec, data, score, snr FROM finds").fetchall()
         done = {
             (r["find_id"], r["catalogue"]): r for r in db.execute("SELECT find_id, catalogue, state, attempts, tried, detail FROM idents")
         }
     finally:
         if conn is None:
             db.close()
-    out: list[tuple[tuple[int, int, float], str]] = []
+    out: list[tuple[tuple[int, int, int, float], str]] = []
     for r in rows:
         data = json.loads(r["data"] or "{}")
         want = want_of(r["kind"], r["ra"], r["dec"], data)
@@ -688,7 +688,10 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
             ):
                 worst = d["tried"] if worst is None else min(worst, d["tried"])
         if worst is not None:
-            out.append(((IDENT_RANK.get(r["kind"], 2), 0 if r["place"] in targets else 1, worst), r["id"]))
+            # the most promising first across kinds (what the page shows first: a lead corrected before the many below it), then the
+            # kind's rank, the test targets', the longest waiting
+            promise = promise_of(r["kind"], "unexplained", r["score"] if r["score"] is not None else r["snr"], 1)
+            out.append(((-promise, IDENT_RANK.get(r["kind"], 2), 0 if r["place"] in targets else 1, worst), r["id"]))
     out.sort(key=lambda x: x[0])
     return [i for _, i in out[:limit]]
 

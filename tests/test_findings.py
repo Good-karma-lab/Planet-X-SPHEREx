@@ -831,3 +831,21 @@ def test_sbident_asks_jpl_for_its_precise_second_pass() -> None:
     got = asyncio.run(f.sbident(60.6088571, 8.3985333, 61085.955, 36.72, 70.3))
     assert asked["two-pass"] == "true" and asked["suppress-first-pass"] == "true"
     assert got["state"] == "ok" and got["name"] == "12304 (1991 SR1)" and 3.0 < got["sep"] < 6.0 and got["two_pass"] is True
+
+
+def test_the_most_promising_find_is_identified_first(tmp_path: Path) -> None:
+    """The leads at the top of Findings are corrected first: the 36.7″/h track (promise 75) before a weak Planet X peak."""
+    import time as _time
+
+    from service.findings import pending_ids
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+
+    def put(i: str, kind: str, score: float) -> dict[str, Any]:
+        return {"id": i, "kind": kind, "place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": 1.0, "snr": score, "score": score,
+                "chance": None, "data": {}, "scans": []}  # fmt: skip
+
+    db.write_finds([put("peak:weak", "peak", 0.5), put("film:top", "film", 19.1), put("red:x", "red", 30.0)])
+    db.db.commit()
+    order = pending_ids(str(db.path), 10, frozenset(), _time.time())
+    assert order.index("film:top") < order.index("peak:weak") < order.index("red:x")
