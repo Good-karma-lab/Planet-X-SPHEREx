@@ -155,7 +155,7 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
 
     app, st, _mail = site
     _fake_grid(st)
-    fake(st, set())
+    fake(st, {("294-0150", "SW"), ("294-0148", "NW")})  # the promising quarters are built (M-3: only built ones)
 
     def at(cell: str, q: str) -> tuple[float, float]:
         qc = grid.quarter(grid.by_id(cell), q)
@@ -181,6 +181,12 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
         got.add((t["cell_id"], t["quarter"], (t.get("why") or {}).get("finding_id")))
     assert got == {("294-0150", "SW", "browndwarf:1")}  # the newcomer never gets the famous square's track
     assert routes_tasks.quarter_of(grid.by_id("294-0150"), *at("294-0150", "SW")) == "SW"
+    # not built yet: not given first (it took 1 min 45 s cold); the stock builds it, and the stock's built quarters are given meanwhile
+    fake(st, set())
+    monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
+    t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    assert "why" not in t
+    fake(st, {("294-0150", "SW"), ("294-0148", "NW")})
     # once somebody has looked through that quarter, it is not given first any more: the stock's order
     accounts.get(st).db._conn().execute("INSERT INTO grid_views VALUES ('294-0150','user:a','nothing',2.0,'SW')")
     monkeypatch.setitem(routes_tasks._promising, "at", 0.0)

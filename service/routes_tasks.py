@@ -449,6 +449,9 @@ def make_tasks_router(st: Any) -> APIRouter:
             seen_q = quarters_viewed(acc, list({p["cell_id"] for p in pq}))
             fresh = newcomer(acc, user_id)
             pq = [p for p in pq if not seen_q.get(p["cell_id"], {}).get(p["quarter"], 0) and not (fresh and p["cell_id"] in famous_cells())]
+        # only a built one (M-3: a cold promising quarter took 1 min 45 s): the quarter stock builds these first (upcoming), so they
+        # come in as they are made; until then the stock's own built quarters are given
+        pq = [p for p in pq[:READY_SCAN] if qs.ready(p["cell_id"], p["quarter"])]
         if pq:
             p = RNG.choice(pq[:SPREAD])
             row = searched[p["cell_id"]]
