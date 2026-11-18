@@ -95,3 +95,36 @@ ssh -i ~/.ssh/oci_spherex_ed25519 ubuntu@OLD 'cd /var/lib/sky && sudo tar -cf - 
 
 Until the new VM has run a few days, keep OLD **stopped, not deleted**. To go back: stop NEW's service, copy the four databases back
 the same way, start OLD, point the address back. Delete OLD only when the user says so (on the trial: before the credits end).
+
+## A second node (the A1, from 18 Nov 2026)
+
+Until the full move (target 10–12 Dec, before the trial credits end 14 Dec 09:18 UTC), the Always Free A1 (`79.72.56.0`,
+VM.Standard.A1.Flex, aarch64, 2 OCPU / 12 GB now, 4 / 24 GB when the resize gets capacity) runs the service as a **second node**. It is not
+public: no DNS, only SSH open (`provision.sh` with `SKY_PRIVATE=1`). Its sweep searches squares the main service lends it
+(`service/node.py`):
+
+- It calls the main service, one way only, over the public address. `POST /api/internal/lease` lends the next square of the sweep
+  order with a 2 h lease. `POST /api/internal/result` takes back what the node made: the products' rows and metas (marked stripped, the
+  pictures stay on the node), the searches' result files and the square's grid row. Findings collects them as if the main had built them.
+- Both sides hold `SKY_NODE_SECRET` in `/etc/sky/env` (HMAC of every request). The node also has `SKY_NODE_MAIN=https://www.spherex.space`,
+  `SKY_NODE_NAME=a1`, `SKY_SWEEP=1`, `SKY_QUARTER_STOCK=0`, `SKY_WARM=0`, `SKY_FINDINGS_READONLY=1`. It has none of the main service's other
+  keys (mail, Google sign-in).
+- The node's own index is a copy of the main service's (copied once through a dev machine; `sky-index.timer` keeps it current).
+
+Measured on 18 Nov 2026 (cold fields, the same places on both machines, one at a time; the node's raw cache empty at the start):
+
+| | E5 (16 vCPU / 48 GB) | A1 (2 OCPU / 12 GB) |
+|---|---|---|
+| cold 10′ field | 105 s | 188 s (also 197, 206 s at other places) |
+| cold 20′ field | 147 s | 225 s (also 212, 236 s) |
+| cold 60′ field | 284 s | 634 s (also 729 s); service memory peak 10.2 GB of 12 |
+| the public archive, one file / three at once | ~20 MB/s / 61 MB/s | ~20 MB/s / 63 MB/s |
+| a 60′ time-lapse and its search (exposures cached) | – | film 52 s, search 429 s |
+
+**Memory.** `sky-api.service` has `MemoryMax=70%` of the machine (8.8 GB on the A1), and `machine.py` keeps the jobs' budget within 55 % of
+that fence (4.8 GB on the A1). Before 18 Nov a fixed 13 GB fence under a 24 GB budget let the kernel kill the E5's API.
+
+**Cost of two boot volumes.** Both VMs have 200 GB boot volumes: 400 GB against the 200 GB of Always Free block storage. The extra 200 GB at the
+Balanced rate (about $0.0425 per GB-month: $0.0255 storage + $0.017 for 10 VPUs per GB) is about $8.50 a month, about $0.28 a day, while both
+exist. A boot volume can be made larger but not smaller in place, so a smaller A1 volume means recreating the A1. It ends when the E5 is
+deleted after the move, so we keep it as it is.
