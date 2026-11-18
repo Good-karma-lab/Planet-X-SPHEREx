@@ -89,6 +89,12 @@ class Leases:
             if row is not None and row.get("state") == "searching" and str(row.get("source") or "").startswith("node:"):
                 grid_db.put(r["cell_id"], "new", source="sweep")
             self.db.execute("DELETE FROM node_leases WHERE cell_id = ?", (r["cell_id"],))
+        mine = self.db.execute("SELECT cell_id FROM node_leases WHERE node = ? AND until >= ? ORDER BY given", (node, t)).fetchone()
+        if mine is not None:  # the node asks again (it restarted mid-square): the square it holds, its lease renewed
+            self.db.execute("UPDATE node_leases SET until = ? WHERE cell_id = ?", (t + LEASE_S, mine["cell_id"]))
+            from service import grid as grid_mod
+
+            return grid_mod.by_id(mine["cell_id"])
         for ce in order:
             row = grid_db.get(ce.id)
             if row is not None and row.get("state") in ("searched", "failed", "searching"):
