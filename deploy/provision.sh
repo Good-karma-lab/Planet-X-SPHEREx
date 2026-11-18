@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Provision an Ubuntu 24.04 VM (x86-64 or aarch64) for SPHEREx Space. Idempotent; run as root on the VM:
 #   sudo SKY_DOMAIN=spherex.space bash /tmp/provision.sh
+#   sudo SKY_PRIVATE=1 bash /tmp/provision.sh        (a second node: no domain, 80 and 443 closed)
 # The code arrives by deploy/push.sh from a development machine (or by git once the repository is public).
 set -euo pipefail
 
@@ -22,10 +23,13 @@ fi
 
 # Firewall: the Ubuntu images of Oracle Cloud keep their rules in iptables (/etc/iptables/rules.v4); 22, 80 and 443 must be open there
 # and in the VCN security list. ufw is not used, so the two never disagree.
-for port in 80 443; do
-  iptables -C INPUT -p tcp --dport "$port" -m state --state NEW -j ACCEPT 2>/dev/null \
-    || iptables -I INPUT 5 -p tcp --dport "$port" -m state --state NEW -j ACCEPT
-done
+# SKY_PRIVATE=1: a second node (no public site, no DNS): 80 and 443 stay closed, only SSH answers from outside
+if [ "${SKY_PRIVATE:-0}" != 1 ]; then
+  for port in 80 443; do
+    iptables -C INPUT -p tcp --dport "$port" -m state --state NEW -j ACCEPT 2>/dev/null \
+      || iptables -I INPUT 5 -p tcp --dport "$port" -m state --state NEW -j ACCEPT
+  done
+fi
 command -v netfilter-persistent >/dev/null && netfilter-persistent save || true
 
 id sky >/dev/null 2>&1 || useradd --system --create-home --home-dir /home/sky --shell /bin/bash sky

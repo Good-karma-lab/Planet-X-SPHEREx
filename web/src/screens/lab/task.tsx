@@ -315,6 +315,9 @@ export interface LabTaskView {
   tapping: boolean;
   taps: Tap[];
   addTap: (t: Tap) => void;
+  /** a task about one find is open and not answered yet: what the catalogues say about that find waits (a control object, whose
+   *  answer is known, must look exactly like any other, and nobody is led) */
+  blind: boolean;
 }
 
 /** The Task panel and what goes with it (an empty view when the lab has no task). */
@@ -409,6 +412,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     body,
     tapping,
     taps,
+    blind: !!task && focusKind(task.kind) && !done,
     addTap: (t) => setTaps((x) => [...x.filter((q) => (t.pass ?? t.frame) == null || (q.pass ?? q.frame) !== (t.pass ?? t.frame)), t]),
   };
   if (!task) return view;

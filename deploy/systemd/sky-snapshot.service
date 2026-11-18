@@ -1,5 +1,5 @@
 [Unit]
-Description=SPHEREx Sky: snapshot of the index and the warm set to R2
+Description=SPHEREx Sky: snapshot of the databases, the index and the warm set to object storage
 
 [Service]
 Type=oneshot

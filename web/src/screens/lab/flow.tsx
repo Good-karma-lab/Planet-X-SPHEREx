@@ -262,6 +262,8 @@ export interface LabFlow {
   peopleSearch: SearchInfo;
   /** what the field's lookup already holds about the selected source (a ringed known object or a deeper match), null when nothing */
   selHeld: Held | null;
+  /** a task's find not answered yet: what the catalogues and Findings say of it waits for the answers */
+  blind: boolean;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -504,7 +506,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       const k = [...byPass.values()].filter(Boolean).length;
       return byPass.size ? [k, byPass.size] : null;
     };
-    drawKnown({ ...env, seenIn, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, knDraw);
+    // a task's find not answered yet: nothing of the catalogues at its place (its answer may be known: a control object)
+    const bs = taskRef.current.blind ? argsRef.current.sel : null;
+    const bp = bs ? (bs.pmra || bs.pmdec ? atEpoch(bs.ra, bs.dec, bs.pmra ?? 0, bs.pmdec ?? 0, env.year) : [bs.ra, bs.dec]) : null;
+    const bt = bp ? uv(bp[0]!, bp[1]!) : null;
+    const box0 = rects[0];
+    const blindAt = bt && box0 ? { x: box0.x + bt[0] * box0.w, y: box0.y + bt[1] * box0.h, r: Math.max(14, (12 * box0.w) / env.fovArc) } : null;
+    drawKnown({ ...env, seenIn, blindAt, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, knDraw);
     const z = env.zoom;
     if (z && !wall) {
       // the zoom on a find: the same rings and names at the zoom's scale (the sources without a match too: what is near the find)
@@ -1417,6 +1425,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   // ---- the card of what is selected (Object tab): a mark, or the lab's selected source. Note, "Add to investigation" and
   // "Check and submit" exist only here: with nothing selected there is nothing to note or submit.
   const matchAt = (ra: number, dec: number): string => {
+    // a task's find not answered yet: the catalogues' word waits for the answers (a control object looks like any other)
+    if (!cur && taskView.blind) return 'after your answers';
     const w = a.epochNow != null ? catalogueAt(known, ra, dec, a.epochNow).word : 'asking the catalogues…';
     // a find: JPL's answer is the find's own (asked for every visit of its track), never the picture's lookup, which may still be
     // waiting: "JPL did not answer" beside an UNEXPLAINED badge read as a contradiction
@@ -1746,6 +1756,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const selHeld = heldPlace && a.epochNow != null ? heldAt(known, heldPlace.ra, heldPlace.dec, a.epochNow) : null;
   return {
     selHeld,
+    blind: taskView.blind,
     draw,
     pointer: (p) => {
       ptr.current = p;

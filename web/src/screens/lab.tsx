@@ -3082,7 +3082,8 @@ export function Lab({ route }: { route: Route }) {
     const [tra, tdec] = atEpoch(o.ra, o.dec, o.pmra ?? 0, o.pmdec ?? 0, 2025.9);
     return Math.abs(tdec - dec) < half && Math.abs(((tra - ra + 540) % 360) - 180) * Math.cos((dec * Math.PI) / 180) < half;
   });
-  const fieldName = inField ? inField.n : 'Sky field';
+  // a task's find before its answers: the title names no famous object of the field (a control looks like any other)
+  const fieldName = inField && !flow.blind ? inField.n : 'Sky field';
   // the picture in words, for a screen reader: said again only when it stops (never every frame of the time-lapse)
   const passNo = passMeta ? passes.indexOf(passMeta) + 1 : 0;
   const pictureWords = !meta
@@ -3546,7 +3547,16 @@ export function Lab({ route }: { route: Route }) {
     })),
   ];
   // a find people set aside (two agreed it is an artefact) leaves the list, as it leaves Findings
-  const findRows = findRowsAll.filter((r) => r.ra == null || r.dec == null || !flow.asideAt(r.ra, r.dec));
+  // a task's find before its answers: its own row in the list says nothing of what it is (a control object looks like any other)
+  const blindUv = flow.blind && sel ? uvNow(...((sel.pmra || sel.pmdec ? atEpoch(sel.ra, sel.dec, sel.pmra ?? 0, sel.pmdec ?? 0, yearNow) : [sel.ra, sel.dec]) as [number, number])) : null;
+  const blindTol = meta ? 12 / (meta.grid.n * meta.grid.step_arcsec) : 0;
+  const findRows = findRowsAll
+    .filter((r) => r.ra == null || r.dec == null || !flow.asideAt(r.ra, r.dec))
+    .map((r) =>
+      blindUv && r.uv && Math.abs(r.uv[0] - blindUv[0]) < blindTol && Math.abs(r.uv[1] - blindUv[1]) < blindTol
+        ? { ...r, name: 'The object in question', line: 'what it is: after your answers', status: 'checking' as const }
+        : r,
+    );
   const foundCount = unexplainedCount(findRows);
   const unexplainedOf = (g: 'red' | 'anomaly') => findRows.filter((r) => r.group === g && r.status === 'unexplained').length;
   const fieldOn = valid && !!meta;
@@ -4670,7 +4680,13 @@ export function Lab({ route }: { route: Route }) {
                 <div class="pobj">
                   {(sel || selAn !== null) && (
                     <div class="sel-head" data-testid="sel-head">
-                      <b>{selAn !== null ? `Anomaly ${selAn}` : (sel?.name ?? (sel ? `${formatRA(sel.ra)} ${formatDec(sel.dec)}` : ''))}</b>
+                      <b>
+                        {flow.blind
+                          ? 'The object in question'
+                          : selAn !== null
+                            ? `Anomaly ${selAn}`
+                            : (sel?.name ?? (sel ? `${formatRA(sel.ra)} ${formatDec(sel.dec)}` : ''))}
+                      </b>
                       {sel && (
                         <button class="mini" onClick={() => setSpecOpen(true)} title="The spectrum, wide" data-testid="open-spectrum">
                           Wide
@@ -4678,14 +4694,20 @@ export function Lab({ route }: { route: Route }) {
                       )}
                     </div>
                   )}
-                  {sel && flow.hintAt(sel.ra, sel.dec) && (
+                  {flow.blind && (
+                    // a task's find before its answers: nothing that would say what it is (a control object looks like any other)
+                    <div class="obj-blind mono-s" data-testid="obj-blind">
+                      Catalogues and its record · after your answers
+                    </div>
+                  )}
+                  {!flow.blind && sel && flow.hintAt(sel.ra, sel.dec) && (
                     <div class="obj-hint" data-testid="obj-hint" title="A ghost, a spike or the glow of a bright star, or the frame's edge, can look like a source">
                       {flow.hintAt(sel.ra, sel.dec)}
                     </div>
                   )}
                   {!flow.markOpen && flow.card}
-                  {sel?.finding && <FindStatus id={sel.finding} />}
-                  <details class="obj-more" data-testid="obj-more" open>
+                  {!flow.blind && sel?.finding && <FindStatus id={sel.finding} />}
+                  <details class="obj-more" data-testid="obj-more" open style={flow.blind ? { display: 'none' } : undefined}>
                     <summary>More about it</summary>
                     {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                       <>

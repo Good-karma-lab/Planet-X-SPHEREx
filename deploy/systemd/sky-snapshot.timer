@@ -1,5 +1,5 @@
 [Unit]
-Description=Daily snapshot to R2
+Description=Daily snapshot to object storage
 
 [Timer]
 OnCalendar=*-*-* 07:30:00
