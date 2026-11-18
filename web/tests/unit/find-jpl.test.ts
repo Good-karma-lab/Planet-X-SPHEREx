@@ -21,3 +21,13 @@ describe("an unexplained find's catalogue line never says known for a catalogue 
     expect(withFindStatus('known · in CatWISE2020', 'known')).toBe('known · in CatWISE2020');
   });
 });
+
+import { withFindKnown } from '../../src/screens/lab/known';
+describe('a known find names what knows it', () => {
+  it('takes the name from its own identification', () => {
+    const ids = [{ catalogue: 'allwise', state: 'ok', name: 'J040225.75+082356.5' }, { catalogue: 'sbident', state: 'ok', name: '12304 (1991 SR1)' }];
+    expect(withFindKnown('in no catalogue', ids)).toBe('known · JPL 12304 (1991 SR1)');
+    expect(withFindKnown('known · SIMBAD Barnard’s star', ids)).toBe('known · SIMBAD Barnard’s star');
+    expect(withFindKnown('in no catalogue', [])).toBe('in no catalogue');
+  });
+});
