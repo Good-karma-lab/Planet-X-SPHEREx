@@ -399,3 +399,23 @@ def test_a_hidden_find_is_a_control_object_and_judged_as_one(site: tuple[FastAPI
     ev = db._conn().execute("SELECT kind, right FROM acc_score_events WHERE ref='peak:residual'").fetchall()
     assert [(e["kind"], e["right"]) for e in ev] == [("control_peak", 1)]  # judged at once, right
     assert db._conn().execute("SELECT COUNT(*) FROM acc_series_results WHERE finding_id='peak:residual'").fetchone()[0] == 0
+
+
+def test_the_controls_come_from_the_real_findings_query(tmp_path: Path) -> None:
+    """Without stand-ins: a peak below its bar is hidden from the leads (the default list and "all") and is a control object."""
+    from service.findings import FindingsDB
+    from service.routes_tasks import control_rows, lead_findings
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([
+        {**base, "id": "peak:below", "kind": "peak", "data": {"peak": {"ok": False}}},
+        {**base, "id": "film:lead", "kind": "film", "ra": 61.0, "data": {}},
+    ])  # fmt: skip
+    db.db.commit()
+    st = SimpleNamespace(findings=SimpleNamespace(db=db))
+    leads = lead_findings(st) or []
+    assert "peak:below" not in {r["finding_id"] for r in leads} and "film:lead" in {r["finding_id"] for r in leads}
+    assert "peak:below" not in {r["finding_id"] for r in lead_findings(st, "all") or []}
+    ctl = control_rows(st)
+    assert [(r["finding_id"], r["status"], r["stage"]) for r in ctl] == [("peak:below", "below", "artefact")]

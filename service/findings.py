@@ -1874,7 +1874,9 @@ def query(
         for f in items
         if (not kind or f["kind"] == kind)
         and (
-            (f["status"] in HIDDEN) == (status in HIDDEN) and (status not in HIDDEN or f["status"] == status)
+            True  # "any": every find, the hidden ones too (the question series' control objects; not a status of the page)
+            if status == "any"
+            else (f["status"] in HIDDEN) == (status in HIDDEN) and (status not in HIDDEN or f["status"] == status)
             if status in (None, "all") or status in HIDDEN
             else f["status"] == status
         )

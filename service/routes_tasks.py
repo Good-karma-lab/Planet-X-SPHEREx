@@ -260,7 +260,7 @@ def cell_field_key(acc: accounts.Accounts, cell_id: str) -> str | None:
 
 
 def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | None:
-    """The machine findings in the order of the Findings page (`status` "all": the hidden ones too). None when the findings
+    """The machine findings in the order of the Findings page (`status` "any": the hidden ones too). None when the findings
     database is not loaded."""
     f = getattr(st, "findings", None)
     if f is None:
@@ -320,7 +320,7 @@ def control_rows(st: Any) -> list[dict[str, Any]]:
     if got is not None and time.monotonic() - got[0] < CONTROLS_KEEP_S:
         return got[1]
     hidden = set(HIDDEN) - {"set_aside"}
-    rows = [r for r in (lead_findings(st, "all") or []) if r.get("status") in hidden]
+    rows = [r for r in (lead_findings(st, "any") or []) if r.get("status") in hidden]
     st._task_controls = (time.monotonic(), rows)
     return rows
 
