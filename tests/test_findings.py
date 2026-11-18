@@ -668,3 +668,30 @@ def test_the_identification_loop_asks_the_workers_as_background(monkeypatch: pyt
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(fmod.Findings.identify_loop(me))  # type: ignore[arg-type]
     assert seen == [3] and seen[0] >= cpu.LOW
+
+
+def test_the_collector_runs_in_a_worker_process_as_background(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """collect goes to a worker process: its arguments and its answer pickle, and the collector loop asks as maintenance."""
+    import pickle
+    from types import SimpleNamespace
+
+    from service import cpu
+    from service import findings as fmod
+
+    rows, keys = _store(tmp_path)
+    got = pickle.loads(pickle.dumps(collect(*pickle.loads(pickle.dumps((tmp_path, rows, keys, TARGETS))))))
+    assert got == collect(tmp_path, rows, keys, TARGETS)
+    seen: list[int] = []
+
+    async def run(fn: Any, *args: Any) -> Any:
+        seen.append(cpu.priority())
+        raise asyncio.CancelledError
+
+    monkeypatch.setattr(fmod.cpu, "run", run)
+    store = SimpleNamespace(listing=lambda kinds: [])
+    keyer = SimpleNamespace(key_of=lambda k: k)
+    me = SimpleNamespace(store=store, movers=keyer, pairs=keyer, dwarfs=keyer, anomalies=keyer, store_dir=tmp_path, targets=[])
+    me.sweep = lambda: fmod.Findings.sweep(me)  # type: ignore[arg-type]
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(fmod.Findings.sweep_loop(me))  # type: ignore[arg-type]
+    assert seen == [3]

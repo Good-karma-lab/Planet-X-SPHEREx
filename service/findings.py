@@ -942,7 +942,7 @@ class Findings:
         self.kick.set()
 
     async def sweep(self) -> dict[str, int]:
-        rows = self.store.listing(("field", "filmsearch", "distant", "deep"))
+        rows = await asyncio.to_thread(self.store.listing, ("field", "filmsearch", "distant", "deep"))
         fkeys = {
             r["key"]: {
                 "movers": self.movers.key_of(r["key"]),
@@ -953,7 +953,9 @@ class Findings:
             for r in rows
             if r["kind"] == "field"
         }
-        finds, sig = await asyncio.to_thread(collect, self.store_dir, rows, fkeys, self.targets)
+        # every result file read and parsed: a worker process (in a thread it took the GIL from the event loop for a second, more as the
+        # sweep adds results)
+        finds, sig = await cpu.run(collect, self.store_dir, rows, fkeys, self.targets)
         if sig == self.db.get_meta("sig"):
             return {"added": 0, "removed": 0, "finds": len(finds)}
         async with self.lock:
@@ -964,6 +966,7 @@ class Findings:
         return {"added": added, "removed": removed, "finds": len(finds)}
 
     async def sweep_loop(self) -> None:
+        cpu.JOB.set(_Maintenance())  # its compute calls (collect) are background ones, never a person's
         while True:
             with contextlib.suppress(Exception):
                 await self.sweep()
