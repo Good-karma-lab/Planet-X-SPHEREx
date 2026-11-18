@@ -2565,6 +2565,17 @@ export function Lab({ route }: { route: Route }) {
       setFrame(q.index);
     },
     visit: film !== null ? visit : null,
+    visitOf: (mjd) => {
+      // the visit of the pass on show nearest a date, numbered as the time line numbers it (within two hours, else none)
+      const fr = filmData?.meta.frames ?? [];
+      if (film === null || !fr.length) return null;
+      let k = 0;
+      fr.forEach((f, i) => {
+        if (Math.abs(f.mjd - mjd) < Math.abs(fr[k]!.mjd - mjd)) k = i;
+      });
+      return Math.abs(fr[k]!.mjd - mjd) < 2 / 24 ? k + 1 : null;
+    },
+    nVisits: film !== null ? (filmData?.meta.frames.length ?? 0) : 0,
     showVisit: (mjd) => {
       const fr = filmData?.meta.frames ?? [];
       if (!fr.length) return;

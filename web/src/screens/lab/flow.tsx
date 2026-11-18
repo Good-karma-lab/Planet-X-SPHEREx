@@ -108,6 +108,10 @@ export interface FlowArgs {
   showVisit: (mjd: number) => void;
   /** the visit on show in Days (null in Months) */
   visit: number | null;
+  /** a date's visit in the pass on show, numbered as the time line numbers it (1 to nVisits); null outside Days or off every visit */
+  visitOf: (mjd: number) => number | null;
+  /** how many visits the pass on show has in Days (0 in Months) */
+  nVisits: number;
 }
 
 const ICON_MARK =
@@ -562,7 +566,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           ctx.fillStyle = miss ? '#ff6b6b' : cur ? '#ffd08a' : 'rgba(255,200,110,0.55)';
           ctx.fill();
           if (!cur) {
-            const t = String(tt[k]!.i + 1);
+            const t = String(argsRef.current.visitOf(tt[k]!.mjd) ?? tt[k]!.i + 1);
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#000';
             ctx.strokeText(t, x - 13, y + 4);
@@ -605,12 +609,17 @@ export function useLabFlow(a: FlowArgs): LabFlow {
             ctx.closePath();
             ctx.fillStyle = '#ffd08a';
             ctx.fill();
-            const lab = o.k === 0 ? `from visit 1` : `to visit ${tt.length}`;
+            // the pass's own visit numbers, as the time line says them
+            const vn = argsRef.current.visitOf(tt[o.k]!.mjd);
+            const lab = o.k === 0 ? `from visit ${vn ?? 1}` : `to visit ${vn ?? tt.length}`;
             ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
             const tw = ctx.measureText(lab).width;
             const lx = Math.min(box.x + box.w - tw - 6, Math.max(box.x + 6, ex - tw / 2 - 18 * Math.cos(o.dir)));
             // never on the title row or the band chips and status line at the bottom
-            const ly = Math.min(box.y + box.h - 84, Math.max(box.y + 52, ey - 16 * Math.sin(o.dir) + 4));
+            let ly = Math.min(box.y + box.h - 84, Math.max(box.y + 52, ey - 16 * Math.sin(o.dir) + 4));
+            // never over what is already on the picture (the scale bar, a name): up a line until it is clear
+            for (let t = 0; t < 4 && placed.some((q) => lx < q.x1 && lx + tw > q.x0 && ly - 11 < q.y1 && ly + 3 > q.y0); t++) ly -= 16;
+            placed.push({ x0: lx, y0: ly - 11, x1: lx + tw, y1: ly + 3 });
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#000';
             ctx.strokeText(lab, lx, ly);
@@ -633,7 +642,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
         ctx.lineWidth = 3;
         ctx.strokeStyle = '#000';
-        const lab = `visit ${tt[near]!.i + 1}`;
+        const lab = `visit ${argsRef.current.visitOf(tt[near]!.mjd) ?? tt[near]!.i + 1}`;
         ctx.strokeText(lab, rx + 17, ry + 4);
         ctx.fillStyle = '#ffd08a';
         ctx.fillText(lab, rx + 17, ry + 4);
@@ -1202,7 +1211,14 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       );
     if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={task?.finding_id ?? null} />;
     if (show === 'stamps') return <StampsView src={taskSrc} anomaly={anomaly} />;
-    if (show === 'blink' || show === 'pictures') return <div class="tv-line">{body?.pictures?.length ? `The visits of its pass · ${body.pictures.length} pictures` : 'The visits of its pass'}</div>;
+    if (show === 'blink' || show === 'pictures')
+      return (
+        <div class="tv-line">
+          {body?.pictures?.length
+            ? `Seen in ${body.pictures.length} of its pass's ${a.nVisits || '…'} visits`
+            : 'The visits of its pass'}
+        </div>
+      );
     if (show === 'old_surveys' || show === 'old_new') return <div class="tv-line">Old surveys play first: DSS 1985–99 · 2MASS 1997–2001 · WISE 2010</div>;
     if (kind === 'bad_picture')
       return (
@@ -1235,6 +1251,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       setTool('mark');
     },
     showPicture: (mjd) => a.showVisit(mjd),
+    visitOf: a.visitOf,
   });
   const taskRef = useRef(taskView);
   taskRef.current = taskView;
@@ -1250,7 +1267,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       // a track: the visits of its pass, in the Days scale
       if (!visits.length) return;
       setUp.current = stepKey;
-      if (!a.params['film']) a.set({ film: (visits.reduce((x, y) => x + y, 0) / visits.length).toFixed(3), arch: null });
+      // the track's own pass: a pass left in the address from before (another task, another find) is not this track's
+      const cur = Number(a.params['film']);
+      const lo = Math.min(...visits) - 2;
+      const hi = Math.max(...visits) + 2;
+      if (!(cur >= lo && cur <= hi)) a.set({ film: (visits.reduce((x, y) => x + y, 0) / visits.length).toFixed(3), arch: null });
     } else if (show === 'blink2' || (!show && task.kind === 'moves')) {
       // two passes are a Months view: out of Days at once (a track task before this one may have left it there)
       if (a.params['film']) a.set({ film: null });
