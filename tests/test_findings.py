@@ -722,3 +722,31 @@ def test_a_deciding_catalogue_is_asked_again_until_it_answers(tmp_path: Path) ->
     assert pending_ids(str(db.path), 10, frozenset(), _time.time()) == []  # not before its wait
     idents = [{"catalogue": "sbident", "state": "unavailable", "attempts": MAX_ATTEMPTS + 3}]
     assert status_of({"kind": "film", "data": {}}, idents) == "unchecked"
+
+
+def test_a_brown_dwarf_candidate_that_did_not_move_is_a_blend_not_a_lead() -> None:
+    """169.89 +4.35 (explorer round 2): an 8.8″/yr 'mover' whose shift is a blend with a Gaia star 7.7″ away, with an AllWISE source at
+    its place from 2010 (moving as claimed it would be 140″ away): not a lead, low promise, and never "no catalogue names it"."""
+    from service.findings import STAGE_OF_STATUS, promise_of
+
+    bd = {"kind": "browndwarf", "ra": 170.153439, "dec": 4.438454, "data": {"group": "candidate", "source": {
+        "pm": 8838.8, "shift_arcsec": 9.1, "baseline_years": 1.03}}}  # fmt: skip
+    base = [{"catalogue": c, "state": "none", "attempts": 0} for c in ("simbad", "twomass", "vsx", "ned", "sbident")]
+    gaia_nb = {"catalogue": "gaia", "label": "Gaia DR3", "state": "none", "detail": {"blend_r": 10.0,
+               "neighbour": {"name": "Gaia DR3 3813536887008754304", "sep": 7.7}}}  # fmt: skip
+    allwise_none = {"catalogue": "allwise", "state": "none"}
+    assert status_of(bd, [*base, gaia_nb, allwise_none]) == "blend"
+    text = verdict_of(bd, [*base, gaia_nb, allwise_none], "blend")
+    assert "7.7″" in text and "Gaia DR3 3813536887008754304" in text and "no catalogue names" not in text
+    # the AllWISE source at today's place alone says the same: in 2010 it was already here
+    allwise_here = {"catalogue": "allwise", "label": "AllWISE", "state": "ok", "name": "J112036.82+042613.5", "sep": 4.9}
+    gaia_none = {"catalogue": "gaia", "state": "none", "detail": {"blend_r": 10.0}}
+    assert status_of(bd, [*base, gaia_none, allwise_here]) == "blend"
+    assert "stood still" in verdict_of(bd, [*base, gaia_none, allwise_here], "blend")
+    assert STAGE_OF_STATUS["blend"] == "artefact" and promise_of("browndwarf", "blend", 7.0, 0) < 10
+    # a real fast mover far beyond its neighbour stays a lead; and a candidate a catalogue sits on is never "no catalogue names it"
+    fast = {**bd, "data": {"group": "candidate", "source": {"pm": 8838.8, "shift_arcsec": 30.0}}}
+    assert status_of(fast, [*base, gaia_nb, {"catalogue": "allwise", "state": "none"}]) == "unexplained"
+    slow = {**bd, "data": {"group": "candidate", "source": {"pm": 300.0, "shift_arcsec": 0.3}}}
+    named = [*base, gaia_none, {**allwise_here, "sep": 2.0}]
+    assert status_of(slow, named) == "unexplained" and "no catalogue names" not in verdict_of(slow, named, "unexplained")
