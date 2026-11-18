@@ -45,7 +45,7 @@ sudo install -m 644 /opt/sky/deploy/systemd/sky-api.service /opt/sky/deploy/syst
 sudo systemctl daemon-reload
 sudo -u sky bash -lc "cd /opt/sky && ~/.local/bin/uv sync --frozen --no-dev -q"
 healthy() { for i in $(seq 1 90); do curl -sf -m 3 "http://127.0.0.1:$1/api/v1/health" >/dev/null && return 0; sleep 1; done; echo "port $1 did not come up" >&2; return 1; }
-sudo systemctl enable --now sky-api-standby.service
+sudo systemctl enable --now sky-api-standby.service && sudo systemctl enable sky-api.service sky-index.timer sky-disk.timer >/dev/null 2>&1
 sudo systemctl restart sky-api-standby.service && healthy 8781
 if [ "'"$NOW"'" != 1 ]; then
   for i in $(seq 1 240); do
