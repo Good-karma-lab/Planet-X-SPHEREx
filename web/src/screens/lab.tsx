@@ -3127,6 +3127,27 @@ export function Lab({ route }: { route: Route }) {
     : fieldLoading
       ? loadStep(phase || 'asking the sky service…', pictures.current.size, meta?.passes.length ?? 0)
       : null;
+  // a cold field's first look (GET /api/v1/fields/quick: the all-sky cube cut to the field's own grid), asked once per field while it
+  // loads; a 502 (the bucket did not answer) keeps the usual card
+  const [quick, setQuick] = useState<string | null>(null);
+  useEffect(() => {
+    setQuick(null);
+    if (!valid || film !== null) return;
+    let stop = false;
+    let url = '';
+    void fetch(`/api/v1/fields/quick?ra=${ra.toFixed(5)}&dec=${dec.toFixed(5)}&fov=${fov}`)
+      .then((r) => (r.ok && /^image\//.test(r.headers.get('content-type') ?? '') ? r.blob() : null))
+      .then((b) => {
+        if (!b || stop) return;
+        url = URL.createObjectURL(b);
+        setQuick(url);
+      })
+      .catch(() => {});
+    return () => {
+      stop = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [valid, ra, dec, fov, film === null]);
   const dateLabel = time === 'sum' ? 'all seasons' : passMeta ? season(passMeta.mjd_mid) : fieldLoading ? '' : phase || '';
   const daysShort = filmData ? `visit ${visit + 1} of ${nVisits} · ${utc(filmData.meta.frames[visit]?.mjd ?? 0)}` : daysStatus;
   const passMjd = (passes.find((q) => q.index === (shown?.pass ?? 0)) ?? passes[0])?.mjd_mid;
@@ -3739,7 +3760,11 @@ export function Lab({ route }: { route: Route }) {
                 data-testid="picture"
               />
               <canvas ref={overlay} class="ov" />
-              <LoadOverlay step={loadNow} field={`${ra},${dec},${fov}`} />
+              {quick && loadNow && view === 'picture' && (
+                // the field's first look while it is built: the SPHEREx all-sky map cut to this very grid, dimmed, still
+                <img class="quickframe" src={quick} alt="SPHEREx all-sky map of this field: a first look while the field is built" data-testid="quick-frame" />
+              )}
+              <LoadOverlay step={loadNow} field={`${ra},${dec},${fov}`} firstLook={!!quick && !!loadNow && view === 'picture'} />
               {flow.floats}
               {labels.map((l) =>
                 l.empty ? (
