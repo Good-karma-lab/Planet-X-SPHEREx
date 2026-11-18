@@ -30,7 +30,7 @@ from collections.abc import Awaitable, Callable, Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-from service import grid
+from service import grid, node
 from service.jobs.scheduler import Priority
 from service.products.store import product_key
 from service.workers import fieldjob
@@ -163,7 +163,15 @@ class SweepRunner:
 
     # ---- the order --------------------------------------------------------------------------------------------------------------
     def next_square(self) -> grid.Cell | None:
-        """The next square not searched or failed yet, in the sweep order (a database read: call it in a thread)."""
+        """The next square not searched or failed yet, in the sweep order (a database read: call it in a thread). On a second node:
+        the square the main service lends (service/node.py), None when it lends none or cannot be reached."""
+        if node.is_node():
+            try:
+                sq = node.call("/api/internal/lease", {"node": node.node_name()}).get("square")
+            except Exception as e:  # the main service did not answer: asked again later
+                self._say("idle", why=f"the main service did not lend a square: {type(e).__name__}")
+                return None
+            return grid.by_id(sq["id"]) if sq else None
         db = getattr(self.st, "grid", None)
         if db is None:
             return None
@@ -248,6 +256,35 @@ class SweepRunner:
         freed = await asyncio.to_thread(store.strip, fieldjob.KIND, key)
         return {"state": "searched", "finds": len(ids), "seconds": secs, "freed": freed}
 
+    async def send_back(self, ce: grid.Cell, since: float, got: dict[str, Any]) -> str:
+        """A node's square goes back to the main service: its grid row, the products' metas, the result files. -> what was said."""
+        db, store = self.st.grid, self.st.store
+        row = await asyncio.to_thread(db.get, ce.id) or {}
+        products, files = await asyncio.to_thread(node.made_since, store, self.st.cfg.store_dir, since)
+        ids = row.get("find_ids") or "[]"
+        bar = row.get("bar") or "{}"
+        body = {
+            "node": node.node_name(),
+            "square": ce.id,
+            "products": products,
+            "files": files,
+            "row": {
+                "state": "searched" if got.get("state") == "searched" else "failed",
+                "finds": row.get("finds"),
+                "find_ids": json.loads(ids) if isinstance(ids, str) else ids,
+                "bar": json.loads(bar) if isinstance(bar, str) else bar,
+                "field_key": row.get("field_key"),
+                "searched_at": row.get("searched_at"),
+                "seconds": row.get("seconds"),
+                "error": got.get("error"),
+            },
+        }
+        try:
+            out = await asyncio.to_thread(node.call, "/api/internal/result", body, 300.0)
+            return f"sent: {out.get('products')} products, {out.get('files')} files"
+        except Exception as e:  # the lease ends and the main service lends the square again
+            return f"not sent: {type(e).__name__}: {e}"[:160]
+
     def strip_expired(self) -> int:
         """Strip the 20′ fields the sweep kept for their finds once KEEP_DAYS have passed (a database read: in a thread)."""
         db, store = self.st.grid, self.st.store
@@ -283,7 +320,7 @@ class SweepRunner:
                 self._say("paused", why=why, step=None)
                 await asyncio.sleep(IDLE_S)
                 continue
-            lab = await asyncio.to_thread(self.next_lab_field)
+            lab = None if node.is_node() else await asyncio.to_thread(self.next_lab_field)  # a node: the main service keeps those
             if lab is not None:  # a top find's lab field first: people open those
                 before = self._s3_now()
                 try:
@@ -295,16 +332,23 @@ class SweepRunner:
                 self._say("idle", last_result=got)
                 continue
             ce = await asyncio.to_thread(self.next_square)
+            if ce is None and node.is_node():
+                self._say("idle", why="the main service lends no square now")
+                await asyncio.sleep(IDLE_S * 4)
+                continue
             if ce is None:
                 self._say("done", why="every square is searched")
                 await asyncio.sleep(3600.0)
                 continue
             before = self._s3_now()
+            t_square = time.time()
             try:
                 got = await self.square(ce)
             except Exception as e:  # said, the square marked failed, the next one tried
                 got = {"state": "failed", "error": f"{type(e).__name__}: {e}"[:200]}
                 await asyncio.to_thread(self.st.grid.put, ce.id, "failed", error=got["error"], source="sweep")
+            if node.is_node():
+                got["sent"] = await self.send_back(ce, t_square, got)
             if self._archive_troubled(before):  # a read gave up, or many retries, during this square: give the archive time
                 self._backoff_until = time.time() + ARCHIVE_BACKOFF_S
             if got.get("state") == "searched":
