@@ -29,6 +29,7 @@ from typing import Any
 from service.storage import atomic_write_bytes
 
 NODE_SKEW_S = 300.0
+LATE_AFTER_S = (1800.0, 3600.0, 7200.0)  # a square whose Find Planet X searches were still running is sent again this long after
 LEASE_S = 2 * 3600.0  # a square not sent back by then is lent again (the node died or gave up)
 FILE_MAX_BYTES = 8_000_000  # one result file
 RESULT_DIRS = ("movers", "pairs", "browndwarfs", "red", "anomalies")  # the searches' result files (service/findings.collect reads them)
@@ -120,9 +121,27 @@ def safe_rel(path: str) -> PurePosixPath | None:
     return p
 
 
+def apply_late(store: Any, store_dir: Path, body: dict[str, Any]) -> dict[str, Any]:
+    """What finished on the node after its square went back: products and files only, the square's row is left as it is."""
+    return _write(store, store_dir, body)
+
+
 def apply_result(store: Any, store_dir: Path, grid_db: Any, body: dict[str, Any]) -> dict[str, Any]:
     """Write what a node sends back for a square: the products' rows and metas (each marked stripped: the pictures stay on the node),
     the result files, and the square's grid row. -> {products, files}. Raises ValueError on anything outside what a square makes."""
+    got = _write(store, store_dir, body)
+    row = body.get("row") or {}
+    state = row.get("state") if row.get("state") in ("searched", "failed") else "failed"
+    grid_db.put(
+        str(body["square"]), state, finds=int(row.get("finds") or 0), find_ids=list(row.get("find_ids") or []), bar=row.get("bar") or {},
+        field_key=row.get("field_key"), searched_at=row.get("searched_at"), source=f"node:{body.get('node')}",
+        seconds=row.get("seconds"), error=row.get("error"),
+    )  # fmt: skip
+    return got
+
+
+def _write(store: Any, store_dir: Path, body: dict[str, Any]) -> dict[str, Any]:
+    """The products' rows and metas (marked stripped) and the result files of a node's body. -> {products, files}."""
     from service.products.versions import VERSIONS
 
     n_products = n_files = 0
@@ -149,13 +168,6 @@ def apply_result(store: Any, store_dir: Path, grid_db: Any, body: dict[str, Any]
         json.loads(text)  # a result file is JSON: anything else is refused
         atomic_write_bytes(store_dir / Path(*rel.parts), data)
         n_files += 1
-    row = body.get("row") or {}
-    state = row.get("state") if row.get("state") in ("searched", "failed") else "failed"
-    grid_db.put(
-        str(body["square"]), state, finds=int(row.get("finds") or 0), find_ids=list(row.get("find_ids") or []), bar=row.get("bar") or {},
-        field_key=row.get("field_key"), searched_at=row.get("searched_at"), source=f"node:{body.get('node')}",
-        seconds=row.get("seconds"), error=row.get("error"),
-    )  # fmt: skip
     return {"products": n_products, "files": n_files}
 
 

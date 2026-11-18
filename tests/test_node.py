@@ -111,6 +111,14 @@ def test_the_routes_lend_and_take_back_signed_calls_only(tmp_path: Path, monkeyp
     out = post("/api/internal/result", _body("c" * 24, sq["id"])).json()
     assert out == {"ok": True, "products": 1, "files": 1} and st.grid.get(sq["id"])["state"] == "searched"
     assert post("/api/internal/result", _body("c" * 24, sq["id"])).status_code == 409  # its lease ended with the result
+    distant = {"kind": "distant", "key": "e" * 24, "version": VERSIONS["distant"], "params": {}, "meta": {"status": "ok"}}
+    late = {"node": "a1", "square": sq["id"], "late": True, "files": [{"path": "red/late.json", "text": "{}"}], "products": [distant]}
+    assert post("/api/internal/result", late).json() == {"ok": True, "products": 1, "files": 1}  # a Planet X search that finished later
+    assert st.store.is_complete("e" * 24) and (tmp_path / "red" / "late.json").is_file()
+    assert st.grid.get(sq["id"])["state"] == "searched"  # the square's row is left as it was
+    assert post("/api/internal/result", {**late, "node": "b2"}).status_code == 409  # not the node that searched it
+    other = post("/api/internal/lease", {"node": "a1"}).json()["square"]
+    assert post("/api/internal/result", {**late, "square": other["id"]}).status_code == 409  # a square still being searched
 
 
 def test_a_node_sends_what_it_made_since_the_square_began(tmp_path: Path) -> None:

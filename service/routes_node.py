@@ -62,6 +62,16 @@ def make_node_router(st: Any) -> APIRouter:
         """What a node made for a square it holds: written here as if this service had built it."""
         body = await signed(request)
         sq = str(body.get("square") or "")
+        if body.get("late"):
+            # what finished after the square went back (a Find Planet X search): only products and files, from the node that searched it
+            row = await asyncio.to_thread(st.grid.get, sq)
+            if row is None or row.get("state") != "searched" or row.get("source") != f"node:{body['node']}":
+                raise HTTPException(409, "this node did not search that square")
+            try:
+                got = await asyncio.to_thread(node.apply_late, st.store, st.cfg.store_dir, body)
+            except ValueError as e:
+                raise HTTPException(422, str(e)) from e
+            return {"ok": True, **got}
         if not await asyncio.to_thread(leases().holds, sq, body["node"]):
             raise HTTPException(409, "this node does not hold that square (its lease ended)")
         try:

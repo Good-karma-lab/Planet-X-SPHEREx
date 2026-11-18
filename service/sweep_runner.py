@@ -114,6 +114,7 @@ class SweepRunner:
         self.enabled = os.environ.get("SKY_SWEEP", "1") != "0"
         self._order: Iterator[grid.Cell] | None = None
         self._backoff_until = 0.0
+        self._late: list[dict[str, Any]] = []  # a node's squares sent back while their Find Planet X searches still ran
         self.day = datetime.now(UTC).date().isoformat()
         self.status: dict[str, Any] = {"state": "starting", "squares_today": 0, "finds_today": 0, "seconds_today": 0.0}
 
@@ -285,6 +286,22 @@ class SweepRunner:
         except Exception as e:  # the lease ends and the main service lends the square again
             return f"not sent: {type(e).__name__}: {e}"[:160]
 
+    async def send_late(self) -> None:
+        """What finished after a square went back (its Find Planet X searches) is sent again at node.LATE_AFTER_S."""
+        keep = []
+        for it in self._late:
+            if time.time() - it["sent_at"] < node.LATE_AFTER_S[it["n"]]:
+                keep.append(it)
+                continue
+            products, files = await asyncio.to_thread(node.made_since, self.st.store, self.st.cfg.store_dir, it["since"])
+            body = {"node": node.node_name(), "square": it["square"].id, "late": True, "products": products, "files": files}
+            with contextlib.suppress(Exception):  # asked again at the next step, or given up after the last
+                await asyncio.to_thread(node.call, "/api/internal/result", body, 300.0)
+            it["n"] += 1
+            if it["n"] < len(node.LATE_AFTER_S):
+                keep.append(it)
+        self._late = keep
+
     def strip_expired(self) -> int:
         """Strip the 20′ fields the sweep kept for their finds once KEEP_DAYS have passed (a database read: in a thread)."""
         db, store = self.st.grid, self.st.store
@@ -331,6 +348,8 @@ class SweepRunner:
                     self._backoff_until = time.time() + ARCHIVE_BACKOFF_S
                 self._say("idle", last_result=got)
                 continue
+            if node.is_node():
+                await self.send_late()
             ce = await asyncio.to_thread(self.next_square)
             if ce is None and node.is_node():
                 self._say("idle", why="the main service lends no square now")
@@ -349,6 +368,8 @@ class SweepRunner:
                 await asyncio.to_thread(self.st.grid.put, ce.id, "failed", error=got["error"], source="sweep")
             if node.is_node():
                 got["sent"] = await self.send_back(ce, t_square, got)
+                if "running" in json.dumps((await asyncio.to_thread(self.st.grid.get, ce.id) or {}).get("bar") or ""):
+                    self._late.append({"square": ce, "since": t_square, "sent_at": time.time(), "n": 0})
             if self._archive_troubled(before):  # a read gave up, or many retries, during this square: give the archive time
                 self._backoff_until = time.time() + ARCHIVE_BACKOFF_S
             if got.get("state") == "searched":
