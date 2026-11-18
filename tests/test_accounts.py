@@ -327,6 +327,19 @@ def test_a_machine_finding_submitted_by_two_people_is_in_both_their_findings(sit
         assert [(f["finding_id"], f["role"], f["title"]) for f in mine] == [("mover:1", "submitted", title)]
 
 
+def test_a_time_lapse_task_opens_on_its_own_field(site: tuple[FastAPI, _State, _Mail]) -> None:
+    """A film's finding task was centred on the track at 60′: a field never made, a cold build of minutes. It opens on the film's own
+    field (built, kept), the find itself shown by its id."""
+    app, st, mail = site
+    c = _sign_in(app, mail)
+    fp = {"ra": 60.71158, "dec": 8.617, "fov": 60.0}
+    finds = [{"finding_id": "film:1", "kind": "film", "field_key": "k", "ra": 60.6089, "dec": 8.3985, "status": "unexplained",
+              "data": {"field_params": fp}}]  # fmt: skip
+    st.task_findings = lambda: finds  # type: ignore[attr-defined]
+    t = c.get("/api/tasks/next", params={"kind": "finding"}).json()["task"]
+    assert (t["ra"], t["dec"], t["fov"], t["finding_id"]) == (60.71158, 8.617, 60.0, "film:1")
+
+
 def test_investigation_and_submit_only_when_the_checks_allow(site: tuple[FastAPI, _State, _Mail]) -> None:
     app, st, mail = site
     c = _sign_in(app, mail)

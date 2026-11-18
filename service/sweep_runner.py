@@ -78,12 +78,19 @@ def top_find_fields(st: Any) -> list[dict[str, Any]]:
         if f.get("kind") == "film" and not fp:
             continue
         ra, dec, fov = (fp["ra"], fp["dec"], fp["fov"]) if fp else (f["ra"], f["dec"], 10.0)
-        params = fieldjob.canonical(float(ra), float(dec), float(fov))
-        key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
-        if st.store.is_complete(key) and not fieldjob.unread(st.store.read_meta(fieldjob.KIND, key)):
-            continue
-        if params not in out:
-            out.append(params)
+        wanted = [fieldjob.canonical(float(ra), float(dec), float(fov))]
+        if not fp:  # its task opens at the smallest field that holds the whole track (20′ or 60′ for a long one): that one too
+            from service.routes_tasks import task_fov
+
+            tfov = task_fov({"finding_id": f.get("id"), "kind": f.get("kind"), "data": f.get("data") or {}})
+            if tfov != fov:
+                wanted.append(fieldjob.canonical(float(ra), float(dec), float(tfov)))
+        for params in wanted:
+            key = product_key(fieldjob.KIND, params, extra=(fieldjob.exposure_signature(st.index, params),))
+            if st.store.is_complete(key) and not fieldjob.unread(st.store.read_meta(fieldjob.KIND, key)):
+                continue
+            if params not in out:
+                out.append(params)
     return out
 
 

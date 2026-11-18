@@ -549,7 +549,12 @@ def make_tasks_router(st: Any) -> APIRouter:
             return None
         kind = task["kind"]
         if kind in ("moves", "red", "anomaly", "finding") and task.get("finding_id"):
-            task["fov"] = task_fov(find_row(st, task["finding_id"]))  # the whole track in the picture
+            row = find_row(st, task["finding_id"])
+            task["fov"] = task_fov(row)  # the whole track in the picture
+            fp = ((row or {}).get("data") or {}).get("field_params") or {}
+            if str(task["finding_id"]).startswith("film:") and fp.get("ra") is not None and fp.get("dec") is not None:
+                # a time-lapse opens on its own field (built, kept): centred on the track it was a 60′ field never made (a cold build)
+                task["ra"], task["dec"] = float(fp["ra"]), float(fp["dec"])
             series = people.series_of(str(task["finding_id"]).split(":")[0])
             if series is not None:
                 task["series"] = {"id": series, "steps": people.steps_of(series)}
