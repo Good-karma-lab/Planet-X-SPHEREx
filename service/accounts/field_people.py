@@ -215,6 +215,12 @@ class FieldPeople:
             (jid, "single", user_id, mark["field_key"], mark["ra"], mark["dec"], json.dumps([mark["id"]]), "asking", now, now),
         )
         got = await self._jpl_at(mark)
+        if got is not None and got.get("state") == "pending":
+            # JPL is still being asked in the background (one identification takes a minute or two; its answer is kept): look again
+            # in a minute, no try spent
+            data = {"tries": tries, "retry_at": now + 60.0, "why": "pending"}
+            c.execute("UPDATE acc_people_jobs SET state='jpl_wait', data=?, updated=? WHERE id=?", (json.dumps(data), time.time(), jid))
+            return {"effect": "moves", "state": "checking", "retry_at": iso(now + 60.0)}
         if got is None or got.get("state") != "ok":
             retry_at = now + RETRY_STEPS_S[min(tries, len(RETRY_STEPS_S) - 1)]
             data = {"tries": tries + 1, "retry_at": retry_at, "why": (got or {}).get("error") or (got or {}).get("state") or "not loaded"}
@@ -336,6 +342,8 @@ class FieldPeople:
                     "name": data.get("name"),
                     "text": f"Known: {data.get('name')}, a Solar System body JPL puts {data.get('sep')}″ from your mark at that moment.",
                 }
+            if st == "jpl_wait" and data.get("why") == "pending":
+                return {"state": "checking", "text": "Asking JPL whether a known body was there at that moment (a minute or two)…"}
             if st == "jpl_wait":
                 return waiting("JPL")
             if st == "no_body":
