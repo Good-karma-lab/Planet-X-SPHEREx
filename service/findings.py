@@ -173,6 +173,24 @@ def _cell(ra: float, dec: float) -> str:
     return f"{round(ra * c * 3600 / 6)}:{round(dec * 3600 / 6)}"
 
 
+SLUG_WORD = {"film": "track"}  # the page's words for a kind, where the id's is a machine word ("film" is a time-lapse track)
+
+
+def slug_of(fid: str) -> str:
+    """A find's id in the page's words, for addresses and titles: film:8dcb8e38bc95 -> track-8dcb8e38bc95 (the id stays the key)."""
+    kind, _, h = fid.partition(":")
+    return f"{SLUG_WORD.get(kind, kind)}-{h}" if h else fid
+
+
+def id_of(name: str) -> str:
+    """A find's id from its id or its slug (track-8dcb8e38bc95 -> film:8dcb8e38bc95)."""
+    if ":" in name or "-" not in name:
+        return name
+    word, _, h = name.rpartition("-")
+    kind = next((k for k, w in SLUG_WORD.items() if w == word), word)
+    return f"{kind}:{h}"
+
+
 def find_id(kind: str, ra: float, dec: float, extra: str = "") -> str:
     return f"{kind}:{hashlib.sha1(f'{kind}{_cell(ra, dec)}{extra}'.encode()).hexdigest()[:12]}"
 
@@ -1608,7 +1626,7 @@ def rate_unit(kind: str) -> str:
 
 
 LITE_KEYS = (
-    "id", "kind", "place", "fov", "ra", "dec", "rate", "rate_unit", "snr", "score", "chance", "status", "verdict", "identity", "updated",
+    "id", "slug", "kind", "place", "fov", "ra", "dec", "rate", "rate_unit", "snr", "score", "chance", "status", "verdict", "identity", "updated",
     "stage", "promise", "viewers", "credit", "clip", "note", "visible", "visible_sn",
 )  # fmt: skip
 
@@ -1663,7 +1681,7 @@ def query(
     items: list[dict[str, Any]] = []
     for r in rows:
         f = {
-            "id": r["id"], "kind": r["kind"], "place": r["place"], "fov": r["fov"], "ra": r["ra"], "dec": r["dec"], "epoch": r["epoch"],
+            "id": r["id"], "slug": slug_of(r["id"]), "kind": r["kind"], "place": r["place"], "fov": r["fov"], "ra": r["ra"], "dec": r["dec"], "epoch": r["epoch"],
             "rate": r["rate"], "rate_unit": rate_unit(r["kind"]), "snr": r["snr"], "score": r["score"], "chance": r["chance"],
             "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "updated": r["updated"],
             "versions": json.loads(r["versions"] or "{}"), **rel[r["id"]],

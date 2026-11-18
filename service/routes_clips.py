@@ -17,7 +17,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 
 from service.clips import VERSION, ClipPending, Clips, ClipUnavailable, clips_dir
-from service.findings import find_row
+from service.findings import find_row, id_of
 from service.jobs.scheduler import Priority
 from service.jsonsafe import SafeJSONResponse as JSONResponse
 from service.products.store import Store, product_key
@@ -72,6 +72,7 @@ def make_clips_router(st: Any) -> APIRouter:
         return row
 
     async def clip(find_id: str) -> Any:
+        find_id = id_of(find_id)  # its slug too (track-…)
         clips = clips_of(st)
         find = await asyncio.to_thread(the_find, find_id)
         try:
@@ -84,6 +85,7 @@ def make_clips_router(st: Any) -> APIRouter:
 
     async def still(find_id: str) -> Any:
         """One still frame of the finding's place, for a card whose clip is not made yet: 200 image/webp or 404 {state, reason}."""
+        find_id = id_of(find_id)  # its slug too (track-…)
         find = await asyncio.to_thread(the_find, find_id)
         try:
             path = await clips_of(st).still(find)
@@ -92,6 +94,7 @@ def make_clips_router(st: Any) -> APIRouter:
         return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=86400"})
 
     async def clip_info(find_id: str) -> Any:
+        find_id = id_of(find_id)  # its slug too (track-…)
         clips = clips_of(st)
         find = await asyncio.to_thread(the_find, find_id)
         return {**clips.summary(find), "shows": clips.info(find_id)}

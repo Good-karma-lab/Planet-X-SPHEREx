@@ -750,3 +750,14 @@ def test_a_brown_dwarf_candidate_that_did_not_move_is_a_blend_not_a_lead() -> No
     slow = {**bd, "data": {"group": "candidate", "source": {"pm": 300.0, "shift_arcsec": 0.3}}}
     named = [*base, gaia_none, {**allwise_here, "sep": 2.0}]
     assert status_of(slow, named) == "unexplained" and "no catalogue names" not in verdict_of(slow, named, "unexplained")
+
+
+def test_a_find_has_a_slug_in_the_pages_words_and_the_routes_take_it() -> None:
+    """p2 (explorer round 2): `film:` showed in addresses and titles. The id stays the key (credits, tasks and answers use it); the
+    slug says it in the page's words, and an address with the slug finds the same find."""
+    from service.findings import id_of, slug_of
+
+    assert slug_of("film:8dcb8e38bc95") == "track-8dcb8e38bc95" and slug_of("browndwarf:b5e2f0136331") == "browndwarf-b5e2f0136331"
+    for fid in ("film:8dcb8e38bc95", "browndwarf:b5e2f0136331", "mover:3", "peak:aae17000e21f", "user:1a2b3c"):
+        assert id_of(slug_of(fid)) == fid and id_of(fid) == fid
+    assert slug_of("plain") == "plain" and id_of("plain") == "plain"
