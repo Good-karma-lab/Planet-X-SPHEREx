@@ -272,7 +272,10 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         # the background sweep of the grid (service/sweep_runner.py): on wherever the service has its exposure index and is not the
         # standby, unless SKY_SWEEP=0; it gives way to people, the stock, the disk and the archive by itself
         sweep_env = os.environ.get("SKY_SWEEP", "1" if st.machine.sweep else "0")  # off by default on a small machine
-        if background and (sweep_env == "force" or (sweep_env == "1" and os.environ.get("SKY_WARM", "1") == "1")):
+        from service import node as node_mod
+
+        # a second node sweeps whatever its warm set says (it builds nobody's fields): SKY_SWEEP=1 with SKY_WARM=0 left it idle
+        if background and (sweep_env == "force" or (sweep_env == "1" and (os.environ.get("SKY_WARM", "1") == "1" or node_mod.is_node()))):
             st.sweep = sweep_runner.SweepRunner(st, sweep_searches, sweep_planetx, lambda: sweep_runner.top_find_fields(st))
             sweep_task = asyncio.get_running_loop().create_task(sweep_loop())
         yield
