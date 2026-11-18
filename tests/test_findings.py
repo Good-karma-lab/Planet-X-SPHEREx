@@ -56,6 +56,15 @@ def test_collect_lists_every_kind_and_a_signature(tmp_path: Path) -> None:
     assert collect(tmp_path, rows, keys, TARGETS)[1] != sig
 
 
+def test_a_field_being_made_again_keeps_its_finds(tmp_path: Path) -> None:
+    """The sweep strips a searched square's field; asked for again, it is made again and is not complete for that while (or for good,
+    if a restart cut the build). Its finds come from its searches' result files, so they stay in Findings."""
+    rows, keys = _store(tmp_path)
+    want = sorted(f["id"] for f in collect(tmp_path, rows, keys, TARGETS)[0])
+    rows = [{**r, "complete": False} for r in rows]
+    assert sorted(f["id"] for f in collect(tmp_path, rows, keys, TARGETS)[0]) == want
+
+
 def test_database_keeps_identification_when_a_find_is_rewritten_and_drops_vanished_finds(tmp_path: Path) -> None:
     rows, keys = _store(tmp_path)
     finds, _ = collect(tmp_path, rows, keys, TARGETS)

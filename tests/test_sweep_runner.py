@@ -224,3 +224,24 @@ def test_the_step_said_is_this_squares(tmp_path: Path) -> None:
     ce = r.next_square()
     asyncio.run(r.square(ce))
     assert r.snapshot()["step"] in ("the searches", "Find Planet X")
+
+
+def test_a_start_leaves_the_stripped_fields_complete(tmp_path: Path) -> None:
+    """At start the black fields (nothing read) are reopened; the fields the sweep stripped are not (their finds would leave Findings),
+    and one an earlier start reopened is complete again."""
+    store = Store(tmp_path)
+
+    def field(key: str, meta: dict[str, Any], complete: bool = True) -> None:
+        store.begin("field", key, {"ra": 1.0, "dec": 2.0, "fov": 20.0})
+        store.write_meta("field", key, meta)
+        if complete:
+            store.complete(key)
+
+    good = {"passes": [{}, {}], "exposures": 10, "not_readable": 0}
+    field("a" * 24, {**good, "stripped": True})  # stripped, complete: stays
+    field("b" * 24, {**good, "stripped": True}, complete=False)  # stripped, reopened by an earlier start: complete again
+    field("c" * 24, {"passes": [], "exposures": 10, "not_readable": 10})  # black: reopened
+    field("d" * 24, good)  # a good field: stays
+    assert fieldjob.unread(store.read_meta("field", "c" * 24))
+    assert fieldjob.reopen_unread(store) == (1, 1)
+    assert [store.is_complete(k * 24) for k in "abcd"] == [True, True, False, True]

@@ -56,6 +56,24 @@ def remember(ra: float, dec: float, fov: float, warm: bool = False) -> None:
     (_WARM if warm else _CENTRES).setdefault(p["fov"], set()).add((p["ra"], p["dec"]))
 
 
+def reopen_unread(store: Any) -> tuple[int, int]:
+    """At start: fields kept by a build whose reader failed (nothing read, a black field) are made again when next asked for. A field
+    the sweep stripped is not one: it stays complete (its searches' results stand) and is made again only when asked for (the app's
+    submit_field); one an earlier start reopened is complete again (no build runs at start). Returns (reopened, completed again)."""
+    reopened = again = 0
+    for row in store.listing((KIND,)):
+        meta = store.read_meta(KIND, row["key"])
+        if meta is not None and meta.get("stripped"):
+            if not row["complete"]:
+                store.complete(row["key"])
+                again += 1
+            continue
+        if row["complete"] and unread(meta):
+            store.reopen(row["key"])
+            reopened += 1
+    return reopened, again
+
+
 def canonical(ra: float, dec: float, fov: float) -> dict[str, Any]:
     """The address rounding: RA to 0.01 s of time, Dec to 0.1″, the field size to one of the five sizes; a place within SNAP of the
     field size from a field the service already has is that field."""

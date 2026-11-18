@@ -226,7 +226,9 @@ def collect(
 
     for row in rows:
         p = row["params"]
-        if row["kind"] == "field" and row["complete"]:
+        # a field's finds come from its searches' result files (named by the field's key), not from its pictures: a field the sweep
+        # stripped and that is being made again (not complete for that while, or for good if a restart cut its build) keeps its finds
+        if row["kind"] == "field":
             k = fkeys[row["key"]]
             ra, dec, fov = float(p["ra"]), float(p["dec"]), float(p.get("fov", 5))
             place = place_name(targets, ra, dec)

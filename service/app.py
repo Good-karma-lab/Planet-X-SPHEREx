@@ -219,13 +219,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if not STANDBY:
             store = st.store
 
-            def reopen_unread() -> None:
-                """Fields kept by a build whose reader failed (nothing read, a black field) are made again when next asked for."""
-                for row in store.listing((fieldjob.KIND,)):
-                    if row["complete"] and fieldjob.unread(store.read_meta(fieldjob.KIND, row["key"])):
-                        store.reopen(row["key"])
-
-            asyncio.get_running_loop().run_in_executor(None, reopen_unread)
+            asyncio.get_running_loop().run_in_executor(None, fieldjob.reopen_unread, store)
         anomalies = st.anomalies or _NoAnomalies()
         writer = not (STANDBY or FINDINGS_READONLY)
         st.findings = Findings(st.store, cfg.store_dir, st.catalogue, st.movers, st.pairs, st.dwarfs, anomalies, writer=writer)
