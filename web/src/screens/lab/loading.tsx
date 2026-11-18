@@ -17,7 +17,8 @@ export interface LoadStep {
 export function loadStep(phase: string, pictures: number, passes: number): LoadStep {
   const s = phase.trim();
   let m = s.match(/^reading the exposures: (\d+) of (\d+), (\d+) MB downloaded/);
-  if (m) return { title: 'Loading the exposures', detail: `${m[1]} of ${m[2]} exposures · ${m[3]} MB`, frac: Number(m[1]) / Math.max(1, Number(m[2])) };
+  // the megabytes only once there are some (a cached exposure costs none: "0 MB" read as stuck)
+  if (m) return { title: 'Loading the exposures', detail: `${m[1]} of ${m[2]} exposures${Number(m[3]) > 0 ? ` · ${m[3]} MB` : ''}`, frac: Number(m[1]) / Math.max(1, Number(m[2])) };
   m = s.match(/^pass (\d+) of (\d+): D\d stacked \((\d+) of (\d+) detector stacks\)/);
   if (m) return { title: `Stacking pass ${m[1]} of ${m[2]}`, detail: `${m[3]} of ${m[4]} detector stacks`, frac: Number(m[3]) / Math.max(1, Number(m[4])) };
   m = s.match(/^quick picture of pass (\d+) of (\d+)/);
@@ -72,11 +73,16 @@ export function LoadOverlay({ step, field }: { step: LoadStep | null; field: str
   const reduced = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
   // the furthest step reached: the service reads the next pass's exposures while it stacks the last one, so the ticks never go back
   const reached = useRef(-1);
+  // the whole wait's share done so far: it only grows; and how much of the exposures are read
+  const overall = useRef(0);
+  const readFrac = useRef(0);
   const listRef = useRef<string[] | null>(null);
   // a new field starts the clock and the steps again
   useEffect(() => {
     started.current = Date.now();
     reached.current = -1;
+    overall.current = 0;
+    readFrac.current = 0;
     listRef.current = null;
   }, [field]);
   useEffect(() => {
@@ -119,9 +125,37 @@ export function LoadOverlay({ step, field }: { step: LoadStep | null; field: str
   if (!/^Drawing the first pass/.test(shown.title)) listRef.current = st0.list;
   const list = st.list;
   reached.current = Math.max(reached.current, st.at);
-  const at = reached.current;
+  // reading is the step in hand until every exposure is read (the stacking lines come in between)
+  const at = list === STAGES && readFrac.current > 0 && readFrac.current < 0.99 ? Math.min(reached.current, 1) : reached.current;
   const stalled = !!step && !step.failed && (Date.now() - changed.current.at) / 1000 >= STALL_S;
   const elapsed = (Date.now() - started.current) / 1000;
+  // one bar for the whole wait, that only goes forward, each step weighted by the time it takes: reading the exposures is most of a
+  // new field (the service stacks a pass while it reads the next: the step in hand, not the furthest, says how far)
+  const f = shown.frac === null ? 0 : Math.max(0, Math.min(1, shown.frac));
+  const t = shown.title;
+  if (/^Loading the exposures/.test(t)) readFrac.current = Math.max(readFrac.current, f);
+  const overallNow =
+    t === 'Ready'
+      ? 1
+      : /^Finding the exposures/.test(t)
+        ? 0.03
+        : /^Loading the exposures/.test(t)
+          ? 0.05 + 0.7 * f
+          : /^(Stacking pass|Pass \d+ stacked)/.test(t)
+            ? // stacking comes in between the reading (a pass is stacked while the next is read): it counts once all are read
+              0.05 + 0.7 * readFrac.current + (readFrac.current >= 0.99 ? 0.2 * f : 0)
+            : /^Comparing the passes/.test(t)
+              ? 0.95
+              : /^Loading the pictures/.test(t)
+                ? 0.9 * f
+                : /^Drawing the first pass/.test(t)
+                  ? 0.97
+                  : 0;
+  overall.current = Math.max(overall.current, overallNow);
+  const done = overall.current;
+  // a rough time left once there is a rate to go by (10 s in, a sixth of the way): said in half minutes, never before
+  const left = elapsed > 10 && done > 0.16 && done < 0.98 ? (elapsed * (1 - done)) / done : null;
+  const leftWord = left == null ? '' : left < 45 ? 'under a minute left' : `about ${Math.max(1, Math.round(left / 30) / 2)} min left`;
   return (
     <div class={`loadov${fading ? ' fading' : ''}${shown.failed ? ' failed' : ''}`} role="status" aria-live="polite" data-testid="load-block">
       <div class="lo-media">
@@ -138,7 +172,7 @@ export function LoadOverlay({ step, field }: { step: LoadStep | null; field: str
       <div class="lo-body">
         <b class="lo-step">{shown.title}</b>
         <span class="lo-bar" aria-hidden="true">
-          <i class={shown.frac === null ? 'busy' : ''} style={{ width: `${shown.frac === null ? 30 : Math.max(2, Math.min(100, shown.frac * 100))}%` }} />
+          <i style={{ width: `${Math.max(2, Math.min(100, done * 100))}%` }} />
         </span>
         <span class="lo-detail">{shown.detail || '\u00a0'}</span>
         <ul class="lo-stages">
@@ -151,6 +185,7 @@ export function LoadOverlay({ step, field }: { step: LoadStep | null; field: str
         </ul>
         <span class="lo-time">
           {fmtTime(elapsed)}
+          {leftWord && !stalled ? ` · ${leftWord}` : ''}
           {stalled ? ' · Still working: NASA’s archive is slow right now' : ''}
         </span>
       </div>
