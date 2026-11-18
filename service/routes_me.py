@@ -37,7 +37,7 @@ from service.accounts.db import LimitReachedError, iso
 from service.accounts.score import POINTS as SCORE_POINTS
 from service.ratelimit import Buckets
 
-ID = r"^[A-Za-z0-9_\-:.]{6,64}$"
+ID = r"^[A-Za-z0-9_\-:.,+]{6,64}$"  # also the lab's id of a source with no mark: src:<ra>,<dec> (a comma and a sign: M-2, a 422)
 REF = re.compile(r"^#/[^\s<>\"']{0,600}$")  # a place inside this app
 CELL_RESULTS = ("nothing", "marks")
 FINDING_RESULTS = ("moves", "artefact", "known", "cant_tell")  # "Can't tell" closes the task; it is never wrong and never paid
