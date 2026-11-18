@@ -277,22 +277,35 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         return job_reply(key, job, 10)
 
     @r.get(f"{prefix}/jump")
-    def jump(
+    async def jump(
+        request: Request,
         key: str = Query(...),
         i: int = Query(0, ge=0, le=99),
         mjd: float = Query(..., ge=40000, le=80000),
         corridor: float = Query(5.0, ge=0.5, le=60),
         dmin: float | None = Query(None, ge=5, le=5000),
         dmax: float | None = Query(None, ge=5, le=5000),
+        check: int = Query(0, ge=0, le=1, description="1: start the one-pass searches of the corridor's fields nobody searched yet"),
     ) -> Any:
-        """Find Planet X, the jump: where a candidate of one pass is in the next pass (a line of places by distance) and which known
-        candidates lie near it."""
+        """Find Planet X, the jump: where a candidate of one pass is in the next pass (a line of places by distance), which known
+        candidates lie near it, and the fields that cover the corridor (`fields`, each `covered` or not). check=1 starts the one-pass
+        searches of the uncovered fields (at most linkjob.JUMP_FIELDS_MAX, as background runs that give way to people's jobs); ask the
+        jump again when they are done and their candidates are in `in_corridor`."""
         need("store")
         if not key.isalnum():
             raise HTTPException(400)
-        out = linkjob.run_jump(st.store, key, i, mjd, corridor, dmin, dmax)
+        out = await asyncio.to_thread(linkjob.run_jump, st.store, key, i, mjd, corridor, dmin, dmax)
         if out is None:
             raise HTTPException(404, "no such one-pass search or candidate (run /distant first)")
+        if check:
+            started = []
+            for fd in [x for x in out["fields"] if not x["covered"]][: linkjob.JUMP_FIELDS_MAX]:
+                rep = await distant(
+                    request, ra=fd["ra"], dec=fd["dec"], fov=fd["fov"], mjd=fd["mjd"], pass_=None, dmin=fd["dmin"], dmax=fd["dmax"],
+                    det="123", mu_scale=1.0, plan=0, bg=1,
+                )  # fmt: skip
+                started.append({**fd, "key": rep.get("key"), "state": rep.get("state")})
+            out["started"] = started
         return out
 
     @r.get(f"{prefix}/planetx/honest")
