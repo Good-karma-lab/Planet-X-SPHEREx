@@ -36,6 +36,7 @@ import json
 import re
 import time
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from typing import Any
 
 from service.accounts.db import AccountsDB, iso
@@ -336,10 +337,18 @@ class People:
         got = CONTROL_EXPECT.get((series, str(row.get("status")))) or CONTROL_EXPECT.get((series, str(row.get("stage"))))
         return got if got is not None else self.gold(series).get(row["finding_id"])
 
-    def pick(self, task_kind: str, rows: list[dict[str, Any]], user_id: str | None, seen: set[str]) -> dict[str, Any] | None:
+    def pick(
+        self,
+        task_kind: str,
+        rows: list[dict[str, Any]],
+        user_id: str | None,
+        seen: set[str],
+        controls: Callable[[], list[dict[str, Any]]] | None = None,
+    ) -> dict[str, Any] | None:
         """The next find to ask about in a series task. `task_kind` is moves (tracks, slow movers, peaks), red, anomaly or finding
         (any). An unexplained find nobody settled, one already answered by others first (it is the nearest to a result); every
-        CONTROL_EVERY-th task of a person, a control object instead."""
+        CONTROL_EVERY-th task of a person, a control object instead, from `rows` or the extra `controls` (the hidden finds, asked for
+        only then: the task route reads them with a second pass over every find)."""
         kinds = {"moves": ("film", "mover", "browndwarf", "peak"), "red": ("red",), "anomaly": ("anomaly",)}.get(task_kind)
         pool = [r for r in rows if series_of(r.get("kind")) and (kinds is None or r.get("kind") in kinds)]
         mine = set(seen)
@@ -351,9 +360,10 @@ class People:
                 mine |= got
                 done_n += len(got)
         if user_id and done_n % CONTROL_EVERY == CONTROL_EVERY - 1:
-            controls = [r for r in pool if r["finding_id"] not in mine and self.expected(str(series_of(r.get("kind"))), r) is not None]
-            if controls:
-                return controls[0]
+            extra = [r for r in (controls() if controls else []) if series_of(r.get("kind")) and (kinds is None or r.get("kind") in kinds)]
+            cands = [r for r in pool + extra if r["finding_id"] not in mine and self.expected(str(series_of(r.get("kind"))), r) is not None]
+            if cands:
+                return cands[0]
         settled: set[str] = set()
         for s in {series_of(r.get("kind")) for r in pool}:
             settled |= self.settled_ids(str(s))

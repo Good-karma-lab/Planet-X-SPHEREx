@@ -301,6 +301,9 @@ def find_rows(st: Any) -> list[dict[str, Any]]:
     return list(rows)
 
 
+CONTROLS_KEEP_S = 120.0  # the hidden finds change only when a catalogue answers: read again after this long
+
+
 def control_rows(st: Any) -> list[dict[str, Any]]:
     """The finds the default list hides (a star's residual, a galaxy, below the bar, a halo, a blend) as control objects of the
     question series: their right answer is known (people.CONTROL_EXPECT by their stage, "artefact"), and their stage keeps them
@@ -313,8 +316,13 @@ def control_rows(st: Any) -> list[dict[str, Any]]:
         return []  # a test's own list of finds stands for the whole pool
     from service.findings import HIDDEN
 
+    got: tuple[float, list[dict[str, Any]]] | None = getattr(st, "_task_controls", None)  # on the state: one per app
+    if got is not None and time.monotonic() - got[0] < CONTROLS_KEEP_S:
+        return got[1]
     hidden = set(HIDDEN) - {"set_aside"}
-    return [r for r in (lead_findings(st, "all") or []) if r.get("status") in hidden]
+    rows = [r for r in (lead_findings(st, "all") or []) if r.get("status") in hidden]
+    st._task_controls = (time.monotonic(), rows)
+    return rows
 
 
 def find_row(st: Any, finding_id: str) -> dict[str, Any] | None:
@@ -539,7 +547,7 @@ def make_tasks_router(st: Any) -> APIRouter:
                 raise HTTPException(404, "no such finding")
             return one
         seen = acc.db.task_refs(user_id, kind) if user_id else set()
-        return people.get(st, acc.db).pick(kind, rows + control_rows(st), user_id, seen)
+        return people.get(st, acc.db).pick(kind, rows, user_id, seen, controls=lambda: control_rows(st))
 
     def next_other(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
         """find_again, recentre, bad_picture, second_look."""
