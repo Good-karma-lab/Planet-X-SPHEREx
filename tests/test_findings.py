@@ -761,3 +761,18 @@ def test_a_find_has_a_slug_in_the_pages_words_and_the_routes_take_it() -> None:
     for fid in ("film:8dcb8e38bc95", "browndwarf:b5e2f0136331", "mover:3", "peak:aae17000e21f", "user:1a2b3c"):
         assert id_of(slug_of(fid)) == fid and id_of(fid) == fid
     assert slug_of("plain") == "plain" and id_of("plain") == "plain"
+
+
+def test_a_list_with_a_blend_in_it_sorts(tmp_path: Path) -> None:
+    """status=blend and the single-find page list the blends: the sort knew every status but blend (a KeyError, HTTP 500)."""
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    bd = {"id": "browndwarf:1", "kind": "browndwarf", "place": "far", "fov": 20, "ra": 170.153439, "dec": 4.438454, "rate": 8.8,
+          "snr": 7.0, "score": 7.0, "chance": None, "scans": [],
+          "data": {"group": "candidate", "source": {"pm": 8838.8, "shift_arcsec": 9.1}}}  # fmt: skip
+    db.write_finds([bd])
+    for c in ("simbad", "gaia", "twomass", "vsx", "ned", "sbident"):
+        db.put_ident("browndwarf:1", c, "none", None, None, None, {"blend_r": 10.0})
+    db.put_ident("browndwarf:1", "allwise", "ok", "J112036.82+042613.5", 4.9, None, {"blend_r": 10.0})
+    db.db.commit()
+    body = query(db, None, "blend", None, 50, 0)
+    assert [f["status"] for f in body["finds"]] == ["blend"] and body["counts"]["browndwarf"]["blend"] == 1
