@@ -41,7 +41,7 @@ fi
 
 # zero-downtime: the standby restarts first and must answer; then the main instance restarts while the standby serves
 $SSH "$HOST" 'set -e
-sudo install -m 644 /opt/sky/deploy/systemd/sky-api.service /opt/sky/deploy/systemd/sky-api-standby.service /opt/sky/deploy/systemd/sky-index.service /opt/sky/deploy/systemd/sky-index.timer /opt/sky/deploy/systemd/sky-disk.service /opt/sky/deploy/systemd/sky-disk.timer /etc/systemd/system/
+sudo install -m 644 /opt/sky/deploy/systemd/sky-api.service /opt/sky/deploy/systemd/sky-api-standby.service /opt/sky/deploy/systemd/sky-index.service /opt/sky/deploy/systemd/sky-index.timer /opt/sky/deploy/systemd/sky-disk.service /opt/sky/deploy/systemd/sky-disk.timer /opt/sky/deploy/systemd/sky-snapshot.service /opt/sky/deploy/systemd/sky-snapshot.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo -u sky bash -lc "cd /opt/sky && ~/.local/bin/uv sync --frozen --no-dev -q"
 healthy() { for i in $(seq 1 90); do curl -sf -m 3 "http://127.0.0.1:$1/api/v1/health" >/dev/null && return 0; sleep 1; done; echo "port $1 did not come up" >&2; return 1; }

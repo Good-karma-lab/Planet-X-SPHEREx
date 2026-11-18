@@ -47,7 +47,8 @@ API. The store (index, products) stays. A product version bump purges and re-war
 | `sky-api.service` | the API and the warm runner (uvicorn on 127.0.0.1:8780; drains 25 s on stop) |
 | `sky-index.timer` → `sky-index.service` | daily: new days of the exposure index, reconciliation with the bucket |
 | `caddy.service` | HTTPS for the domain and plain HTTP on the bare address |
-| `sky-snapshot.*`, `sky-tunnel.service` | optional: snapshot to object storage; a Cloudflare Tunnel instead of open ports |
+| `sky-snapshot.*` | daily at 07:30 UTC: `deploy/snapshot.sh` to `SKY_SNAPSHOT_REMOTE` (on prod `oci:spherex-backups`, see Backups) |
+| `sky-tunnel.service` | optional: a Cloudflare Tunnel instead of open ports |
 
 ## Outside uptime check
 
@@ -57,3 +58,25 @@ When one does not, it opens a single issue labelled `uptime` (GitHub notifies th
 notification settings), comments on it while the site stays down, and closes it when the site answers again. It needs no account and
 no secret beyond the workflow's own token. Run it by hand from the Actions tab (`workflow_dispatch`). GitHub turns schedules off in a
 public repository after 60 days without a commit; a push turns them on again.
+
+## Backups
+
+`sky-snapshot.timer` runs `deploy/snapshot.sh` every day at 07:30 UTC as the `sky` user. It uploads the four databases (product,
+findings, both catalogues) as a dated copy plus `latest`, keeping the last 14. It also uploads the exposure index and the warm-set
+products (only new immutable files). On prod the target is the Oracle Object Storage bucket `spherex-backups` (namespace
+`axfxsloe2lok`, eu-madrid-1, private, Always Free 20 GB). The login is the VM's own instance principal (dynamic group `spherex-vms`,
+policy `spherex-backups-writer`): no keys are stored. rclone 1.61 or newer is needed (the official .deb, its SHA-256 checked), and
+`/home/sky/.config/rclone/rclone.conf` holds:
+
+```ini
+[oci]
+type = oracleobjectstorage
+provider = instance_principal_auth
+namespace = axfxsloe2lok
+compartment = <tenancy OCID>
+region = eu-madrid-1
+```
+
+`/etc/sky/env`: `SKY_SNAPSHOT_REMOTE=oci:spherex-backups`. First snapshot, 18 Nov 2026: 4.1 GB, 596 objects, 88 s. Restore test
+into a scratch folder (`SKY_STORE=/var/lib/sky-restore-test deploy/restore.sh`): 14 s, every database passes `integrity_check`.
+To restore on a new VM, run `deploy/restore.sh` before the API starts (it keeps any file already there).
