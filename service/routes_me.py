@@ -34,6 +34,7 @@ from service.accounts import score as scoring
 from service.accounts import share as sharing
 from service.accounts import submit as auto
 from service.accounts.db import LimitReachedError, iso
+from service.accounts.review import NOTE_MAX, REVIEW_STATUSES, Review
 from service.accounts.score import POINTS as SCORE_POINTS
 from service.ratelimit import Buckets
 
@@ -42,6 +43,12 @@ REF = re.compile(r"^#/[^\s<>\"']{0,600}$")  # a place inside this app
 CELL_RESULTS = ("nothing", "marks")
 FINDING_RESULTS = ("moves", "artefact", "known", "cant_tell")  # "Can't tell" closes the task; it is never wrong and never paid
 MAX_NOTES, MAX_FRAMES, MAX_THUMB = 200, 60, 200_000
+
+
+class VerdictIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: str = Field(pattern="^(" + "|".join(REVIEW_STATUSES) + ")$")
+    note: str = Field("", max_length=NOTE_MAX)
 
 
 class NameIn(BaseModel):
@@ -281,6 +288,38 @@ def make_me_router(st: Any) -> APIRouter:
         if body.public_profile is not None:
             sharing.get(st, acc.db).set_public(u["id"], body.public_profile)
         return {"user": acc.db.user(u["id"])}
+
+    # ---------------------------------------------------------------------------------------------------------------------- review
+
+    def reviewer(request: Request) -> tuple[accounts.Accounts, dict[str, Any], Review]:
+        acc, u = me(request)
+        rv = Review(acc.db)
+        if not rv.is_reviewer(u["id"]):
+            raise HTTPException(403, "only a reviewer gives verdicts")
+        return acc, u, rv
+
+    @router.get("/api/review")
+    def review_queue(request: Request) -> Any:
+        """The submitted findings waiting for a verdict and the latest verdicts (a reviewer only)."""
+        _acc, _u, rv = reviewer(request)
+        return rv.queue()
+
+    @router.post("/api/review/{finding_id}")
+    def review_give(finding_id: str, body: VerdictIn, request: Request) -> Any:
+        """A reviewer's verdict on a submitted finding: its stage, the points it pays, the answers it settles; everyone credited is told."""
+        acc, u, rv = reviewer(request)
+        if body.status in ("known", "artefact") and not body.note.strip():
+            raise HTTPException(422, "say why it is known or an artefact (the people credited read it)")
+        try:
+            told = rv.give(finding_id, body.status, u["id"], body.note, score_of(acc))
+        except KeyError:
+            raise HTTPException(404, "no such submitted finding") from None
+        return {"finding_id": finding_id, "status": body.status, "told": told, "history": rv.history(finding_id)}
+
+    @router.get("/api/findings/{finding_id}/verdicts")
+    def verdict_history(finding_id: str) -> Any:
+        """The verdicts given on a finding, oldest first: the reviewer's name, the stage, the note (public: names only)."""
+        return {"verdicts": Review(accounts.get(st).db).history(finding_id)}
 
     @router.get("/api/me/score")
     def my_score(request: Request) -> Any:

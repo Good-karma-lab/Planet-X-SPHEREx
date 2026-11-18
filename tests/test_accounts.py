@@ -420,7 +420,8 @@ def test_google_sign_in_with_a_fake_google(site: tuple[FastAPI, _State, _Mail], 
     assert c.get("/api/auth/google/callback", params={"code": "the-code", "state": "forged"}).headers["location"].endswith("signin=google")
     r = c.get("/api/auth/google/callback", params={"code": "the-code", "state": state})
     assert r.headers["location"] == "/#/me"
-    assert c.get("/api/me").json()["user"] == {"id": c.get("/api/me").json()["user"]["id"], "name": "Ann K.", "email": "ann@example.org"}
+    me = c.get("/api/me").json()["user"]
+    assert me == {"id": me["id"], "name": "Ann K.", "email": "ann@example.org", "reviewer": False}
 
 
 def test_google_sign_in_from_the_bare_domain_comes_back_to_the_lab(
