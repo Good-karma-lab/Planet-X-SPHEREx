@@ -167,3 +167,21 @@ a.fcard-title:hover { color: var(--accent); }
 .talk-foot span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .talk-foot .bad { color: #ffb3b3; }
 .talk-signin { align-self: flex-start; }
+/* ---- the filters on: one line before the count, a clear (×) on each one that narrows the list */
+.fon { display: inline-flex; gap: 6px; flex: none; max-width: 60%; overflow: hidden; white-space: nowrap; }
+.fon > span { display: inline-flex; align-items: center; gap: 2px; padding: 0 7px; border-radius: 6px; border: 1px solid var(--edge-soft); color: var(--muted); line-height: 20px; }
+.fon > span.set { color: var(--ink); border-color: rgba(95, 227, 214, 0.45); background: rgba(95, 227, 214, 0.08); padding-right: 2px; }
+.fon button { border: 0; background: none; color: var(--muted); font: 400 15px/1 var(--font, system-ui); width: 20px; height: 20px; padding: 0; cursor: pointer; border-radius: 4px; }
+.fon button:hover { color: var(--ink); background: rgba(95, 227, 214, 0.15); }
+/* the list of the previous filter stays, dimmed, while the next one is read */
+.fgrid { transition: opacity 0.15s; }
+.fgrid.stale { opacity: 0.4; pointer-events: none; }
+.fempty { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0; }
+.fempty .btn span { color: var(--accent); margin-left: 4px; font-family: var(--mono); }
+/* a phone: the filters on are a row of their own under the count, every pill of one height, the × a finger's size */
+@media (max-width: 600px) {
+  .fbar .leadcount { flex-wrap: wrap; row-gap: 6px; }
+  .fon { order: 3; flex-basis: 100%; max-width: 100%; }
+  .fon > span { height: 32px; box-sizing: border-box; }
+  :root .fbar .fon button { min-height: 0; min-width: 0; width: 30px; height: 30px; padding: 0; }
+}

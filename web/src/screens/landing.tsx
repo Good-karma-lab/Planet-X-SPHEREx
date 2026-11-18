@@ -491,10 +491,13 @@ export function Landing() {
                 <li>1.6 million real SPHEREx exposures</li>
                 <li>Every mover checked against ESA Gaia</li>
                 <li>
-                  Free, no account,{' '}
-                  <a href={REPO} target="_blank" rel="noopener noreferrer">
-                    open source
-                  </a>
+                  {/* one text run: in the flex item the link would be an item of its own, with the gap as a second space */}
+                  <span>
+                    Free, no account,{' '}
+                    <a href={REPO} target="_blank" rel="noopener noreferrer">
+                      open source
+                    </a>
+                  </span>
                 </li>
               </ul>
               <p class="lp-or" data-testid="landing-more">

@@ -192,6 +192,23 @@ export function awardLine(): string {
 }
 
 type Takeable = TaskKind;
+
+/** what a series' result does once enough people agree (service/accounts/people.py ACTIONS); the rest stay leads for the checks */
+const ACTION_OF: Record<string, Record<string, string>> = {
+  track: { no_dot: 'drop', streak: 'drop', partial: 'relink' },
+  slow: { still: 'drop', blend: 'drop', moves_old: 'raise' },
+  peak: { no_peak: 'drop', glow: 'drop', candidate: 'raise' },
+  red: { brown_dwarf: 'bd_queue' },
+  anomaly: { neighbour: 'leave_out' },
+};
+const ACTION_WORD: Record<string, string> = {
+  drop: 'When people agree: the find is set aside',
+  relink: 'When people agree: the track is linked again without those pictures',
+  raise: 'When people agree: the find moves up for the checks',
+  bd_queue: 'When people agree: it goes to the brown-dwarf search',
+  leave_out: 'When people agree: those exposures leave its spectrum',
+};
+export const nextWord = (series: string, result: string) => ACTION_WORD[ACTION_OF[series]?.[result] ?? ''] ?? 'When people agree: it stays a lead for the checks';
 /** A place tapped in a picture (find_again, recentre): the pass (Months) or the visit (Days) it was tapped on, and its date. */
 export interface Tap {
   ra: number;
@@ -420,7 +437,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       const got = (r.json ?? {}) as {
         points?: number;
         achievements?: { name?: string }[];
-        result?: { label?: string };
+        result?: { id?: string; label?: string };
         class?: { label?: string };
         agreement?: { answers?: number; needed?: number; settled?: boolean; points_when_agreed?: number };
       };
@@ -439,8 +456,10 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       gotWords = [
         ...((got.result?.label ?? got.class?.label) ? [`Your answers say: ${got.result?.label ?? got.class?.label}`] : []),
         ...(got.achievements ?? []).map((x) => `Achievement: ${x.name ?? ''}`),
+        // what the answers lead to once people agree (service/accounts/people.py ACTIONS), in the series' own terms
+        ...(got.result?.id && seriesId ? [nextWord(seriesId, got.result.id)] : []),
         ...(ag && !ag.settled && !(got.points ?? 0)
-          ? [`Points come when people agree: ${ag.answers ?? 1} of ${ag.needed ?? 3} answers so far, +${ag.points_when_agreed ?? 10} if yours matches`]
+          ? [`${ag.answers ?? 1} of ${ag.needed ?? 3} people answered · +${ag.points_when_agreed ?? 10} points if yours matches theirs`]
           : []),
       ];
       points = typeof got.points === 'number' ? got.points : null;
@@ -520,6 +539,11 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           ) : (
             <div class="mono-s">{done.none}</div>
           )}
+          {/* the way to report what the machine missed stays after the answers too */}
+          <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
+            Mark something the machine missed
+            <small class="tp-path">mark it · say what it is · the checks run</small>
+          </button>
         </div>
       )}
       {!done && (
@@ -583,7 +607,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           (task.kind === 'cell'
             ? [`${n} mark${n === 1 ? '' : 's'}`, a.square?.why ?? ''].filter(Boolean).join(' · ')
             : step && steps
-              ? [`Question ${path.length + 1} of ${steps.length}`, step.tap ? `${missing.length} missing` : ''].filter(Boolean).join(' · ')
+              ? [`Question ${path.length + 1} · up to ${steps.length}`, step.tap ? `${missing.length} missing` : ''].filter(Boolean).join(' · ')
               : tapping
                 ? `${taps.length} tapped`
                 : '')}
@@ -618,6 +642,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           ))}
           <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
             Mark something the machine missed
+            <small class="tp-path">mark it · say what it is · the checks run</small>
           </button>
         </div>
       ) : (
@@ -657,6 +682,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           data-testid="task-missed"
         >
           Mark something the machine missed
+          <small class="tp-path">mark it · say what it is · the checks run</small>
         </button>
       )}
     </div>

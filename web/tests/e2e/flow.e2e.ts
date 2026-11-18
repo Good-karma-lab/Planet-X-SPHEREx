@@ -63,7 +63,7 @@ test('3. the lab shows the task panel for that finding: the first question of it
   const answers = page.getByTestId('task-tree').locator('[data-testid^="task-answer-"]');
   expect(await answers.count()).toBeGreaterThanOrEqual(2);
   await expect(page.getByTestId('task-answer-not_sure')).toBeVisible();
-  await expect(page.getByTestId('task-line')).toContainText(/Question 1 of \d/);
+  await expect(page.getByTestId('task-line')).toContainText(/Question 1 · up to \d/);
   await expect(page.getByTestId('task-missed')).toBeVisible();
   await shot('3-task-panel');
 });

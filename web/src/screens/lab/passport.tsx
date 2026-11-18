@@ -44,24 +44,40 @@ export function FindStatus({ id }: { id: string }) {
   const f = useFindRecord(id);
   if (f === null) return <div class="obj-find mono-s">In Findings: asking…</div>;
   if (f === 'failed') return <div class="obj-find mono-s">In Findings: no answer</div>;
-  const nums = [
-    f.snr != null ? `S/N ${f.snr.toFixed(1)}` : '',
-    f.score != null ? `score ${f.score.toFixed(1)}` : '',
-    rateWord(f),
-    f.promise != null ? `promise ${f.promise}` : '',
-    f.viewers ? `${f.viewers} looked` : '',
-  ].filter(Boolean);
+  // each number with its meaning on hover (the words stay short on the card)
+  const nums: [string, string][] = (
+    [
+      [f.snr != null ? `S/N ${f.snr.toFixed(1)}` : '', 'Signal to noise: how far it stands above the noise of the picture'],
+      [f.score != null ? `score ${f.score.toFixed(1)}` : '', "The search's own measure of how strong the find is"],
+      [rateWord(f), 'How fast it moves on the sky'],
+      [f.promise != null ? `promise ${f.promise}` : '', 'What to look at first, 0 to 100: strength, checks passed, nothing known there'],
+      [f.viewers ? `${f.viewers} looked` : '', 'People who looked at it'],
+    ] as [string, string][]
+  ).filter(([t]) => t);
   return (
     <div class="obj-find" data-testid="find-status">
       <div class="obj-findhead">
         <span class={`badge st-${f.status ?? ''}`}>{(f.status ?? '').replace(/_/g, ' ') || f.kind}</span>
-        {f.stage && <span class="mono-s">stage {f.stage.replace(/_/g, ' ')}</span>}
+        {f.stage && (
+          <span class="mono-s hov" title="Where the find is on its way: new → people looked → checks → submitted">
+            stage {f.stage.replace(/_/g, ' ')}
+          </span>
+        )}
         <a class="cb-link" href={`#/findings?lead=${encodeURIComponent(f.id)}`}>
           In Findings
         </a>
         <TalkLink id={f.id} />
       </div>
-      {nums.length > 0 && <div class="mono-s">{nums.join(' · ')}</div>}
+      {nums.length > 0 && (
+        <div class="mono-s">
+          {nums.map(([t, why], k) => (
+            <span key={t} title={why} class="hov">
+              {k ? ' · ' : ''}
+              {t}
+            </span>
+          ))}
+        </div>
+      )}
       {f.verdict && <div class="obj-findtext">{f.verdict}</div>}
       {f.note && <div class="obj-findtext faint">{f.note}</div>}
     </div>
