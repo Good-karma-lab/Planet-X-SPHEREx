@@ -163,7 +163,7 @@ SPREAD = 8  # people are given a random one of the first SPREAD quarters (built 
 PROMISING_TTL_S = 60.0
 # a square task this old is not handed back, nor its square continued: the person moved on (it was given again 11 h later)
 OPEN_TASK_KEEP_S = 2 * 3600.0  # the promising quarters are worked out again at most this often
-_promising: dict[str, Any] = {"at": 0.0, "rows": []}
+_promising: dict[str, Any] = {"at": 0.0, "rows": [], "st": None}  # kept for one service state (a test's app never sees another's)
 
 
 def quarter_of(ce: Any, ra: float, dec: float) -> str:
@@ -179,7 +179,7 @@ def promising_quarters(st: Any) -> list[dict[str, Any]]:
     """The quarters of the squares where the machine's finds are most promising: for each quarter holding a lead of the moving kinds
     (movers, brown dwarfs, Planet X peaks, time-lapse tracks, pairs: Findings' Promising), the best of them; the most promising first.
     [{cell_id, quarter, promise, finding_id, kind}]. Worked out at most every PROMISING_TTL_S (a database read: call it in a thread)."""
-    if time.time() - float(_promising["at"]) < PROMISING_TTL_S:
+    if _promising.get("st") is st and time.time() - float(_promising["at"]) < PROMISING_TTL_S:
         return list(_promising["rows"])
     g = _grid()
     rows: list[dict[str, Any]] = []
@@ -201,7 +201,7 @@ def promising_quarters(st: Any) -> list[dict[str, Any]]:
                 best[(ce.id, q)] = {"cell_id": ce.id, "quarter": q, "promise": int(f.get("promise") or 0), "finding_id": f["finding_id"],
                                     "kind": f.get("kind")}  # fmt: skip
         rows = sorted(best.values(), key=lambda r: (-r["promise"], r["cell_id"], QUARTERS.index(r["quarter"])))
-    _promising.update(at=time.time(), rows=rows)
+    _promising.update(at=time.time(), rows=rows, st=st)
     return list(rows)
 
 
@@ -449,6 +449,9 @@ def make_tasks_router(st: Any) -> APIRouter:
             seen_q = quarters_viewed(acc, list({p["cell_id"] for p in pq}))
             fresh = newcomer(acc, user_id)
             pq = [p for p in pq if not seen_q.get(p["cell_id"], {}).get(p["quarter"], 0) and not (fresh and p["cell_id"] in famous_cells())]
+        # only a built one (M-3: a cold promising quarter took 1 min 45 s): the quarter stock builds these first (upcoming), so they
+        # come in as they are made; until then the stock's own built quarters are given
+        pq = [p for p in pq[:READY_SCAN] if qs.ready(p["cell_id"], p["quarter"])]
         if pq:
             p = RNG.choice(pq[:SPREAD])
             row = searched[p["cell_id"]]

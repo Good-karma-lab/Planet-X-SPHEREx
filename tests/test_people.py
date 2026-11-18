@@ -95,8 +95,9 @@ def test_paths_lead_to_results() -> None:
         for path, want in paths.items():
             assert run_path(series, list(path), [1]) == want, (series, path)
         assert set(paths.values()) - {"cant_tell"} == set(people.RESULTS[series]), series
-    with pytest.raises(AnswerError, match="tap at least one picture"):
-        run_path("track", ["some", "done", "dot"], [])
+    # "Only in some", then Done with none tapped: missing from none of them, so in every picture (M-1: it was a 422)
+    assert run_path("track", ["some", "done", "dot"], []) == "moves"
+    assert run_path("track", ["some", "done", "dot"], None) == "moves"
     for bad in ([], ["every"], ["no", "dot"], ["maybe"], ["not_sure", "dot"]):
         with pytest.raises(AnswerError):
             run_path("track", bad, [1])
@@ -256,8 +257,6 @@ def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any]) ->
     assert t["series"]["id"] == "track" and [s["id"] for s in t["series"]["steps"]] == ["steps", "missing", "shape"]
     assert [p["i"] for p in t["pictures"]] == [0, 1, 2, 3, 4] and t["pictures"][2]["mjd"] == 61102.0
     assert "question" not in t and "answers" not in t and "tree" not in t  # no one-click classes any more
-    bad = ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["some", "done", "dot"], "pictures": []})
-    assert bad.status_code == 422 and bad.json()["detail"] == "tap at least one picture where it is missing"
     out = ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["some", "done", "dot"], "pictures": [3]}).json()
     assert (
         out["result"] == {"id": "partial", "label": "A dot steps along the arrow, not in every picture"}

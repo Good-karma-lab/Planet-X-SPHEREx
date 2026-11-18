@@ -262,6 +262,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         bd_task = None
         sweep_task = None
         flags_task = asyncio.get_running_loop().create_task(exposure_flags_loop())
+        people_task = None if STANDBY else asyncio.get_running_loop().create_task(people_retry_loop())
         background = st.index is not None and not STANDBY
         if os.environ.get("SKY_WARM", "1") == "1" and background and quarters.STOCK > 0:
             stock_task = asyncio.get_running_loop().create_task(quarter_stock_loop())
@@ -280,6 +281,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             stock_task.cancel()
         if bd_task is not None:
             bd_task.cancel()
+        if people_task is not None:
+            people_task.cancel()
         if sweep_task is not None:
             sweep_task.cancel()
         flags_task.cancel()
@@ -332,6 +335,19 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         while True:
             with contextlib.suppress(Exception):
                 await asyncio.to_thread(exposure_flags.refresh, st)
+            await asyncio.sleep(60.0)
+
+    async def people_retry_loop() -> None:
+        """What people's marks asked and was not answered (a single mark's JPL, a lookup) is asked again when its time comes; at
+        start the marks that never got an answer are queued (service/accounts/field_people.py)."""
+        from service.accounts import field_people
+
+        await asyncio.sleep(60.0)
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(lambda: field_people.get(st, accounts_get(st).db).backfill())
+        while True:
+            with contextlib.suppress(Exception):
+                await field_people.get(st, accounts_get(st).db).retry_due()
             await asyncio.sleep(60.0)
 
     async def bd_queue_loop() -> None:

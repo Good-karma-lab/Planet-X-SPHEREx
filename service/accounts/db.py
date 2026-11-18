@@ -304,9 +304,18 @@ class AccountsDB:
             "created": iso(r["created"]), "done_at": iso(r["done_at"]),
         }  # fmt: skip
 
-    def tasks(self, user_id: str) -> list[dict[str, Any]]:
+    def tasks(self, user_id: str, stale_after_s: float = 2 * 3600.0) -> list[dict[str, Any]]:
+        """The user's tasks, open ones first, newest first. An open square task older than `stale_after_s` says `stale` (it is not
+        handed out again: the cabinet's Continue skips it; it stays in the history)."""
         rows = self._conn().execute("SELECT * FROM acc_tasks WHERE user_id=? ORDER BY state DESC, created DESC", (user_id,))
-        return [self._task(r) for r in rows]
+        old = time.time() - stale_after_s
+        out = []
+        for r in rows:
+            t = self._task(r)
+            if r["kind"] == "cell" and r["state"] == "open":
+                t["stale"] = float(r["created"]) < old
+            out.append(t)
+        return out
 
     def task(self, task_id: str) -> tuple[dict[str, Any], str | None] | None:
         r = self._conn().execute("SELECT * FROM acc_tasks WHERE id=?", (task_id,)).fetchone()

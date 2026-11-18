@@ -340,6 +340,19 @@ def test_a_time_lapse_task_opens_on_its_own_field(site: tuple[FastAPI, _State, _
     assert (t["ra"], t["dec"], t["fov"], t["finding_id"]) == (60.71158, 8.617, 60.0, "film:1")
 
 
+def test_a_source_with_no_mark_goes_into_a_new_investigation(site: tuple[FastAPI, _State, _Mail]) -> None:
+    """Explorer round 3 M-2: "Add to investigation → New investigation" on a source with no mark was a 422 (its id, src:<ra>,<dec>,
+    has a comma)."""
+    app, _st, mail = site
+    c = _sign_in(app, mail)
+    body = {"id": "src:60.56215,+8.98543", "label": "Track 2", "ra": 60.56215, "dec": 8.98543, "finding_id": "film:aed36bc0f2e7",
+            "ref": "#/lab?ra=60.71158&dec=8.61700&fov=60", "title": "Track 2 near Barnard"}  # fmt: skip
+    r = c.post("/api/me/investigations/new/items", json=body)
+    assert r.status_code == 200, r.text
+    inv = r.json()
+    assert inv["title"] == "Track 2 near Barnard" and [x["id"] for x in inv["items"]] == ["src:60.56215,+8.98543"]
+
+
 def test_investigation_and_submit_only_when_the_checks_allow(site: tuple[FastAPI, _State, _Mail]) -> None:
     app, st, mail = site
     c = _sign_in(app, mail)

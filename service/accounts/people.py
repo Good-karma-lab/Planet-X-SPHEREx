@@ -258,7 +258,8 @@ def label_of(series: str, result: str | None) -> str:
 
 def run_path(series: str, path: list[str], pictures: list[int] | None = None) -> str:
     """The result a path of answers leads to (one answer id per step, from the first). Raises AnswerError for an answer the step
-    does not have, a path that stops before its end or goes on after it, or a tap step without a tapped picture."""
+    does not have, or a path that stops before its end or goes on after it. A tap step answered with no picture tapped means the
+    object is in every picture."""
     steps = {s["id"]: s for s in SERIES[series]}
     step: dict[str, Any] | None = SERIES[series][0]
     went_some = False
@@ -272,9 +273,10 @@ def run_path(series: str, path: list[str], pictures: list[int] | None = None) ->
         chosen = next((a for a in step["answers"] if a["id"] == answer), None)
         if chosen is None:
             raise AnswerError(f"“{answer}” is not an answer to “{step['question']}”")
-        if step.get("tap") and not pictures:
-            raise AnswerError("tap at least one picture where it is missing")
         went_some = went_some or (series == "track" and step["id"] == "steps" and answer == "some")
+        if step.get("tap") and not pictures:
+            # "Done" with none tapped: it is missing from none of them, i.e. it is in every picture (a valid answer, not an error)
+            went_some = False
         if "result" in chosen:
             if i != len(path) - 1:
                 raise AnswerError("the answers go on after the last question")

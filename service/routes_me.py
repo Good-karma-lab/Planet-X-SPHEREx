@@ -37,7 +37,7 @@ from service.accounts.db import LimitReachedError, iso
 from service.accounts.score import POINTS as SCORE_POINTS
 from service.ratelimit import Buckets
 
-ID = r"^[A-Za-z0-9_\-:.]{6,64}$"
+ID = r"^[A-Za-z0-9_\-:.,+]{6,64}$"  # also the lab's id of a source with no mark: src:<ra>,<dec> (a comma and a sign: M-2, a 422)
 REF = re.compile(r"^#/[^\s<>\"']{0,600}$")  # a place inside this app
 CELL_RESULTS = ("nothing", "marks")
 FINDING_RESULTS = ("moves", "artefact", "known", "cant_tell")  # "Can't tell" closes the task; it is never wrong and never paid
@@ -298,7 +298,11 @@ def make_me_router(st: Any) -> APIRouter:
     @router.get("/api/me/marks")
     def marks(request: Request, field_key: str | None = None) -> Any:
         acc, u = me(request)
-        return {"marks": acc.db.marks(u["id"], field_key)}
+        # each mark that acted says where it ended: known (what), no match in any catalogue, set aside, or could not be checked yet
+        verdicts = field_people.get(st, acc.db).verdicts(u["id"])
+        return {
+            "marks": [{**m, **({"verdict": verdicts[m["id"]]} if m["id"] in verdicts else {})} for m in acc.db.marks(u["id"], field_key)]
+        }
 
     @router.post("/api/me/marks")
     async def put_mark(body: MarkIn, request: Request) -> Any:
