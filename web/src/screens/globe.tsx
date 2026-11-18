@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { nextTask, taskHash } from '../lib/account';
+import { nextTask, taskHash, type Task } from '../lib/account';
 import { aim, type AimState } from '../lib/aim';
 import { idleLoop, visibleInterval } from '../lib/idle';
 import { formatHash } from '../lib/route';
@@ -393,6 +393,8 @@ export function Globe() {
   const [covTick, setCovTick] = useState(0);
   // the square whose card is open: its id at once, its card when the service has answered
   const [cellId, setCellId] = useState<string | null>(null);
+  // the square "Give me a square" handed out: its card's "Take this square" opens that very task
+  const [given, setGiven] = useState<Task | null>(null);
   const [cell, setCell] = useState<CellCard | null>(null);
   const cv = useRef<HTMLCanvasElement>(null);
   // a comet or asteroid chosen in the list: its path since April 2025 and where it is today
@@ -1506,7 +1508,15 @@ export function Globe() {
               <span class="lbl">Coverage</span>
             </button>
           </div>
-          <GiveSquare />
+          <GiveSquare
+            onSquare={(t) => {
+              setGiven(t);
+              setCovOn(true);
+              setCellId(t.cell_id);
+              // the square framed whole (20′), as close as the globe goes
+              flyRef.current(t.ra!, t.dec!, 0.4);
+            }}
+          />
         </div>
         {covOn && cellId && (
           <div class="cov-card dark-glass" data-testid="cov-card" role="dialog" aria-label={`Square ${cellId}`}>
@@ -1547,6 +1557,10 @@ export function Globe() {
                     data-testid="cov-take"
                     title="Open the lab with the task: look through this square"
                     onClick={() => {
+                      if (given && given.cell_id === cell.id) {
+                        location.hash = taskHash(given);
+                        return;
+                      }
                       location.hash = formatHash({
                         screen: 'lab',
                         params: {
@@ -1921,9 +1935,10 @@ export function Globe() {
   );
 }
 
-/** "Give me a square": the next square task (a quarter, 10′, of a searched square: a built one first, service/quarters.py), opened in
- *  the lab at once. A guest gets one too (trying needs no account); the look counts once they sign in. */
-function GiveSquare() {
+/** "Give me a square": the next square task (a quarter, 10′, of a searched square, in the service's order), shown where it is: the
+ *  globe flies to it, the squares come on and its card opens; "Take this square" opens the lab on that task. A guest gets one too
+ *  (trying needs no account); the look counts once they sign in. */
+function GiveSquare({ onSquare }: { onSquare: (t: Task) => void }) {
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState('');
   const go = () => {
@@ -1932,7 +1947,8 @@ function GiveSquare() {
     nextTask('cell').then(
       (t) => {
         setBusy(false);
-        if (t) location.hash = taskHash(t);
+        if (t && t.ra != null && t.dec != null && t.cell_id) onSquare(t);
+        else if (t) location.hash = taskHash(t);
         else setWhy('No searched square is waiting for a look');
       },
       (e: Error) => {

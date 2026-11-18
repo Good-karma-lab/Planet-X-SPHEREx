@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { rememberLab } from './lib/place';
 import { getHealth, type Health } from './lib/api';
 import { parseHash, type Route, type Screen } from './lib/route';
 import { Globe } from './screens/globe';
@@ -47,7 +48,10 @@ export function App() {
   // the Lab keeps its own place in the address; returning to it from another screen restores the last field
   const [lastLab, setLastLab] = useState('#/lab');
   useEffect(() => {
-    if (route.screen === 'lab' && route.params['ra']) setLastLab(location.hash);
+    if (route.screen === 'lab' && route.params['ra']) {
+      setLastLab(location.hash);
+      rememberLab(location.hash);
+    }
   }, [route]);
   // a screen opens at its top: the page's own scroller (a desktop) and the document (a phone) both keep the place of the screen before otherwise
   useEffect(() => {

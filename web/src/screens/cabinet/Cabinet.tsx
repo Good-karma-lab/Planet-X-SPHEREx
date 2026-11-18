@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'preact/hooks';
 import { api, describeHash, nextTask, refreshUnread, taskHash, useUser, type AccountMark, type Task, type User } from '../../lib/account';
 import { InvestigationPage } from './Investigation';
 import { SignInCard } from '../../ui/SignInCard';
+import { lastLab } from '../../lib/place';
 import { Pic } from './pic';
 import { Badge, ScorePanel, badgeSrc, type MyScore } from './Score';
 import { AccountMenu, Bell, type Notice } from './Corner';
@@ -135,7 +136,12 @@ function SignIn({ expired }: { expired: string | undefined }) {
   const error = expired === 'expired' ? 'This link was already used or has expired · send a new one' : expired === 'google' ? 'Google sign-in did not finish · try again' : '';
   return (
     <div class="sx-page">
-      <SignInCard next="#/me" reason="To keep your squares, marks and findings" error={error} />
+      <SignInCard
+        // coming from the lab: the link brings the person back to that very place (field, task, pass), not to the Cabinet
+        next={lastLab() || '#/me'}
+        reason={lastLab() ? 'Then back to your place in the lab' : 'To keep your squares, marks and findings'}
+        error={error}
+      />
     </div>
   );
 }
