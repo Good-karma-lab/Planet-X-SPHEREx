@@ -696,6 +696,26 @@ function useTally<K extends string>(names: K[], query: (k: K, q: URLSearchParams
   }, [dep]);
   return t;
 }
+/** The kind chips' numbers under the active status and visibility: GET /api/v1/findings' counts_view, one small reply. The last
+ *  numbers stay while the next are on their way. */
+function useKindCounts(stage: StageSel, mine: string[], unseen: boolean): Record<string, number> | null {
+  const [c, setC] = useState<Record<string, number> | null>(null);
+  const dep = `${stage}|${stage === 'mine' ? mine.join(',') : ''}|${unseen}`;
+  useEffect(() => {
+    let stop = false;
+    const q = new URLSearchParams({ lite: '1', status: 'all', limit: '1' });
+    stageQuery(q, stage, mine);
+    if (stage !== 'mine') q.set('visibility', unseen ? 'unseen' : 'seen');
+    void fetch(`/api/v1/findings?${q}`)
+      .then((r) => (r.ok ? (r.json() as Promise<{ counts_view?: Record<string, number> }>) : null))
+      .then((d) => d?.counts_view && !stop && setC(d.counts_view))
+      .catch(() => {});
+    return () => {
+      stop = true;
+    };
+  }, [dep]);
+  return c;
+}
 /** the count of an `in_view` under the visibility filter: "visible" keeps the finds whose picture is still being measured, as the list does */
 const underView = (v: InView | undefined, unseen: boolean, all: boolean) =>
   v == null ? null : all ? v.visible + v.not_visible + v.not_measured : unseen ? v.not_visible : v.visible + v.not_measured;
@@ -762,15 +782,9 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   }, [cards.finds.length, cards.done]);
   const h = cards.head;
   const atlas = leadId === ATLAS_LEAD.id;
-  // every number on a chip is what that chip gives under the other filters
-  const byKind = useTally<KindSel>(
-    ['promising', 'mover', 'browndwarf', 'peak', 'film', 'pair', 'red', 'anomaly'],
-    (k, q) => {
-      kindQuery(q, k);
-      stageQuery(q, stage, mine);
-    },
-    `${stage}|${stage === 'mine' ? mine.join(',') : ''}`,
-  );
+  // every number on a chip is what that chip gives under the other filters: one reply's counts_view has it for every kind (the
+  // service counts under the status, stage and visibility asked, the kinds left out)
+  const byKind = useKindCounts(stage, mine, unseen);
   const byStage = useTally<StageSel>(
     kind === 'submitted' ? [] : ['waiting', 'noted'],
     (st, q) => {
@@ -779,7 +793,8 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
     },
     kind,
   );
-  const cnt = (k: KindSel) => (k === 'submitted' ? null : underView(byKind[k], unseen, stage === 'mine'));
+  const cnt = (k: KindSel) =>
+    k === 'submitted' || !byKind ? null : k === 'promising' ? PROMISING.reduce((n, x) => n + (byKind[x] ?? 0), 0) : (byKind[k] ?? 0);
   const kinds: [KindSel, string][] = [
     ['promising', 'Promising'],
     ['mover', KIND_SHORT.mover!],
