@@ -177,3 +177,23 @@ def test_the_snapshot_counts_the_running_jobs_of_people_apart() -> None:
         await s.stop()
 
     asyncio.run(run())
+
+
+def test_a_reopened_product_gets_a_new_job_not_the_finished_one() -> None:
+    """A field the sweep stripped, asked for again, is reopened: the job that made it the first time (done) must not stand for it."""
+
+    async def run() -> None:
+        s = Scheduler()
+        s.start()
+        first = s.submit("field", "k", {}, sleeper(0.05), Priority.P2, "heavy")
+        await until(lambda: first.state == "done")
+        assert s.submit("field", "k", {}, sleeper(0.05), Priority.P0, "heavy") is first  # a done job stands while its product is kept
+        running = s.submit("field", "r", {}, sleeper(0.5), Priority.P0, "heavy")
+        await until(lambda: running.state == "running")
+        assert s.forget("k") and not s.forget("r")  # a running job is never dropped
+        again = s.submit("field", "k", {}, sleeper(0.05), Priority.P0, "heavy")
+        assert again is not first
+        await until(lambda: again.state == "done" and running.state == "done")
+        await s.stop()
+
+    asyncio.run(run())

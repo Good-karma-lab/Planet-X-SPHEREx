@@ -203,6 +203,15 @@ class Scheduler:
         self._kick()
         return j
 
+    def forget(self, key: str) -> bool:
+        """Drop a finished job of this key, so the next submit makes the product again (its product was reopened: a field the sweep
+        stripped, asked for again, would otherwise get back the job that made it the first time, done, and never be made)."""
+        jid = self.by_key.get(key)
+        if jid is not None and self.jobs[jid].state in ("done", "error", "cancelled"):
+            del self.by_key[key]
+            return True
+        return False
+
     def poll(self, job_id: str) -> Job | None:
         j = self.jobs.get(job_id)
         if j is None:

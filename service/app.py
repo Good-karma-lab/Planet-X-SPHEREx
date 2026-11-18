@@ -312,6 +312,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if STANDBY:
             # the standby instance serves while the main one restarts: finished products only; the page asks again in a moment
             raise HTTPException(503, "the sky service is restarting; ask again in a few seconds", headers={"Retry-After": "3"})
+        st.scheduler.forget(key)  # not complete (never made, or reopened): a job that finished before must not stand for it
         index, files, store, wl = st.index, st.files, st.store, st.wavelengths
 
         async def fn(ctx: Any) -> dict[str, Any]:
