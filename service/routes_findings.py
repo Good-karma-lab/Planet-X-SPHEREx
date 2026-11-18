@@ -234,6 +234,16 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 tracks=tracks,
             )
         )
+        if (
+            sort == "promise"
+            and offset == 0
+            and not kind
+            and not place
+            and not ids
+            and status in (None, "all", "leads")
+            and hasattr(f, "front")
+        ):
+            f.front = tuple(x["id"] for x in body["finds"][:24])  # identified first (Findings.identify_loop)
         body = enrich(body)
         if lite:
             body["finds"] = [{**{k: x.get(k) for k in LITE_KEYS}, **card_extras(x)} for x in body["finds"]]

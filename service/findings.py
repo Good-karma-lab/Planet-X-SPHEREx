@@ -646,7 +646,9 @@ class _Maintenance:
     priority = 3  # service.cpu reads it: P3, a background call that gives way to people (service.jobs.scheduler.Priority.P3)
 
 
-def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn: sqlite3.Connection | None = None) -> list[str]:
+def pending_ids(
+    path: str, limit: int, targets: frozenset[str], now: float, conn: sqlite3.Connection | None = None, front: tuple[str, ...] = ()
+) -> list[str]:
     """The ids of the finds with a catalogue not yet answered (or that did not answer and may be asked again). The most promising first
     (as Findings orders them), then the kinds that matter most (Find Planet X peaks, movers, brown dwarfs, film tracks, then pairs),
     the test targets' before the rest within each rank, and within that the longest waiting. It reads every find and what each catalogue
@@ -662,7 +664,8 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
     finally:
         if conn is None:
             db.close()
-    out: list[tuple[tuple[int, int, int, int, float], str]] = []
+    out: list[tuple[tuple[int, int, int, int, int, float], str]] = []
+    at_front = {fid: n for n, fid in enumerate(front)}
     for r in rows:
         data = json.loads(r["data"] or "{}")
         want = want_of(r["kind"], r["ra"], r["dec"], data)
@@ -699,7 +702,17 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
             promise = promise_of(r["kind"], "unexplained", r["score"] if r["score"] is not None else r["snr"], 1)
             # what changes a verdict (a deciding catalogue, a first or a precise second ask) before what only adds detail: with VizieR
             # down, thousands of finds wait on VSX alone and pushed the top track's JPL check to the 30th place
-            out.append(((tier, -promise, IDENT_RANK.get(r["kind"], 2), 0 if r["place"] in targets else 1, worst), r["id"]))
+            # within a tier, the first page of Promising as last served (`front`, in its order) before the rest: promise_of here cannot
+            # see who has looked at a find, so equal promises (a track's σ is capped) left page 1's tracks behind dozens of others
+            key = (
+                tier,
+                at_front.get(r["id"], len(at_front)),
+                -promise,
+                IDENT_RANK.get(r["kind"], 2),
+                0 if r["place"] in targets else 1,
+                worst,
+            )
+            out.append((key, r["id"]))
     out.sort(key=lambda x: x[0])
     return [i for _, i in out[:limit]]
 
@@ -958,6 +971,9 @@ class Findings:
         self.tasks: list[asyncio.Task[None]] = []
         self.lock = asyncio.Lock()
         self.kick = asyncio.Event()
+        # the ids of the first page of Promising as last served (service/routes_findings.py): what a visitor sees first is identified
+        # first, in that order
+        self.front: tuple[str, ...] = ()
         try:
             self.targets = [
                 {"n": o["n"], "ra": o["ra"], "dec": o["dec"]}
@@ -1260,7 +1276,9 @@ class Findings:
         cpu.JOB.set(_Maintenance())
         while True:
             try:
-                ids = await cpu.run(pending_ids, str(self.db.path), 8, frozenset(t["n"] for t in self.targets), time.time())
+                ids = await cpu.run(
+                    pending_ids, str(self.db.path), 8, frozenset(t["n"] for t in self.targets), time.time(), None, self.front
+                )
                 batch = await asyncio.to_thread(self.db.rows_of, ids)
                 if not batch:
                     await asyncio.sleep(15)
