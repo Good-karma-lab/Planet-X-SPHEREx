@@ -24,6 +24,7 @@ import math
 import random
 import re
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -159,6 +160,49 @@ def open_quarters(viewed: dict[str, int], taken: set[str]) -> list[str]:
 
 READY_SCAN = 40  # quarters looked at for a built one before a cold one is given
 SPREAD = 8  # people are given a random one of the first SPREAD quarters (built ones first), so not everyone gets the same square
+PROMISING_TTL_S = 60.0  # the promising quarters are worked out again at most this often
+_promising: dict[str, Any] = {"at": 0.0, "rows": []}
+
+
+def quarter_of(ce: Any, ra: float, dec: float) -> str:
+    """The quarter of a square a sky position falls in (the grid's geometry: north half in Dec, east half in RA)."""
+    dm, rm = 0.5 * (ce.dec0 + ce.dec1), 0.5 * (ce.ra0 + ce.ra1)
+    r = ra % 360.0
+    if r < ce.ra0 - 180.0:
+        r += 360.0
+    return ("N" if dec >= dm else "S") + ("E" if r >= rm else "W")
+
+
+def promising_quarters(st: Any) -> list[dict[str, Any]]:
+    """The quarters of the squares where the machine's finds are most promising: for each quarter holding a lead of the moving kinds
+    (movers, brown dwarfs, Planet X peaks, time-lapse tracks, pairs: Findings' Promising), the best of them; the most promising first.
+    [{cell_id, quarter, promise, finding_id, kind}]. Worked out at most every PROMISING_TTL_S (a database read: call it in a thread)."""
+    if time.time() - float(_promising["at"]) < PROMISING_TTL_S:
+        return list(_promising["rows"])
+    g = _grid()
+    rows: list[dict[str, Any]] = []
+    try:
+        from service.findings import PROMISING_KINDS
+
+        finds = lead_findings(st) or []
+    except Exception:
+        finds = []
+    if g is not None:
+        best: dict[tuple[str, str], dict[str, Any]] = {}
+        for f in finds:
+            if f.get("kind") not in PROMISING_KINDS or f.get("status") not in LEADS:
+                continue
+            ce = g.cell_at(float(f["ra"]), float(f["dec"]))
+            q = quarter_of(ce, float(f["ra"]), float(f["dec"]))
+            cur = best.get((ce.id, q))
+            if cur is None or int(f.get("promise") or 0) > cur["promise"]:
+                best[(ce.id, q)] = {"cell_id": ce.id, "quarter": q, "promise": int(f.get("promise") or 0), "finding_id": f["finding_id"],
+                                    "kind": f.get("kind")}  # fmt: skip
+        rows = sorted(best.values(), key=lambda r: (-r["promise"], r["cell_id"], QUARTERS.index(r["quarter"])))
+    _promising.update(at=time.time(), rows=rows)
+    return list(rows)
+
+
 RNG = random.Random()
 
 
@@ -323,7 +367,12 @@ def make_tasks_router(st: Any) -> APIRouter:
             ((viewed.get(r["cell_id"], {}).get(q, 0), i, r["cell_id"], q) for i, r in enumerate(rows[:500]) for q in QUARTERS),
             key=lambda t: (t[0], t[1], QUARTERS.index(t[3])),
         )
-        return [(c, q) for _, _, c, q in order[:limit]]
+        # the promising quarters nobody has looked through first (they are given first: pick_cell), then the stock's order
+        cells = {r["cell_id"] for r in rows}
+        first = [(p["cell_id"], p["quarter"]) for p in promising_quarters(st)[: 2 * SPREAD] if p["cell_id"] in cells]
+        first = [cq for cq in first if not viewed.get(cq[0], {}).get(cq[1], 0)]
+        rest = [(c, q) for _, _, c, q in order if (c, q) not in set(first)]
+        return (first + rest)[:limit]
 
     st.upcoming_quarters = upcoming
 
@@ -388,6 +437,20 @@ def make_tasks_router(st: Any) -> APIRouter:
         if rows is None:
             raise HTTPException(503, "the sky grid is not loaded")
         rows = [r for r in rows if len(taken.get(r["cell_id"], set())) < len(QUARTERS)]
+        # the squares where the machine's finds are most promising first: a quarter nobody has looked through yet that holds one of
+        # the best leads (Findings' Promising), a random one of the first SPREAD (people are spread), never a famous target's square
+        # for a newcomer; then the stock's order below
+        searched = {r["cell_id"]: r for r in rows}
+        pq = [p for p in promising_quarters(st) if p["cell_id"] in searched and p["quarter"] not in taken.get(p["cell_id"], set())]
+        if pq:
+            seen_q = quarters_viewed(acc, list({p["cell_id"] for p in pq}))
+            fresh = newcomer(acc, user_id)
+            pq = [p for p in pq if not seen_q.get(p["cell_id"], {}).get(p["quarter"], 0) and not (fresh and p["cell_id"] in famous_cells())]
+        if pq:
+            p = RNG.choice(pq[:SPREAD])
+            row = searched[p["cell_id"]]
+            why = {"finding_id": p["finding_id"], "kind": p["kind"], "promise": p["promise"]}
+            return {**row, "quarter": p["quarter"], "fov": QUARTER_FOV, **quarter_place(p["cell_id"], p["quarter"]), "why": why}
         viewed = quarters_viewed(acc, [r["cell_id"] for r in rows[:500]])
         # the square whose least-looked open quarter has the fewest viewers; the grid's own order among equals
         best: tuple[int, int, dict[str, Any], str] | None = None
@@ -551,6 +614,9 @@ def make_tasks_router(st: Any) -> APIRouter:
             ref = next_judged(acc, kind, uid, finding_id)
         if ref is None:
             return {"task": None}
-        return {"task": with_ask(acc.db.add_task(uid, kind, ref))}
+        task = with_ask(acc.db.add_task(uid, kind, ref))
+        if task is not None and ref.get("why"):  # a square given for a promising find in it: which find (the globe card says why)
+            task = {**task, "why": ref["why"]}
+        return {"task": task}
 
     return router

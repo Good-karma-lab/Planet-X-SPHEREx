@@ -381,6 +381,39 @@ def test_google_sign_in_with_a_fake_google(site: tuple[FastAPI, _State, _Mail], 
     assert c.get("/api/me").json()["user"] == {"id": c.get("/api/me").json()["user"]["id"], "name": "Ann K.", "email": "ann@example.org"}
 
 
+def test_google_sign_in_from_the_bare_domain_comes_back_to_the_lab(
+    site: tuple[FastAPI, _State, _Mail], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The site is open as spherex.space and as www.spherex.space; Google comes back to the public one. Started on the other name, the
+    start goes to the public one first (its cookie keeps the state and `next`), so the person lands back in the lab, not the cabinet;
+    a sign-in that fails goes back to `next` too."""
+    app, st, _ = site
+    monkeypatch.setenv("SKY_GOOGLE_CLIENT_ID", "cid")
+    monkeypatch.setenv("SKY_GOOGLE_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("SKY_GOOGLE_PUBLIC", "1")
+    monkeypatch.setenv("SKY_PUBLIC_URL", "https://www.example.org")
+
+    def google(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/token":
+            return httpx.Response(200, json={"access_token": "at"})
+        return httpx.Response(200, json={"sub": "g-2", "email": "bob@example.org", "email_verified": True, "name": "Bob"})
+
+    accounts.get(st).http_transport = httpx.MockTransport(google)
+    nxt = "#/lab?ra=330.91371&dec=-56.91667&fov=10&task=t_1&kind=cell&cell=099-0543&quarter=SW&do=look"
+    bare = TestClient(app, base_url="https://example.org", follow_redirects=False)
+    r = bare.get("/api/auth/google", params={"next": nxt})
+    assert r.status_code == 303 and r.headers["location"].startswith("https://www.example.org/api/auth/google?next=")
+    assert "set-cookie" not in r.headers  # nothing kept on the name Google does not come back to
+    www = TestClient(app, base_url="https://www.example.org", follow_redirects=False)
+    r = www.get(r.headers["location"])
+    state = re.search(r"state=([^&]+)", r.headers["location"]).group(1)  # type: ignore[union-attr]
+    forged = www.get("/api/auth/google/callback", params={"code": "c", "state": "forged"})
+    assert forged.headers["location"] == f"/{nxt}&signin=google"  # a failed sign-in goes back to the lab, not the cabinet
+    r = www.get("/api/auth/google", params={"next": nxt})
+    state = re.search(r"state=([^&]+)", r.headers["location"]).group(1)  # type: ignore[union-attr]
+    assert www.get("/api/auth/google/callback", params={"code": "c", "state": state}).headers["location"] == f"/{nxt}"
+
+
 def test_notifications_say_what_happened_once(site: tuple[FastAPI, _State, _Mail]) -> None:
     app, st, mail = site
     _fake_grid(st)

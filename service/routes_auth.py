@@ -16,7 +16,7 @@ import os
 import re
 import secrets
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -62,7 +62,10 @@ def make_auth_router(st: Any) -> APIRouter:
         resp.set_cookie(COOKIE, token, max_age=int(SESSION_S), httponly=True, samesite="lax", secure=not is_local(request), path="/")
         return resp
 
-    def failed(request: Request, why: str) -> Response:
+    def failed(request: Request, why: str, nxt: str | None = None) -> Response:
+        """Back where the person came from with `signin=<why>` (the lab, not the cabinet), else the cabinet."""
+        if nxt and NEXT.match(nxt):
+            return RedirectResponse(f"/{nxt}{'&' if '?' in nxt else '?'}signin={why}", status_code=303)
         return RedirectResponse(f"/#/me?signin={why}", status_code=303)
 
     @router.get("/api/me")
@@ -112,12 +115,18 @@ def make_auth_router(st: Any) -> APIRouter:
         acc = accounts.get(st)
         if acc.google is None:
             raise HTTPException(404, "Google sign-in is not set up")
+        base = public_base(request)
+        host = urlparse(base).hostname
+        if not is_local(request) and host and request.url.hostname and request.url.hostname != host:
+            # Google comes back to the public address: the state cookie (and `next` in it) must be set there; set on another name of
+            # the site (spherex.space for www.spherex.space) it was not sent back, the sign-in failed and landed in the cabinet
+            return RedirectResponse(f"{base}/api/auth/google{'?' + urlencode({'next': next}) if next and NEXT.match(next) else ''}", 303)
         limited(acc.openings.take(acc.who(request)))
         state = secrets.token_urlsafe(24)
         query = urlencode(
             {
                 "client_id": acc.google[0],
-                "redirect_uri": f"{public_base(request)}/api/auth/google/callback",
+                "redirect_uri": f"{base}/api/auth/google/callback",
                 "response_type": "code",
                 "scope": "openid email profile",
                 "state": state,
@@ -137,7 +146,7 @@ def make_auth_router(st: Any) -> APIRouter:
         limited(acc.openings.take(acc.who(request)))
         kept, _, nxt = (request.cookies.get(OAUTH_COOKIE) or "").partition("|")
         if not code or not state or not kept or not secrets.compare_digest(kept, state):
-            return failed(request, "google")
+            return failed(request, "google", nxt or None)
         try:
             async with httpx.AsyncClient(transport=acc.http_transport, timeout=15.0) as http:
                 tok = await http.post(
@@ -155,10 +164,10 @@ def make_auth_router(st: Any) -> APIRouter:
                 info.raise_for_status()
                 who = info.json()
         except (httpx.HTTPError, KeyError, ValueError):
-            return failed(request, "google")
+            return failed(request, "google", nxt or None)
         email = str(who.get("email") or "").strip().lower()
         if not who.get("email_verified") or not EMAIL.match(email):
-            return failed(request, "google")
+            return failed(request, "google", nxt or None)
         user = acc.db.user_for_email(email, name=str(who.get("name") or "") or None, google_sub=str(who.get("sub") or "") or None)
         resp = signed_in(request, user, nxt or None)
         resp.delete_cookie(OAUTH_COOKIE, path="/api/auth")
