@@ -16,7 +16,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-SMALL_CORES = 4  # this many cores or fewer: a small machine
+SMALL_CORES = 3  # this many cores or fewer: a small machine (a 4-OCPU / 24 GB A1 is not: 18 Nov 2026)
 SMALL_RAM_MB = 16000  # this much memory or less: a small machine
 FENCE_SHARE = 55  # per cent of the unit's MemoryMax the jobs may hold
 
@@ -82,7 +82,7 @@ def limits(cores: int | None = None, ram: int | None = None, fence: int | bool |
         ram_mb=r,
         small=small,
         workers=_env_int("SKY_WORKERS", c),
-        heavy_slots=_env_int("SKY_HEAVY_SLOTS", 6 if not small else 2),
+        heavy_slots=_env_int("SKY_HEAVY_SLOTS", min(6, c) if not small else 2),  # a field build per core, at most six
         memory_budget_mb=_env_int("SKY_MEMORY_BUDGET_MB", budget),
         memory_max_mb=cg,
         worker_mem_mb=_env_int("SKY_WORKER_MEM_MB", min(6000, max(1500, mem * 35 // 100))),

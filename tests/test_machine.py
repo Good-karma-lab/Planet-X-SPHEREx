@@ -49,3 +49,10 @@ def test_the_jobs_budget_stays_inside_the_units_fence() -> None:
     a1 = machine.limits(cores=2, ram=12000, fence=8400)  # MemoryMax=70 % of a 12 GB A1
     assert a1.memory_budget_mb == 4620 and a1.worker_mem_mb == 2940
     assert machine.limits(cores=16, ram=48000, fence=None).memory_budget_mb == 24000
+
+
+def test_a_four_core_24_gb_machine_is_not_small() -> None:
+    """The A1 resized to 4 OCPU / 24 GB: the normal profile, one field build per core, the jobs' budget inside its 70 % fence."""
+    lim = machine.limits(cores=4, ram=24000, fence=16800)
+    assert not lim.small and lim.heavy_slots == 4 and lim.bg_heavy == 2 and lim.memory_budget_mb == 9240
+    assert machine.limits(cores=2, ram=12000, fence=None).small and machine.limits(cores=4, ram=12000, fence=None).small
