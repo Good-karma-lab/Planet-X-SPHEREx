@@ -28,12 +28,17 @@ const wanted = (): string | null => {
 
 // Numbers on this page that the layout itself carries come from runs on the production service.
 // the version of this account: bumped, with a line in CHANGES, whenever an algorithm or a constant it states changes
-export const METHOD_VERSION = { id: 'M40', date: '2026-11-18' };
+export const METHOD_VERSION = { id: 'M41', date: '2026-11-18' };
 const CHANGES: [string, string, string][] = [
+  [
+    'M41',
+    '2026-11-18',
+    'The link of passes reports what chance links; the jump covers its corridor with one-pass searches of the other pass and can start the missing ones; a line track of the time-lapse search is not a lead until its light is checked in the exposures (the R Draconis track had none); the checks re-measured on the live service four days later, and why the time-lapse search misses two of eight known bodies.',
+  ],
   [
     'M40',
     '2026-11-18',
-    'Findings and JPL: the precise second pass of Small-Body Identification, a track unexplained only once JPL answered, an undated peak never; what the identification queue asks first; the blend and stood-still rule with its chance level and the review of what it sets aside; a cold field\'s first frame from the all-sky cube; who gives a verdict: what the machine settles by itself, and the reviewer\'s stages with who and why kept; the control objects of the question series include the finds the machine set aside itself, and the weights are stated; the link of passes reports what chance links; the jump covers its corridor with one-pass searches of the other pass and can start the missing ones; a line track of the time-lapse search is not a lead until its light is checked in the exposures (the R Draconis track had none).',
+    'Findings and JPL: the precise second pass of Small-Body Identification, a track unexplained only once JPL answered, an undated peak never; what the identification queue asks first; the blend and stood-still rule with its chance level and the review of what it sets aside; a cold field\'s first frame from the all-sky cube; who gives a verdict: what the machine settles by itself, and the reviewer\'s stages with who and why kept; the control objects of the question series include the finds the machine set aside itself, and the weights are stated.',
   ],
   [
     'M39',

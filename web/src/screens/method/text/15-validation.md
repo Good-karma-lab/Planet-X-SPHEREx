@@ -55,6 +55,22 @@ The 60′ ecliptic time-lapse of December 2025 (RA 169.8917°, Dec +4.3514°, 24
 
 **Result:** in the time-lapse search of the 60′ ecliptic field, scrambled candidate places (12 trials) make 1.83 chance tracks per trial with at least 3 visits and 0.0 with at least 4 visits, which is why a track needs at least 4 visits; the straight-line control (40 trials) makes 0.0 at 4 visits. Source: live `/api/v1/film/48c5bbb2c5e028b847075c51/tracks`, 2026-11-14.
 
+### Re-measured on 18 November 2026
+
+The same requests on the live service four days later, with every change since (release 49):
+
+| Check | 14 November | 18 November |
+|---|---|---|
+| Barnard's Star, 5′ field | 11.37 ± 0.47 ″/yr, PA 353.1° | 11.37 ± 0.47 ″/yr, PA 353.1° (Gaia DR3 10.393, 355.6°) |
+| Barnard's Star, 20′ field | 10.7 ± 0.8 ″/yr | 10.66 ± 0.81 ″/yr, PA 353.0° |
+| ε Indi B, 5′ / 20′ / 60′ | 4.59 / 4.72 / 4.68 ″/yr | 4.59 ± 0.49 / 4.72 ± 0.51 / 4.68 ± 0.30 ″/yr (Gaia DR3 4.684) |
+| ε Indi, 60′: tracks | 3 (1 named by Gaia) | 2, both named by Gaia (ε Indi B, and 6412595290592307840 at 5.6 ″/yr) |
+| WISE 0855−0714, 5′ (red bands) | 7.93 ± 0.61 ″/yr, PA 280.8° | 7.93 ± 0.61 ″/yr, PA 280.8°; SIMBAD WISEA J085510.74−071442.5, Y2 |
+| Chance between passes, every field above | 0.0 tracks per field (20 trials) | 0.0 tracks per field (20 trials) |
+| Time-lapse search, 60′ December ecliptic film | 6 of 8 known bodies, 0 unexplained | the same 6 tracks, re-run on the second node with the current code; chance at 3 visits 1.83, at 4 visits 0.0 |
+
+Why the two of eight are missed (measured in the film's own motion maps): 7948 Whitaker is clearly there in three visits (7.5, 11.6 and 42σ), but the frame before has no data at its place and its strongest point lies on the field's edge, where too few exposures of the visit cover it for the on − off check; 5575 Ryanpark (V 19.1) stands at 2.4 to 4.8σ in each of its nine frames, below the 5σ a frame needs, and only adding the frames along its motion would show it. The Eris link of 15 November cannot be re-run: its three one-pass results are no longer in the store (they were made by an earlier version), so its row in part 12 stays as measured then.
+
 ## Find Planet X on known bodies
 
 We search Eris and Makemake blind in one pass and link the passes; the distances are compared with the known orbits. The rows with their keys are in Bodies beyond Neptune.
