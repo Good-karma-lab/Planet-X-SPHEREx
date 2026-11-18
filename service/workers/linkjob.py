@@ -266,8 +266,13 @@ def jump_fields(line: list[dict[str, float]], t2: float, near: list[dict[str, An
         dmin, dmax = (min(inside), max(inside)) if inside else (line[k]["d"], line[k]["d"])
         dmax = max(dmax, dmin * 1.2)
         covered = any(math.hypot((g["ra0"] - ra) * cosd, g["dec0"] - dec) * 60.0 <= max(0.0, g["fov"] / 2.0 - fov / 4.0) for g in near)
-        out.append({"ra": round(ra, 5), "dec": round(dec, 5), "fov": fov, "mjd": round(t2, 3), "dmin": round(max(dmin, 5.0), 1),
-                    "dmax": round(dmax, 1), "covered": covered})  # fmt: skip
+        last = out[-1] if out else None
+        if last is not None and math.hypot((last["ra"] - ra) * cosd, last["dec"] - dec) * 60.0 < 0.4 * fov:
+            # the end of the line a little past the last field: that field is widened to its distances, no near copy is added
+            last["dmin"], last["dmax"] = round(min(last["dmin"], max(dmin, 5.0)), 1), round(max(last["dmax"], dmax), 1)
+        else:
+            out.append({"ra": round(ra, 5), "dec": round(dec, 5), "fov": fov, "mjd": round(t2, 3), "dmin": round(max(dmin, 5.0), 1),
+                        "dmax": round(dmax, 1), "covered": covered})  # fmt: skip
         if at >= along[-1]:
             break
         at = min(at + 0.8 * fov, float(along[-1]))

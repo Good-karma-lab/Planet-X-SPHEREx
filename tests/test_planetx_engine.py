@@ -191,6 +191,9 @@ def test_the_jump_corridor_is_covered_by_search_fields() -> None:
     line = [{"d": round(95.0 + (500.0 - 95.0) * k / 39, 2), "ra": 30.0 + 1.2 * k / 39, "dec": 0.0} for k in range(40)]
     fields = linkjob.jump_fields(line, 61238.0, [{"ra0": 30.0, "dec0": 0.0, "fov": 30.0}])
     assert len(fields) == 6 and fields[0]["covered"] and not any(f["covered"] for f in fields[1:])
+    short = linkjob.jump_fields(line[:31], 61238.0, [])  # its end only 2′ past a field: no near copy of it
+    gaps_short = [math.hypot(b["ra"] - a["ra"], b["dec"] - a["dec"]) * 60 for a, b in itertools.pairwise(short)]
+    assert min(gaps_short) >= 0.4 * 18.0
     assert fields[0]["dmin"] == 95.0 and fields[-1]["dmax"] >= 500.0 * 0.99
     assert all(f["dmax"] >= 1.2 * f["dmin"] and f["fov"] == 18.0 and f["mjd"] == 61238.0 for f in fields)
     gaps = [math.hypot(b["ra"] - a["ra"], b["dec"] - a["dec"]) * 60 for a, b in itertools.pairwise(fields)]
