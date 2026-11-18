@@ -28,8 +28,13 @@ const wanted = (): string | null => {
 
 // Numbers on this page that the layout itself carries come from runs on the production service.
 // the version of this account: bumped, with a line in CHANGES, whenever an algorithm or a constant it states changes
-export const METHOD_VERSION = { id: 'M39', date: '2026-11-17' };
+export const METHOD_VERSION = { id: 'M40', date: '2026-11-18' };
 const CHANGES: [string, string, string][] = [
+  [
+    'M40',
+    '2026-11-18',
+    'Findings and JPL: the precise second pass of Small-Body Identification, a track unexplained only once JPL answered, an undated peak never; what the identification queue asks first; the blend and stood-still rule with its chance level and the review of what it sets aside.',
+  ],
   [
     'M39',
     '2026-11-17',

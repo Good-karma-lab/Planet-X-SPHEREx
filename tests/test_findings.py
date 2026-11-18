@@ -664,7 +664,7 @@ def test_the_identification_loop_asks_the_workers_as_background(monkeypatch: pyt
         raise asyncio.CancelledError  # one turn is enough
 
     monkeypatch.setattr(fmod.cpu, "run", run)
-    me = SimpleNamespace(db=SimpleNamespace(path="x"), targets=[])
+    me = SimpleNamespace(db=SimpleNamespace(path="x"), targets=[], front=())
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(fmod.Findings.identify_loop(me))  # type: ignore[arg-type]
     assert seen == [3] and seen[0] >= cpu.LOW
@@ -885,3 +885,21 @@ def test_a_check_that_decides_goes_before_extras_asked_again(tmp_path: Path) -> 
     assert status_of(peak, idents) == "unchecked"
     text = verdict_of(peak, idents, "unchecked")
     assert "date" in text and "JPL" in text and "decide have not all answered" not in text
+
+
+def test_the_first_page_of_promising_is_identified_first(tmp_path: Path) -> None:
+    """Tracks of equal promise (σ is capped): the ones the first page shows, as last served, are asked first and in its order."""
+    import time as _time
+
+    from service.findings import pending_ids
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"kind": "film", "place": "far", "fov": 60, "ra": 60.6, "dec": 60.4, "rate": 36.7, "snr": 19.0, "score": 19.0,
+            "chance": 0.0, "data": {}, "scans": []}  # fmt: skip
+    db.write_finds([{**base, "id": f"film:{n}", "ra": 60.0 + n} for n in range(6)])
+    db.db.commit()
+    now = _time.time()
+    plain = pending_ids(str(db.path), 10, frozenset(), now)
+    assert sorted(plain) == [f"film:{n}" for n in range(6)]
+    got = pending_ids(str(db.path), 10, frozenset(), now, None, ("film:5", "film:3", "other:1"))
+    assert got[:2] == ["film:5", "film:3"] and sorted(got[2:]) == ["film:0", "film:1", "film:2", "film:4"]
