@@ -244,7 +244,6 @@ def chance_by_visits(
 
 
 ORBIT_TRIALS = 12
-SHORT_NVIS = 3  # a track this short is drawn only when it is stronger than every track of its length that chance made in the trials
 VERIFY_MAX = 5000
 
 
@@ -277,7 +276,6 @@ def orbit_inputs(
         inp["rr"] = np.array([obs[q.frame][1] for q in sel])
         inp["u"] = -np.array([q.east for q in sel])  # the orbit module counts u to the west
         inp["v"] = np.array([q.north for q in sel])
-        inp["sig"] = np.array([float(verified[c]["sig"]) for c in ok])  # the on - off significance: the strength of a track
     return inp
 
 
@@ -293,28 +291,23 @@ def orbit_link(inp: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
-def orbit_trial(inp: dict[str, Any], k: int) -> list[float]:
+def orbit_trial(inp: dict[str, Any], k: int) -> list[int]:
     """One trial of the control: the same candidates at chance places, linked the same way. -> how many chance tracks of at least n visits
-    (n = 0 .. 10), then (index 11) the strongest SHORT_NVIS-visit chance track's together-significance (0 when there is none): the
-    candidates keep their own significance when they are moved, so a chance track is as strong as real candidates make it."""
+    (n = 0 .. 10)."""
     from engine import orbit as _orbit
 
     eorbit: Any = _orbit
-    ch: list[float] = [0.0] * 12
-    sig = inp.get("sig")
+    ch = [0] * 11
     for r in eorbit.control_trial(inp["u"], inp["v"], inp["vis"], inp["t"], inp["rr"], inp["ra0"], inp["dec0"], 1000 + k):
         for j in range(min(r["nvis"], 10) + 1):
             ch[j] += 1
-        if r["nvis"] == SHORT_NVIS and sig is not None:
-            zs = sig[np.asarray(r["idx"], int)]
-            ch[11] = max(ch[11], float(np.sum(zs) / np.sqrt(len(zs))))
     return ch
 
 
 def orbit_assemble(
     inp: dict[str, Any],
     tr: list[dict[str, Any]],
-    counts: Sequence[Sequence[float]],
+    counts: Sequence[Sequence[int]],
     cands: Sequence[Candidate],
     verified: dict[int, dict[str, Any]],
     obs: dict[int, tuple[float, F64]],
@@ -333,17 +326,10 @@ def orbit_assemble(
     ctl: dict[str, Any] = {"trials": trials, "min_visits_drawn": None, "chance": {}, "verified_candidates": len(ok)}
     if len(ok) < 3:
         return [], ctl
-    arr = np.array([list(c)[:11] for c in counts], float) if trials else np.zeros((0, 11))
-    ch = arr.sum(axis=0) / max(trials, 1) if trials else np.zeros(11)
+    ch = np.sum(np.array(counts, float), axis=0) / max(trials, 1) if trials else np.zeros(11)
     okn = [k for k in range(3, len(ch)) if ch[k] < CHANCE_MAX]
     nv_min = max(okn[0] if okn else len(ch), NMIN_FOUND)
-    # a SHORT_NVIS-visit track stronger than every chance track of that length in all the trials: chance made none like it (0 of
-    # `trials`, below CHANCE_MAX); it is drawn though shorter than nv_min (7948 Whitaker leaves the field after 3 visits at 7-42 sigma)
-    strengths = [float(c[11]) for c in counts if len(c) > 11]  # trials of before this rule carry none: no short tracks then
-    short_bar = max(strengths) if trials and len(strengths) == trials else None
     ctl.update(min_visits_drawn=nv_min, chance={str(k): round(float(ch[k]), 3) for k in range(3, len(ch)) if ch[k] > 0 or k == nv_min})
-    if short_bar is not None and nv_min > SHORT_NVIS and trials * CHANCE_MAX >= 1:
-        ctl["short"] = {"visits": SHORT_NVIS, "bar_z_together": round(short_bar, 1), "trials": trials}
     zmaps = _zm(zmaps)
     plane = eorbit.Plane(inp["ra0"], inp["dec0"])
     n = zmaps.shape[1]
@@ -370,8 +356,7 @@ def orbit_assemble(
             win = zmaps[k, iy - rad : iy + rad + 1, ix - rad : ix + rad + 1]
             if np.isfinite(win).any() and np.nanmax(win) >= REC_Z:
                 rec.append((k, float(x), float(y), float(np.nanmax(win))))
-        short_ok = "short" in ctl and len(have) + len(rec) == SHORT_NVIS and zt > ctl["short"]["bar_z_together"]
-        if (len(have) + len(rec) < nv_min and not short_ok) or len(have) < ORBIT_FOUND_MIN:
+        if len(have) + len(rec) < nv_min or len(have) < ORBIT_FOUND_MIN:
             continue
         pts = [
             {"f": cands[c].frame, "x": round(cands[c].x, 2), "y": round(cands[c].y, 2), "z": round(cands[c].sn, 1), "how": "found"}
@@ -391,7 +376,6 @@ def orbit_assemble(
                 "method": "orbit",
                 "verified": True,
                 "z_together": round(zt, 1),
-                **({"short": True} if len(have) + len(rec) < nv_min else {}),  # drawn by its strength, not its length
                 "dist_au": round(r["dist"], 2),
                 "dist_range_au": [round(r["dist_lo"], 2), round(r["dist_hi"], 2)],
                 "pts": pts,
@@ -528,13 +512,13 @@ async def search_staged(
             inp = await run(orbit_inputs, cands, verified, obs, ra0, dec0)
             say("linking the verified candidates by an orbit")
             raw = await run(orbit_link, inp)
-            counts: list[list[float]] = []
+            counts: list[list[int]] = []
             if len(inp["ok"]) >= 3:
                 done = 0
 
-                async def one(k: int) -> list[float]:
+                async def one(k: int) -> list[int]:
                     nonlocal done
-                    r: list[float] = await run(orbit_trial, inp, k)
+                    r: list[int] = await run(orbit_trial, inp, k)
                     done += 1
                     say("control: the same candidates at chance places", done, ORBIT_TRIALS)
                     return r
