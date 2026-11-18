@@ -141,3 +141,48 @@ def test_people_are_spread_and_a_newcomer_never_gets_a_famous_square(
         seen.add((t["cell_id"], t["quarter"]))
         assert t["cell_id"] != "294-0148"  # the famous square is not a newcomer's
     assert len(seen) > 1  # spread
+
+
+def test_a_square_is_given_where_the_machine_finds_are_most_promising(
+    site: tuple[FastAPI, _State, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ "Give me a square": the quarters holding the best leads (Findings' Promising kinds) that nobody has looked through come first,
+    a random one of the first few, never a famous target's square for a newcomer; the task says which find; red sources do not count."""
+    import random
+
+    from service import accounts, grid, routes_tasks
+
+    app, st, _mail = site
+    _fake_grid(st)
+    fake(st, set())
+
+    def at(cell: str, q: str) -> tuple[float, float]:
+        qc = grid.quarter(grid.by_id(cell), q)
+        return qc.ra, qc.dec
+
+    def lead(fid: str, kind: str, cell: str, q: str, promise: int, status: str = "unexplained") -> dict[str, Any]:
+        ra, dec = at(cell, q)
+        return {"finding_id": fid, "kind": kind, "ra": ra, "dec": dec, "status": status, "promise": promise}
+
+    finds = [
+        lead("red:1", "red", "294-0150", "NE", 35),  # a red source: not a reason for a square
+        lead("browndwarf:1", "browndwarf", "294-0150", "SW", 77),
+        lead("film:1", "film", "294-0148", "NW", 60),  # the famous square's
+        lead("mover:1", "mover", "294-0149", "SE", 40, status="known"),  # known: not a lead
+    ]
+    monkeypatch.setattr(routes_tasks, "lead_findings", lambda st: finds)
+    monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
+    monkeypatch.setattr(routes_tasks, "famous_cells", lambda: {"294-0148"})
+    got = set()
+    for seed in range(8):
+        monkeypatch.setattr(routes_tasks, "RNG", random.Random(seed))
+        t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+        got.add((t["cell_id"], t["quarter"], (t.get("why") or {}).get("finding_id")))
+    assert got == {("294-0150", "SW", "browndwarf:1")}  # the newcomer never gets the famous square's track
+    assert routes_tasks.quarter_of(grid.by_id("294-0150"), *at("294-0150", "SW")) == "SW"
+    # once somebody has looked through that quarter, it is not given first any more: the stock's order
+    accounts.get(st).db._conn().execute("INSERT INTO grid_views VALUES ('294-0150','user:a','nothing',2.0,'SW')")
+    monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
+    t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    assert "why" not in t
