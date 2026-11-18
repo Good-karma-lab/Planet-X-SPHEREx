@@ -191,6 +191,119 @@ class QuickLook:
         return out
 
 
+FRAME_PLANES_UM = (4.5, 2.8, 1.3)  # red, green, blue: the long, middle and short ends of SPHEREx's bands (D6, D4, D2)
+FRAME_PX_ARCSEC = 6.45  # half a cube pixel: finer only repeats the cube's 12.9″ pixels
+FRAME_MAX = 512
+
+
+def _stretch(v: np.ndarray) -> np.ndarray:
+    """0..1 by an asinh stretch between the sky's median and its 99.7th percentile (NaN stays NaN)."""
+    ok = np.isfinite(v)
+    if ok.sum() < 16:
+        return np.full(v.shape, np.nan)
+    lo, hi = np.percentile(v[ok], [50.0, 99.7])
+    span = max(float(hi - lo), 1e-9)
+    x = np.clip((v - lo) / span, 0.0, None)
+    out: np.ndarray = np.clip(np.arcsinh(10.0 * x) / np.arcsinh(10.0), 0.0, 1.0)
+    return out
+
+
+def _claim(lay: TileLayout, a: np.ndarray, d: np.ndarray, filled: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The frame's pixels (sky places a, d) that fall in this cube tile and no earlier one: (mask, x, y) in the tile."""
+    w = WCS(fits.Header.fromstring(lay.wcs_header, sep="\n"), naxis=2)
+    x, y = w.all_world2pix(a, d, 0)
+    ok = np.isfinite(x) & np.isfinite(y)
+    xi = np.where(ok, np.rint(np.nan_to_num(x)), -1).astype(np.int64)
+    yi = np.where(ok, np.rint(np.nan_to_num(y)), -1).astype(np.int64)
+    inside = ok & (xi >= 0) & (xi < TILE) & (yi >= 0) & (yi < TILE) & ~filled
+    filled |= inside
+    return inside, xi, yi
+
+
+async def _read_tile(ql: QuickLook, lay: TileLayout, inside: np.ndarray, xi: np.ndarray, yi: np.ndarray, out: np.ndarray) -> int:
+    """Three planes of the claimed pixels, reading only the rows they span. Returns the bytes read."""
+    if not inside.any():
+        return 0
+    y0, y1 = int(yi[inside].min()), int(yi[inside].max())
+    lam = np.asarray(lay.lam or [], float)
+    planes = [
+        int(np.argmin(np.abs(lam - um))) if lam.size else min(lay.planes - 1, int(k * lay.planes / 3))
+        for k, um in enumerate(FRAME_PLANES_UM)
+    ]
+
+    async def rows(k: int) -> np.ndarray:
+        o = lay.data_offset + (k * TILE * TILE + y0 * TILE) * 4
+        b = await ql.s3.get_range(lay.key, o, o + (y1 - y0 + 1) * TILE * 4)
+        return np.frombuffer(b, dtype=">f4").reshape(y1 - y0 + 1, TILE).astype(np.float32)
+
+    blocks = await asyncio.gather(*(rows(k) for k in planes))
+    for c, blk in enumerate(blocks):
+        out[c][inside] = blk[yi[inside] - y0, xi[inside]]
+    return len(planes) * (y1 - y0 + 1) * TILE * 4
+
+
+def _encode(out: np.ndarray) -> tuple[bytes, float]:
+    import io
+
+    from PIL import Image
+
+    rgb = np.stack([_stretch(out[c]) for c in range(3)], axis=-1)
+    alpha = np.isfinite(rgb).all(axis=-1)
+    m = out.shape[1]
+    img = np.zeros((m, m, 4), np.uint8)
+    img[..., :3] = np.nan_to_num(rgb * 255.0).astype(np.uint8)
+    img[..., 3] = np.where(alpha, 255, 0)
+    buf = io.BytesIO()
+    Image.fromarray(img, "RGBA").save(buf, "PNG", optimize=True)
+    return buf.getvalue(), float(alpha.mean())
+
+
+async def frame(ql: QuickLook, ra: float, dec: float, fov_arcmin: float) -> tuple[bytes, dict[str, Any]]:
+    """A first look at a field from the DR1 all-sky cube, on the field's own grid (engine/grid.py: north up, east left, the image
+    spanning the grid's n × n pixels): a colour PNG of 4.5, 2.8 and 1.3 µm, transparent where the map has no data (a saturated
+    core, a gap). It is the survey's mosaic at 12.9″ pixels, shown while the field is built from the exposures (2–60 s cold), never
+    instead of it."""
+    import time
+
+    from engine.grid import grid_for_fov
+
+    t0 = time.monotonic()
+    g = grid_for_fov(ra, dec, fov_arcmin)
+    m = int(min(FRAME_MAX, max(64, math.ceil(g.n * g.step_arcsec / FRAME_PX_ARCSEC))))
+    gx = (np.arange(m) + 0.5) * g.n / m - 0.5  # the centres of the frame's pixels in grid pixels
+    a, d = g.grid_to_sky(*np.meshgrid(gx, gx))
+    out = np.full((3, m, m), np.nan, np.float32)
+    filled = np.zeros((m, m), bool)
+    tiles: list[int] = []
+    probe = [(int(i), int(j)) for i in np.linspace(0, m - 1, 9) for j in np.linspace(0, m - 1, 9)]
+    nbytes = 0
+    for _ in range(3):  # the tiles under a 9 × 9 sample, then those of any pixel still unclaimed (a corner sliver of a tile)
+        new = []
+        for i, j in probe:
+            t = ang2pix_nest(ORDER, float(a[i, j]), float(d[i, j]))
+            if t not in tiles and t not in new:
+                new.append(t)
+        if not new:
+            break
+        tiles += new
+        lays = await asyncio.gather(*(ql.layout(t) for t in new))
+        claims = [await asyncio.to_thread(_claim, lay, a, d, filled) for lay in lays]
+        nbytes += sum(await asyncio.gather(*(_read_tile(ql, lay, *c, out) for lay, c in zip(lays, claims, strict=True))))
+        left = np.argwhere(~filled)
+        probe = [(int(i), int(j)) for i, j in left[:: max(1, len(left) // 200)]]
+    png, covered = await asyncio.to_thread(_encode, out)
+    info = {
+        "source": f"SPHEREx DR1 all-sky spectral cube ({RELEASE}), HiPS order {ORDER} tiles {tiles}, 12.9″ pixels",
+        "planes_um": list(FRAME_PLANES_UM),
+        "grid": {"ra0": g.ra0, "dec0": g.dec0, "step_arcsec": g.step_arcsec, "n": g.n},
+        "size": m,
+        "covered": round(covered, 3),
+        "bytes_read": nbytes,
+        "seconds": round(time.monotonic() - t0, 2),
+    }
+    return png, info
+
+
 def _wavelengths(h: fits.Header, data: bytes, planes: int) -> list[float]:
     """The WAVELENGTH column of the WCS-WAVE table: one wavelength per plane (in µm), read from the row layout."""
     sizes = {"L": 1, "B": 1, "I": 2, "J": 4, "K": 8, "E": 4, "D": 8, "A": 1}

@@ -49,6 +49,8 @@ We read the first-year data release DR1 (`dr1/level2/` in the public bucket `nas
 
 The bucket also holds an all-sky HiPS spectral cube of DR1 (`dr1/hips5_cube/`, order 5, about 321 MB per tile) and the mission's per-pixel wavelength calibration (`dr1/spectral_wcs/`). The cube is the SPHEREx layer of the globe and the source of the quick-look spectrum; the calibration is used for the wavelength of every pixel (see Wavelength of a pixel).
 
+**A cold field's first frame.** While a field is built from its exposures (2 to 60 seconds when nothing of it is ready), `GET /api/v1/fields/quick` gives a first frame from the same cube within a second or two: three of its planes (4.5, 2.8 and 1.3 µm as red, green and blue), resampled by nearest pixel onto the field's own grid (north up, east left, the same n × n pixels as the field that follows) at 6.45″, half a cube pixel. Only the rows of the cube tile the field spans are read, by byte range (about 0.4 MB for a 10′ field, 4.5 MB for 60′). Each plane is stretched by asinh between the sky's median and its 99.7th percentile; where the cube has no value (a saturated core, a gap) the frame is transparent. It is the survey's mosaic, 12.9″ pixels and every visit added, so it shows the place, never motion, and it is replaced by the field as soon as the first pass is in.
+
 ## Reading only what a field needs
 
 A field of 2′ to 60′ is a small part of a 2040 × 2040 detector image, and S3 serves one byte range per request. The unit of reading is therefore a band of whole image rows, and we never download a whole file.

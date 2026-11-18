@@ -1059,6 +1059,36 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             raise HTTPException(404, "no such spectrum: ask for /api/v1/spectrum first")
         return run.stamps_view(since)
 
+    @app.get(f"{API_PREFIX}/fields/quick")
+    async def field_quick(
+        ra: float = Query(..., ge=0, lt=360), dec: float = Query(..., ge=-90, le=90), fov: float = Query(5, gt=0, le=60)
+    ) -> Any:
+        """A first frame of a field within a second or two, to show while a cold field is built (2–60 s): the DR1 all-sky cube's
+        mosaic at 12.9″ pixels in colour (4.5, 2.8, 1.3 µm), a PNG spanning the field's own grid (the same n × n pixels as the field
+        that follows, north up, east left), transparent where the map has no data. `X-Quick` says what it is made of."""
+        from service.quicklook import frame
+
+        if st.quicklook is None:
+            raise HTTPException(503)
+        params = fieldjob.canonical(ra, dec, fov)
+        cra, cdec, cfov = float(params["ra"]), float(params["dec"]), float(params["fov"])
+        path = cfg.store_dir / "quicklook" / "frames" / f"{cra:.5f}_{cdec:+.5f}_{cfov:g}.png"
+        head = {"Cache-Control": "public, max-age=86400"}
+        if path.is_file():
+            meta = path.with_suffix(".json")
+            return Response(
+                path.read_bytes(), media_type="image/png", headers={**head, "X-Quick": meta.read_text() if meta.is_file() else "{}"}
+            )
+        try:
+            png, info = await frame(st.quicklook, cra, cdec, cfov)
+        except Exception as e:  # the bucket did not answer: said, never cached
+            raise HTTPException(502, f"the all-sky cube could not be read: {type(e).__name__}") from e
+        text = jsonsafe.dumps(info, separators=(",", ":"), ensure_ascii=True)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.with_suffix(".json").write_text(text)
+        path.write_bytes(png)
+        return Response(png, media_type="image/png", headers={**head, "X-Quick": text})
+
     @app.get(f"{API_PREFIX}/spectrum/quicklook")
     async def spectrum_quicklook(
         ra: float = Query(..., ge=0, lt=360),

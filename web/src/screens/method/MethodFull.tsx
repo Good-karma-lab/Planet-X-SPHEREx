@@ -33,7 +33,7 @@ const CHANGES: [string, string, string][] = [
   [
     'M40',
     '2026-11-18',
-    'Findings and JPL: the precise second pass of Small-Body Identification, a track unexplained only once JPL answered, an undated peak never; what the identification queue asks first; the blend and stood-still rule with its chance level and the review of what it sets aside.',
+    'Findings and JPL: the precise second pass of Small-Body Identification, a track unexplained only once JPL answered, an undated peak never; what the identification queue asks first; the blend and stood-still rule with its chance level and the review of what it sets aside; a cold field\'s first frame from the all-sky cube.',
   ],
   [
     'M39',
