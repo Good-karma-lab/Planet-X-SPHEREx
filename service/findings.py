@@ -1435,7 +1435,7 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
                     "not a body. Not counted as a lead.")  # fmt: skip
         if why[0] == "still" and len(why) >= 5:
             rate, _ = _claimed_motion(f)
-            far = f", {rate * (EPOCH - float(why[4])):.0f}″ away by now" if rate else ""
+            far = f" {rate * (EPOCH - float(why[4])):.0f}″ away by now" if rate else ""
             return (f"{why[1]} has a source at this place ({why[2]}, {why[3]}″ away) in {float(why[4]):.0f}; moving as claimed it would be"
                     f"{far or ' far from it'}: it stood still. Not counted as a lead.")  # fmt: skip
         return "A blend or a source that stood still, not a body. Not counted as a lead."
