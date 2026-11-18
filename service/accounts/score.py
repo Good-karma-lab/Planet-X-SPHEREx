@@ -54,6 +54,7 @@ STAGE_OF_STATUS = {
     "below": "artefact",
     "halo": "artefact",
     "set_aside": "artefact",
+    "blend": "artefact",
 }
 GALACTIC_PLANE_DEG = 5.0
 ECLIPTIC_DEG = 10.0  # the grid's ecliptic band

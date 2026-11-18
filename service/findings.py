@@ -1798,8 +1798,11 @@ def query(
         sel = [f for f in sel if f["visible"] is not False]
     elif visibility == "unseen":
         sel = [f for f in sel if f["visible"] is False]
-    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6, "set_aside": 7}
-    sel.sort(key=lambda f: (rank[f["status"]], KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0)))
+    rank = {"unexplained": 0, "unchecked": 1, "known": 2, "residual": 3, "galaxy": 4, "below": 5, "halo": 6, "set_aside": 7, "blend": 8}
+    # a status this list does not know goes last, never a KeyError (a blend broke every list it was in)
+    sel.sort(
+        key=lambda f: (rank.get(f["status"], 99), KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0))
+    )
     if sort == "promise":
         # a find that can have no clip (a track whose visits are not kept, a place no field covers) goes below every find that can;
         # within equal promise the finds whose clip is ready come first: the first screen shows pictures, not empty cards
