@@ -1,3 +1,4 @@
+import { startTour } from '../../ui/Hints';
 import { REFERENCES } from './references';
 
 const REPO = 'https://github.com/Good-karma-lab/Planet-X-SPHEREx';
@@ -61,6 +62,11 @@ export function AboutBody() {
               github.com/Good-karma-lab/Planet-X-SPHEREx
             </a>{' '}
             (Apache-2.0).
+          </p>
+          <p class="mono-s">
+            <button class="cb-link" onClick={startTour} data-testid="hints-again">
+              Show the hints again
+            </button>
           </p>
           <p class="mono-s">Achievement badges generated with Google Gemini. The lab's loading video was generated with Google Gemini.</p>
           <p class="mono-s">

@@ -6,7 +6,7 @@ import { IndexV2 } from './index/IndexV2';
 import { AboutBody } from './about/About';
 import { FindingsView } from './findings/finds';
 import { useLeadParam } from './findings/leads';
-import { mountTour } from '../ui/Tour';
+import { mountTour } from '../ui/Hints';
 import { SearchedCounter, useSearched } from './search/searched';
 
 

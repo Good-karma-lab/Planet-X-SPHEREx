@@ -11,7 +11,7 @@ test('the rail switches screens by clicking', async ({ page }) => {
   });
   page.on('pageerror', (e) => errors.push(e.message));
 
-  await page.addInitScript(() => localStorage.setItem('spherex-tour-seen', '1')); // the first-visit tour is its own test
+  await page.addInitScript(() => localStorage.setItem('spherex-hints-seen-off', '1')); // the newcomer's hints are their own test
   await page.goto('/#/explore');
   await expect(page.getByTestId('sky')).toBeVisible();
   const heading: Record<string, RegExp> = { Findings: /^Findings$/, Index: /^Exposure index$/, Method: /SPHEREx files/, About: /^About$/ };
@@ -50,12 +50,12 @@ test('no horizontal overflow at phone width', async ({ page }) => {
   expect(overflow).toBeLessThanOrEqual(0);
 });
 
-test('a first-time visitor who clicks the rail right after the globe opens stays where they clicked (the tour does not take them back)', async ({
+test('a first-time visitor who clicks the rail right after the globe opens stays where they clicked (the hints never take them anywhere)', async ({
   page,
 }) => {
   await page.goto('/#/explore');
   await page.waitForTimeout(600);
   await page.locator('a[href="#/lab"]').first().click();
-  await page.waitForTimeout(3500); // past the tour's start (2.5 s)
+  await page.waitForTimeout(3500); // past the moment a hint appears (0.9 s)
   await expect(page).toHaveURL(/#\/lab$/);
 });
