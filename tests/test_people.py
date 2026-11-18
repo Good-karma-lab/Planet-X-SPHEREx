@@ -377,3 +377,25 @@ def test_talk_under_a_finding(site: tuple[FastAPI, Any], monkeypatch: pytest.Mon
     mine = [x for x in bob.get("/api/findings/film:1/comments").json()["comments"] if x["mine"]]
     assert bob.delete(f"/api/me/comments/{mine[0]['id']}").status_code == 204
     assert ann.delete(f"/api/me/comments/{mine[1]['id']}").status_code == 404  # not hers
+
+
+def test_a_hidden_find_is_a_control_object_and_judged_as_one(site: tuple[FastAPI, Any]) -> None:
+    """The default list hides a star's residual: as a control of the series it still reaches a person (each fifth task), it is never
+    an open task, and its answer is judged at once against the known one (here: a residual peak has no dot of its own)."""
+    app, st = site
+    residual = {"finding_id": "peak:residual", "kind": "peak", "status": "residual", "stage": "artefact", "ra": 20.0, "dec": 5.0,
+                "field_key": "k9"}  # fmt: skip
+    st.task_findings = lambda: [r for r in FINDS if r["finding_id"] != "film:known"]  # no known control among the leads
+    st.task_controls = lambda: [residual]
+    kim = _people(app)("kim")
+    got = []
+    for _ in range(5):
+        t = kim.get("/api/tasks/next", params={"kind": "moves"}).json()["task"]
+        got.append(t["finding_id"])
+        path = ["no"] if t["finding_id"] == "peak:residual" else ["not_sure"]
+        assert kim.post(f"/api/me/tasks/{t['id']}/done", json={"path": path}).status_code == 200
+    assert got[:4] == ["film:1", "film:2", "mover:1", "peak:1"] and got[4] == "peak:residual"
+    db = __import__("service.accounts", fromlist=["get"]).get(st).db
+    ev = db._conn().execute("SELECT kind, right FROM acc_score_events WHERE ref='peak:residual'").fetchall()
+    assert [(e["kind"], e["right"]) for e in ev] == [("control_peak", 1)]  # judged at once, right
+    assert db._conn().execute("SELECT COUNT(*) FROM acc_series_results WHERE finding_id='peak:residual'").fetchone()[0] == 0
