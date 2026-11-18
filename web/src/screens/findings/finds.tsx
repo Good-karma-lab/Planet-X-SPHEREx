@@ -25,8 +25,30 @@ export interface Ident {
 export function knownIn(idents: Ident[]): boolean {
   return idents.some((i) => i.catalogue !== 'halo' && i.state === 'ok');
 }
+/** a find's status in plain words (the service's: service/findings) and what it means, on hover */
+const STATUS_WORD: Record<string, string> = {
+  unchecked: 'not yet checked',
+  unexplained: 'unexplained',
+  known: 'known',
+  residual: 'residual',
+  blend: 'blend · stood still',
+  halo: "in a bright star's glow",
+  galaxy: 'a galaxy',
+  below: 'below the bar',
+  set_aside: 'set aside by people',
+};
+const STATUS_WHY: Record<string, string> = {
+  blend: 'Two sources side by side: their blend stood still while the ring moved. Not a lead',
+  halo: "A bump in the glow of a bright star. Not a lead",
+  residual: 'What is left after a known source is taken away. Not a lead',
+  below: 'Below the bar this field sets for a find',
+  set_aside: 'People agreed it is an artefact',
+};
+
 export interface Find {
   id: string;
+  /** the address word of the find (track-2e26f8ee6415): links use it, the id stays the key */
+  slug?: string;
   kind: string;
   place: string;
   fov: number;
@@ -36,7 +58,7 @@ export interface Find {
   snr: number | null;
   score: number | null;
   chance: number | null;
-  status: 'unexplained' | 'unchecked' | 'known' | 'residual';
+  status: 'unexplained' | 'unchecked' | 'known' | 'residual' | 'blend' | 'halo' | 'galaxy' | 'below' | 'set_aside';
   verdict: string;
   idents: Ident[];
   data: Record<string, any>;
@@ -141,6 +163,8 @@ export const knownName = (f: Find) => {
 
 export function titleOf(f: Find): string {
   const d = f.data;
+  // a blend is no candidate of anything: two sources side by side, standing still while the ring moved
+  if (f.status === 'blend') return `Blend of two sources · stood still${f.rate ? ` (ring ${(f.rate ?? 0).toFixed(1)}″/yr)` : ''}`;
   switch (f.kind) {
     case 'mover': {
       const nm = knownName(f);
@@ -448,8 +472,8 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
       <h3 class="lp-title">{titleOf(f)}</h3>
       <div class="mono-s">
         {f.place} · {(f.kind && KIND_SHORT[f.kind]) ?? f.kind} ·{' '}
-        <b class={f.status === 'known' ? 'st-known' : f.status === 'unchecked' || f.status === 'residual' ? 'st-wait' : 'st-un'}>
-          {f.status === 'unchecked' ? 'not yet checked' : f.status}
+        <b class={f.status === 'known' ? 'st-known' : f.status === 'unexplained' ? 'st-un' : 'st-wait'} title={STATUS_WHY[f.status] ?? ''}>
+          {STATUS_WORD[f.status] ?? f.status}
         </b>
       </div>
       <p class="fverdict">{f.verdict}</p>
@@ -526,7 +550,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
           Download JSON
         </a>
       </div>
-      <Talk id={f.id} next={`#/findings?lead=${encodeURIComponent(f.id)}`} />
+      <Talk id={f.id} next={`#/findings?lead=${encodeURIComponent(f.slug ?? f.id)}`} />
       <div class="mono-s fver">
         {Object.entries(f.versions)
           .map(([k, v]) => `${k} ${v}`)
@@ -916,7 +940,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
             <FindCard
               key={f.id}
               f={f}
-              current={leadId === f.id}
+              current={leadId === f.id || (!!f.slug && leadId === f.slug)}
               onOpen={setLeadId}
               mine={mine.includes(f.id)}
               people={peopleLine(peopleSaid[f.id])}

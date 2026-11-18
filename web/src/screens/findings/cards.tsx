@@ -6,6 +6,8 @@ import { cleanName } from './finds';
 /** A find as a card needs it (`GET /api/findings?lite=1`). */
 export interface CardFind {
   id: string;
+  /** the address word of the find (track-2e26f8ee6415): links use it */
+  slug?: string;
   kind: string;
   place: string;
   fov: number;
@@ -311,7 +313,7 @@ export function FindCard({
     <li class={`fcard glass${current ? ' on' : ''}`}>
       <button
         class="fcard-pic"
-        onClick={() => onOpen(f.id)}
+        onClick={() => onOpen(f.slug ?? f.id)}
         title="Open the report of this finding"
         aria-label={`Open the report: ${cardTitle(f)}`}
       >

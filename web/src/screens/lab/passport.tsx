@@ -5,6 +5,10 @@ import { useTalkCount } from '../findings/talk';
 
 export interface FindRecord {
   id: string;
+  /** the find's address word (track-2e26f8ee6415): the one used in links; the id stays the key for answers */
+  slug?: string;
+  /** its own catalogue answers (sbident is JPL's): what the find's badge stands on */
+  idents?: { catalogue: string; state: string; attempts?: number }[];
   kind: string;
   status?: string;
   stage?: string;
@@ -63,10 +67,10 @@ export function FindStatus({ id }: { id: string }) {
             stage {f.stage.replace(/_/g, ' ')}
           </span>
         )}
-        <a class="cb-link" href={`#/findings?lead=${encodeURIComponent(f.id)}`}>
+        <a class="cb-link" href={`#/findings?lead=${encodeURIComponent(f.slug ?? f.id)}`}>
           In Findings
         </a>
-        <TalkLink id={f.id} />
+        <TalkLink id={f.id} slug={f.slug} />
       </div>
       {nums.length > 0 && (
         <div class="mono-s">
@@ -85,10 +89,10 @@ export function FindStatus({ id }: { id: string }) {
 }
 
 /** the find's Talk in Findings, with how many comments it has */
-function TalkLink({ id }: { id: string }) {
+function TalkLink({ id, slug }: { id: string; slug?: string }) {
   const n = useTalkCount(id);
   return (
-    <a class="cb-link" href={`#/findings?lead=${encodeURIComponent(id)}`} title="Comments and links under this finding" data-testid="talk-link">
+    <a class="cb-link" href={`#/findings?lead=${encodeURIComponent(slug ?? id)}`} title="Comments and links under this finding" data-testid="talk-link">
       Talk{n ? ` · ${n}` : ''}
     </a>
   );

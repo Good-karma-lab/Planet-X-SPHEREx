@@ -799,3 +799,13 @@ export function followFieldKnown(ra: number, dec: number, fov: number, on: (f: F
     stop = true;
   };
 }
+
+/** The catalogue line of a find with JPL's answer taken from the find's own check (sbident: none = no known body, ok = a body):
+ *  the picture's lookup may still be asking JPL, which beside an UNEXPLAINED badge read as a contradiction. */
+export function withFindJpl(word: string, state: string): string {
+  if ((state !== 'none' && state !== 'ok') || !/\bJPL\b/.test(word)) return word;
+  const rest = word
+    .replace(/, JPL\b|\bJPL, |\bJPL\b(?= (being asked|did not answer))/, '')
+    .replace(/^no match so far ·\s+(being asked|did not answer)$/, 'in no catalogue');
+  return state === 'none' ? `${rest} · JPL: no known body there` : rest;
+}
