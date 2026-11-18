@@ -1,6 +1,7 @@
 // The product-flow pieces of the lab (product spec §5 Lab): Known objects, marks, the ruler. One hook, `useLabFlow`, which lab.tsx
 // calls; it returns what the lab draws on its overlay, what it puts over the picture and in the Controls panel, and its status line.
 import { formatHash, parseHash } from '../../lib/route';
+import { CHECK_GLYPH, CHECK_WORD, checksVerdict, useMarkChecks, useMarkVerdicts } from './markchecks';
 import type { ComponentChildren } from 'preact';
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
 import {
@@ -38,7 +39,7 @@ import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, taskTrack, useLabTask, type NextTask } from './task';
 import { FindingClip, MoverView, StampsView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
-import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, withFindJpl, type FieldKnown, type Held } from './known';
+import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, withFindJpl, withFindStatus, type FieldKnown, type Held } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
 import { clearDo, pendingDo, useSignIn } from './signin';
 import { useRetry, type SearchInfo } from './progress';
@@ -108,12 +109,20 @@ export interface FlowArgs {
   showVisit: (mjd: number) => void;
   /** the visit on show in Days (null in Months) */
   visit: number | null;
+  /** in Days: the index of the pass whose visits play (a mark put there belongs to it), null in Months */
+  daysPass: number | null;
   /** the selected find's own catalogue answers (its record in Findings): what its badge stands on */
   findIdents?: { catalogue: string; state: string }[] | null;
+  /** the selected find's status in Findings (unexplained, known, blend…): its catalogue line agrees with it */
+  findStatus?: string | null;
   /** a date's visit in the pass on show, numbered as the time line numbers it (1 to nVisits); null outside Days or off every visit */
   visitOf: (mjd: number) => number | null;
   /** how many visits the pass on show has in Days (0 in Months) */
   nVisits: number;
+  /** stops the time-lapse on the frame on show (Mark needs a still picture to click on) */
+  pause: () => void;
+  /** the field's passes (or the visits of the pass, in Days) are on the picture: a question can be answered by looking */
+  ready: boolean;
 }
 
 const ICON_MARK =
@@ -149,6 +158,13 @@ const LEVEL_COLOUR: Record<MarkLevel, string> = { suspicious: '#ff9d5c', interes
 const KIND_COLOUR: Record<MarkKind, string> = { moves: '#ffd08a', not_in_catalogues: '#7fd8ff', artefact: '#aab4b9', odd: '#d7a6ff' };
 const KIND_WORD: Record<MarkKind, string> = { moves: 'It moves', not_in_catalogues: 'Not in catalogues', artefact: 'Artefact', odd: 'Something odd' };
 const KIND_SHORT: Record<MarkKind, string> = { moves: 'It moves', not_in_catalogues: 'Not in catalogues', artefact: 'Artefact', odd: 'Odd' };
+/** what the service does with a mark of each kind when it is sent (spec §5g): said in step 3 when nothing newer is known */
+const SENT_WORD: Record<MarkKind, string> = {
+  moves: 'checks running',
+  not_in_catalogues: 'catalogues asked again',
+  artefact: 'counted with the others',
+  odd: 'in the Talk of this place',
+};
 const LOOK_WORD: Record<string, string> = { blinks: 'Blinks on and off', glare: 'Glare or ghost', spike: 'Spike', edge: 'Picture edge', hot_dot: 'One hot dot' };
 /** what the server did with a mark, as the picture's status line says it (spec §5g) */
 export function effectWord(e: MarkEffect | null): string {
@@ -303,6 +319,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const marksRef = useRef(marks);
   marksRef.current = marks;
   const [tool, setTool] = useState<FlowTool>(null);
+  // Mark armed: the time-lapse stops on the frame on show, so what is clicked stays where it is
+  useEffect(() => {
+    if (tool === 'mark') a.pause();
+  }, [tool]);
   // spec §5g "It moves": after the first mark of a mover the lab shows the pass farthest from it and asks for the same thing there
   const [tapHere, setTapHere] = useState<{ id: string; label: string; ra: number; dec: number; pass: number; passLabel: string } | null>(null);
   const tapRef = useRef(tapHere);
@@ -962,7 +982,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           if (!sessionStorage.getItem('spherex.marks.asked')) {
             sessionStorage.setItem('spherex.marks.asked', '1');
             // the sign-in link comes back here with this mark in the address: it is put there again if this browser lost it
-            si.ask('marks', `mark:${ra.toFixed(5)},${dec.toFixed(5)},${a.pass ?? ''}`);
+            si.ask('marks', `mark:${ra.toFixed(5)},${dec.toFixed(5)},${a.pass ?? a.daysPass ?? ''}`);
           }
         } catch {
           /* no store: no popup */
@@ -975,7 +995,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         cell_id: a.params['cell'] ?? null,
         ra,
         dec,
-        pass: a.pass,
+        // in Days the mark belongs to the pass whose visits play (it used to be saved with no pass)
+        pass: a.pass ?? a.daysPass,
         label: tapHere ? tapHere.label : `Mark ${n}`,
         level: tapHere ? LEVEL_OF_KIND.moves : 'suspicious',
         ...(tapHere ? { kind: 'moves' as const, link: tapHere.id } : {}),
@@ -1063,7 +1084,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     const cat = a.epochNow != null ? catalogueAt(known, place.ra, place.dec, a.epochNow) : null;
     const rl = ruler.length === 2 ? rulerOf(ruler[0]!, ruler[1]!) : null;
     const body = {
-      id: m ? m.id : `src:${place.ra.toFixed(5)},${place.dec.toFixed(5)}`,
+      // the service takes letters, digits and _-:. only (a comma was refused with 422): the place as src:RA_Dec
+      id: m ? m.id : `src:${place.ra.toFixed(5)}_${place.dec.toFixed(5)}`,
       label: (m ? m.label : a.sel?.name) || `${place.ra.toFixed(5)} ${place.dec >= 0 ? '+' : ''}${place.dec.toFixed(5)}`,
       ra: place.ra,
       dec: place.dec,
@@ -1105,6 +1127,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       });
       if (r.status === 401) return setInvLine('Sign in to add to an investigation');
       if (r.status === 409) return setInvLine('This investigation is closed or full');
+      if (r.status >= 400 && r.status < 500) {
+        // a refusal, in the service's own words (it did answer)
+        const d = (await r.json().catch(() => null)) as { detail?: unknown } | null;
+        const why = typeof d?.detail === 'string' ? d.detail : Array.isArray(d?.detail) ? 'the object could not be read' : `the service said ${r.status}`;
+        return setInvLine(`Not added: ${why}`);
+      }
       if (!r.ok) throw new Error(String(r.status));
       const got = (await r.json()) as { id?: string; title?: string; mark_ids?: string[] };
       if (!got.id) throw new Error('no id');
@@ -1254,6 +1282,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     },
     showPicture: (mjd) => a.showVisit(mjd),
     visitOf: a.visitOf,
+    ready: a.ready,
   });
   const taskRef = useRef(taskView);
   taskRef.current = taskView;
@@ -1300,6 +1329,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const taskPanel = taskView.panel;
 
   const cur = open ? (marks.find((m) => m.id === open) ?? null) : null;
+  // the open mover mark's checks (its investigation): followed while they run, ended by their verdict
+  const curGroup = cur ? [cur.id, ...marks.filter((q) => q.id !== cur.id && headOf(q, marks)?.id === cur.id).map((q) => q.id)] : [];
+  const markChecks = useMarkChecks(cur?.kind === 'moves' ? curGroup : [], si.signedIn);
+  // every mark's verdict from the service (known, no match, waiting for JPL…): asked again when a mark changes
+  const verdicts = useMarkVerdicts(si.signedIn, marks.map((m) => `${m.id}:${m.kind ?? ''}`).join(','));
   // Esc leaves a tool, then closes the open mark
   const toolRef = useRef(tool);
   toolRef.current = tool;
@@ -1387,7 +1421,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // a find: JPL's answer is the find's own (asked for every visit of its track), never the picture's lookup, which may still be
     // waiting: "JPL did not answer" beside an UNEXPLAINED badge read as a contradiction
     const jpl = !cur ? a.findIdents?.find((i) => i.catalogue === 'sbident') : undefined;
-    return jpl ? withFindJpl(w, jpl.state) : w;
+    const w2 = !cur ? withFindStatus(w, a.findStatus) : w;
+    return jpl ? withFindJpl(w2, jpl.state) : w2;
   };
   // where the selected source is on the date shown: a moving one carries its J2000 place and its motion
   const selNow = (): { ra: number; dec: number } | null => {
@@ -1456,7 +1491,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         cell_id: a.params['cell'] ?? null,
         ra,
         dec,
-        pass: mpass ? Number(mpass) : a.pass,
+        pass: mpass ? Number(mpass) : (a.pass ?? a.daysPass),
         label: `Mark ${marksRef.current.length + 1}`,
         level: 'suspicious',
         note: '',
@@ -1473,13 +1508,34 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   }, [si.signedIn, !!a.sel, open]);
   // a mark's way to the checks, in three steps: marked · what it is · what the service does with it (spec §5g)
   const markEff = lastMarkEffect();
-  const stepThree = (m: Mark): { text: string; state: 'wait' | 'now' | 'done'; signIn?: boolean } => {
+  const stepThree = (m: Mark): { text: string; state: 'wait' | 'now' | 'done' | 'bad' | 'known'; signIn?: boolean } => {
     if (!m.kind) return { text: 'Checks', state: 'wait' };
     if (tapHere && tapHere.id === m.id) return { text: `Tap it in ${tapHere.passLabel}`, state: 'now' };
     if (!si.signedIn) return { text: 'Sign in to send it', state: 'now', signIn: true };
+    // the service's own verdict on this mark (or on its mover's other mark), when it has one and no checks are running
+    const vd = [m.id, ...marks.filter((q) => headOf(q, marks)?.id === m.id).map((q) => q.id)].map((id) => verdicts[id]).find(Boolean);
+    if (vd && vd.state !== 'checking') {
+      // known: a final answer, not a fault (its own quiet look); no catalogue match: the good news; the rest still waits
+      const st: 'now' | 'done' | 'known' = vd.state === 'known' ? 'known' : vd.state === 'no_match' ? 'done' : 'now';
+      return { text: vd.text, state: st };
+    }
+    if (m.kind === 'moves') {
+      // the checks of its investigation, as they answer, then their verdict
+      if (markChecks && markChecks !== 'none') {
+        // the pill says it in a word; the verdict in full is the line under the checks
+        const v = checksVerdict(markChecks);
+        const rows = markChecks.checks;
+        const answered = rows.filter((x) => ['pass', 'warn', 'fail'].includes(x.state)).length;
+        return { text: v.state === 'bad' ? 'Checks ✗' : v.state === 'done' ? 'Checks ✓' : `Checks · ${answered} of ${rows.length || 8}`, state: v.state };
+      }
+      // one pass only: the checks start with its mark on another pass
+      if (curGroup.length < 2 && a.passes.length >= 2) return { text: 'Mark it on another pass too', state: 'now' };
+      return { text: markChecks === 'none' ? 'waiting for the service' : 'asking…', state: 'now' };
+    }
     const mine = markEff && (markEff.id === m.id || marks.some((q) => q.id === markEff.id && headOf(q, marks)?.id === m.id));
     const w = mine ? effectWord(markEff) : '';
-    return w ? { text: w.replace(/^It moves · /, ''), state: 'done' } : { text: 'sending…', state: 'now' };
+    // what the service did with a mark of this kind (said at once when it was put; after a reload, what it does)
+    return { text: w || SENT_WORD[m.kind], state: 'done' };
   };
   const card =
     cur || a.sel ? (
@@ -1528,6 +1584,21 @@ export function useLabFlow(a: FlowArgs): LabFlow {
                 </ol>
               );
             })()}
+            {cur.kind === 'moves' && markChecks && markChecks !== 'none' && markChecks.checks.length > 0 && (
+              <div class="oc-checks" data-testid="mark-checks">
+                <div class={`oc-verdict v-${checksVerdict(markChecks).state}`} data-testid="mark-verdict">
+                  {checksVerdict(markChecks).text}
+                </div>
+                {markChecks.checks.map((c) => (
+                  <span key={c.id} class={`ck ck-${c.state}`} title={c.detail || c.state}>
+                    {CHECK_GLYPH[c.state] ?? '…'} {CHECK_WORD[c.id] ?? c.id}
+                  </span>
+                ))}
+                <a class="cb-link" href={`#/me?tab=investigations&inv=${encodeURIComponent(markChecks.inv)}`}>
+                  {markChecks.state === 'ready' || markChecks.state === 'needs_comment' ? 'Check and submit ›' : 'In the Cabinet ›'}
+                </a>
+              </div>
+            )}
             <div class="oc-kinds" role="group" aria-label="What it is" data-testid="mark-kinds">
               {MARK_KINDS.map((k) => (
                 <button

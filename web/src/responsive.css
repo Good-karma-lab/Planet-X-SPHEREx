@@ -2399,3 +2399,29 @@
 }
 /* the Mark button's way under its words, at every width */
 .taskpanel .tp-missed, .candlist .tp-missed { flex-direction: column; }
+
+/* the sheet's handle, easier to see (explore round 3): a brighter, wider bar with a small arrow while the sheet is down */
+@media (max-width: 1279.98px) {
+  :root .sheet-grip i {
+    width: 56px;
+    background: rgba(200, 240, 248, 0.7);
+    position: relative;
+  }
+  :root .sheet-grip[aria-expanded='false'] i::before,
+  :root .sheet-grip[aria-expanded='false'] i::after {
+    content: '';
+    position: absolute;
+    top: -1px;
+    width: 6px;
+    height: 6px;
+    border-left: 2px solid rgba(200, 240, 248, 0.7);
+    border-top: 2px solid rgba(200, 240, 248, 0.7);
+    transform: rotate(45deg);
+  }
+  :root .sheet-grip[aria-expanded='false'] i::before { left: -16px; }
+  :root .sheet-grip[aria-expanded='false'] i::after { right: -16px; }
+}
+@media (max-width: 599.98px) and (min-height: 480px) {
+  /* at rest the question says what the task is: its small header line gives its height to the picture */
+  :root .lab .panel[data-detent='peek'] .taskpanel .tp-head { display: none; }
+}

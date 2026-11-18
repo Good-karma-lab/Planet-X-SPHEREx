@@ -14,6 +14,8 @@ export interface Source {
   /** a moving body (an asteroid track of the film search): its brightness changes with its distance from the Sun and the Earth and with
    *  its phase, so it has no variable-star verdict; JPL's predicted V and what each visit shows are given instead */
   moving?: { V?: number | null; visits: { n: number; z: number; how: 'found' | 'recovered' }[] };
+  /** a moving body's place is for one moment: which ("visit 9 of 13 · 17 Feb"), said beside the position */
+  at?: string;
 }
 
 export interface SpecPoint {

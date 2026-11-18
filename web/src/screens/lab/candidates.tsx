@@ -210,7 +210,19 @@ export function CandList({
 }) {
   const list = orderRows(rows.filter((r) => !r.group));
   const folded = orderRows(rows.filter((r) => r.group));
+  // the folded group: open by itself when short, and when its count is clicked in the searches' row
   const [openGroup, setOpenGroup] = useState(false);
+  const shortGroup = folded.length > 0 && folded.length <= 10;
+  useEffect(() => setOpenGroup(shortGroup), [shortGroup, field.ra, field.dec, field.fov]);
+  const groupRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const on = () => {
+      setOpenGroup(true);
+      setTimeout(() => groupRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }), 50);
+    };
+    window.addEventListener('spherex:open-group', on);
+    return () => window.removeEventListener('spherex:open-group', on);
+  }, []);
   // the top rows are on show; "All N" opens the rest (the column below keeps its place)
   const [all, setAll] = useState(false);
   const shown = all ? list : list.slice(0, TOP_ROWS);
@@ -219,7 +231,12 @@ export function CandList({
     const fid = r.group ? findOfRow(r, finds) : null;
     return (
       <div key={r.key} class="crow-wrap">
-        <button class={`crow s-${r.status}${selected === r.key ? ' on' : ''}`} onClick={r.pick} data-testid="cand-row">
+        <button
+          class={`crow s-${r.status}${selected === r.key ? ' on' : ''}`}
+          onClick={r.pick}
+          aria-label={`${r.name}: ${r.line} · ${STATUS_WORD[r.status]}`}
+          data-testid="cand-row"
+        >
           <Still uv={r.uv} picture={picture} path={r.path} />
           <span class="cr-text">
             <b title={r.name}>{r.name}</b>
@@ -250,7 +267,7 @@ export function CandList({
       )}
       {!list.length && <div class="cr-none">{busy ? 'Searching…' : 'Nothing unexplained here'}</div>}
       {folded.length > 0 && (
-        <details class="cr-group" open={openGroup} onToggle={(e) => setOpenGroup((e.target as HTMLDetailsElement).open)} data-testid="cand-group">
+        <details class="cr-group" ref={groupRef} open={openGroup} onToggle={(e) => setOpenGroup((e.target as HTMLDetailsElement).open)} data-testid="cand-group">
           <summary>
             Red sources and anomalies · {folded.length}
           </summary>

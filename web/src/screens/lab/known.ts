@@ -802,6 +802,14 @@ export function followFieldKnown(ra: number, dec: number, fov: number, on: (f: F
 
 /** The catalogue line of a find with JPL's answer taken from the find's own check (sbident: none = no known body, ok = a body):
  *  the picture's lookup may still be asking JPL, which beside an UNEXPLAINED badge read as a contradiction. */
+/** A find's catalogue line beside its status: an unexplained find matched only by a catalogue that names no object (CatWISE,
+ *  AllWISE, 2MASS, a faint Gaia source) is not "known": that catalogue saw a source there and does not say what it is. */
+export function withFindStatus(word: string, status: string | null | undefined): string {
+  if (status !== 'unexplained') return word;
+  const m = /^known · in (.+)$/.exec(word);
+  return m ? `in ${m[1]}, which does not say what it is` : word;
+}
+
 export function withFindJpl(word: string, state: string): string {
   if ((state !== 'none' && state !== 'ok') || !/\bJPL\b/.test(word)) return word;
   const rest = word

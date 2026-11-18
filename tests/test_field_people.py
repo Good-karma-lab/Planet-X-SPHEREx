@@ -304,3 +304,17 @@ def test_a_mark_made_before_the_single_check_gets_its_answer(site: tuple[FastAPI
     assert asyncio.run(fp.retry_due()) == 1
     v = {m["id"]: m for m in ann.get("/api/me/marks").json()["marks"]}["mv-0000201"]["verdict"]
     assert v["state"] == "known" and v["name"] == "12304 (1991 SR1)"
+
+
+def test_jpl_still_being_asked_is_checking_not_a_failure(site: tuple[FastAPI, Any]) -> None:
+    """JPL's answer takes a minute or two: "pending" is not "did not answer"; the mark says it is asking and looks again in a minute."""
+    app, st = site
+    ann = _people(app)("ann")
+    st.jpl_state = "pending"
+    got = _mark(ann, "mv-0000301", "moves", 62.0, 9.0, **{"mjd": 61085.6})
+    assert got["effect"]["state"] == "checking"
+    v = {m["id"]: m for m in ann.get("/api/me/marks").json()["marks"]}["mv-0000301"]["verdict"]
+    assert v["state"] == "checking" and "Asking JPL" in v["text"]
+    db = field_people.get(st, accounts.get(st).db).db
+    row = db._conn().execute("SELECT data FROM acc_people_jobs WHERE id='single:mv-0000301'").fetchone()
+    assert '"tries": 0' in row[0]  # no try spent

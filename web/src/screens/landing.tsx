@@ -3,6 +3,7 @@
 // drawn from inside the sphere with a stereographic camera that turns as the page scrolls. Nothing is drawn or modelled on it.
 // Pictures on the page are real SPHEREx frames and DSS plates (web/public/landing/). Styles: ../landing.css (classes lp-).
 import { visibleInterval } from '../lib/idle';
+import { useUser, type User } from '../lib/account';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import '../landing.css';
 
@@ -44,8 +45,24 @@ const SECTIONS: [string, string][] = [
   ['challenge', 'The challenge'],
 ];
 
+/** The Cabinet, the account's own page. */
+const CABINET = '#/me';
+const initial = (u: User) => (u.name || u.email || '?').trim().charAt(0).toUpperCase() || '?';
+
+/** A signed-in person's way to their Cabinet in the top bar: their initial and "Cabinet" (the initial alone, or the menu, on a phone). */
+function CabinetLink({ user }: { user: User }) {
+  return (
+    <a class="lp-btn lp-btn-sm lp-btn-ghost lp-me" href={CABINET} title={`Cabinet · ${user.name || user.email}`} aria-label={`Cabinet, signed in as ${user.name || user.email}`} data-testid="landing-cabinet">
+      <span class="lp-me-ini" aria-hidden="true">
+        {initial(user)}
+      </span>
+      <span class="lp-me-word">Cabinet</span>
+    </a>
+  );
+}
+
 /** The section links in a small menu, for a window too narrow for them in the bar (landing.css shows the button below 1080 px). */
-function NavMenu() {
+function NavMenu({ user }: { user: User | null }) {
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -76,9 +93,25 @@ function NavMenu() {
         <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
           {open ? <path d="M6 6l12 12M18 6L6 18" /> : <path d="M4 7h16M4 12h16M4 17h16" />}
         </svg>
+        {/* signed in, on a window too narrow for the Cabinet button: the initial on the menu button says so */}
+        {user && (
+          <span class="lp-menu-ini" aria-hidden="true">
+            {initial(user)}
+          </span>
+        )}
       </button>
       {open && (
         <div class="lp-menu-list" id="lp-menu-list">
+          {user && (
+            <a class="lp-menu-me" href={CABINET} onClick={() => setOpen(false)} data-testid="landing-menu-cabinet">
+              <span class="lp-me-ini" aria-hidden="true">
+                {initial(user)}
+              </span>
+              <span>
+                Cabinet <small>{user.name || user.email}</small>
+              </span>
+            </a>
+          )}
           {SECTIONS.map(([id, label]) => (
             <a key={id} href={`#${id}`} onClick={go(id)}>
               {label}
@@ -210,10 +243,10 @@ function SkyBackdrop({ scroller }: { scroller: () => HTMLElement | null }) {
 const PM = { ra: -0.801551, dec: 10.362394 };
 const at = (t: number): [number, number] => [50 - (PM.ra * (t - 2000)) / 14.4, 50 - (PM.dec * (t - 2000)) / 14.4];
 /** Dates of real images of this place (the app's archive list); the path on the 1950 and 1991 plates was checked within 0.3 %. */
-const EPOCHS: { t: number; lab: string; sub: string; future?: boolean }[] = [
+const EPOCHS: { t: number; lab: string; sub: string; future?: boolean; to?: number }[] = [
   { t: 1950.52, lab: '1950', sub: 'POSS-I plate' },
   { t: 1988.36, lab: '', sub: '' },
-  { t: 1991.46, lab: '1988–93', sub: 'POSS-II plates' },
+  { t: 1991.46, lab: '1988–93', sub: 'POSS-II plates', to: 1993 },
   { t: 1993.57, lab: '', sub: '' },
   { t: 2000.41, lab: '2000', sub: '2MASS' },
   { t: 2010.7, lab: '2010', sub: 'AllWISE' },
@@ -224,6 +257,12 @@ const A = at(1950.52);
 const B = at(2050);
 const LEN = Math.hypot(B[0] - A[0], B[1] - A[1]);
 const U: [number, number] = [(B[0] - A[0]) / LEN, (B[1] - A[1]) / LEN];
+
+/** The year the box shows (the whole year the dot is in) is the year of a labelled image (or lies in its span: the POSS-II plates, 1988–93). */
+const hitYear = (e: (typeof EPOCHS)[number], ts: number) => {
+  const y = Math.floor(ts);
+  return y >= Number(e.lab.slice(0, 4)) && y <= (e.to ?? Number(e.lab.slice(0, 4)));
+};
 
 function PathHero() {
   const [t, setT] = useState(reducedMotion() ? NOW : 1950.5);
@@ -236,10 +275,13 @@ function PathHero() {
   const ts = Math.min(t, 2050);
   const [mx, my] = at(ts);
   const inCore = Math.hypot(mx - nx, my - ny) < R;
-  const last = EPOCHS.filter((e) => e.t <= ts + 0.3 && e.lab).pop();
   // the dot is in the SPHEREx years (inside the ring): the card and the ring light up, the strongest highlight of the path
   const nowHit = Math.abs(ts - NOW) < 3;
-  const sub = Math.abs(ts - NOW) < 3 ? 'SPHEREx' : ts > 2027 ? 'the future' : last ? last.sub : '';
+  // the year box names a survey only while the dot stands on that survey's date (the same rule lights its label on the path);
+  // between them the dot is where Gaia's motion puts it
+  const at0 = EPOCHS.find((e) => e.lab && !e.future && hitYear(e, ts));
+  const year = Math.floor(ts);
+  const sub = year === 2025 || year === 2026 ? 'SPHEREx' : year > 2026 ? 'the future' : at0 ? at0.sub : 'Gaia motion';
   return (
     <figure class="lp-live-fig">
       <div
@@ -267,7 +309,7 @@ function PathHero() {
         {EPOCHS.filter((e) => e.lab).map((e) => {
           const [x, y] = at(e.t);
           return (
-            <span key={e.t} class={`lp-plab ${Math.abs(e.t - ts) < 3 ? 'hit' : ''}`} style={{ left: `${x + 2.6}%`, top: `${y}%` }}>
+            <span key={e.t} class={`lp-plab ${hitYear(e, ts) ? 'hit' : ''}`} style={{ left: `${x + 2.6}%`, top: `${y}%` }}>
               {e.lab} <small>{e.sub}</small>
             </span>
           );
@@ -282,7 +324,7 @@ function PathHero() {
           moves 10.4″ a year (Gaia)
         </div>
         <div class="lp-pyear">
-          {Math.round(ts)}
+          {year}
           <small>{sub}</small>
         </div>
       </div>
@@ -423,6 +465,7 @@ function LatestDiscovery() {
 
 export function Landing() {
   const scroller = useRef<HTMLDivElement>(null);
+  const { user } = useUser();
   return (
     <div class="lp" ref={scroller} data-testid="landing">
       <SkyBackdrop scroller={() => scroller.current} />
@@ -445,10 +488,11 @@ export function Landing() {
             <a href={REPO} target="_blank" rel="noopener noreferrer" data-testid="landing-source">
               Source code
             </a>
+            {user && <CabinetLink user={user} />}
             <a class="lp-btn lp-btn-primary lp-btn-sm" href={START} data-testid="landing-open">
               Start searching
             </a>
-            <NavMenu />
+            <NavMenu user={user} />
           </nav>
         </div>
       </header>
@@ -493,10 +537,11 @@ export function Landing() {
                 <li>
                   {/* one text run: in the flex item the link would be an item of its own, with the gap as a second space */}
                   <span>
-                    Free, no account,{' '}
+                    Free,{' '}
                     <a href={REPO} target="_blank" rel="noopener noreferrer">
                       open source
-                    </a>
+                    </a>{' '}
+                    · look without an account; sign in to keep your marks and answers
                   </span>
                 </li>
               </ul>

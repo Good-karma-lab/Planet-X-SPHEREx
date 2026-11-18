@@ -434,3 +434,20 @@
 /* a word with its meaning on hover: a dotted underline says so */
 .hov[title] { text-decoration: underline dotted rgba(160, 190, 200, 0.45); text-underline-offset: 3px; cursor: help; }
 .look-missed { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; height: auto; padding-top: 5px; padding-bottom: 5px; }
+/* a mark's checks as they answer, and its verdict */
+.objcard .oc-steps li.bad { color: #ffb3b3; border-color: rgba(255, 120, 120, 0.5); background: rgba(255, 120, 120, 0.07); white-space: normal; }
+.objcard .oc-checks { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: -2px 0 8px; font: 500 11px var(--mono); color: var(--muted); align-items: center; }
+.objcard .oc-checks .ck { white-space: nowrap; cursor: help; }
+.objcard .oc-checks .ck-pass { color: #9fe6c4; }
+.objcard .oc-checks .ck-warn { color: #ffd08a; }
+.objcard .oc-checks .ck-fail { color: #ffb3b3; }
+.objcard .oc-checks .ck-running, .objcard .oc-checks .ck-no_answer { color: var(--faint); }
+.objcard .oc-checks .cb-link { margin-left: auto; }
+.searchrow .sr-open { background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; text-decoration: underline dotted rgba(160, 190, 200, 0.5); text-underline-offset: 3px; }
+.searchrow .sr-open:hover { color: var(--ink); }
+.objcard .oc-checks .oc-verdict { flex: 1 1 100%; font: 600 12px var(--font); color: var(--ink); }
+.objcard .oc-checks .oc-verdict.v-bad { color: #ffb3b3; }
+.objcard .oc-checks .oc-verdict.v-done { color: #9fe6c4; }
+.objcard .oc-checks .oc-verdict.v-now { color: #ffd08a; }
+.objcard .oc-steps li.known { color: var(--ink); border-color: rgba(150, 215, 205, 0.5); background: rgba(150, 215, 205, 0.07); white-space: normal; }
+.objcard .oc-steps li.done:last-child, .objcard .oc-steps li.now:last-child { white-space: normal; }

@@ -271,7 +271,7 @@ a.cb-row2:hover { background: rgba(95, 227, 214, 0.07); }
 .cb-x:hover { color: var(--bad); border-color: rgba(255, 111, 111, 0.4); }
 .cb-row2 .cb-pic .cb-pic-big { left: auto; right: calc(100% + 10px); }
 .cb-worklist .cb-row2 .cb-pic .cb-pic-big { left: calc(100% + 10px); right: auto; }
-@media (max-width: 1100px) { .cb-cols { grid-template-columns: 1fr; } .cb-stats { display: none; } }
+@media (max-width: 1100px) { .cb-cols { grid-template-columns: minmax(0, 1fr); } .cb-stats { display: none; } }
 @media (max-width: 700px) {
   .cb-top h1 { font-size: 20px; }
   .cb-namebtn b { display: none; }
@@ -296,3 +296,18 @@ a.cb-row2:hover { background: rgba(95, 227, 214, 0.07); }
 .cb-pic .cb-src { position: absolute; left: 4px; bottom: 3px; font: 600 10.5px var(--mono); letter-spacing: 0.06em; color: rgba(214, 231, 237, 0.75); text-shadow: 0 0 3px #000; pointer-events: none; }
 .cb-pic:has(> canvas), .cb-pic:has(> img) { border-style: solid; }
 .cb-pic.cb-icontile { display: grid; place-items: center; border-style: solid; color: var(--accent-l); background: radial-gradient(circle at 50% 40%, rgba(95, 227, 214, 0.12), rgba(2, 7, 10, 0.9)); }
+/* sign-out on its way: the item keeps its place and size, says "Signing out…" and takes no second click */
+.cb-menuitem:disabled { cursor: default; }
+.cb-menuitem:disabled:hover { background: none; }
+.cb-menuitem.danger:disabled { opacity: 0.45; }
+.cb-menuitem.busy { color: var(--accent-l); }
+.cb-spin { box-sizing: border-box; flex: none; width: 13px; height: 13px; border-radius: 50%; border: 2px solid rgba(95, 227, 214, 0.25); border-top-color: var(--accent-l); animation: cb-spin 0.8s linear infinite; }
+@keyframes cb-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .cb-spin { animation: none; border-top-color: rgba(95, 227, 214, 0.25); border-right-color: var(--accent-l); } }
+/* the display stretch of a place's clip (pic.tsx): the filter's own svg takes no room */
+.cb-pic > svg.cb-str { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
+/* a mark's verdict on its badge */
+.badge.v-known { color: #cfe8e2; border-color: rgba(150, 215, 205, 0.5); }
+.badge.v-no_match { color: #9fe6c4; border-color: rgba(120, 220, 170, 0.5); }
+.badge.v-waiting, .badge.v-checking, .badge.v-needs_another_pass { color: #ffd08a; border-color: rgba(255, 180, 84, 0.45); }
+.badge.v-comment { color: #d7a6ff; border-color: rgba(215, 166, 255, 0.45); }
