@@ -668,10 +668,18 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
         worst = None
         for c in want:
             d = done.get((r["id"], c))
-            if d is None or (
-                r["kind"] in BLEND_KINDS and c == "gaia" and d["state"] != "unavailable" and '"blend_r"' not in (d["detail"] or "")
-            ):
-                worst = 0.0 if worst is None else min(worst, 0.0)  # never asked, or asked before neighbours were looked for
+            detail = (d["detail"] or "") if d is not None else ""
+            # asked before neighbours were looked for, or before JPL was asked for its precise second pass: asked once more
+            old = (
+                d is not None
+                and d["state"] != "unavailable"
+                and (
+                    (r["kind"] in BLEND_KINDS and c == "gaia" and '"blend_r"' not in detail)
+                    or (c == "sbident" and '"two_pass"' not in detail)
+                )
+            )
+            if d is None or old:
+                worst = 0.0 if worst is None else min(worst, 0.0)  # never asked, or asked the old way
             # one that adds detail gives up after MAX_ATTEMPTS; a deciding one is asked until it answers (the wait grows to 32 RETRY_S)
             elif (
                 d["state"] == "unavailable"
@@ -1035,6 +1043,10 @@ class Findings:
                         "fov-ra-hwidth": f"{half / max(0.05, math.cos(math.radians(dec))):.5f}",
                         "fov-dec-hwidth": f"{half:.5f}",
                         "vmag-lim": str(SB_VMAG),
+                        # the second pass: positions integrated precisely. The first pass is a quick approximation that can be tens of
+                        # arcseconds off: 12304 (1991 SR1) stood 17.7″ from the top time-lapse lead there and 4.4″ in the second pass
+                        "two-pass": "true",
+                        "suppress-first-pass": "true",
                     },
                     timeout=httpx.Timeout(
                         SB_TIMEOUT_S, connect=10.0
@@ -1048,19 +1060,29 @@ class Findings:
             self.breaker.failure()
             raise
         self.breaker.success()
-        fields = body.get("fields_first") or body.get("fields") or []
-        data = body.get("data_first_pass") or body.get("data") or []
+        from service.known_field import parse_sexa
+
+        fields = body.get("fields_second") or body.get("fields_first") or body.get("fields") or []
+        data = body.get("data_second_pass") or body.get("data_first_pass") or body.get("data") or []
         idx = {n: i for i, n in enumerate(fields)}
         c_ra, c_dec = 'Dist. from center RA (")', 'Dist. from center Dec (")'
+        a_ra, a_dec = "Astrometric RA (hh:mm:ss)", "Astrometric Dec (dd mm'ss\")"
         r_ra, r_dec, c_v = 'RA rate ("/h)', 'Dec rate ("/h)', "Visual magnitude (V)"
         near: list[tuple[float, list[Any]]] = []
         for row in data:
             try:
-                near.append((math.hypot(float(row[idx[c_ra]]), float(row[idx[c_dec]])), row))
+                if a_ra in idx and a_dec in idx:  # the second pass: the body's own place, measured from ours
+                    bra, bdec = parse_sexa(str(row[idx[a_ra]]), True), parse_sexa(str(row[idx[a_dec]]), False)
+                    if bra is None or bdec is None:
+                        continue
+                    d_ra = ((bra - ra + 180.0) % 360.0 - 180.0) * math.cos(math.radians(dec))
+                    near.append((math.hypot(d_ra, bdec - dec) * 3600.0, row))
+                else:
+                    near.append((math.hypot(float(row[idx[c_ra]]), float(row[idx[c_dec]])), row))
             except (KeyError, ValueError, IndexError):
                 continue
         near.sort(key=lambda x: x[0])
-        out: dict[str, Any] = {"n_bodies": len(data), "vmag_limit": SB_VMAG}
+        out: dict[str, Any] = {"n_bodies": len(data), "vmag_limit": SB_VMAG, "two_pass": True}
         for sep, row in near:
             if sep > SB_MATCH_ARCSEC:
                 break
@@ -1135,9 +1157,10 @@ class Findings:
         ]
         if best is not None and names.count(best) >= need:
             hit = next(g for g in got if g.get("name") == best)
-            return {**hit, "visits_checked": len(sel), "visits_matched": names.count(best), "per_visit": per}
+            return {**hit, "visits_checked": len(sel), "visits_matched": names.count(best), "per_visit": per, "two_pass": True}
         return {
             "state": "none",
+            "two_pass": True,
             "visits_checked": len(sel),
             "visits_matched": names.count(best) if best else 0,
             "per_visit": per,
@@ -1193,6 +1216,7 @@ class Findings:
                     "visits_checked",
                     "visits_matched",
                     "per_visit",
+                    "two_pass",
                 )
                 self.db.put_ident(row["id"], "sbident", a["state"], a.get("name"), a.get("sep"), None, {k: a[k] for k in keep if k in a}, a)
             except BreakerOpenError:
