@@ -1,7 +1,8 @@
 # Deployment
 
 Production: https://spherex.space. One Oracle Cloud VM in Madrid (eu-madrid-1), Ubuntu 24.04; today VM.Standard.E5.Flex (x86-64,
-4 vCPU, 16 GB, 193 GB disk), later an Ampere A1 (aarch64). Everything here works on both architectures. Caddy terminates HTTPS
+8 OCPU / 16 vCPU, 48 GB, 193 GB disk; the trial), later an Ampere A1 (aarch64). Everything here works on both architectures, and the
+service sizes itself from the machine (`service/machine.py`). Moving to another VM: `deploy/MIGRATE.md`. Caddy terminates HTTPS
 (automatic certificates for the domain) and proxies to the API on 127.0.0.1:8780. The SPHEREx bucket is in us-east-1: one range read
 from Madrid takes about 1 s, so the reader keeps many reads in flight.
 

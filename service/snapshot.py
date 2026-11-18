@@ -1,4 +1,5 @@
-"""List what goes into an R2 snapshot: every file of the pinned (warm-set) products, relative to the store.
+"""List the files of a snapshot's warm set: every file of the pinned (warm-set) products, relative to the store (the databases go up
+on their own, as dated copies: deploy/snapshot.sh).
 
 python -m service.snapshot list STORE   -> one relative path per line
 """
@@ -20,7 +21,6 @@ def pinned_files(store: Path) -> list[str]:
             continue
         d = store / "products" / kind / version / key[:2] / key
         out += [str(p.relative_to(store)) for p in sorted(d.iterdir()) if p.is_file()]
-    out.append("catalogue.snapshot.sqlite")  # written by deploy/snapshot.sh with the SQLite backup command
     return out
 
 
