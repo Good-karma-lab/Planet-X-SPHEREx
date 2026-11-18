@@ -936,3 +936,35 @@ def test_the_served_first_page_is_kept_across_a_restart(tmp_path: Path) -> None:
     assert fmod.Findings._front_saved(me) == ("film:b", "peak:a")  # type: ignore[arg-type]
     (tmp_path / "findings-front.json").write_text("not json")
     assert fmod.Findings._front_saved(me) == ()  # type: ignore[arg-type]
+
+
+def test_a_line_track_never_checked_in_the_exposures_is_not_a_lead(tmp_path: Path) -> None:
+    """R Draconis, 18 Nov 2026: a straight-line track whose strongest points held no light in the exposures. A line track without the
+    on - off check is `unverified` (hidden, not a lead); one JPL names stays known; an orbit track (always verified) is a lead."""
+    from service.findings import verdict_of
+
+    idents = [{"catalogue": "sbident", "state": "none"}]
+    line = {"kind": "film", "data": {"track": {"method": "line", "verified": False}}}
+    assert status_of(line, idents) == "unverified"
+    assert "never checked in the exposures" in verdict_of(line, idents, "unverified")
+    assert status_of(line, [{"catalogue": "sbident", "state": "ok", "name": "433 Eros"}]) == "known"
+    orbit = {"kind": "film", "data": {"track": {"method": "orbit", "verified": True}}}
+    assert status_of(orbit, idents) == "unexplained"
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {
+        "place": "R Draconis",
+        "fov": 20,
+        "ra": 248.4,
+        "dec": 66.6,
+        "rate": 3.6,
+        "snr": 101.0,
+        "score": 101.0,
+        "chance": 0.0,
+        "scans": [],
+    }
+    db.write_finds([{**base, "id": "film:rdra", "kind": "film", "data": {"track": {"method": "line", "verified": False}}}])
+    db.put_ident("film:rdra", "sbident", "none", None, None, None, {"two_pass": True})
+    db.db.commit()
+    out = query(db, None, None, None, 10, 0)
+    assert out["counts"]["film"]["unverified"] == 1 and out["counts"]["film"]["leads"] == 0
+    assert [f["id"] for f in query(db, None, "unverified", None, 10, 0)["finds"]] == ["film:rdra"]

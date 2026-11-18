@@ -147,7 +147,9 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     async def findings(
         kind: str | None = Query(None),
-        status: str | None = Query(None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside|blend)$"),
+        status: str | None = Query(
+            None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside|blend|unverified)$"
+        ),
         place: str | None = Query(None),
         limit: int = Query(300, ge=1, le=2000),
         offset: int = Query(0, ge=0),
