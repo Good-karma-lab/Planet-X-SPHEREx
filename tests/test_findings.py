@@ -853,3 +853,35 @@ def test_the_most_promising_find_is_identified_first(tmp_path: Path) -> None:
     db.db.commit()
     order = pending_ids(str(db.path), 10, frozenset(), _time.time())
     assert order.index("film:top") < order.index("peak:weak") < order.index("red:x")
+
+
+def test_a_check_that_decides_goes_before_extras_asked_again(tmp_path: Path) -> None:
+    """With VizieR down, thousands of finds wait on VSX alone; a track whose JPL check was made the old way (no precise second pass) is
+    asked first, though a brown dwarf waiting only on VSX is more promising. And an undated peak says what it lacks: its date, not VSX."""
+    import time as _time
+
+    from service.findings import EXTRA_RETRY_S, MAX_ATTEMPTS, pending_ids, verdict_of
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    film = {"id": "film:1", "kind": "film", "place": "far", "fov": 60, "ra": 60.6, "dec": 60.4, "rate": 36.7, "snr": 5.0,
+            "score": 5.0, "chance": 0.0, "data": {}, "scans": []}  # fmt: skip
+    bd = {**film, "id": "browndwarf:1", "kind": "browndwarf", "snr": 9.0, "score": 9.0}
+    db.write_finds([film, bd])
+    db.put_ident("film:1", "sbident", "none", None, None, None, {"n_bodies": 3})  # asked before two_pass
+    from service.findings import want_of
+
+    for c in want_of("browndwarf", 60.6, 60.4, {}):
+        if c == "vsx":
+            for _ in range(MAX_ATTEMPTS):
+                db.put_ident("browndwarf:1", c, "unavailable", None, None, None, {})
+        else:
+            db.put_ident("browndwarf:1", c, "none", None, None, None, {"blend_r": 10})
+    db.db.commit()
+    assert pending_ids(str(db.path), 10, frozenset(), _time.time() + EXTRA_RETRY_S + 1) == ["film:1", "browndwarf:1"]
+    peak = {"kind": "peak", "ra": 1.0, "dec": 2.0, "data": {"peak": {}}}
+    idents = [{"catalogue": c, "state": "none"} for c in ("simbad", "gaia", "halo")] + [
+        {"catalogue": "vsx", "label": "VSX (variable stars)", "state": "unavailable"}
+    ]
+    assert status_of(peak, idents) == "unchecked"
+    text = verdict_of(peak, idents, "unchecked")
+    assert "date" in text and "JPL" in text and "decide have not all answered" not in text

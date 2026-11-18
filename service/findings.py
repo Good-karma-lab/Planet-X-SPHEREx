@@ -662,12 +662,13 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
     finally:
         if conn is None:
             db.close()
-    out: list[tuple[tuple[int, int, int, float], str]] = []
+    out: list[tuple[tuple[int, int, int, int, float], str]] = []
     for r in rows:
         data = json.loads(r["data"] or "{}")
         want = want_of(r["kind"], r["ra"], r["dec"], data)
         deciding = set(decisive_of(r["kind"], r["ra"] or 0.0, r["dec"] or 90.0, data))
         worst = None
+        tier = 1  # 1: only catalogues that add detail are asked again; 0: one that decides, or one never asked (or asked the old way)
         for c in want:
             d = done.get((r["id"], c))
             detail = (d["detail"] or "") if d is not None else ""
@@ -682,6 +683,7 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
             )
             if d is None or old:
                 worst = 0.0 if worst is None else min(worst, 0.0)  # never asked, or asked the old way
+                tier = 0
             # a deciding one is asked until it answers (the wait grows to 32 RETRY_S); one that adds detail too, but past MAX_ATTEMPTS
             # only every EXTRA_RETRY_S
             elif d["state"] == "unavailable" and (
@@ -689,11 +691,15 @@ def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn
                 or now - d["tried"] >= EXTRA_RETRY_S
             ):
                 worst = d["tried"] if worst is None else min(worst, d["tried"])
+                if c in deciding:
+                    tier = 0
         if worst is not None:
             # the most promising first across kinds (what the page shows first: a lead corrected before the many below it), then the
             # kind's rank, the test targets', the longest waiting
             promise = promise_of(r["kind"], "unexplained", r["score"] if r["score"] is not None else r["snr"], 1)
-            out.append(((-promise, IDENT_RANK.get(r["kind"], 2), 0 if r["place"] in targets else 1, worst), r["id"]))
+            # what changes a verdict (a deciding catalogue, a first or a precise second ask) before what only adds detail: with VizieR
+            # down, thousands of finds wait on VSX alone and pushed the top track's JPL check to the 30th place
+            out.append(((tier, -promise, IDENT_RANK.get(r["kind"], 2), 0 if r["place"] in targets else 1, worst), r["id"]))
     out.sort(key=lambda x: x[0])
     return [i for _, i in out[:limit]]
 
@@ -1478,6 +1484,13 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
             "a catalogued star",
         )
         return f"It sits on a catalogued star ({star}): most likely a residual of that star in the difference, not a body. Not counted as a lead."
+    if status == "unchecked" and f["kind"] == "peak" and _ref_mjd("peak", f.get("data") or {}) is None:
+        # the catalogues may all have answered: what is missing is the date, without which JPL cannot be asked about a known body
+        text = ("Not yet checked: the date this peak's place is for is not recorded (it was found before the search saved it), so JPL "
+                "cannot be asked whether a known body was there.")  # fmt: skip
+        if failed:
+            text += f" Did not answer: {', '.join(failed)}."
+        return text + (f" Named so far: {'; '.join(named[:2])}." if named else "")
     if status == "unchecked":
         text = "Not yet checked: the catalogues that decide have not all answered."
         if waiting:
