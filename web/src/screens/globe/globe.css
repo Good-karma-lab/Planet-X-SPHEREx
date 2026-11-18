@@ -194,3 +194,6 @@
 .give-square { display: flex; align-items: center; gap: 8px; flex: none; }
 .give-square .btn { white-space: nowrap; }
 .give-square .give-why { max-width: 220px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--muted); }
+
+/* why "Give me a square" offered this square */
+.cov-card .cov-why { margin: 2px 0 6px; font: 600 12.5px var(--font); color: #ffd08a; }

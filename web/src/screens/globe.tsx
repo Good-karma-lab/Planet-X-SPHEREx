@@ -1528,6 +1528,13 @@ export function Globe() {
             </div>
             {cell && cell.id === cellId ? (
               <>
+                {given?.cell_id === cell.id && given.why?.kind && (
+                  // the lead that made the service offer this square
+                  <div class="cov-why" data-testid="cov-why">
+                    {WHY_WORD[given.why.kind] ?? 'a lead'} in {given.quarter ? `its ${given.quarter} quarter` : 'this square'}
+                    {given.why.promise != null ? ` · promise ${given.why.promise}` : ''}
+                  </div>
+                )}
                 <div class="cov-state" data-testid="cov-state">
                   <i class="cov-sw" style={{ background: covKind(cell) ? KIND_COLOUR[covKind(cell)!] : 'transparent' }} />
                   {covStateWord(cell)}
@@ -1938,6 +1945,19 @@ export function Globe() {
 /** "Give me a square": the next square task (a quarter, 10′, of a searched square, in the service's order), shown where it is: the
  *  globe flies to it, the squares come on and its card opens; "Take this square" opens the lab on that task. A guest gets one too
  *  (trying needs no account); the look counts once they sign in. */
+/** a lead's kind as the square's card says it */
+const WHY_WORD: Record<string, string> = {
+  mover: 'A mover',
+  track: 'A mover',
+  browndwarf: 'A brown-dwarf candidate',
+  brown_dwarf: 'A brown-dwarf candidate',
+  peak: 'A Planet X peak',
+  film: 'A body moving in one pass',
+  pair: 'A pair changing',
+  red: 'A red source',
+  anomaly: 'A spectral anomaly',
+};
+
 function GiveSquare({ onSquare }: { onSquare: (t: Task) => void }) {
   const [busy, setBusy] = useState(false);
   const [why, setWhy] = useState('');

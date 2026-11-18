@@ -719,3 +719,81 @@ export function heldAt(k: KnownState, ra: number, dec: number, year: number): He
   }
   return null;
 }
+
+// ---------------------------------------------------------------------------------------------- the field's one set (GET /api/known/field)
+
+/** A field's known objects as one set that stays from pass to pass: the catalogue sources the field shows (matched once, against the
+ *  sources found in at least half of the passes), and the measured sources no catalogue has. */
+export interface FieldKnown {
+  state: 'asking' | 'ok' | 'no_field' | 'failed';
+  complete: boolean;
+  /** what is ringed: catalogue objects (deep ones marked by `source: 'gaia'` and a `catalogues` list) at the field's epoch */
+  objects: KnownObject[];
+  deep: KnownObject[];
+  /** the measured sources with no catalogue source within 7″ */
+  unmatched: { ra: number; dec: number; snr: number; passes: number }[];
+  measured: number;
+}
+export const FIELD_ASKING: FieldKnown = { state: 'asking', complete: false, objects: [], deep: [], unmatched: [], measured: 0 };
+
+/** The reply made safe (a saturated star's S/N came back as the word Infinity, which is not JSON) */
+export function parseFieldKnown(text: string): FieldKnown {
+  const r = JSON.parse(text.replace(/:\s*-?(Infinity|NaN)\b/g, ':null')) as {
+    state?: string;
+    complete?: boolean;
+    epoch_mjd?: number;
+    measured?: number;
+    sources?: { id: string; source: string; ra: number; dec: number; mag?: number | null; seen?: boolean; name?: string; label?: boolean; catalogues?: string[] }[];
+    unmatched?: { ra: number; dec: number; snr?: number | null; passes?: number }[];
+  };
+  if (r.state !== 'ok') return { ...FIELD_ASKING, state: r.state === 'no_field' ? 'no_field' : 'failed' };
+  const epoch = yearOfMjd(Number(r.epoch_mjd ?? 61000));
+  const objects: KnownObject[] = [];
+  const deep: KnownObject[] = [];
+  for (const s of r.sources ?? []) {
+    if (!s || !s.seen || !Number.isFinite(s.ra) || !Number.isFinite(s.dec)) continue;
+    const o: KnownObject = {
+      id: String(s.id),
+      source: s.source === 'simbad' ? 'simbad' : 'gaia',
+      name: s.name ?? '',
+      mag: Number.isFinite(s.mag as number) ? (s.mag as number) : null,
+      positions: [{ epoch, ra: s.ra, dec: s.dec }],
+      label: false, // the named and fast ones are drawn from /api/known, with their motion
+      ...(s.source === 'deep' ? { catalogues: s.catalogues ?? [] } : {}),
+    };
+    (s.source === 'deep' ? deep : objects).push(o);
+  }
+  return {
+    state: 'ok',
+    complete: !!r.complete,
+    objects,
+    deep,
+    unmatched: (r.unmatched ?? [])
+      .filter((q) => Number.isFinite(q.ra) && Number.isFinite(q.dec))
+      .map((q) => ({ ra: q.ra, dec: q.dec, snr: Number.isFinite(q.snr as number) ? (q.snr as number) : 99, passes: q.passes ?? 0 })),
+    measured: Number(r.measured ?? 0),
+  };
+}
+
+/** Ask for the field's set, and again every few seconds while a catalogue is still being asked (at most two minutes). */
+export function followFieldKnown(ra: number, dec: number, fov: number, on: (f: FieldKnown) => void): () => void {
+  let stop = false;
+  let tries = 0;
+  const ask = async () => {
+    try {
+      const r = await fetch(`/api/known/field?ra=${ra.toFixed(5)}&dec=${dec.toFixed(5)}&fov=${fov}&wait=2`, { cache: 'no-store' });
+      if (stop) return;
+      if (!r.ok) return on({ ...FIELD_ASKING, state: r.status === 404 ? 'no_field' : 'failed' });
+      const f = parseFieldKnown(await r.text());
+      if (stop) return;
+      on(f);
+      if (f.state === 'ok' && !f.complete && ++tries < 30) setTimeout(() => !stop && void ask(), 4000);
+    } catch {
+      if (!stop) on({ ...FIELD_ASKING, state: 'failed' });
+    }
+  };
+  void ask();
+  return () => {
+    stop = true;
+  };
+}
