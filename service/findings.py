@@ -1764,6 +1764,28 @@ def query(
         tally[f["status"]] += 1
         if f["status"] in ("unexplained", "unchecked"):
             tally["leads"] += 1  # what is still a lead: not a known body, a galaxy, a star's residual or below the bar
+
+    def passes(f: dict[str, Any]) -> bool:
+        """Every filter of the request but the kind ones (the kind chips count under the others: counts_view)."""
+        return (
+            (
+                (f["status"] in HIDDEN) == (status in HIDDEN) and (status not in HIDDEN or f["status"] == status)
+                if status in (None, "all") or status in HIDDEN
+                else f["status"] == status
+            )
+            and (not place or f["place"] == place)
+            and (not stage or f["stage"] == stage)
+            and (not waiting or (f["viewers"] == 0 and f["stage"] == "new"))
+            and (only is None or f["id"] in only)
+            and (not noted or f["note"] is not None)
+            and (visibility != "seen" or f["visible"] is not False)
+            and (visibility != "unseen" or f["visible"] is False)
+        )
+
+    counts_view: dict[str, int] = dict.fromkeys(KINDS, 0)
+    for f in items:
+        if passes(f):
+            counts_view[f["kind"]] = counts_view.get(f["kind"], 0) + 1
     sel = [
         f
         for f in items
@@ -1830,6 +1852,9 @@ def query(
         "count": len(sel),
         "total": sum(1 for f in items if f["status"] not in HIDDEN),
         "counts": counts,
+        # per kind, the finds that pass this request's every filter but the kind ones (status, stage, waiting, visibility, …): the
+        # numbers of the kind chips under the filters in use
+        "counts_view": counts_view,
         "labels": KIND_LABEL,
         "stages": stages,
         "waiting": sum(1 for f in shown if f["viewers"] == 0 and f["stage"] == "new"),

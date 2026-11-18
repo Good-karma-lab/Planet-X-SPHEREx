@@ -776,3 +776,19 @@ def test_a_list_with_a_blend_in_it_sorts(tmp_path: Path) -> None:
     db.db.commit()
     body = query(db, None, "blend", None, 50, 0)
     assert [f["status"] for f in body["finds"]] == ["blend"] and body["counts"]["browndwarf"]["blend"] == 1
+
+
+def test_counts_view_counts_each_kind_under_the_other_filters(tmp_path: Path) -> None:
+    """The kind chips count under the stage and visibility filters in use: counts_view, one number per kind (the page made a call per
+    chip before)."""
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+
+    def put(i: str, kind: str) -> dict[str, Any]:
+        return {"id": i, "kind": kind, "place": "far", "fov": 20, "ra": 10.0, "dec": 5.0, "rate": 1.0, "snr": 9.0, "score": 9.0,
+                "chance": None, "data": {}, "scans": []}  # fmt: skip
+
+    db.write_finds([put("red:1", "red"), put("red:2", "red"), put("anomaly:1", "anomaly"), put("peak:1", "peak")])
+    body = query(db, None, "all", None, 50, 0, kinds=("red",))
+    assert body["counts_view"]["red"] == 2 and body["counts_view"]["anomaly"] == 1 and body["counts_view"]["mover"] == 0
+    assert [f["kind"] for f in body["finds"]] == ["red", "red"]  # the list itself keeps the kind filter
+    assert query(db, None, "all", None, 50, 0, stage="known")["counts_view"]["red"] == 0  # under a stage nobody is in
