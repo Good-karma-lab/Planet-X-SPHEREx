@@ -166,4 +166,11 @@ async def verify(
             progress(done, len(exps))
 
     await asyncio.gather(*(one(i) for i in range(len(exps))))
-    return [onoff.reduce(on[k], ref[k], nmin[k]) for k in range(len(places))]
+    # the on − off reductions of every place (a median per on-exposure): a worker process, not the event loop (it held it a second)
+    got: list[dict[str, object] | None] = await compute(reduce_all, on, ref, list(nmin))
+    return got
+
+
+def reduce_all(on: dict[int, list[onoff.Point]], ref: dict[int, list[onoff.Point]], nmin: list[int]) -> list[dict[str, object] | None]:
+    """`onoff.reduce` of every place (module level: it runs in a worker process)."""
+    return [onoff.reduce(on[k], ref[k], nmin[k]) for k in range(len(nmin))]
