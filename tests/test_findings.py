@@ -410,6 +410,12 @@ def test_identification_order_puts_the_few_that_matter_first(tmp_path: Path) -> 
     assert order[:2] == ["m2", "m1"] or set(order[:3]) == {"m1", "m2", "p1"}
     assert order.index("a1") > order.index("m1") and order.index("r1") > order.index("p1")
     assert order[-1] == "r1" or order[-2:] == ["a1", "r1"] or order[-2:] == ["r1", "a1"]
+    # the identification loop asks a worker process, on its own read-only connection, for the same order
+    import time as _time
+
+    from service.findings import pending_ids
+
+    assert pending_ids(str(db.path), 10, frozenset({"Barnard's Star"}), _time.time()) == order
 
 
 def test_identification_summary_splits_deciding_catalogues_from_extras(tmp_path: Path) -> None:

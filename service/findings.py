@@ -28,7 +28,7 @@ from typing import Any
 
 import httpx
 
-from service import people_tracks
+from service import cpu, people_tracks
 from service.bodies import SB_IDENT, _iso, _sexa_dec, _sexa_ra
 from service.products.store import Store
 from service.products.versions import VERSIONS
@@ -614,6 +614,38 @@ def _red_key(field_key: str) -> str:
     return product_key("red", {"field": field_key})
 
 
+def pending_ids(path: str, limit: int, targets: frozenset[str], now: float, conn: sqlite3.Connection | None = None) -> list[str]:
+    """The ids of the finds with a catalogue not yet answered (or that did not answer and may be asked again). The few that matter most
+    are asked first (Find Planet X peaks, movers, brown dwarfs, film tracks, then pairs; the hundreds of anomalies and red sources last),
+    the test targets' before the rest within each rank, and within that the longest waiting. It reads every find and what each catalogue
+    said, so the identification loop runs it in a worker process (service/cpu.py) on its own read-only connection: in the API process it
+    took the GIL from the event loop."""
+    db = conn or sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10.0)
+    try:
+        db.row_factory = sqlite3.Row
+        rows = db.execute("SELECT id, kind, place, ra, dec, data FROM finds").fetchall()
+        done = {(r["find_id"], r["catalogue"]): r for r in db.execute("SELECT find_id, catalogue, state, attempts, tried FROM idents")}
+    finally:
+        if conn is None:
+            db.close()
+    out: list[tuple[tuple[int, int, float], str]] = []
+    for r in rows:
+        want = want_of(r["kind"], r["ra"], r["dec"], json.loads(r["data"] or "{}"))
+        worst = None
+        for c in want:
+            d = done.get((r["id"], c))
+            if d is None:
+                worst = 0.0 if worst is None else min(worst, 0.0)
+            elif (
+                d["state"] == "unavailable" and d["attempts"] < MAX_ATTEMPTS and now - d["tried"] >= RETRY_S * (2 ** min(d["attempts"], 5))
+            ):
+                worst = d["tried"] if worst is None else min(worst, d["tried"])
+        if worst is not None:
+            out.append(((IDENT_RANK.get(r["kind"], 2), 0 if r["place"] in targets else 1, worst), r["id"]))
+    out.sort(key=lambda x: x[0])
+    return [i for _, i in out[:limit]]
+
+
 class FindingsDB:
     """findings.db: the finds, what each catalogue said about each, and the signature of the result files last read."""
 
@@ -762,30 +794,16 @@ class FindingsDB:
         return out
 
     def pending(self, limit: int, targets: frozenset[str] = frozenset()) -> list[sqlite3.Row]:
-        """Finds with a catalogue not yet answered (or that did not answer and may be asked again). The few that matter most are asked first
-        (Find Planet X peaks, movers, brown dwarfs, film tracks, then pairs; the hundreds of anomalies and red sources last), the test targets'
-        before the rest within each rank, and within that the longest waiting."""
-        now = time.time()
-        rows = self.db.execute("SELECT id, kind, place, ra, dec, data FROM finds").fetchall()
-        out: list[tuple[tuple[int, int, float], sqlite3.Row]] = []
-        done = {(r["find_id"], r["catalogue"]): r for r in self.db.execute("SELECT * FROM idents")}
-        for r in rows:
-            want = want_of(r["kind"], r["ra"], r["dec"], json.loads(r["data"] or "{}"))
-            worst = None
-            for c in want:
-                d = done.get((r["id"], c))
-                if d is None:
-                    worst = 0.0 if worst is None else min(worst, 0.0)
-                elif (
-                    d["state"] == "unavailable"
-                    and d["attempts"] < MAX_ATTEMPTS
-                    and now - d["tried"] >= RETRY_S * (2 ** min(d["attempts"], 5))
-                ):
-                    worst = d["tried"] if worst is None else min(worst, d["tried"])
-            if worst is not None:
-                out.append(((IDENT_RANK.get(r["kind"], 2), 0 if r["place"] in targets else 1, worst), r))
-        out.sort(key=lambda x: x[0])
-        return [r for _, r in out[:limit]]
+        """Finds with a catalogue not yet answered (or that did not answer and may be asked again), in the order pending_ids gives."""
+        return self.rows_of(pending_ids(str(self.path), limit, targets, time.time(), conn=self.db))
+
+    def rows_of(self, ids: list[str]) -> list[sqlite3.Row]:
+        """The finds' rows (id, kind, place, ra, dec, data) in the order of `ids`."""
+        if not ids:
+            return []
+        m = ",".join("?" for _ in ids)
+        got = {r["id"]: r for r in self.db.execute(f"SELECT id, kind, place, ra, dec, data FROM finds WHERE id IN ({m})", ids)}
+        return [got[i] for i in ids if i in got]
 
     def put_ident(
         self,
@@ -1156,7 +1174,8 @@ class Findings:
     async def identify_loop(self) -> None:
         while True:
             try:
-                batch = await asyncio.to_thread(self.db.pending, 8, frozenset(t["n"] for t in self.targets))
+                ids = await cpu.run(pending_ids, str(self.db.path), 8, frozenset(t["n"] for t in self.targets), time.time())
+                batch = await asyncio.to_thread(self.db.rows_of, ids)
                 if not batch:
                     await asyncio.sleep(15)
                     continue
