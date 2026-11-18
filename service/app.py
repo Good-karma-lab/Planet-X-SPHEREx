@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__, cpu, exposure_flags, jsonsafe, people_queue, quarters, sweep_runner
+from service import __version__, cpu, exposure_flags, jsonsafe, machine, people_queue, quarters, sweep_runner
 from service import grid as grid_mod
 from service.accounts import get as accounts_get
 from service.accounts import register_accounts
@@ -36,6 +36,7 @@ from service.coverage import coverage_payload, index_key
 from service.findings import Findings
 from service.fpx_known import FpxIdentifier
 from service.grid import GridDB, import_searched
+from service.jobs import scheduler as sched_mod
 from service.jobs.scheduler import Priority, Scheduler
 from service.jsonsafe import SafeJSONResponse as JSONResponse
 from service.known import Known
@@ -79,8 +80,6 @@ SERVICE_NAME = "spherex-sky"
 API_PREFIX = "/api/v1"
 # a second instance that takes over while the main one restarts (deploy/push.sh): it builds nothing new
 STANDBY = os.environ.get("SKY_STANDBY", "0") == "1"
-HEAVY_SLOTS = 6  # field builds at once (17 Nov 2026: 3 before; the builds wait on the archive more than they compute)
-MEMORY_BUDGET_MB = 24000  # of the VM's 48 GB
 # a local run on a snapshot of the production finds (tools/findings_snapshot.py): Findings only reads its database and the Find Planet X
 # identifier does not ask JPL, while every field and search is built as usual (a standby would build nothing new)
 FINDINGS_READONLY = os.environ.get("SKY_FINDINGS_READONLY", "0") == "1"
@@ -107,6 +106,7 @@ class State:
         # the square quarters built ahead (service/quarters.py): set by the tasks router, the stock loop's last step for /health
         self.quarters: Any = None
         self.upcoming_quarters: Any = None
+        self.machine: Any = None  # service.machine.Limits: the limits this machine got
         self.submit_field: Any = None
         self.quarter_stock: dict[str, Any] = {}
         # people's queue for the brown-dwarf search (service/people_queue.py) and its last step for /health
@@ -192,10 +192,14 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.spectra = Spectra(st.index, st.files, st.wavelengths, cfg.store_dir)
             st.anomalies = Anomalies(st.index, st.files, st.wavelengths, st.store, cfg.store_dir)
             st.anomalies.catalogue = st.catalogue
+        lim = machine.limits()  # the limits follow the machine's cores and memory (service/machine.py); the environment overrides each
+        st.machine = lim
+        sched_mod.BG_HEAVY = lim.bg_heavy
+        quarters.STOCK = lim.quarter_stock
         if scheduler is None:
-            workers = max(1, int(os.environ.get("SKY_WORKERS", os.cpu_count() or 2)))
+            workers = max(1, lim.workers)
             # fresh worker processes (forkserver), not copies of the API process: small, and the memory cap counts only their own work
-            mem_mb = int(os.environ.get("SKY_WORKER_MEM_MB", "6000"))
+            mem_mb = lim.worker_mem_mb
 
             def new_pool(workers: int = workers, mem_mb: int = mem_mb) -> ProcessPoolExecutor:
                 return ProcessPoolExecutor(
@@ -205,9 +209,10 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.executor = new_pool()
             cpu.configure(st.executor, workers, new_pool)  # a pool a dying worker broke is replaced by a new one
             # heavy jobs at once: a field build mostly waits on the archive, so more run side by side than there are cores for them
-            # (6 by default, SKY_HEAVY_SLOTS overrides); their memory together stays within SKY_MEMORY_BUDGET_MB (24 GB by default)
-            heavy = int(os.environ.get("SKY_HEAVY_SLOTS", str(HEAVY_SLOTS)))
-            budget = int(os.environ.get("SKY_MEMORY_BUDGET_MB", str(MEMORY_BUDGET_MB)))
+            # (service/machine.py: 6 on the 16-vCPU VM, 2 on a small machine; SKY_HEAVY_SLOTS overrides); their memory together stays
+            # within the memory budget (half the machine, at most 24 GB; SKY_MEMORY_BUDGET_MB overrides)
+            heavy = lim.heavy_slots
+            budget = lim.memory_budget_mb
             st.scheduler = Scheduler(executor=st.executor, slots={"light": 8, "heavy": max(2, heavy)}, memory_budget_mb=budget)
         else:
             st.scheduler = scheduler
@@ -264,7 +269,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             bd_task = asyncio.get_running_loop().create_task(bd_queue_loop())
         # the background sweep of the grid (service/sweep_runner.py): on wherever the service has its exposure index and is not the
         # standby, unless SKY_SWEEP=0; it gives way to people, the stock, the disk and the archive by itself
-        sweep_env = os.environ.get("SKY_SWEEP", "1")
+        sweep_env = os.environ.get("SKY_SWEEP", "1" if st.machine.sweep else "0")  # off by default on a small machine
         if background and (sweep_env == "force" or (sweep_env == "1" and os.environ.get("SKY_WARM", "1") == "1")):
             st.sweep = sweep_runner.SweepRunner(st, sweep_searches, sweep_planetx, lambda: sweep_runner.top_find_fields(st))
             sweep_task = asyncio.get_running_loop().create_task(sweep_loop())
@@ -736,6 +741,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "quarter_stock": {"target": quarters.STOCK, **st.quarter_stock} if st.quarters is not None else None,
             "bd_queue": {"done": len(st.bd_queue.done), **st.bd_queue_last} if st.bd_queue is not None else None,
             "sweep": st.sweep.snapshot() if st.sweep is not None else None,
+            "machine": st.machine.as_dict() if st.machine is not None else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
             "cpu": cpu.stats(),
             "tiles": None if st.hips is None else {"cached": st.hips.count, "fetched": st.hips.fetched, "failed": st.hips.failed},
