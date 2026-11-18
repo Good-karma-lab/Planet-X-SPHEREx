@@ -792,3 +792,16 @@ def test_counts_view_counts_each_kind_under_the_other_filters(tmp_path: Path) ->
     assert body["counts_view"]["red"] == 2 and body["counts_view"]["anomaly"] == 1 and body["counts_view"]["mover"] == 0
     assert [f["kind"] for f in body["finds"]] == ["red", "red"]  # the list itself keeps the kind filter
     assert query(db, None, "all", None, 50, 0, stage="known")["counts_view"]["red"] == 0  # under a stage nobody is in
+
+
+def test_stage_view_counts_the_stage_chips_under_the_kind_filter(tmp_path: Path) -> None:
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+
+    def put(i: str, kind: str) -> dict[str, Any]:
+        return {"id": i, "kind": kind, "place": "far", "fov": 20, "ra": 10.0, "dec": 5.0, "rate": 1.0, "snr": 9.0, "score": 9.0,
+                "chance": None, "data": {}, "scans": []}  # fmt: skip
+
+    db.write_finds([put("red:1", "red"), put("red:2", "red"), put("anomaly:1", "anomaly")])
+    sv = query(db, None, "all", None, 50, 0, kinds=("red",))["stage_view"]
+    assert sv["waiting"] == 2 and sv["new"] == 2 and sv["noted"] == 0  # the anomaly is another kind: not counted
+    assert query(db, None, "all", None, 50, 0, kinds=("red",), stage="known")["stage_view"]["waiting"] == 2  # not under its own stage
