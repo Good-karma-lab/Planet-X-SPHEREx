@@ -6,7 +6,7 @@ with `~/.ssh/oci_spherex_ed25519`. `OLD` and `NEW` below are the two VMs' addres
 
 ## What fits a small machine (2 OCPU / 12 GB A1)
 
-The service sizes itself from the machine (`service/machine.py`; `/api/v1/health` → `machine` says what it chose). On 4 cores or
+The service sizes itself from the machine (`service/machine.py`; `/api/v1/health` → `machine` says what it chose). On 3 cores or
 fewer, or 16 GB or less, it is a small machine:
 
 | | 16 vCPU / 48 GB (today) | 2 OCPU / 12 GB | variable |
