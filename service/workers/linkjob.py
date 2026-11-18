@@ -67,8 +67,8 @@ def _num(v: Any) -> float | None:
     return None if v is None or (isinstance(v, float) and not math.isfinite(v)) else round(float(v), 3)
 
 
-LINK_TRIALS = 10  # the chance control: the second pass's candidates at chance places of its field, linked the same way
-LINK_PAIRS_MAX = 600  # a trial links at most this many pairs (a random choice; the counts are scaled to all pairs)
+LINK_TRIALS = 5  # the chance control: the second pass's candidates at chance places of their field, linked the same way
+LINK_PAIRS_MAX = 9  # measured only up to this many pairs (a chance pair's fit takes ~4 s: it never converges): 3 x 3 confirmed candidates
 
 
 def _moved(pts: list[Any], du: float, dv: float) -> list[Any]:
@@ -82,25 +82,24 @@ def _moved(pts: list[Any], du: float, dv: float) -> list[Any]:
 def chance_links(passes: list[list[Any]], halves: list[float], tol: float, trials: int = LINK_TRIALS, seed: int = 7) -> dict[str, Any]:
     """What chance alone links: the candidates of the second pass are put at uniform chance places of their field (±`halves[1]`
     arcsec from where they are, their tracks' shape kept), the first and third passes stay, and the passes are linked the same way.
-    -> {trials, pairs, one_body (chance links per trial, misfit <= tol and bound), confirmed (chance links the third pass confirms)}."""
-    rng = np.random.default_rng(seed)
+    -> {trials, pairs, one_body (chance links per trial, misfit <= tol and bound), confirmed (chance links the third pass confirms)};
+    with more than LINK_PAIRS_MAX pairs it is not measured and says so."""
     a, b = passes[0], passes[1]
-    pairs_all = len(a) * len(b)
-    one = conf = 0.0
+    pairs = len(a) * len(b)
+    if pairs > LINK_PAIRS_MAX:
+        return {
+            "trials": 0,
+            "pairs": pairs,
+            "note": f"not measured: {pairs} pairs (it is measured up to {LINK_PAIRS_MAX}, the confirmed candidates)",
+        }
+    rng = np.random.default_rng(seed)
+    one = conf = 0
     for _ in range(trials):
         moved = [(info, _moved(pts, *rng.uniform(-halves[1], halves[1], 2))) for info, pts in b]
-        aa, bb = a, moved
-        scale = 1.0
-        if pairs_all > LINK_PAIRS_MAX:  # a random subset of both sides, scaled back to every pair
-            ka = max(1, round(len(a) * (LINK_PAIRS_MAX / pairs_all) ** 0.5))
-            kb = max(1, LINK_PAIRS_MAX // ka)
-            aa = [a[i] for i in rng.choice(len(a), min(ka, len(a)), replace=False)]
-            bb = [moved[i] for i in rng.choice(len(moved), min(kb, len(moved)), replace=False)]
-            scale = pairs_all / max(1, len(aa) * len(bb))
-        got = elink.link_passes([aa, bb, *passes[2:]], tol=tol)
-        one += scale * sum(1 for lk in got if lk["ok"])
-        conf += scale * sum(1 for lk in got if lk.get("ok3"))
-    return {"trials": trials, "pairs": pairs_all, "one_body": round(one / trials, 3), "confirmed": round(conf / trials, 3)}
+        got = elink.link_passes([a, moved, *passes[2:]], tol=tol)
+        one += sum(1 for lk in got if lk["ok"])
+        conf += sum(1 for lk in got if lk.get("ok3"))
+    return {"trials": trials, "pairs": pairs, "one_body": round(one / trials, 3), "confirmed": round(conf / trials, 3)}
 
 
 def link_results(
@@ -245,6 +244,36 @@ def jump_line(
     return out
 
 
+JUMP_FIELD_FOV = 18.0  # arcmin: the one-pass search fields that cover the corridor (the distance search's default size)
+JUMP_FIELDS_MAX = 6  # a check starts at most this many
+
+
+def jump_fields(line: list[dict[str, float]], t2: float, near: list[dict[str, Any]], fov: float = JUMP_FIELD_FOV) -> list[dict[str, Any]]:
+    """The one-pass search fields that cover the line of places in the other pass: tiles of `fov` arcmin centred on points of the line,
+    one every 0.8 fov along it (they overlap), each with the distance range of the line inside it, and whether a finished one-pass
+    result of that pass (`near`: grid centres and sizes) already covers it. -> [{ra, dec, fov, mjd, dmin, dmax, covered}]."""
+    if not line:
+        return []
+    pts = np.array([[x["ra"], x["dec"]] for x in line])
+    cosd = math.cos(math.radians(float(pts[:, 1].mean())))
+    along = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(pts[:, 0]) * cosd, np.diff(pts[:, 1])) * 60.0)])
+    out: list[dict[str, Any]] = []
+    at = 0.0
+    while True:
+        k = int(np.argmin(np.abs(along - at)))
+        ra, dec = float(pts[k, 0]), float(pts[k, 1])
+        inside = [x["d"] for x in line if math.hypot((x["ra"] - ra) * cosd, x["dec"] - dec) * 60.0 <= fov / 2.0]
+        dmin, dmax = (min(inside), max(inside)) if inside else (line[k]["d"], line[k]["d"])
+        dmax = max(dmax, dmin * 1.2)
+        covered = any(math.hypot((g["ra0"] - ra) * cosd, g["dec0"] - dec) * 60.0 <= max(0.0, g["fov"] / 2.0 - fov / 4.0) for g in near)
+        out.append({"ra": round(ra, 5), "dec": round(dec, 5), "fov": fov, "mjd": round(t2, 3), "dmin": round(max(dmin, 5.0), 1),
+                    "dmax": round(dmax, 1), "covered": covered})  # fmt: skip
+        if at >= along[-1]:
+            break
+        at = min(at + 0.8 * fov, float(along[-1]))
+    return out
+
+
 def run_jump(
     store: Store, key: str, ci: int, t2: float, corridor: float, dmin: float | None = None, dmax: float | None = None
 ) -> dict[str, Any] | None:
@@ -258,9 +287,13 @@ def run_jump(
     line = jump_line(r, c, t2, dmin, dmax)
     la = np.array([[x["ra"], x["dec"]] for x in line])
     found = []
+    near: list[dict[str, Any]] = []
     for k2, r2 in all_distant_results(store):
         if k2 == key or r2.get("t0") is None or abs(float(r2["t0"]) - t2) > 40:
             continue
+        g2 = r2.get("grid") or {}
+        if g2.get("ra0") is not None:
+            near.append({"ra0": g2["ra0"], "dec0": g2["dec0"], "fov": float(g2.get("n") or 0) * edist.S / 60.0})
         for i2, c2 in enumerate(r2.get("candidates") or []):
             dd = np.hypot((la[:, 0] - c2["ra"]) * math.cos(math.radians(c2["dec"])), la[:, 1] - c2["dec"]) * 60.0
             m = int(np.argmin(dd))
@@ -297,5 +330,7 @@ def run_jump(
         "corridor_arcmin": corridor,
         "line_length_arcmin": round(length, 1),
         "in_corridor": uniq,
+        # the corridor as one-pass searches of the other pass: an empty corridor means something only where every field was searched
+        "fields": jump_fields(line, t2, near),
         "honest": honest_words("jump"),
     }

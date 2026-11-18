@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import itertools
 import math
 
 import numpy as np
@@ -178,6 +179,19 @@ def test_the_link_reports_what_chance_links() -> None:
     for t0 in (T1, T2, T3):
         grid, c = candidate_of(X0, V0, T1, t0, float(np.linalg.norm(eorbit.kepler(X0, V0, np.float64((t0 - T1) * 86400.0))) / eorbit.AU))
         passes.append([({"i": 0}, elink.candidate_points(c, grid, t0, SPAN))])
-    ch = linkjob.chance_links(passes, [N * edist.S / 2.0] * 3, 6.0, trials=4)
-    assert ch == {"trials": 4, "pairs": 1, "one_body": ch["one_body"], "confirmed": 0.0}
-    assert ch["one_body"] <= 0.25  # a chance place hardly ever fits one orbit with the first pass within 6″
+    ch = linkjob.chance_links(passes, [N * edist.S / 2.0] * 3, 6.0, trials=2)
+    assert ch == {"trials": 2, "pairs": 1, "one_body": 0.0, "confirmed": 0.0}  # a chance place does not fit one orbit within 6″
+    many = [passes[0] * 4, passes[1] * 3, passes[2]]  # 12 pairs: more than are measured, said so
+    assert linkjob.chance_links(many, [N * edist.S / 2.0] * 3, 6.0)["note"].startswith("not measured: 12 pairs")
+
+
+def test_the_jump_corridor_is_covered_by_search_fields() -> None:
+    """A 72′ line of places (95 au at one end, 500 au at the other) is covered by overlapping 18′ fields, each with the distances of the
+    line inside it; a field a finished one-pass search already holds is said to be covered."""
+    line = [{"d": round(95.0 + (500.0 - 95.0) * k / 39, 2), "ra": 30.0 + 1.2 * k / 39, "dec": 0.0} for k in range(40)]
+    fields = linkjob.jump_fields(line, 61238.0, [{"ra0": 30.0, "dec0": 0.0, "fov": 30.0}])
+    assert len(fields) == 6 and fields[0]["covered"] and not any(f["covered"] for f in fields[1:])
+    assert fields[0]["dmin"] == 95.0 and fields[-1]["dmax"] >= 500.0 * 0.99
+    assert all(f["dmax"] >= 1.2 * f["dmin"] and f["fov"] == 18.0 and f["mjd"] == 61238.0 for f in fields)
+    gaps = [math.hypot(b["ra"] - a["ra"], b["dec"] - a["dec"]) * 60 for a, b in itertools.pairwise(fields)]
+    assert max(gaps) <= 0.8 * 18.0 + 1.0  # overlapping: no stretch of the corridor between two fields is left out
