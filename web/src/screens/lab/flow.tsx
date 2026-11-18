@@ -38,7 +38,7 @@ import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, taskTrack, useLabTask, type NextTask } from './task';
 import { FindingClip, MoverView, StampsView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
-import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, type FieldKnown, type Held } from './known';
+import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, withFindJpl, type FieldKnown, type Held } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
 import { clearDo, pendingDo, useSignIn } from './signin';
 import { useRetry, type SearchInfo } from './progress';
@@ -108,6 +108,8 @@ export interface FlowArgs {
   showVisit: (mjd: number) => void;
   /** the visit on show in Days (null in Months) */
   visit: number | null;
+  /** the selected find's own catalogue answers (its record in Findings): what its badge stands on */
+  findIdents?: { catalogue: string; state: string }[] | null;
   /** a date's visit in the pass on show, numbered as the time line numbers it (1 to nVisits); null outside Days or off every visit */
   visitOf: (mjd: number) => number | null;
   /** how many visits the pass on show has in Days (0 in Months) */
@@ -1380,8 +1382,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
 
   // ---- the card of what is selected (Object tab): a mark, or the lab's selected source. Note, "Add to investigation" and
   // "Check and submit" exist only here: with nothing selected there is nothing to note or submit.
-  const matchAt = (ra: number, dec: number): string =>
-    a.epochNow != null ? catalogueAt(known, ra, dec, a.epochNow).word : 'asking the catalogues…';
+  const matchAt = (ra: number, dec: number): string => {
+    const w = a.epochNow != null ? catalogueAt(known, ra, dec, a.epochNow).word : 'asking the catalogues…';
+    // a find: JPL's answer is the find's own (asked for every visit of its track), never the picture's lookup, which may still be
+    // waiting: "JPL did not answer" beside an UNEXPLAINED badge read as a contradiction
+    const jpl = !cur ? a.findIdents?.find((i) => i.catalogue === 'sbident') : undefined;
+    return jpl ? withFindJpl(w, jpl.state) : w;
+  };
   // where the selected source is on the date shown: a moving one carries its J2000 place and its motion
   const selNow = (): { ra: number; dec: number } | null => {
     if (!a.sel) return null;
