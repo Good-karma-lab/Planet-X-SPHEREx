@@ -39,7 +39,7 @@ import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, taskTrack, useLabTask, type NextTask } from './task';
 import { FindingClip, MoverView, StampsView } from './taskviews';
 import type { Anomaly, Source } from '../spectrum';
-import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, withFindJpl, withFindStatus, type FieldKnown, type Held } from './known';
+import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, withFindJpl, withFindKnown, withFindStatus, type FieldKnown, type Held } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
 import { clearDo, pendingDo, useSignIn } from './signin';
 import { useRetry, type SearchInfo } from './progress';
@@ -112,7 +112,7 @@ export interface FlowArgs {
   /** in Days: the index of the pass whose visits play (a mark put there belongs to it), null in Months */
   daysPass: number | null;
   /** the selected find's own catalogue answers (its record in Findings): what its badge stands on */
-  findIdents?: { catalogue: string; state: string }[] | null;
+  findIdents?: { catalogue: string; state: string; name?: string | null }[] | null;
   /** the selected find's status in Findings (unexplained, known, blend…): its catalogue line agrees with it */
   findStatus?: string | null;
   /** a date's visit in the pass on show, numbered as the time line numbers it (1 to nVisits); null outside Days or off every visit */
@@ -1432,7 +1432,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // waiting: "JPL did not answer" beside an UNEXPLAINED badge read as a contradiction
     const jpl = !cur ? a.findIdents?.find((i) => i.catalogue === 'sbident') : undefined;
     const w2 = !cur ? withFindStatus(w, a.findStatus) : w;
-    return jpl ? withFindJpl(w2, jpl.state) : w2;
+    const w3 = jpl ? withFindJpl(w2, jpl.state) : w2;
+    // a find the service calls known (JPL named its body, SIMBAD its star): the line says so, as the find's card does
+    return !cur && a.findStatus === 'known' ? withFindKnown(w3, a.findIdents) : w3;
   };
   // where the selected source is on the date shown: a moving one carries its J2000 place and its motion
   const selNow = (): { ra: number; dec: number } | null => {

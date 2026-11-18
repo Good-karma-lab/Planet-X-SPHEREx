@@ -808,6 +808,23 @@ export function followFieldKnown(ra: number, dec: number, fov: number, on: (f: F
  *  the picture's lookup may still be asking JPL, which beside an UNEXPLAINED badge read as a contradiction. */
 /** A find's catalogue line beside its status: an unexplained find matched only by a catalogue that names no object (CatWISE,
  *  AllWISE, 2MASS, a faint Gaia source) is not "known": that catalogue saw a source there and does not say what it is. */
+/** the catalogues of a find's own identification, as the line names them, in the order a name is taken */
+const IDENT_WORD: [string, string][] = [
+  ['sbident', 'JPL'],
+  ['simbad', 'SIMBAD'],
+  ['gaia', 'Gaia DR3'],
+];
+
+/** A find the service calls known: the line names what knows it (from the find's own identification), never "in no catalogue". */
+export function withFindKnown(word: string, idents: { catalogue: string; state: string; name?: string | null }[] | null | undefined): string {
+  if (/^known\b/.test(word)) return word;
+  for (const [cat, say] of IDENT_WORD) {
+    const i = idents?.find((x) => x.catalogue === cat && x.state === 'ok' && x.name);
+    if (i) return `known · ${say} ${i.name}`;
+  }
+  return word;
+}
+
 export function withFindStatus(word: string, status: string | null | undefined): string {
   if (status !== 'unexplained') return word;
   const m = /^known · in (.+)$/.exec(word);

@@ -137,9 +137,22 @@ export class FieldClient {
     await Promise.all(
       todo.map(async (name) => {
         const p = (async () => {
+          let bare = false;
           for (let attempt = 0; ; attempt++) {
-            const r = await fetch(`/api/v1/fields/${this.key}/parts/${name}`);
-            if (r.ok) return parseSxp(await r.arrayBuffer());
+            let r: Response;
+            let body: ArrayBuffer | null = null;
+            try {
+              // after a failed request, past the browser's cache: a part too big for a full disk cache failed to be written there
+              // (ERR_CACHE_WRITE_FAILURE) and the whole field was said not to be made; a body cut off on the way is asked again too
+              r = await fetch(`/api/v1/fields/${this.key}/parts/${name}`, bare ? { cache: 'no-store' } : undefined);
+              if (r.ok) body = await r.arrayBuffer();
+            } catch (e) {
+              if (attempt >= 3) throw e;
+              bare = true;
+              await new Promise((res) => setTimeout(res, 800 * (attempt + 1)));
+              continue;
+            }
+            if (body) return parseSxp(body);
             if (attempt >= 4 || (r.status !== 502 && r.status !== 503 && r.status !== 504)) throw new Error(`${name}: ${r.status}`);
             await new Promise((res) => setTimeout(res, 1000 * (attempt + 1)));
           }

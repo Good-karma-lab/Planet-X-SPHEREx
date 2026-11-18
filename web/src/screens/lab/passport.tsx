@@ -8,7 +8,7 @@ export interface FindRecord {
   /** the find's address word (track-2e26f8ee6415): the one used in links; the id stays the key for answers */
   slug?: string;
   /** its own catalogue answers (sbident is JPL's): what the find's badge stands on */
-  idents?: { catalogue: string; state: string; attempts?: number }[];
+  idents?: { catalogue: string; state: string; attempts?: number; name?: string | null }[];
   kind: string;
   status?: string;
   stage?: string;
