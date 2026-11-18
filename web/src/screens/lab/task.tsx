@@ -296,6 +296,8 @@ export interface TaskArgs {
   markMissed: () => void;
   /** shows one of a track's pictures on the picture: the visit of the pass nearest its date (MJD) */
   showPicture: (mjd: number) => void;
+  /** a date's visit number in the pass on show (the time line's numbering), null when not known */
+  visitOf?: (mjd: number) => number | null;
 }
 
 /** The task as the lab works with it: the panel, the step on show, the service's body, and the taps. */
@@ -573,13 +575,13 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               key={q.i}
               class={`mini tp-pic${missing.includes(q.i) ? ' on' : ''}`}
               aria-pressed={missing.includes(q.i)}
-              title={q.mjd != null ? `Missing in this picture · ${new Date((q.mjd - 40587) * 86400000).toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'Missing in this picture'}
+              title={q.mjd != null ? `Missing in visit ${a.visitOf?.(q.mjd) ?? q.i + 1} · ${new Date((q.mjd - 40587) * 86400000).toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'Missing in this picture'}
               onClick={() => {
                 if (q.mjd != null) a.showPicture(q.mjd);
                 setMissing((m) => (m.includes(q.i) ? m.filter((x) => x !== q.i) : [...m, q.i]));
               }}
             >
-              {q.i + 1}
+              {(q.mjd != null ? a.visitOf?.(q.mjd) : null) ?? q.i + 1}
             </button>
           ))}
           {!pictures.length && <span class="tp-none">The pictures of this track are not given</span>}

@@ -2322,8 +2322,8 @@
 /* ----- phones: a task's example picture belongs to the sheet pulled up; at rest the task is its question, one line and its
    answers, so that the lab's own picture keeps its size ----- */
 @media (max-width: 599.98px) and (min-height: 480px) {
-  :root .lab .panel[data-detent='peek'] .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done),
-  :root .lab .panel:not([data-detent]) .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done) {
+  :root .lab .panel[data-detent='peek'] .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done):not(.tp-pics),
+  :root .lab .panel:not([data-detent]) .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done):not(.tp-pics) {
     display: none;
   }
   :root .taskpanel .tp-tree,
