@@ -292,6 +292,14 @@ const COLOUR: Record<KnownSource, { ring: string; text: string }> = {
   simbad: { ring: 'rgba(150,230,170,0.85)', text: '#d3f5dc' },
   jpl: { ring: 'rgba(245,225,150,0.9)', text: '#fbf0c4' },
 };
+/** a source only a deeper catalogue has (2MASS, WISE, faint Gaia): its own quiet colour */
+const DEEP_RING = 'rgba(150, 215, 205, 0.8)';
+/** a known object's ring sits outside the star's own glow: the width of a SPHEREx point (6.2″) on the picture, more for a bright star */
+export function ringRadius(mag: number | null | undefined, pxPerArcsec: number): number {
+  const psf = 6.2 * pxPerArcsec;
+  const bright = mag != null ? Math.max(0, 13 - mag) * 0.9 : 0;
+  return Math.max(4.5, Math.min(16, 0.75 * psf + bright));
+}
 /** the ring of a detected source with no catalogue match (CSS px) */
 const NOMATCH_R = 10;
 /** a star faster than this gets its one-year arrow (″/yr) */
@@ -303,6 +311,8 @@ const MAX_RINGS = 4000;
 export interface KnownMatch {
   /** ids of the catalogue objects with a detected source at their place */
   shown: Set<string>;
+  /** ids of the deeper-catalogue entries (2MASS, WISE, faint Gaia) with a detected source at their place: known, ringed too */
+  deep?: Set<string>;
   /** detected sources with no catalogue object at their place, as fractions of the picture (u right, v down) */
   noMatch: { u: number; v: number; snr: number }[];
 }
@@ -327,12 +337,12 @@ export function matchKnown(
 ): KnownMatch {
   const r = Math.max(2, MATCH_ARCSEC / step);
   const rd = Math.max(1, DEEP_ARCSEC / step);
-  const dpts: { x: number; y: number }[] = [];
+  const dpts: { x: number; y: number; o: KnownObject }[] = [];
   for (const o of deep) {
     const at = placeAt(o, year);
     if (!at) continue;
     const [u, v] = uvOf(at[0], at[1]);
-    if (u >= -0.05 && v >= -0.05 && u <= 1.05 && v <= 1.05) dpts.push({ x: u * n, y: v * n });
+    if (u >= -0.05 && v >= -0.05 && u <= 1.05 && v <= 1.05) dpts.push({ x: u * n, y: v * n, o });
   }
   const dcat = new Buckets(dpts, Math.max(4, rd));
   const pts: { x: number; y: number; o: KnownObject }[] = [];
@@ -349,15 +359,22 @@ export function matchKnown(
     .filter((q) => q.o.mag != null && q.o.mag <= 10)
     .map((q) => ({ x: q.x, y: q.y, r: (q.o.mag! <= 6 ? 120 : q.o.mag! <= 9 ? 75 : 30) / step }));
   const shown = new Set<string>();
+  const deepShown = new Set<string>();
   const noMatch: KnownMatch['noMatch'] = [];
   for (const p of peaks) {
     const hit = cat.near(p.x, p.y, r);
-    if (hit) shown.add(hit.o.id);
+    if (hit) {
+      shown.add(hit.o.id);
+      continue;
+    }
+    const dh = dcat.near(p.x, p.y, rd);
+    // a source only a deeper catalogue has (an infrared star in 2MASS or WISE, a faint Gaia star): known, and ringed as such
+    if (dh) deepShown.add(dh.o.id);
     // a bump in a diffuse glow is the halo of a bright star (which may lie outside the frame), not a source without a match
-    else if (p.snr >= NOMATCH_SIGMA && !p.glow && !dcat.near(p.x, p.y, rd) && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r))
+    else if (p.snr >= NOMATCH_SIGMA && !p.glow && !bright.some((b) => Math.hypot(b.x - p.x, b.y - p.y) < b.r))
       noMatch.push({ u: p.x / n, v: p.y / n, snr: p.snr });
   }
-  return { shown, noMatch };
+  return { shown, deep: deepShown, noMatch };
 }
 
 export interface KnownDrawEnv {
@@ -403,6 +420,10 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
       : k.objects;
   let hover: { o: KnownObject; x: number; y: number; r: number; box: (typeof rects)[number]; d: number } | null = null;
   const named: { o: KnownObject; x: number; y: number; r: number; box: (typeof rects)[number] }[] = [];
+  let deepHover: { o: KnownObject; x: number; y: number; r: number; d: number } | null = null;
+  // the faintest star ringed: every detected one up to 10′, G 17 at 20′, G 13 at 60′ (a star without a magnitude: up to 10′ only)
+  const lim = fovArc <= 700 ? 99 : fovArc <= 1300 ? 17 : 13;
+  const quiet = fovArc > 700 ? 0.4 : 0.6;
   ctx.save();
   for (const box of rects) {
     const pxPerArcsec = box.w / fovArc;
@@ -417,8 +438,10 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
       const arrows = new Path2D();
       for (const o of objs) {
         if (o.source !== src) continue;
-        // only what the picture can show: a detected source at its place, a named one, a Solar System body; without a picture, the bright ones
-        if (!o.label && src !== 'jpl' && !(match ? match.shown.has(o.id) : (o.mag ?? 99) <= SHOWN_MAG)) continue;
+        // what the picture can show: a source detected at its place in any pass, a star bright enough to see, a named one, a
+        // Solar System body
+        // a wide field rings the brighter stars only (60′ has thousands): the limit grows with the field, never per pass
+        if (!o.label && src !== 'jpl' && !((match?.shown.has(o.id) && (o.mag ?? 99) <= lim) || (o.mag ?? 99) <= Math.min(SHOWN_MAG, lim))) continue;
         const at = placeAt(o, year);
         if (!at) continue;
         const [u, v] = uvOf(at[0], at[1]);
@@ -426,7 +449,8 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
         const x = box.x + u * box.w;
         const y = box.y + v * box.h;
         if (!wall && hidden(x, y)) continue;
-        const r = wall ? 3 : o.label ? 6 : 3.5; // a known object: one small quiet ring
+        // a known object: one quiet ring, just outside its star
+        const r = wall ? 3 : Math.max(o.label ? 6 : 0, ringRadius(o.mag, pxPerArcsec));
         const path = o.label ? bold : thin;
         path.moveTo(x + r, y);
         path.arc(x, y, r, 0, 2 * Math.PI);
@@ -460,13 +484,39 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
       ctx.stroke(bold);
       ctx.stroke(arrows);
       ctx.strokeStyle = c.ring;
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = quiet;
       ctx.lineWidth = 0.9;
       ctx.stroke(thin);
       ctx.globalAlpha = 1;
       ctx.lineWidth = 1.1;
       ctx.stroke(bold);
       ctx.stroke(arrows);
+    }
+    // the sources only a deeper catalogue has: known too (an infrared star of 2MASS or WISE has no Gaia entry)
+    if (match?.deep?.size && fovArc <= 700) {
+      const ring = new Path2D();
+      for (const o of k.deep) {
+        if (!match.deep.has(o.id)) continue;
+        const at = placeAt(o, year);
+        if (!at) continue;
+        const [u, v] = uvOf(at[0], at[1]);
+        if (u < -0.02 || v < -0.02 || u > 1.02 || v > 1.02) continue;
+        const x = box.x + u * box.w;
+        const y = box.y + v * box.h;
+        if (!wall && hidden(x, y)) continue;
+        const r = wall ? 3 : ringRadius(o.mag, pxPerArcsec);
+        ring.moveTo(x + r, y);
+        ring.arc(x, y, r, 0, 2 * Math.PI);
+        if (pointer && !wall) {
+          const d = Math.hypot(pointer.x - x, pointer.y - y);
+          if (d <= r + 4 && (!deepHover || d < deepHover.d)) deepHover = { o, x, y, r, d };
+        }
+      }
+      ctx.strokeStyle = DEEP_RING;
+      ctx.globalAlpha = 0.6;
+      ctx.lineWidth = 0.9;
+      ctx.stroke(ring);
+      ctx.globalAlpha = 1;
     }
     ctx.restore();
   }
@@ -490,6 +540,12 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.6;
     ctx.stroke(ring);
+  }
+  if (deepHover && !hover && !lone) {
+    const h = deepHover;
+    ctx.font = '500 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    const cats = (h.o.catalogues ?? []).map((c) => DEEP[c] ?? c).join(', ');
+    text(ctx, `known · ${cats || 'a deeper catalogue'}`, h.x + h.r + 5, h.y + 4, '#d8f0ec');
   }
   if (lone && !hover) {
     ctx.font = '600 11px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';

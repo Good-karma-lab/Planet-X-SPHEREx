@@ -350,6 +350,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   // the sources of each pass picture (found once), and what the catalogues have of them at the date shown
   const peaksRef = useRef(new Map<string, Peak[]>());
   const matchRef = useRef<{ key: string; m: KnownMatch } | null>(null);
+  const unionRef = useRef<{ key: string; passes: Set<number>; shown: Set<string>; deep: Set<string>; lone: KnownMatch['noMatch'] }>({
+    key: '',
+    passes: new Set(),
+    shown: new Set(),
+    deep: new Set(),
+    lone: [],
+  });
   const [counts, setCounts] = useState<{ known: number; noMatch: number } | null>(null);
   const countsRef = useRef('');
   useEffect(() => {
@@ -370,10 +377,29 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         matchRef.current = { key: mk, m: matchKnown(kn.objects, peaks, pic.n, pic.step, uv, env.year, kn.deep) };
       match = matchRef.current.m;
     }
-    const ck = match ? `${match.shown.size}:${match.noMatch.length}` : '';
+    // one set of rings for the field, not one per pass: what any pass shown so far has at a catalogue's place is known, and stays
+    // ringed in every pass (a star too faint to be found in one pass blinked its ring off and on); the counts only grow, never flip
+    const uk = `${argsRef.current.ra},${argsRef.current.dec},${argsRef.current.fov}|${kn.objects.length}|${kn.deep.length}`;
+    let un = unionRef.current;
+    if (un.key !== uk) unionRef.current = un = { key: uk, passes: new Set(), shown: new Set(), deep: new Set(), lone: [] };
+    if (match && pic && !un.passes.has(pic.pass)) {
+      un.passes.add(pic.pass);
+      for (const id of match.shown) un.shown.add(id);
+      for (const id of match.deep ?? []) un.deep.add(id);
+      const tol = 2.5 / pic.n;
+      for (const q of match.noMatch) {
+        const same = un.lone.find((o) => Math.abs(o.u - q.u) <= tol && Math.abs(o.v - q.v) <= tol);
+        if (same) same.snr = Math.max(same.snr, q.snr);
+        else un.lone.push({ ...q });
+      }
+      // a place first without a match may be matched in another pass (a moving star's place): known wins
+    }
+    const field: KnownMatch | null = un.passes.size ? { shown: un.shown, deep: un.deep, noMatch: un.lone } : match;
+    match = field;
+    const ck = match ? `${match.shown.size + (match.deep?.size ?? 0)}:${match.noMatch.length}` : '';
     if (ck !== countsRef.current) {
       countsRef.current = ck;
-      setCounts(match ? { known: match.shown.size, noMatch: match.noMatch.length } : null);
+      setCounts(match ? { known: match.shown.size + (match.deep?.size ?? 0), noMatch: match.noMatch.length } : null);
     }
     // a task about one object rings nothing else; and while a deeper catalogue is still being asked no source is ringed as
     // unmatched (the ring would appear and go when the catalogue arrives): the count on the status line says how many so far
@@ -861,17 +887,18 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
     if (tool === 'mark') {
       // a guest's first mark: the popup offers to keep the marks under a name (the mark is put all the same, in this browser)
+      const [ra, dec] = skyOf(x / a.side, y / a.side);
       if (!si.signedIn) {
         try {
           if (!sessionStorage.getItem('spherex.marks.asked')) {
             sessionStorage.setItem('spherex.marks.asked', '1');
-            si.ask('marks', '');
+            // the sign-in link comes back here with this mark in the address: it is put there again if this browser lost it
+            si.ask('marks', `mark:${ra.toFixed(5)},${dec.toFixed(5)},${a.pass ?? ''}`);
           }
         } catch {
           /* no store: no popup */
         }
       }
-      const [ra, dec] = skyOf(x / a.side, y / a.side);
       const n = marksRef.current.length + 1;
       const m = addMark({
         field_key: fieldKey(a.ra, a.dec, a.fov),
@@ -1316,6 +1343,32 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       </div>
     </>
   );
+  // after a sign-in link that came from a mark: the mark is there (put again if this browser did not keep it), its card open
+  useEffect(() => {
+    const want = pendingDo(a.params);
+    if (!want.startsWith('mark:') || !si.signedIn || !g) return;
+    clearDo();
+    const [mra, mdec, mpass] = want.slice(5).split(',');
+    const ra = Number(mra);
+    const dec = Number(mdec);
+    if (!Number.isFinite(ra) || !Number.isFinite(dec)) return;
+    const near = marksRef.current.find((q) => Math.hypot((q.ra - ra) * Math.cos((dec * Math.PI) / 180), q.dec - dec) * 3600 < 3);
+    const m =
+      near ??
+      addMark({
+        field_key: fieldKey(a.ra, a.dec, a.fov),
+        mjd: a.epochNow != null ? 51544.5 + (a.epochNow - 2000) * 365.25 : null,
+        cell_id: a.params['cell'] ?? null,
+        ra,
+        dec,
+        pass: mpass ? Number(mpass) : a.pass,
+        label: `Mark ${marksRef.current.length + 1}`,
+        level: 'suspicious',
+        note: '',
+      });
+    setOpen(m.id);
+    a.setTab('cand');
+  }, [si.signedIn, !!g, a.params['do']]);
   // after a sign-in link that came from "Add to investigation": the list opens once the selection is back
   useEffect(() => {
     if (pendingDo(a.params) === 'add' && si.signedIn && (a.sel || open)) {
