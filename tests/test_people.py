@@ -4,6 +4,7 @@ control objects and weights, the counts for the Method page."""
 
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -440,9 +441,35 @@ def test_the_finds_list_is_read_once_for_a_while_and_each_caller_gets_copies(tmp
     a[0]["status"] = "changed by a caller"
     b = routes_tasks.find_rows(st)
     assert len(reads) == 1 and b[0]["status"] != "changed by a caller" and b[0]["finding_id"] == "film:lead"
-    st._task_finds = (st._task_finds[0] - routes_tasks.FIND_ROWS_KEEP_S - 1, st._task_finds[1])  # kept long enough: read again
+    # kept long enough: the kept list is handed out at once and read again in the background, once however many callers come
+    st._task_finds = (st._task_finds[0] - routes_tasks.FIND_ROWS_KEEP_S - 1, st._task_finds[1])
+    old_at = st._task_finds[0]
+    assert routes_tasks.find_rows(st)[0]["finding_id"] == "film:lead"
     routes_tasks.find_rows(st)
-    assert len(reads) == 2
+    st._task_finds_thread.join(5)
+    assert len(reads) == 2 and st._task_finds[0] > old_at
+
+
+def test_a_failed_background_read_of_the_finds_keeps_the_list_there_was(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from service import routes_tasks
+
+    st = SimpleNamespace(_task_finds=(0.0, [{"finding_id": "film:old"}]))
+
+    def broken(s: Any, status: str | None = None) -> list[dict[str, Any]]:
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(routes_tasks, "lead_findings", broken)
+    assert routes_tasks.find_rows(st) == [{"finding_id": "film:old"}]
+    st._task_finds_thread.join(5)
+    assert st._task_finds == (0.0, [{"finding_id": "film:old"}]) and st._task_finds_busy is False
+    assert "could not be read again" in caplog.text
+    # the lock is free again: the next caller starts the next read
+    monkeypatch.setattr(routes_tasks, "lead_findings", lambda s, status=None: [{"finding_id": "film:new"}])
+    routes_tasks.find_rows(st)
+    st._task_finds_thread.join(5)
+    assert st._task_finds[1] == [{"finding_id": "film:new"}]
 
 
 def test_a_track_task_names_the_film_its_search_ran_on(site: tuple[FastAPI, Any]) -> None:
