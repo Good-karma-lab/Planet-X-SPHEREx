@@ -66,6 +66,8 @@ class _Gate:
     def _cap(self) -> int:
         """The background's share: all but the reserve while nobody is at the page; while a person's call waits or came in the last
         PERSON_RECENT_S, at most PERSON_LOW_CAP, so a person's field gets nearly every worker as the background calls finish."""
+        if self.low_cap >= self.total - 1:
+            return self.low_cap  # no reserve (a second node): nobody is at its page, every call is its own work
         person_waits = any(not low and not f.done() for _, _, low, f in self.waiting)
         if person_waits or time.monotonic() - self.person_at < PERSON_RECENT_S:
             return min(self.low_cap, PERSON_LOW_CAP)
