@@ -42,3 +42,13 @@ def test_serves_the_built_web_app(tmp_path: Path) -> None:
     assert r.status_code == 200
     assert "SPHEREx Sky" in r.text
     assert c.get("/api/v1/health").json()["ok"] is True
+
+
+def test_a_check_of_the_site_does_not_pause_the_sweep_as_a_person_would(tmp_path: Path) -> None:
+    """The deployed site's checks send X-Sky-Check: 1: they open fields as a person does, but the sweep goes on."""
+    with client(tmp_path) as c:
+        assert c.get("/api/v1/health").json()["jobs"]["person_active"] is False
+        c.get("/api/v1/fields", headers={"X-Sky-Check": "1"})
+        assert c.get("/api/v1/health").json()["jobs"]["person_active"] is False
+        c.get("/api/v1/fields")
+        assert c.get("/api/v1/health").json()["jobs"]["person_active"] is True

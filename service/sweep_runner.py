@@ -145,13 +145,32 @@ class SweepRunner:
         self._late: list[dict[str, Any]] = []  # a node's squares sent back while their Find Planet X searches still ran
         self.day = datetime.now(UTC).date().isoformat()
         self.status: dict[str, Any] = {"state": "starting", "squares_today": 0, "finds_today": 0, "seconds_today": 0.0}
+        self._today: tuple[float, dict[str, Any]] | None = None  # the day's squares read from the grid, and when
 
     # ---- what /health says ----------------------------------------------------------------------------------------------------
     def snapshot(self) -> dict[str, Any]:
         s = dict(self.status)
+        s.update(self.today())
         if s.get("seconds_today"):
             s["per_hour"] = round(3600.0 * s["squares_today"] / s["seconds_today"], 1)
         return s
+
+    def today(self) -> dict[str, Any]:
+        """Today's squares, finds and seconds (UTC) from the squares' own rows, so a restart does not set them to 0; kept 30 s (health
+        asks often). Empty when there is no grid (the counters of this process stand then)."""
+        now = time.time()
+        got = self._today
+        if got is not None and now - got[0] < 30.0:
+            return got[1]
+        db = getattr(self.st, "grid", None)
+        out: dict[str, Any] = {}
+        if db is not None:
+            try:
+                out = db.searched_on(datetime.now(UTC).date().isoformat())
+            except Exception:
+                out = {}
+        self._today = (now, out)
+        return out
 
     def _say(self, state: str, **kw: Any) -> None:
         today = datetime.now(UTC).date().isoformat()
@@ -434,6 +453,7 @@ class SweepRunner:
         if self._archive_troubled(before):  # a read gave up, or many retries, during this square: give the archive time
             self._backoff_until = time.time() + ARCHIVE_BACKOFF_S
         if got.get("state") == "searched":
+            self._today = None  # read the day's squares again
             self.status["squares_today"] += 1
             self.status["finds_today"] += int(got.get("finds") or 0)
             self.status["seconds_today"] += float(got.get("seconds") or 0)

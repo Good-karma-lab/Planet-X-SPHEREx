@@ -86,6 +86,8 @@ try {
   for (const [w, h] of SIZES) {
     const ctx = await browser.newContext({ viewport: { width: w, height: h }, deviceScaleFactor: 1, hasTouch: w < 600, isMobile: w < 600 });
     if (!HINTS) await ctx.addInitScript(() => { try { localStorage.setItem('spherex-tour-seen', '1'); localStorage.setItem('spherex-hints-seen-off', '1'); } catch {} });
+    // a check, not a person: the site's own API calls say so (X-Sky-Check), so an audit of the deployed site does not pause its sweep
+    await ctx.route('**/api/**', (r) => r.continue({ headers: { ...r.request().headers(), 'x-sky-check': '1' } }));
     const page = await ctx.newPage();
     for (const [id, path] of PAGES) {
       let ok = false;
