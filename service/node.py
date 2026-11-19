@@ -230,6 +230,15 @@ def is_node() -> bool:
     return bool(main_url() and secret())
 
 
+def slots(machine: Any = None) -> int:
+    """How many squares a node searches at once: SKY_NODE_SLOTS, else 2 on a normal machine and 1 on a small one (each square builds its
+    field and runs its searches inside the machine's budget; Find Planet X takes most of a square's time and waits on the archive)."""
+    try:
+        return max(1, min(4, int(os.environ["SKY_NODE_SLOTS"])))
+    except (KeyError, ValueError):
+        return 1 if machine is not None and getattr(machine, "small", False) else 2
+
+
 def call(path: str, payload: dict[str, Any], timeout: float = 120.0) -> dict[str, Any]:
     """One signed call to the main service (blocking: run it in a thread)."""
     import httpx

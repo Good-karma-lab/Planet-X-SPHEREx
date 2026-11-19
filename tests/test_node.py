@@ -171,3 +171,27 @@ def test_the_leases_take_many_threads_at_once(tmp_path: Path) -> None:
     with ThreadPoolExecutor(8) as ex:
         got = list(ex.map(lambda _: lz.summary({})["a1"]["squares_all"], range(400)))
     assert set(got) == {50}
+
+
+def test_a_node_runs_two_squares_at_once_each_under_its_slot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """2 slots on a normal machine, 1 on a small one, SKY_NODE_SLOTS wins; each slot leases under its own name (a1s0, a1s1), also from
+    the thread its lease call runs in."""
+    import asyncio
+
+    from service import sweep_runner
+
+    monkeypatch.delenv("SKY_NODE_SLOTS", raising=False)
+    assert node.slots(SimpleNamespace(small=False)) == 2 and node.slots(SimpleNamespace(small=True)) == 1
+    monkeypatch.setenv("SKY_NODE_SLOTS", "3")
+    assert node.slots(SimpleNamespace(small=True)) == 3
+    monkeypatch.setenv("SKY_NODE_NAME", "a1")
+    assert sweep_runner.lease_name() == "a1"
+
+    async def slot(k: int) -> str:
+        sweep_runner.SLOT.set(f"a1s{k}")
+        return await asyncio.to_thread(sweep_runner.lease_name)
+
+    async def both() -> list[str]:
+        return list(await asyncio.gather(slot(0), slot(1)))
+
+    assert asyncio.run(both()) == ["a1s0", "a1s1"]
