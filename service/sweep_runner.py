@@ -54,6 +54,13 @@ LAB_STOCK_EVERY_S = 600.0  # how often the list of the top finds' lab fields is 
 RETRY_BURST = 20  # failed archive reads during one square (retried or not) that make the sweep wait; a few retries are normal
 
 
+def _num(v: Any) -> float | None:
+    try:
+        return float(v) if v is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
 def disk_used_pct(path: Any) -> float:
     try:
         u = shutil.disk_usage(path)
@@ -88,6 +95,18 @@ def top_find_fields(st: Any) -> list[dict[str, Any]]:
             continue
         ra, dec, fov = (fp["ra"], fp["dec"], fp["fov"]) if fp else (f["ra"], f["dec"], 10.0)
         wanted = [fieldjob.canonical(float(ra), float(dec), float(fov))]
+        if fp:  # its task opens centred on the track with a margin (routes_tasks.track_place): that field and its film first
+            from service.routes_tasks import track_place
+
+            place = track_place({"data": f.get("data") or {}})
+            mjd = _num((f.get("data") or {}).get("film"))
+            if place is not None:
+                lead = fieldjob.canonical(*place)
+                fk = st.lead_film_key(*place, mjd) if mjd is not None and callable(getattr(st, "lead_film_key", None)) else None
+                if fk is not None and not st.store.is_complete(fk[0]):
+                    out.append({**lead, "film_mjd": mjd})  # the field (if not built) and then the film of the track's pass
+                    continue
+                wanted.insert(0, lead)
         if not fp:  # its task opens at the smallest field that holds the whole track (20′ or 60′ for a long one): that one too
             from service.routes_tasks import task_fov
 
@@ -212,11 +231,16 @@ class SweepRunner:
 
     async def lab_field(self, params: dict[str, Any]) -> dict[str, Any]:
         t0 = time.time()
+        params = dict(params)
+        film_mjd = params.pop("film_mjd", None)  # a track lead: its task's field, then the film of its pass on that field
         self._say("warming a find's field", field=params, step=None)
         key, job = self.st.submit_field(params, Priority.P2)
         while job is not None and job.state not in ("done", "error", "cancelled") and time.time() - t0 < SQUARE_LIMIT_S:
             await asyncio.sleep(5.0)
         done = self.st.store.is_complete(key)
+        if done and film_mjd is not None and callable(getattr(self.st, "warm_lead_film", None)):
+            self._say("warming a find's film", field=params, step=None)
+            done = await self.st.warm_lead_film(params["ra"], params["dec"], params["fov"], float(film_mjd))
         self.status["lab_fields_today"] = int(self.status.get("lab_fields_today") or 0) + int(done)
         return {"state": "warmed" if done else "failed", "field": params, "seconds": round(time.time() - t0)}
 

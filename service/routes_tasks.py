@@ -369,6 +369,28 @@ def find_row(st: Any, finding_id: str) -> dict[str, Any] | None:
 TASK_FOVS = (10.0, 20.0, 60.0)  # the field sizes a finding task opens at: the smallest that holds the whole track
 
 
+LEAD_MARGIN = 0.15  # each side of a track in its task's field: the whole track and this share of the field around it
+
+
+def track_place(row: dict[str, Any] | None) -> tuple[float, float, float] | None:
+    """Where a time-lapse track's task opens: centred on the middle of its visits, at the smallest of the task sizes that holds them
+    all with LEAD_MARGIN on each side (60′ when nothing smaller does). None without the visits' places. On its film's own field a
+    visit sat on the left edge (the designer, 19 Nov 2026)."""
+    vis = [(float(v["ra"]), float(v["dec"])) for v in ((row or {}).get("data") or {}).get("visits") or [] if v.get("ra") is not None]
+    if not vis:
+        return None
+    decs = [d for _, d in vis]
+    ras = [a for a, _ in vis]
+    ref = ras[0]
+    ras = [ref + ((a - ref + 180.0) % 360.0 - 180.0) for a in ras]  # across RA 0
+    dec0 = (min(decs) + max(decs)) / 2.0
+    ra0 = ((min(ras) + max(ras)) / 2.0) % 360.0
+    span = max((max(ras) - min(ras)) * math.cos(math.radians(dec0)), max(decs) - min(decs)) * 60.0  # arcmin
+    need = span / (1.0 - 2.0 * LEAD_MARGIN)
+    fov = next((f for f in TASK_FOVS if f >= need), TASK_FOVS[-1])
+    return ra0, dec0, fov
+
+
 def task_fov(row: dict[str, Any] | None) -> float:
     """The field a finding task opens at: 10′, or the smallest of 20′ / 60′ that holds the whole track with a margin; a time-lapse
     at its own field (60′ unless it says)."""
@@ -608,8 +630,12 @@ def make_tasks_router(st: Any) -> APIRouter:
             row = find_row(st, task["finding_id"])
             task["fov"] = task_fov(row)  # the whole track in the picture
             fp = ((row or {}).get("data") or {}).get("field_params") or {}
-            if str(task["finding_id"]).startswith("film:") and fp.get("ra") is not None and fp.get("dec") is not None:
-                # a time-lapse opens on its own field (built, kept): centred on the track it was a 60′ field never made (a cold build)
+            place = track_place(row) if str(task["finding_id"]).startswith("film:") else None
+            if place is not None:
+                # a time-lapse track opens centred on its visits, the whole track inside with a margin (the sweep warms that field
+                # for the top finds: sweep_runner.top_find_fields)
+                task["ra"], task["dec"], task["fov"] = place
+            elif str(task["finding_id"]).startswith("film:") and fp.get("ra") is not None and fp.get("dec") is not None:
                 task["ra"], task["dec"] = float(fp["ra"]), float(fp["dec"])
             series = people.series_of(str(task["finding_id"]).split(":")[0])
             if series is not None:

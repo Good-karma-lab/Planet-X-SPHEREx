@@ -230,3 +230,21 @@ def test_an_old_open_square_task_is_not_given_again(
     # the cabinet's Continue skips the old one (m-8: "Continue · square 099-0543 SW" pointed to a square of the day before)
     listed = {t["id"]: t for t in c.get("/api/me/tasks").json()["tasks"]}
     assert listed[first["id"]]["stale"] is True and listed[again["id"]]["stale"] is False
+
+
+def test_a_track_lead_opens_centred_on_its_visits_with_a_margin() -> None:
+    """The designer, 19 Nov 2026: on its film's own field a visit sat on the left edge. A track's task opens centred on the middle of
+    its visits at the smallest size holding them with 15 % each side."""
+    from service.routes_tasks import track_place
+
+    def row(pts: list[tuple[float, float]]) -> dict[str, Any]:
+        return {"data": {"visits": [{"ra": a, "dec": d, "mjd": 61000.0 + k} for k, (a, d) in enumerate(pts)]}}
+
+    ra0, dec0, fov = track_place(row([(50.0, 7.0), (50.0, 7.0 + 7.0 / 60.0)]))  # 7′ long
+    assert fov == 10.0 and abs(ra0 - 50.0) < 1e-9 and abs(dec0 - (7.0 + 3.5 / 60.0)) < 1e-9
+    assert track_place(row([(50.0, 7.0), (50.0, 7.0 + 15.0 / 60.0)]))[2] == 60.0  # 15′ / 0.7 = 21.4′: not 20′
+    ra_w, _, _ = track_place(row([(359.95, 0.0), (0.05, 0.0)]))  # across RA 0
+    assert min(abs(ra_w - 0.0), abs(ra_w - 360.0)) < 1e-6
+    assert track_place({"data": {}}) is None
+    # the middle of the visits, not their order: the first visit may be anywhere along the track
+    assert track_place(row([(50.1, 7.0), (50.0, 7.0), (50.05, 7.0)]))[0] == pytest.approx(50.05)

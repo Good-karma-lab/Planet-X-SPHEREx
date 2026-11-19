@@ -251,3 +251,32 @@ def test_a_start_leaves_the_stripped_fields_complete(tmp_path: Path) -> None:
     assert fieldjob.unread(store.read_meta("field", "c" * 24))
     assert fieldjob.reopen_unread(store) == (1, 1)
     assert [store.is_complete(k * 24) for k in "abcd"] == [True, True, False, True]
+
+
+def test_a_track_leads_field_and_film_are_warmed_where_its_task_opens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A track's task opens centred on its visits (routes_tasks.track_place); the sweep builds that field and the film of the track's
+    pass on it, so its questions do not wait on a cold film; built, it is left."""
+    from service import findings
+    from service.products.store import product_key
+    from service.routes_tasks import track_place
+
+    visits = [{"ra": 50.0, "dec": 7.0, "mjd": 61100.0}, {"ra": 50.0, "dec": 7.0 + 7 / 60, "mjd": 61101.0}]
+    track = {"kind": "film", "ra": 50.0, "dec": 7.05, "data": {"field_params": {"ra": 50.1, "dec": 7.2, "fov": 20.0}, "visits": visits,
+                                                               "film": 61100.5}}  # fmt: skip
+    monkeypatch.setattr(findings, "query", lambda *a, **k: {"finds": [track]})
+    monkeypatch.setattr(fieldjob, "exposure_signature", lambda index, params: "sig")
+    store = Store(tmp_path / "store")
+    films: list[tuple[float, ...]] = []
+    st = SimpleNamespace(findings=SimpleNamespace(db=object()), findings_flow=object(), index=object(), store=store,
+                         lead_film_key=lambda ra, dec, fov, mjd: (films.append((ra, dec, fov, mjd)) or ("filmkey", {})))  # fmt: skip
+    got = sweep_runner.top_find_fields(st)
+    place = track_place({"data": track["data"]})
+    assert got[0] == {**fieldjob.canonical(*place), "film_mjd": 61100.5} and films[0][3] == 61100.5
+    store.begin("film", "filmkey", {})
+    store.complete("filmkey")
+    lead = fieldjob.canonical(*place)
+    key = product_key(fieldjob.KIND, lead, extra=("sig",))
+    store.begin("field", key, lead)
+    store.write_meta("field", key, {"passes": [{}, {}]})
+    store.complete(key)
+    assert lead not in [{k: v for k, v in p.items() if k != "film_mjd"} for p in sweep_runner.top_find_fields(st)]
