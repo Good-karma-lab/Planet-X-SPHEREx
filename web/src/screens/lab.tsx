@@ -2574,6 +2574,8 @@ export function Lab({ route }: { route: Route }) {
   const yearOf = (mjd: number) => 2000 + (mjd - 51544.5) / 365.25;
   const flowDays = film !== null && !!filmData;
   // a grid square or one of its quarters: its outline, its status words, the look that counts only on purpose
+  // the quarter's minute counts on the quarter only: it waits while a lead in the square has its questions open (its own field)
+  const leadOpenRef = useRef(false);
   const square = useSquareLook({
     params: p,
     ra,
@@ -2581,7 +2583,7 @@ export function Lab({ route }: { route: Route }) {
     fov,
     pass: film === null ? (shown?.pass ?? null) : null,
     passesTotal: meta?.passes.length ?? 0,
-    ready: !!meta && phase === '' && film === null,
+    ready: !!meta && phase === '' && film === null && !leadOpenRef.current && p['q_ra'] == null,
     open: (q) => {
       location.hash = formatHash({ screen: 'lab', params: q });
     },
@@ -2679,7 +2681,8 @@ export function Lab({ route }: { route: Route }) {
         return null;
       }
     },
-  });
+  });  leadOpenRef.current = flow.leadOpen;
+
   flowRef.current = flow;
   // for the Candidates list: whether JPL answered for the asteroid tracks of the pass, and the SIMBAD names of the red sources
   // (a named one is known)

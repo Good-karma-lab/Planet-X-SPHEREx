@@ -264,6 +264,8 @@ export interface LabFlow {
   selHeld: Held | null;
   /** a task's find not answered yet: what the catalogues and Findings say of it waits for the answers */
   blind: boolean;
+  /** a square's lead has its questions open: the quarter's look waits (it counts on the quarter only) */
+  leadOpen: boolean;
 }
 
 export function useLabFlow(a: FlowArgs): LabFlow {
@@ -1818,6 +1820,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   return {
     selHeld,
     blind: blindAny,
+    leadOpen,
     draw,
     pointer: (p) => {
       ptr.current = p;
