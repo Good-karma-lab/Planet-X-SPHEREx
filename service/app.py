@@ -741,6 +741,16 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             response.headers.setdefault("Cache-Control", "no-cache")
         return response
 
+    async def nodes_health() -> dict[str, Any] | None:
+        """The nodes' state for /health, never its failure: /health is what the proxy reads to send visitors to this instance."""
+        if not callable(st.nodes_summary):
+            return None
+        try:
+            got: dict[str, Any] | None = await asyncio.to_thread(st.nodes_summary)
+            return got
+        except Exception as e:
+            return {"error": f"{type(e).__name__}: {e}"[:160]}
+
     @app.get(f"{API_PREFIX}/health")
     async def health() -> dict[str, Any]:
         """Cheap liveness and state. Async on purpose: it never queues for the thread pool behind field lookups, so Caddy's health check
@@ -765,7 +775,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "bd_queue": {"done": len(st.bd_queue.done), **st.bd_queue_last} if st.bd_queue is not None else None,
             "sweep": st.sweep.snapshot() if st.sweep is not None else None,
             # the second nodes searching squares for this service (service/node.py): their square, step and squares today
-            "nodes": await asyncio.to_thread(st.nodes_summary) if callable(st.nodes_summary) else None,
+            "nodes": await nodes_health(),
             "machine": st.machine.as_dict() if st.machine is not None else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
             "cpu": cpu.stats(),

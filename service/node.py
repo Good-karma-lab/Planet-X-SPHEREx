@@ -22,6 +22,7 @@ import hmac
 import json
 import os
 import sqlite3
+import threading
 import time
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -86,6 +87,9 @@ class Leases:
     """The squares lent to nodes (the product database, beside the grid)."""
 
     def __init__(self, path: Path) -> None:
+        # one connection, used from the threads of several requests at once (/health every 2 s): every use holds the lock, else
+        # SQLite refused with "bad parameter or other API misuse" and /health answered 500 (19 Nov 2026)
+        self.lock = threading.RLock()
         self.db = sqlite3.connect(path, check_same_thread=False, timeout=10.0, isolation_level=None)
         self.db.row_factory = sqlite3.Row
         self.db.execute("PRAGMA busy_timeout=8000")
@@ -93,59 +97,64 @@ class Leases:
 
     def lend(self, grid_db: Any, order: Any, node: str, now: float | None = None) -> Any:
         """The next square in the sweep order nobody searched, is searching or holds (an expired lease is taken back first)."""
-        t = now if now is not None else time.time()
-        for r in self.db.execute("SELECT cell_id FROM node_leases WHERE until < ?", (t,)).fetchall():
-            row = grid_db.get(r["cell_id"])
-            if row is not None and row.get("state") == "searching" and str(row.get("source") or "").startswith("node:"):
-                grid_db.put(r["cell_id"], "new", source="sweep")
-            self.db.execute("DELETE FROM node_leases WHERE cell_id = ?", (r["cell_id"],))
-        mine = self.db.execute("SELECT cell_id FROM node_leases WHERE node = ? AND until >= ? ORDER BY given", (node, t)).fetchone()
-        if mine is not None:  # the node asks again (it restarted mid-square): the square it holds, its lease renewed
-            self.db.execute("UPDATE node_leases SET until = ? WHERE cell_id = ?", (t + LEASE_S, mine["cell_id"]))
-            from service import grid as grid_mod
+        with self.lock:
+            t = now if now is not None else time.time()
+            for r in self.db.execute("SELECT cell_id FROM node_leases WHERE until < ?", (t,)).fetchall():
+                row = grid_db.get(r["cell_id"])
+                if row is not None and row.get("state") == "searching" and str(row.get("source") or "").startswith("node:"):
+                    grid_db.put(r["cell_id"], "new", source="sweep")
+                self.db.execute("DELETE FROM node_leases WHERE cell_id = ?", (r["cell_id"],))
+            mine = self.db.execute("SELECT cell_id FROM node_leases WHERE node = ? AND until >= ? ORDER BY given", (node, t)).fetchone()
+            if mine is not None:  # the node asks again (it restarted mid-square): the square it holds, its lease renewed
+                self.db.execute("UPDATE node_leases SET until = ? WHERE cell_id = ?", (t + LEASE_S, mine["cell_id"]))
+                from service import grid as grid_mod
 
-            return grid_mod.by_id(mine["cell_id"])
-        for ce in order:
-            row = grid_db.get(ce.id)
-            if row is not None and row.get("state") in ("searched", "failed", "searching"):
-                continue
-            self.db.execute("INSERT OR REPLACE INTO node_leases VALUES (?,?,?,?)", (ce.id, node, t + LEASE_S, t))
-            grid_db.put(ce.id, "searching", source=f"node:{node}")
-            return ce
-        return None
+                return grid_mod.by_id(mine["cell_id"])
+            for ce in order:
+                row = grid_db.get(ce.id)
+                if row is not None and row.get("state") in ("searched", "failed", "searching"):
+                    continue
+                self.db.execute("INSERT OR REPLACE INTO node_leases VALUES (?,?,?,?)", (ce.id, node, t + LEASE_S, t))
+                grid_db.put(ce.id, "searching", source=f"node:{node}")
+                return ce
+            return None
 
     def holds(self, cell_id: str, node: str) -> bool:
-        r = self.db.execute("SELECT node FROM node_leases WHERE cell_id = ?", (cell_id,)).fetchone()
-        return r is not None and r["node"] == node
+        with self.lock:
+            r = self.db.execute("SELECT node FROM node_leases WHERE cell_id = ?", (cell_id,)).fetchone()
+            return r is not None and r["node"] == node
 
     def release(self, cell_id: str) -> None:
-        self.db.execute("DELETE FROM node_leases WHERE cell_id = ?", (cell_id,))
+        with self.lock:
+            self.db.execute("DELETE FROM node_leases WHERE cell_id = ?", (cell_id,))
 
     def record(self, cell_id: str, node: str, finds: int, products: int, files: int) -> None:
         """A square a node sent back (the grid row's own `source` may be rewritten later: this log keeps who searched it)."""
-        self.db.execute("INSERT INTO node_results VALUES (?,?,?,?,?,?)", (cell_id, node, time.time(), finds, products, files))
+        with self.lock:
+            self.db.execute("INSERT INTO node_results VALUES (?,?,?,?,?,?)", (cell_id, node, time.time(), finds, products, files))
 
     def summary(self, status: dict[str, dict[str, Any]], now: float | None = None) -> dict[str, Any]:
         """{node: {square, since, step, state, seen_s, squares_today, finds_today, squares_all}} for /health (`status`: the heartbeats)."""
-        t = now if now is not None else time.time()
-        day0 = t - (t % 86400.0)
-        out: dict[str, Any] = {}
-        for r in self.db.execute("SELECT node, cell_id, given FROM node_leases ORDER BY given"):
-            out.setdefault(r["node"], {})["square"] = r["cell_id"]
-            out[r["node"]]["since"] = round(r["given"])
-        q = (
-            "SELECT node, SUM(at >= ?) today, SUM(CASE WHEN at >= ? THEN finds ELSE 0 END) finds_today, COUNT(*) n"
-            " FROM node_results GROUP BY node"
-        )
-        for r in self.db.execute(q, (day0, day0)):
-            out.setdefault(r["node"], {}).update(
-                squares_today=int(r["today"] or 0), finds_today=int(r["finds_today"] or 0), squares_all=int(r["n"])
+        with self.lock:
+            t = now if now is not None else time.time()
+            day0 = t - (t % 86400.0)
+            out: dict[str, Any] = {}
+            for r in self.db.execute("SELECT node, cell_id, given FROM node_leases ORDER BY given"):
+                out.setdefault(r["node"], {})["square"] = r["cell_id"]
+                out[r["node"]]["since"] = round(r["given"])
+            q = (
+                "SELECT node, SUM(at >= ?) today, SUM(CASE WHEN at >= ? THEN finds ELSE 0 END) finds_today, COUNT(*) n"
+                " FROM node_results GROUP BY node"
             )
-        for name, hb in status.items():
-            sw = hb.get("sweep") or {}
-            out.setdefault(name, {}).update(step=sw.get("step"), state=sw.get("state"), seen_s=round(t - float(hb.get("at") or 0)),
-                                            per_hour=sw.get("per_hour"))  # fmt: skip
-        return out
+            for r in self.db.execute(q, (day0, day0)):
+                out.setdefault(r["node"], {}).update(
+                    squares_today=int(r["today"] or 0), finds_today=int(r["finds_today"] or 0), squares_all=int(r["n"])
+                )
+            for name, hb in status.items():
+                sw = hb.get("sweep") or {}
+                out.setdefault(name, {}).update(step=sw.get("step"), state=sw.get("state"), seen_s=round(t - float(hb.get("at") or 0)),
+                                                per_hour=sw.get("per_hour"))  # fmt: skip
+            return out
 
 
 def safe_rel(path: str) -> PurePosixPath | None:

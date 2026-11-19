@@ -159,3 +159,15 @@ def test_health_says_what_each_node_does(tmp_path: Path, monkeypatch: pytest.Mon
     assert got["seen_s"] <= 2 and got["state"] == "searching"
     assert grid.view_of(grid.by_id(held["id"]), st.grid.get(held["id"]), 0)["by"] == "a1"
     assert "by" not in grid.view_of(grid.by_id(first["id"]), st.grid.get(first["id"]), 0)  # searched: no longer being searched
+
+
+def test_the_leases_take_many_threads_at_once(tmp_path: Path) -> None:
+    """/health reads the leases from several request threads at once (Caddy every 2 s): no 'bad parameter or other API misuse'."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    lz = node.Leases(tmp_path / "product.sqlite")
+    for k in range(50):
+        lz.record(f"290-{k:04d}", "a1", 1, 2, 3)
+    with ThreadPoolExecutor(8) as ex:
+        got = list(ex.map(lambda _: lz.summary({})["a1"]["squares_all"], range(400)))
+    assert set(got) == {50}
