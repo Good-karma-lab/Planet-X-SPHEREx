@@ -234,6 +234,8 @@ export interface NextTask {
   series?: { id: string; steps: SeriesStep[] } | null;
   /** a square given for a lead in it: which find */
   why?: { finding_id?: string; kind?: string; promise?: number; ra?: number; dec?: number; text?: string; ask?: { kind?: string; finding_id?: string; series?: string } } | null;
+  /** a time-lapse track: the date (MJD) of the film its search ran on; the lab plays that film (warmed ahead) */
+  film?: number | null;
   /** a track's pictures (its visits), to tap where it is missing */
   pictures?: { i: number; mjd?: number | null; ra?: number | null; dec?: number | null }[] | null;
   /** the other kinds: their question and answers */
@@ -275,6 +277,8 @@ export function taskParams(t: NextTask): Record<string, string> | null {
     // the find is the lab's selected object (`find`): the one thing the task rings brightly (an exposure is no find)
     ...(t.finding_id && t.kind !== 'bad_picture' ? { finding: t.finding_id, find: t.finding_id } : {}),
     ...(t.finding_id && t.kind === 'bad_picture' ? { exposure: t.finding_id } : {}),
+    // a track opens straight in Days on its search's own film
+    ...(t.film != null && t.finding_id?.startsWith('film:') ? { film: String(t.film) } : {}),
   };
 }
 
@@ -628,13 +632,26 @@ export function useLabTask(a: TaskArgs): LabTaskView {
             : step && steps
               ? [
                   `Question ${path.length + 1} · up to ${steps.length}`,
-                  a.ready === false ? 'answers open when the passes are drawn' : step.tap ? `${missing.length} missing` : '',
+                  // short enough for the one line of the panel (it never wraps, so nothing below it jumps)
+                  a.ready === false
+                    ? step.show === 'blink' || step.show === 'pictures'
+                      ? 'loading the visits…'
+                      : 'loading the pictures…'
+                    : step.tap
+                      ? `${missing.length} missing`
+                      : '',
                 ]
                   .filter(Boolean)
                   .join(' · ')
               : tapping
                 ? `${taps.length} tapped`
                 : '')}
+        {/* a guest learns before answering that an answer needs a name (the answer clicked is still given after the sign-in) */}
+        {!line && task.kind !== 'cell' && step && !si.signedIn && (
+          <button class="lnk tp-guest" onClick={() => si.ask('answer', '')} data-testid="task-guest">
+            sign in to answer
+          </button>
+        )}
       </div>
       {done ? null : step ? (
         <div

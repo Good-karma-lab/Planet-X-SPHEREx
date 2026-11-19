@@ -819,11 +819,12 @@ export interface AnomalyField {
   seconds: number;
 }
 
-/** The driving bins in words: "excess at 1.51–1.66 µm (+27σ, 31 % of the misfit)". */
+/** The driving bins in words: "excess at 1.51–1.66 µm (27× the noise, 31 % of the difference)": the difference from the spectrum
+ *  of an ordinary star or galaxy that makes it odd, and this range's share of it. */
 export function driverWords(a: Anomaly): string[] {
   return a.drivers.map(
     (d) =>
-      `${d.z > 0 ? 'excess' : 'deficit'} at ${d.lo.toFixed(2)}–${d.hi.toFixed(2)} µm (${d.z > 0 ? '+' : '−'}${Math.abs(d.z).toFixed(0)}σ, ${Math.round(d.share * 100)} % of the misfit)`,
+      `${d.z > 0 ? 'excess' : 'deficit'} at ${d.lo.toFixed(2)}–${d.hi.toFixed(2)} µm (${Math.abs(d.z).toFixed(0)}× the noise, ${Math.round(d.share * 100)} % of the difference)`,
   );
 }
 

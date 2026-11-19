@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { honestLines } from '../search/jobs';
 import { useSearched, type SearchedField } from '../search/searched';
 import { P9, RECORDED } from './data';
+import { atKnown, echoOf } from './known';
 import type { Group, Layers, PxField, PxScene, View } from './scene';
 import './px3.css';
 
@@ -75,16 +76,6 @@ const SIZES = [2, 5, 10, 20, 60];
 const snap = (fov: number) => SIZES.find((s) => s >= fov - 0.5) ?? 60;
 const labHref = (f: SearchedField) => `#/lab?ra=${f.open.ra}&dec=${f.open.dec}&fov=${snap(f.open.fov)}`;
 
-/** Where the live service's Eris and Makemake detections stand in each pass: a Find Planet X peak this close is that known body. */
-const KNOWN_AT: [number, number][] = [
-  [27.3724, -0.114],
-  [26.3287, -0.4364],
-  [27.5024, 0.1488],
-  [199.9413, 21.4873],
-  [202.3119, 20.1508],
-  [61.86, 8.84],
-];
-
 /** One Find Planet X peak, as Findings lists it (GET /api/v1/findings, kind peak). A LEAD is a peak above its field's bar that is not a
  *  known body; the same definition the Findings page and the Lab use. */
 interface Known {
@@ -103,12 +94,25 @@ interface Peak {
   status?: string;
   epoch?: number;
   data: {
-    peak?: { stamp?: string; d?: number; sn?: number; phot_sn?: number; ok?: boolean; edge?: boolean; d_lo?: number; known?: Known | null };
+    peak?: {
+      stamp?: string;
+      d?: number;
+      sn?: number;
+      phot_sn?: number;
+      ok?: boolean;
+      edge?: boolean;
+      d_lo?: number;
+      known?: Known | null;
+      by_pass?: { ra?: number; dec?: number; sn?: number }[] | null;
+    };
   };
 }
-/** a peak JPL names (data.peak.known from the service, or status 'known'), or one at a live known-body place */
+/** a peak JPL names (data.peak.known from the service, or status 'known'), one at a live known-body place, or a known body's echo */
 const isKnown = (f: Peak) =>
-  f.status === 'known' || f.data.peak?.known?.state === 'ok' || KNOWN_AT.some((k) => sep(k, [f.ra, f.dec]) < 0.05);
+  f.status === 'known' ||
+  f.data.peak?.known?.state === 'ok' ||
+  atKnown(f.ra, f.dec) ||
+  echoOf(f) != null;
 function usePeaks(): { leads: Peak[]; known: Peak[] } | null {
   const [p, setP] = useState<{ leads: Peak[]; known: Peak[] } | null>(null);
   useEffect(() => {
@@ -209,6 +213,8 @@ export function PlanetXPage() {
   const pk = usePeaks();
   const leads = pk?.leads ?? null;
   const knownPeaks = pk?.known ?? [];
+  // known bodies' echoes the service did not name (their strongest pass sits on the body)
+  const echoes = knownPeaks.filter((f) => !f.data.peak?.known?.name && f.status !== 'known').map(echoOf).filter((x): x is string => !!x);
   const [tab, setTab] = useState<'cands' | 'searched' | 'story'>('cands');
   const [chapter, setChapter] = useState(-1);
   const [layers, setLayersState] = useState<Layers>(ALL);
@@ -244,15 +250,17 @@ export function PlanetXPage() {
         <em class="pill lead">{pk.data.peak?.known?.state === 'ok' ? 'known body' : 'lead'}</em>
       </div>
       <div class="where">
-        {PLACES.find(([, ra, dec]) => sep([ra, dec], [pk.ra, pk.dec]) < 0.3)?.[0] ?? pk.place} · RA {pk.ra.toFixed(2)} · Dec{' '}
-        {fmtDec(pk.dec)}
+        {/* the name of the searched field the peak lies in (a place people know), never the name of the peak itself */}
+        {(() => {
+          const near = PLACES.find(([, ra, dec]) => sep([ra, dec], [pk.ra, pk.dec]) < 0.3)?.[0];
+          return near ? `in the ${near.replace(/ field$/, '')} field · ` : '';
+        })()}
+        RA {pk.ra.toFixed(2)} · Dec {fmtDec(pk.dec)}
         {pk.data.peak?.phot_sn != null ? ` · photometry ${pk.data.peak.phot_sn.toFixed(1)}σ` : ''}
       </div>
-      <p>
-        {pk.data.peak?.known?.state === 'ok' && pk.data.peak.known.words
-          ? `${pk.data.peak.known.words[0]!.toUpperCase()}${pk.data.peak.known.words.slice(1)}. JPL’s own place and the search’s agree to ${Math.max(...(pk.data.peak.known.seps ?? [0])).toFixed(1)}″.`
-          : 'A peak above its field’s bar. A lead is not a body yet: it needs one orbit through two or three passes and the check against known bodies.'}
-      </p>
+      {pk.data.peak?.known?.state === 'ok' && pk.data.peak.known.words && (
+        <p>{`${pk.data.peak.known.words[0]!.toUpperCase()}${pk.data.peak.known.words.slice(1)}. JPL’s own place and the search’s agree to ${Math.max(...(pk.data.peak.known.seps ?? [0])).toFixed(1)}″.`}</p>
+      )}
       {pk.data.peak?.stamp && (
         <figure class="px3-stamp">
           <img src={pk.data.peak.stamp} alt="The deep sum of the passes at the lead's place" loading="lazy" />
@@ -360,7 +368,7 @@ export function PlanetXPage() {
           <div class="px3-st" data-testid="px-stats">
             <span>
               <b>{leads == null ? '—' : nLeads}</b> {nLeads === 1 ? 'lead' : 'leads'} in <b>{searched == null ? '—' : mine.length}</b>{' '}
-              searched places
+              <span title="Fields of any size where Find Planet X ran (most other searched fields are the time-lapse search only)">fields searched for Planet X</span>
             </span>
             <span>
               <b>0</b> confirmed
@@ -460,6 +468,12 @@ export function PlanetXPage() {
           {tab === 'cands' && (
             <div data-testid="px-cands">
               <h4 class="px3-sub">Leads · {leads == null ? '…' : nLeads}</h4>
+              {nLeads > 0 && (
+                <p class="px3-note" data-testid="px-lead-note">
+                  Each lead is a peak above its field’s bar. A lead is not a body yet: it needs one orbit through two or three passes and the
+                  check against known bodies.
+                </p>
+              )}
               {(leads ?? []).map(card)}
               {leads != null && nLeads === 0 && <p class="px3-note">No leads above the bar right now.</p>}
               <h4 class="px3-sub">Ruled out</h4>
@@ -520,6 +534,13 @@ export function PlanetXPage() {
                     </a>
                   </div>
                 ))}
+              {echoes.length > 0 && (
+                <p class="px3-note" data-testid="px-echoes">
+                  {echoes.length === 1 ? '1 more peak is' : `${echoes.length} more peaks are`}{' '}
+                  {[...new Set(echoes)].join(' and ')} seen in one of its passes: the search lined that pass up with noise in the others.
+                  Not counted as {echoes.length === 1 ? 'a lead' : 'leads'}.
+                </p>
+              )}
               {honest.map((l, k) => (
                 <p key={k} class="px3-note">
                   {l}

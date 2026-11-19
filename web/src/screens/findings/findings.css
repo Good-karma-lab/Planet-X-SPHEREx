@@ -185,3 +185,10 @@ a.fcard-title:hover { color: var(--accent); }
   .fon > span { height: 32px; box-sizing: border-box; }
   :root .fbar .fon button { min-height: 0; min-width: 0; width: 30px; height: 30px; padding: 0; }
 }
+
+/* "Check this finding" while its task is asked for: says Opening…, a second click does nothing */
+a.btn[aria-busy="true"] { opacity: 0.75; cursor: progress; pointer-events: none; }
+a.btn[aria-busy="true"]::after { content: " · opening…"; }
+
+/* where most searched fields lie (the finds gather there for that reason): one quiet line under the counter */
+.searched-patch { margin: 6px 0 0; font-size: 13px; color: var(--muted); }

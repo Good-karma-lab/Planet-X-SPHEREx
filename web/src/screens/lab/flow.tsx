@@ -1364,7 +1364,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       const cur = Number(a.params['film']);
       const lo = Math.min(...visits) - 2;
       const hi = Math.max(...visits) + 2;
-      if (!(cur >= lo && cur <= hi)) a.set({ film: (visits.reduce((x, y) => x + y, 0) / visits.length).toFixed(3), arch: null });
+      // the film the track's search ran on when the service says it (built and warmed: no new film is made), else the middle of the visits
+      const own = typeof body?.film === 'number' && body.film >= lo && body.film <= hi ? String(body.film) : null;
+      if (!(cur >= lo && cur <= hi)) a.set({ film: own ?? (visits.reduce((x, y) => x + y, 0) / visits.length).toFixed(3), arch: null });
     } else if (show === 'blink2' || (!show && task.kind === 'moves')) {
       // two passes are a Months view: out of Days at once (a track task before this one may have left it there)
       if (a.params['film']) a.set({ film: null });

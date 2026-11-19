@@ -224,10 +224,28 @@ export function searchedTotals(fields: SearchedField[]): { fields: number; deg2:
   };
 }
 
+/** Where most of the searched fields lie, when one patch of sky (a 10° box) holds more than half of them: the finds gather there too,
+ *  because that is where the search has looked, not because that sky is special. null when the fields are spread out. */
+export function searchedPatch(fields: SearchedField[]): { ra: number; dec: number; share: number } | null {
+  if (fields.length < 20) return null;
+  const bins = new Map<string, SearchedField[]>();
+  for (const f of fields) {
+    const k = `${Math.round(f.ra / 10)},${Math.round(f.dec / 10)}`;
+    bins.set(k, [...(bins.get(k) ?? []), f]);
+  }
+  const top = [...bins.values()].sort((a, b) => b.length - a.length)[0]!;
+  const share = top.length / fields.length;
+  if (share <= 0.5) return null;
+  const ra = top.reduce((a, f) => a + f.ra, 0) / top.length;
+  const dec = top.reduce((a, f) => a + f.dec, 0) / top.length;
+  return { ra, dec, share };
+}
+
 /** «Searched so far»: fields, square degrees, exposures and leads, from /api/v1/searched. Renders nothing while the service has no such list. */
 export function SearchedCounter({ fields, leads = true }: { fields: SearchedField[] | null; leads?: boolean }) {
   if (!fields) return null;
   const t = searchedTotals(fields);
+  const patch = searchedPatch(fields);
   const tile = (b: string, l: string, tip?: string) => (
     <div title={tip}>
       <b>{b}</b>
@@ -235,15 +253,28 @@ export function SearchedCounter({ fields, leads = true }: { fields: SearchedFiel
     </div>
   );
   return (
-    <div class="fsum searched-counter" aria-label="Searched so far">
-      {tile(t.fields.toLocaleString('en-US'), 'fields searched so far')}
-      {tile(
-        t.deg2 < 10 ? t.deg2.toFixed(2) : t.deg2.toFixed(0),
-        'square degrees',
-        'the areas of the fields added; fields that overlap count twice',
+    <>
+      <div class="fsum searched-counter" aria-label="Searched so far">
+        {tile(
+          t.fields.toLocaleString('en-US'),
+          'fields searched so far',
+          'every field searched, of any size (2′ to 60′): the sweep’s 20′ squares and the fields people opened in the Lab. The globe counts only the squares of its grid',
+        )}
+        {tile(
+          t.deg2 < 10 ? t.deg2.toFixed(2) : t.deg2.toFixed(0),
+          'square degrees',
+          'the areas of the fields added; fields that overlap count twice',
+        )}
+        {t.exposures > 0 && tile(t.exposures.toLocaleString('en-US'), 'exposures read')}
+        {leads && tile(t.leads.toLocaleString('en-US'), 'leads (not discoveries)')}
+      </div>
+      {patch && (
+        <p class="searched-patch" data-testid="searched-patch">
+          {Math.round(patch.share * 100)}% of the fields searched so far lie near RA {Math.round(patch.ra)}°, Dec{' '}
+          {patch.dec >= 0 ? '+' : '−'}
+          {Math.abs(Math.round(patch.dec))}°: most finds are there because that is where the search has looked so far.
+        </p>
       )}
-      {t.exposures > 0 && tile(t.exposures.toLocaleString('en-US'), 'exposures read')}
-      {leads && tile(t.leads.toLocaleString('en-US'), 'leads (not discoveries)')}
-    </div>
+    </>
   );
 }

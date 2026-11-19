@@ -170,7 +170,7 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
               href={checkHref(card)}
               onClick={(e) => {
                 e.preventDefault();
-                void takeTask(card);
+                void takeTask(card, e.currentTarget as HTMLElement);
               }}
             >
               Check this finding

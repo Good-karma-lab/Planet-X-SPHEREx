@@ -198,7 +198,9 @@ export function Hints() {
       // fine
     }
   }
-  const n = HINTS.indexOf(hint) + 1;
+  // counted on this screen (the hints of other screens come there): "1 of 3" in the lab, no counter where there is one hint
+  const here = HINTS.filter((h) => h.screen === hint.screen && h.task === hint.task);
+  const n = here.indexOf(hint) + 1;
   return (
     <>
       {/* the control the hint is about, outlined */}
@@ -218,9 +220,7 @@ export function Hints() {
         <b>{hint.title}</b>
         <p>{hint.text}</p>
         <div class="hint-f">
-          <span class="mono-s">
-            {n} of {HINTS.length}
-          </span>
+          <span class="mono-s">{here.length > 1 ? `${n} of ${here.length}` : ''}</span>
           <button class="btn sm hint-skip" onClick={skipAll} data-testid="hint-skip" title="No more hints (About: Show the hints again)">
             Skip all
           </button>

@@ -905,7 +905,7 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
                 : kind === 'submitted'
                   ? `${cards.finds.length} findings submitted by people`
                   : h
-                    ? `${cards.done ? n(h.count) : `${cards.finds.length} of ${h.count} · more as you scroll`} · ${h.total} in the searched fields · a find is a lead, not a discovery`
+                    ? `${cards.done ? n(h.count) : `${cards.finds.length} of ${h.count} · more as you scroll`} · ${h.total.toLocaleString('en-US')} finds of every kind in all · a find is a lead, not a discovery`
                     : 'reading the findings…'
             }${h && h.identification.pending > 0 ? ` · identifying: ${h.identification.pending} catalogue answers to come` : ''}`;
             // one line at every width (the whole of it on hover): the panel keeps its height when the numbers change
