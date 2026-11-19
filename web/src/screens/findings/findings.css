@@ -196,3 +196,22 @@ a.btn[aria-busy="true"]::after { content: " · opening…"; }
 .fkinds .fgroup-h { flex: none; align-self: center; min-width: 104px; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
 .fbar .fkinds + .fkinds { padding-top: 8px; border-top: 1px solid var(--edge-soft, rgba(255, 255, 255, 0.06)); }
 @media (max-width: 599.98px) and (min-height: 480px) { .fkinds .fgroup-h { min-width: 0; } }
+
+/* the page's head is ONE line at every width: the title, a short count and the Filters button (its number: the filters set); the
+   kinds, the statuses, the counters and the page's words are in a panel that slides in from the right (a phone: a sheet from below) */
+.fhead { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 14px; }
+.fhead h1 { margin: 0; }
+.fhead .fsum { color: var(--muted); }
+.ffilter-btn { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; }
+.ffilter-n { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent); color: #032420; font: 700 11px var(--mono); }
+.fsheet-back { position: fixed; inset: 0; z-index: 69; background: rgba(0, 0, 0, 0.45); }
+.fbar { position: fixed; top: 0; right: 0; bottom: 0; width: min(460px, 100vw); z-index: 70; margin: 0 !important; padding: 18px 18px 24px; border-radius: 16px 0 0 16px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; background: rgba(8, 18, 24, 0.98); transform: translateX(105%); visibility: hidden; transition: transform 0.2s ease, visibility 0s linear 0.2s; }
+.fbar.open { transform: none; visibility: visible; transition: transform 0.2s ease; }
+.fsheet-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; font-size: 18px; }
+.fsheet-intro { margin-bottom: 12px; }
+.fsheet-intro .hint { margin: 0 0 10px; font-size: 14px; line-height: 1.45; }
+.fsheet-intro .searched-counter { height: auto; flex-wrap: wrap; white-space: normal; }
+.fbar .fkinds .fgroup-h { flex-basis: 100%; }
+.fbar .fsep { display: none; }
+.fbar .leadcount .lc-line { white-space: normal; }
+@media (prefers-reduced-motion: reduce) { .fbar, .fbar.open { transition: none; } }
