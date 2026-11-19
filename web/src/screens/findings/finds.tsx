@@ -41,7 +41,7 @@ const STATUS_WORD: Record<string, string> = {
 };
 const STATUS_WHY: Record<string, string> = {
   blend: 'Two sources side by side: their blend stood still while the ring moved. Not a lead',
-  halo: "A bump in the glow of a bright star. Not a lead",
+  halo: 'A bump in the glow of a bright star. Not a lead',
   residual: 'What is left after a known source is taken away. Not a lead',
   below: 'Below the bar this field sets for a find',
   set_aside: 'People agreed it is an artefact',
@@ -856,17 +856,26 @@ export function FindingsView({
   };
   return (
     <>
-      <button
-        type="button"
-        class="btn ffilter-btn"
-        aria-expanded={sheet}
-        aria-controls="findings-filters"
-        data-testid="filters-open"
-        onClick={() => setSheet(true)}
-      >
-        Filters
-        {active.filter((a) => a.clear).length > 0 && <span class="ffilter-n">{active.filter((a) => a.clear).length}</span>}
-      </button>
+      <div class="pg-h fhead">
+        <h1>Findings</h1>
+        <span class="fsum mono-s" data-testid="findings-summary">
+          {kindName(kind)}
+          {h
+            ? ` · ${(kind === 'submitted' ? cards.finds.length : h.count).toLocaleString('en-US')} ${h.count === 1 ? 'find' : 'finds'}`
+            : ''}
+        </span>
+        <button
+          type="button"
+          class="btn ffilter-btn"
+          aria-expanded={sheet}
+          aria-controls="findings-filters"
+          data-testid="filters-open"
+          onClick={() => setSheet(true)}
+        >
+          Filters
+          {active.filter((a) => a.clear).length > 0 && <span class="ffilter-n">{active.filter((a) => a.clear).length}</span>}
+        </button>
+      </div>
       {sheet && <div class="fsheet-back" aria-hidden="true" onClick={() => setSheet(false)} />}
       <section id="findings-filters" class={`card glass fbar${sheet ? ' open' : ''}`} aria-label="Filters">
         <div class="fsheet-head">

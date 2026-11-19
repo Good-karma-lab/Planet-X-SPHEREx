@@ -9,9 +9,7 @@ import { useLeadParam } from './findings/leads';
 import { mountTour } from '../ui/Hints';
 import { SearchedCounter, useSearched } from './search/searched';
 
-
 mountTour();
-
 
 /** True on a desktop and a two-pane tablet (responsive.css): the lead report then sits beside the list instead of sliding over it. */
 function useWide() {
@@ -35,11 +33,8 @@ function FindingsPage() {
   const wide = useWide();
   return (
     <>
-      <div class="pg-h">
-        <h1>Findings</h1>
-        <p class="hint">{FINDINGS_HINT}</p>
-      </div>
-      <SearchedCounter fields={searched} leads={false} />
+      {/* the page's head is one line (the title, a short count, the Filters button): FindingsView draws it; the words and the
+          counters stand in the panel of filters at every width */}
       <FindingsView
         wide={wide}
         leadId={leadId}
@@ -81,15 +76,9 @@ export function InfoPage({ screen, health }: { screen: Screen; health: Health | 
       {screen === 'index' ? (
         <IndexV2 health={health} />
       ) : (
-      <div class={`ipage ${screen === 'method' ? 'method' : ''}`}>
-        {screen === 'findings' ? (
-          <FindingsPage />
-        ) : screen === 'method' ? (
-          <MethodPage />
-        ) : (
-          <AboutPage />
-        )}
-      </div>
+        <div class={`ipage ${screen === 'method' ? 'method' : ''}`}>
+          {screen === 'findings' ? <FindingsPage /> : screen === 'method' ? <MethodPage /> : <AboutPage />}
+        </div>
       )}
     </div>
   );

@@ -12,10 +12,6 @@
 /* ===== everywhere: the parts that exist only for touch windows are not displayed ===== */
 .tab-more,
 .sheet-grip,
-.ffilter-btn,
-.fsheet-back,
-.fsheet-head,
-.fsheet-intro,
 .fpos,
 .touch-only,
 .vsq .float.touch-only {
@@ -1499,6 +1495,10 @@
     padding-right: 130px;
     margin-bottom: 4px;
   }
+  /* the count is under the card ("1 of 31"): the head stays one line and the picture keeps its place */
+  :root .fhead .fsum {
+    display: none;
+  }
   :root .ffilter-btn {
     display: inline-flex;
     align-items: center;
@@ -1535,7 +1535,9 @@
     position: fixed;
     left: 0;
     right: 0;
+    top: auto;
     bottom: 0;
+    width: auto;
     z-index: 70;
     max-height: 85dvh;
     margin: 0 !important;
@@ -1551,6 +1553,7 @@
   }
   :root .fbar.open {
     transform: none;
+    border-radius: 18px 18px 0 0;
     visibility: visible;
     transition: transform 0.2s ease;
   }
