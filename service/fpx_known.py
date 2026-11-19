@@ -36,6 +36,22 @@ MATCH_ARCSEC = 20.0
 DISTANCE_TOL = 0.06  # the heliocentric distance of the body against the search's distance (its own range, plus this)
 MAX_BODIES = 6
 SB_VMAG = 26.0
+# The large distant bodies JPL's small-body identification (sbident) leaves out of its answer: Eris is not in it even 15″ from its own
+# place (19 Nov 2026, peak:75166a5e0d64). Each is looked at by its own ephemeris wherever a pass of a lead stands within BIG_NEAR_DEG of it.
+BIG_BODIES = (
+    "136199 Eris (2003 UB313)",
+    "134340 Pluto",
+    "136472 Makemake (2005 FY9)",
+    "136108 Haumea (2003 EL61)",
+    "225088 Gonggong (2007 OR10)",
+    "50000 Quaoar (2002 LM60)",
+    "90482 Orcus (2004 DW)",
+    "120347 Salacia (2004 SB60)",
+    "90377 Sedna (2003 VB12)",
+)
+BIG_NEAR_DEG = 1.0  # a large distant body moves well under 0.1° in BIG_DAYS: its place on the bucket's day is near enough to pick it
+BIG_DAYS = 10
+_BIG_MEMO: dict[tuple[str, int], tuple[float, float]] = {}
 
 
 def _sep(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
@@ -71,16 +87,19 @@ async def _slow_bodies(client: httpx.AsyncClient, ra: float, dec: float, mjd: fl
                 "fov-ra-hwidth": f"{half_deg / max(0.05, math.cos(math.radians(dec))):.4f}",
                 "fov-dec-hwidth": f"{half_deg:.4f}",
                 "vmag-lim": str(SB_VMAG),
+                # the refined pass: the first is a coarse screen whose places are off by degrees (its "nearest" body stood 1.6° away)
+                "two-pass": "true",
+                "suppress-first-pass": "true",
             },
         ),
         lane="sbident",
     )
     r.raise_for_status()
     body = r.json()
-    fields = body.get("fields_first") or body.get("fields") or []
+    fields = body.get("fields_second") or body.get("fields_first") or body.get("fields") or []
     idx = {n: i for i, n in enumerate(fields)}
     out: list[dict[str, Any]] = []
-    for row in body.get("data_first_pass") or body.get("data") or []:
+    for row in body.get("data_second_pass") or body.get("data_first_pass") or body.get("data") or []:
         try:
             rate = math.hypot(float(row[idx['RA rate ("/h)']]), float(row[idx['Dec rate ("/h)']]))
             dist = math.hypot(float(row[idx['Dist. from center RA (")']]), float(row[idx['Dist. from center Dec (")']]))
@@ -94,6 +113,31 @@ async def _slow_bodies(client: httpx.AsyncClient, ra: float, dec: float, mjd: fl
             v = None
         out.append({"name": str(row[0]), "V": v, "rate": rate, "dist": dist})
     out.sort(key=lambda b: b["dist"])
+    return out
+
+
+async def big_bodies_near(client: httpx.AsyncClient, places: list[dict[str, Any]], sem: asyncio.Semaphore) -> list[dict[str, Any]] | None:
+    """The large distant bodies (BIG_BODIES) within BIG_NEAR_DEG of a pass of the lead: one ephemeris per body and BIG_DAYS of dates,
+    kept. -> None when JPL did not answer (the lead is asked again later)."""
+    out: list[dict[str, Any]] = []
+    for name in BIG_BODIES:
+        for pl in places:
+            ds = dates_of(pl)
+            day = int(ds[len(ds) // 2] // BIG_DAYS) * BIG_DAYS
+            key = (name, day)
+            if key not in _BIG_MEMO:
+                try:
+                    async with sem:
+                        t = await horizons_track(client, name, [float(day)])
+                except (httpx.HTTPError, ValueError, KeyError):
+                    return None
+                if len(_BIG_MEMO) > 4000:
+                    _BIG_MEMO.pop(next(iter(_BIG_MEMO)))
+                _BIG_MEMO[key] = (float(t[0]["ra"] or 0.0), float(t[0]["dec"] or 0.0))
+            ra, dec = _BIG_MEMO[key]
+            if _sep(pl["ra"], pl["dec"], ra, dec) <= BIG_NEAR_DEG * 3600.0:
+                out.append({"name": name})
+                break
     return out
 
 
@@ -175,11 +219,7 @@ async def identify(
             await asyncio.sleep(3.0 * (attempt + 1))
     if bodies is None:
         return {"state": "unavailable"}
-    best: dict[str, Any] | None = None
-    echo: dict[str, Any] | None = None
-    sns = [pl.get("sn") for pl in places]
-    passes_sn = len(places) > 1 and all(isinstance(x, (int, float)) for x in sns)
-    strong = max(range(len(places)), key=lambda j: float(sns[j] or 0.0)) if passes_sn else None
+    strong = _strongest(places)
     checked = list(bodies[:MAX_BODIES])
     if strong:  # the strongest pass is not the first: the bodies around it too (an echo stands there, not at the first pass)
         sp = places[strong]
@@ -190,6 +230,56 @@ async def identify(
                 near = await slow_bodies(client, sp["ra"], sp["dec"], sd[len(sd) // 2], sh)
             names = {b["name"] for b in checked}
             checked += [b for b in near[:3] if b["name"] not in names]
+    big = await big_bodies_near(client, places, sem)
+    if big is None:
+        return {"state": "unavailable"}
+    have = {horizons_command(b["name"]) for b in checked}
+    checked += [b for b in big if horizons_command(b["name"]) not in have]
+    named = await _judge(client, places, checked, strong, d_lo, d_hi, sem)
+    if named is not None:
+        return named
+    return {
+        "state": "none",
+        "bodies_checked": min(len(bodies), MAX_BODIES),
+        "n_slow_bodies": len(bodies),
+        "echo_checked": True,
+        "big_checked": True,
+    }
+
+
+def _strongest(places: list[dict[str, Any]]) -> int | None:
+    """The pass with the highest S/N of a deep sum (None: one pass, or the passes do not say)."""
+    sns = [pl.get("sn") for pl in places]
+    if len(places) > 1 and all(isinstance(x, (int, float)) for x in sns):
+        return max(range(len(places)), key=lambda j: float(sns[j] or 0.0))
+    return None
+
+
+async def identify_big(
+    client: httpx.AsyncClient, places: list[dict[str, Any]], d_lo: float, d_hi: float, limit: asyncio.Semaphore | None = None
+) -> dict[str, Any] | None:
+    """An answer kept before BIG_BODIES were looked at, looked at for them alone (sbident is not asked again). -> the body (or its echo),
+    None for none of them, {"state": "unavailable"} when JPL did not answer."""
+    sem = limit or asyncio.Semaphore(2)
+    near = await big_bodies_near(client, places, sem)
+    if near is None:
+        return {"state": "unavailable"}
+    return await _judge(client, places, near, _strongest(places), d_lo, d_hi, sem) if near else None
+
+
+async def _judge(
+    client: httpx.AsyncClient,
+    places: list[dict[str, Any]],
+    checked: list[dict[str, Any]],
+    strong: int | None,
+    d_lo: float,
+    d_hi: float,
+    sem: asyncio.Semaphore,
+) -> dict[str, Any] | None:
+    """Each body's track against the lead's passes: the body in every pass at the search's distance names the lead; a body in its
+    strongest pass only makes it that body's echo. -> the answer, or None."""
+    best: dict[str, Any] | None = None
+    echo: dict[str, Any] | None = None
     for b in checked:
         mj = [m for pl in places for m in dates_of(pl)]
         try:
@@ -248,7 +338,7 @@ async def identify(
         )
         return echo
     if best is None:
-        return {"state": "none", "bodies_checked": min(len(bodies), MAX_BODIES), "n_slow_bodies": len(bodies), "echo_checked": True}
+        return None
     short = short_name(best["name"])
     best["words"] = (
         f"this is {short} (JPL), found blind: it stands {max(best['seps']):.1f}″ or less from JPL's place in "
@@ -327,7 +417,12 @@ def settled(kind: str, v: dict[str, Any]) -> bool:
     passes), checked for a known body's echo (answers kept before that rule are asked once more)."""
     if v.get("state") in ("ok", "residual"):
         return True
-    return v.get("state") == "none" and bool(v.get("screened")) and (kind != "deep" or bool(v.get("echo_checked")))
+    return (
+        v.get("state") == "none"
+        and bool(v.get("screened"))
+        and (kind != "deep" or bool(v.get("echo_checked")))
+        and bool(v.get("big_checked"))
+    )
 
 
 class FpxIdentifier:
@@ -388,7 +483,11 @@ class FpxIdentifier:
         t0 = time.monotonic()
         found = {i: v for i, v in (self.cached(kind, key) or {}).items() if v.get("state") in ("ok", "none", "residual")}
         # a deep sum's none kept before the echo rule: asked again (its old answer stays on the pages until the new one is kept)
-        found = {i: v for i, v in found.items() if not (v.get("state") == "none" and v.get("screened") and not settled(kind, v))}
+        found = {
+            i: v
+            for i, v in found.items()
+            if not (v.get("state") == "none" and v.get("screened") and kind == "deep" and not v.get("echo_checked"))
+        }
         whole = True
         asked = 0
         for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
@@ -403,6 +502,16 @@ class FpxIdentifier:
                     if why
                     else {**found[i], "screened": True}
                 )
+                self._keep(kind, key, found)
+                continue
+            if i in found and found[i].get("state") == "none" and not found[i].get("big_checked"):
+                # a none kept before the large bodies were looked at (sbident leaves Eris out): those bodies alone, sbident not asked again
+                plb = places_of(kind, result, c)
+                vb = await identify_big(self.client, plb[0], plb[1], plb[2], self.limit) if plb is not None else None
+                if vb is not None and vb.get("state") == "unavailable":
+                    whole = False
+                    continue
+                found[i] = {**vb, "at": [c.get("ra"), c.get("dec"), c.get("d")]} if vb else {**found[i], "big_checked": True}
                 self._keep(kind, key, found)
                 continue
             if i in found:
