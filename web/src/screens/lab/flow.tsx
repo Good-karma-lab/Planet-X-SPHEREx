@@ -1330,6 +1330,19 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const act = leadOpen ? leadView : taskView;
   const actTask = leadOpen ? taskOfParams(leadParams) : task;
   const blindAny = taskView.blind || leadView.blind;
+  // while the lead's questions are open the lab shows the lead's own field (the service's place and size for its task: the whole
+  // track in sight, never at the quarter's edge); the quarter's own place waits in q_ra/q_dec/q_fov and comes back after
+  const leadBody = leadView.body;
+  useEffect(() => {
+    const p = a.params;
+    if (leadOpen && leadBody?.ra != null && leadBody.dec != null && p['q_ra'] == null) {
+      const fov = leadBody.fov && leadBody.fov > 0 ? leadBody.fov : 10;
+      a.open({ ...p, ra: leadBody.ra.toFixed(5), dec: leadBody.dec.toFixed(5), fov: String(fov), q_ra: p['ra'] ?? '', q_dec: p['dec'] ?? '', q_fov: p['fov'] ?? '10' });
+    } else if (!leadOpen && leadView.kind && p['q_ra'] != null) {
+      const { q_ra, q_dec, q_fov, ...rest } = p;
+      a.open({ ...rest, ra: q_ra ?? '', dec: q_dec ?? '', fov: q_fov || '10' });
+    }
+  }, [leadOpen, leadBody?.ra, leadBody?.dec]);
   const taskRef = useRef({ ...taskView, blind: blindAny });
   taskRef.current = { ...taskView, blind: blindAny };
   // set up the lab for the step on show (once per step, when what it needs has arrived)
