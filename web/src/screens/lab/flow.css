@@ -474,3 +474,8 @@
 
 /* a guest is told before answering that an answer needs a name: one small link in the line, the line keeps its height */
 .taskpanel .tp-line .tp-guest { min-height: 0; padding: 0; font: 600 11px var(--mono); text-transform: none; letter-spacing: 0; flex: none; }
+/* the bar's menu (⋯): the rows a phone moves into it (the Blink's two passes, the speed, every band or none) are its own */
+.tbar .acts-menu .am-phone { display: none; }
+.tbar .acts-menu .am-row { align-items: center; gap: 8px; padding: 4px 6px; }
+.tbar .acts-menu .am-row > span:first-child { color: var(--muted); font-size: 12.5px; min-width: 52px; }
+.tbar .acts-menu .am-row .mini { flex: 1; justify-content: center; }
