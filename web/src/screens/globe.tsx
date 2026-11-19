@@ -391,6 +391,9 @@ export function Globe() {
   const [decIn, setDecIn] = useState(formatDec(a.dec));
   const [, setDatesTick] = useState(0);
   // the Coverage layer (the grid of squares over any background): on from the switch, or from a link with cov=1 (the landing's "Start searching")
+  // "path 1950→2050 drawn ×19 larger than true" when the selected object's path is drawn larger than true (set by the drawing loop)
+  const [pathNote, setPathNote] = useState('');
+  const pathNoteRef = useRef('');
   const [covOn, setCovOn] = useState(() => kept.covOn || new URLSearchParams(location.hash.split('?')[1] ?? '').get('cov') === '1');
   const [covTick, setCovTick] = useState(0);
   // the square whose card is open: its id at once, its card when the service has answered
@@ -622,7 +625,11 @@ export function Globe() {
         ctx.drawImage(sky.canvas, 0, 0, W, H);
       }
       const b = basis();
-      // grid
+      // grid; its labels are drawn last and only where no object, path or the aim is (an object's words come first, then its path's)
+      const gridLabels: [string, number, number][] = [];
+      const busy: [number, number][] = [];
+      const pathPts: [number, number][] = [];
+      let pathNote = '';
       ctx.save();
       ctx.strokeStyle = 'rgba(255,255,255,.10)';
       ctx.lineWidth = 1;
@@ -650,14 +657,14 @@ export function Globe() {
         for (let de = -90; de <= 90; de += 3) pts.push([ra, de]);
         line(pts);
         const lp = project(ra, 2, b);
-        if (lp[2]) ctx.fillText(`${ra / 15}h`, lp[0] + 3, lp[1] - 3);
+        if (lp[2]) gridLabels.push([`${ra / 15}h`, lp[0] + 3, lp[1] - 3]);
       }
       for (let de = -60; de <= 60; de += 30) {
         const pts: [number, number][] = [];
         for (let ra = 0; ra <= 360; ra += 3) pts.push([ra, de]);
         line(pts);
         const lp = project(st.proj === 'moll' ? 170 : view.current.ra, de, b);
-        if (lp[2]) ctx.fillText(`${de > 0 ? '+' : ''}${de}°`, lp[0] + 3, lp[1] - 3);
+        if (lp[2]) gridLabels.push([`${de > 0 ? '+' : ''}${de}°`, lp[0] + 3, lp[1] - 3]);
       }
       ctx.restore();
       ctx.strokeStyle = 'rgba(255,255,255,.22)';
@@ -721,22 +728,15 @@ export function Globe() {
             font,
             note: coldNote(st.sel.sp, shownId),
           });
+          for (let y = y0; y <= 2050; y += 2) {
+            const s2 = pm(...placeAt(mo, y));
+            if (s2[2]) pathPts.push([s2[0], s2[1]]);
+          }
           const q = pm(...placeAt(mo, by));
           pins.push({ o: st.sel, x: q[0], y: q[1] });
           pathPin = true;
-          if (m > 1) {
-            // a small note at the bottom edge of the frame, never under a label
-            ctx.save();
-            ctx.font = `500 10px ${font}`;
-            ctx.lineWidth = 3;
-            ctx.strokeStyle = '#000';
-            ctx.fillStyle = '#8fa6b0';
-            ctx.textAlign = 'center';
-            const t = `path ${Math.floor(y0)}→2050 drawn ×${m.toFixed(0)} larger than true`;
-            ctx.strokeText(t, W / 2, H - 8);
-            ctx.fillText(t, W / 2, H - 8);
-            ctx.restore();
-          }
+          // the path is drawn larger than true: said in the line of words under the globe (drawn at the frame's foot it ran into them)
+          if (m > 1) pathNote = `path ${Math.floor(y0)}→2050 drawn ×${m.toFixed(0)} larger than true`;
         }
       }
       // test targets (and a selected object without a path): a pin at the place on the date of the backdrop; zoomed in, an open ring
@@ -773,6 +773,20 @@ export function Globe() {
           ctx.fillStyle = '#fff';
           ctx.fillText(txt, p[0] + lx, p[1] + 4);
         }
+      }
+      // the grid's labels where nothing else is: not within 44 px of an object's pin, its path or the aim
+      busy.push(...pathPts);
+      for (const pin of pins) busy.push([pin.x, pin.y]);
+      const aimAt = project(st.a.ra, st.a.dec, b);
+      if (aimAt[2]) busy.push([aimAt[0], aimAt[1]]);
+      ctx.save();
+      ctx.fillStyle = 'rgba(255,255,255,.45)';
+      ctx.font = `11px ${font}`;
+      for (const [t, x, y] of gridLabels) if (!busy.some(([bx, by]) => Math.hypot(bx - x - 10, by - y + 4) < 44)) ctx.fillText(t, x, y);
+      ctx.restore();
+      if (pathNote !== pathNoteRef.current) {
+        pathNoteRef.current = pathNote;
+        setPathNote(pathNote);
       }
       // aim frame: drawn from its four sky corners (north-up on the sky, as the lab's field is), so it turns with a rolled view.
       // A selected square is the frame itself at 20′; at 10′ the frame is the quarter of that square under the aim.
@@ -847,7 +861,8 @@ export function Globe() {
         let lx = cx + rad * 0.72;
         let ly = cy - rad * 0.72;
         for (const [x, y] of pts) if (x - y > lx - ly) [lx, ly] = [x, y]; // the corner furthest up and right
-        ctx.fillText(`${st.a.fov}′`, lx + 6, ly - 4);
+        // the frame's size gives way to a path's words (its years, its stretches) drawn at the same place
+        if (!pathPts.some(([x, y]) => Math.hypot(x - lx - 14, y - ly + 8) < 26)) ctx.fillText(`${st.a.fov}′`, lx + 6, ly - 4);
         ctx.restore();
         frame = { x: cx, y: cy, s: rad * 2 * 0.71 };
       } else frame = null;
@@ -1682,6 +1697,11 @@ export function Globe() {
               <span class="cov-do" data-testid="cov-do">
                 click a square to take it
               </span>
+            </div>
+          )}
+          {pathNote && (
+            <div class="map-credit map-scale" data-testid="path-scale">
+              {pathNote}
             </div>
           )}
           <div class="map-credit" data-testid="map-credit">
