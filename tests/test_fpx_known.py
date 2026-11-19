@@ -17,6 +17,7 @@ from service.upstream import jpl
 @pytest.fixture(autouse=True)
 def _fresh_memo() -> None:
     fpx_known._SB_MEMO.clear()
+    fpx_known._BIG_MEMO.clear()
 
 
 # the blind lead of the live run: its places at each pass's own date and Sedna's JPL places there (0.8″, 0.5″, 0.8″ away)
@@ -28,7 +29,10 @@ PLACES = [
 JPL = {60909.848: (61.77866, 8.83668), 61082.27: (60.71266, 8.60838), 61272.847: (62.38874, 8.97551)}
 
 
-def fake_jpl(far: bool = False) -> httpx.AsyncClient:
+def fake_jpl(far: bool = False, eris: list[dict[str, Any]] | None = None, sb_sedna: bool = True) -> httpx.AsyncClient:
+    """JPL with Sedna on the PLACES; `eris`: places of the passes where Eris stands (sbident never names it, as the real one does not);
+    every other large body far away."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         if "sb_ident" in str(request.url):
             fields = [
@@ -40,11 +44,12 @@ def fake_jpl(far: bool = False) -> httpx.AsyncClient:
                 'Dec rate ("/h)',
             ]
             rows = [
-                ["90377 Sedna (2003 VB12)", "3.0", "-2.0", "20.9", "0.20", "-0.05"],
+                *([["90377 Sedna (2003 VB12)", "3.0", "-2.0", "20.9", "0.20", "-0.05"]] if sb_sedna else []),
                 ["12345 Fast (1999 AB)", "10", "5", "17.0", "40", "10"],  # a main-belt body: not slow
             ]
             return httpx.Response(200, json={"fields_first": fields, "data_first_pass": rows})
         q = dict(request.url.params)
+        cmd = q["COMMAND"]
         jds = [float(x.strip("'")) for x in q["TLIST"].split()]
         lines = []
         for jd in jds:
@@ -53,6 +58,11 @@ def fake_jpl(far: bool = False) -> httpx.AsyncClient:
             ra = JPL[key][0] + (mjd - key) * 0.0017  # Sedna drifts about 6 arcsec a day in the search's frame
             dec = JPL[key][1]
             r = 40.0 if far else 83.0
+            if "136199" in cmd and eris is not None:  # Eris: at the given passes' places, else 2° away; 95.6 au
+                at = min(eris, key=lambda p: abs(p["mjd"] - mjd)) if eris else None
+                ra, dec, r = (at["ra"], at["dec"], 95.6) if at and abs(at["mjd"] - mjd) < 30 else (ra + 2.0, dec, 95.6)
+            elif "90377" not in cmd:
+                ra += 90.0  # the other large bodies: nowhere near
             lines.append(f"2026-Feb-11 06:28, , , {ra}, {dec}, 20.9, n.a., {r}, 1.0, {r - 1.0}, 0.1,")
         return httpx.Response(200, json={"result": "x\n$$SOE\n" + "\n".join(lines) + "\n$$EOE\n"})
 
@@ -351,10 +361,50 @@ def test_a_deep_none_kept_before_the_echo_rule_is_asked_once_more(tmp_path: Path
         "candidates": [{"d": 81.7, "ra": places[1]["ra"], "dec": places[1]["dec"], "ok": True, "by_pass": by_pass}],
     }
     old = {0: {"state": "none", "screened": True, "at": [places[1]["ra"], places[1]["dec"], 81.7]}}
-    assert not fpx_known.settled("deep", old[0]) and fpx_known.settled("distant", old[0])
+    assert not fpx_known.settled("deep", old[0]) and not fpx_known.settled("distant", old[0])
+    assert fpx_known.settled("distant", {**old[0], "big_checked": True})
     idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
     idn._keep("deep", "k" * 24, old)
     asyncio.run(idn.sweep())
     kept = idn.cached("deep", "k" * 24)
     assert kept is not None and kept[0]["state"] == "ok" and kept[0]["echo"] is True
     assert ("deep", "k" * 24) in idn.complete
+
+
+def test_eris_left_out_by_sbident_is_found_by_its_own_ephemeris_and_its_echo_is_known() -> None:
+    """peak:75166a5e0d64 (19 Nov 2026): Eris 15″ from the first pass of a deep sum, S/N 7.7 of 8.8; sbident does not list Eris."""
+    places = _echo_places(0)
+    out = asyncio.run(fpx_known.identify(fake_jpl(eris=[places[0]], sb_sedna=False), places, 81.7, 81.7))
+    assert out["state"] == "ok" and out["echo"] is True and out["name"].startswith("136199 Eris")
+    assert out["words"].startswith("an echo of Eris (JPL), not a new body")
+
+
+def test_a_lead_far_from_every_large_body_is_none_and_says_they_were_looked_at() -> None:
+    out = asyncio.run(fpx_known.identify(fake_jpl(sb_sedna=False), _echo_places(1), 81.7, 81.7))
+    assert out["state"] == "none" and out["big_checked"] is True and out["echo_checked"] is True
+
+
+def test_a_none_kept_before_the_large_bodies_is_looked_at_for_them_alone(tmp_path: Path) -> None:
+    places = _echo_places(0)
+    by_pass = [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"], "sn": p["sn"]} for p in places]
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "params": {"dmin": 30.0, "dmax": 300.0},
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in places],
+        "candidates": [{"d": 81.7, "ra": places[1]["ra"], "dec": places[1]["dec"], "ok": True, "by_pass": by_pass}],
+    }
+    old = {0: {"state": "none", "screened": True, "echo_checked": True, "at": [places[1]["ra"], places[1]["dec"], 81.7]}}
+    assert not fpx_known.settled("deep", old[0])
+    asked: list[str] = []
+    inner = fake_jpl(eris=[places[0]], sb_sedna=False)
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        asked.append("sb" if "sb_ident" in str(request.url) else "hz")
+        return await inner._transport.handle_async_request(request)  # type: ignore[attr-defined]
+
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=httpx.AsyncClient(transport=httpx.MockTransport(handler)))
+    idn._keep("deep", "k" * 24, old)
+    asyncio.run(idn.sweep())
+    kept = idn.cached("deep", "k" * 24)
+    assert kept is not None and kept[0]["state"] == "ok" and kept[0]["echo"] is True and kept[0]["name"].startswith("136199 Eris")
+    assert "sb" not in asked  # sbident is not asked again for an old answer
