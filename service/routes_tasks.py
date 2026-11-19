@@ -384,6 +384,12 @@ def prime_find_rows(st: Any, tries: int = 60, wait_s: float = 5.0) -> bool:
             return True
         except HTTPException:
             time.sleep(wait_s)
+        except sqlite3.OperationalError as e:
+            if "no such table" in str(e):  # a node (A1) has no findings of its own: nothing to read, nobody asks it for tasks
+                log.info("no list of finds to read at the start: %s", e)
+                return False
+            log.exception("the list of finds could not be read at the start")
+            return False
         except Exception:
             log.exception("the list of finds could not be read at the start")
             return False
