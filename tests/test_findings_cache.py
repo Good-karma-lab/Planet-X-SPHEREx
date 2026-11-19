@@ -50,7 +50,9 @@ def test_a_find_kept_out_of_the_lists_as_a_blend_still_has_its_page(monkeypatch:
     find = {"id": "browndwarf:b5e2f0136331", "kind": "browndwarf", "status": "blend", "credit": {}}
 
     def query(db: Any, kind: Any, status: Any, *a: Any, **k: Any) -> dict[str, Any]:
-        return {"count": 0, "total": 0, "finds": [find] if status == "blend" else []}
+        only = k.get("only")
+        hit = status == "blend" or (status == "any" and (only is None or find["id"] in only))  # the page reads one find, any status
+        return {"count": 0, "total": 0, "finds": [find] if hit else []}
 
     monkeypatch.setattr(routes_findings, "query", query)
     monkeypatch.setattr(routes_findings, "find_row", lambda db, fid: {"id": fid} if fid == find["id"] else None)

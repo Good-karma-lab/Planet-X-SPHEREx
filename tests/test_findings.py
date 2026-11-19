@@ -968,3 +968,13 @@ def test_a_line_track_never_checked_in_the_exposures_is_not_a_lead(tmp_path: Pat
     out = query(db, None, None, None, 10, 0)
     assert out["counts"]["film"]["unverified"] == 1 and out["counts"]["film"]["leads"] == 0
     assert [f["id"] for f in query(db, None, "unverified", None, 10, 0)["finds"]] == ["film:rdra"]
+
+
+def test_one_find_is_read_whatever_its_place_in_the_list(tmp_path: Path) -> None:
+    """The find's page reads that one find (any status): it searched a list capped at 5000 and answered 404 past it (19 Nov 2026)."""
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 20, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": [], "data": {}}
+    db.write_finds([{**base, "id": f"red:{k:05d}", "kind": "red", "ra": 10.0 + k * 1e-3, "dec": 5.0} for k in range(5200)])
+    db.db.commit()
+    got = query(db, None, "any", None, 1, 0, only=frozenset({"red:05150"}))
+    assert [f["id"] for f in got["finds"]] == ["red:05150"]

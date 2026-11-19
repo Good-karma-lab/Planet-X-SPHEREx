@@ -12,13 +12,12 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from functools import partial
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
-from service.findings import HIDDEN, KINDS, LITE_KEYS, PROMISING_KINDS, STAGES, VIEW_RESULTS, FlowDB, find_row, id_of, query
+from service.findings import KINDS, LITE_KEYS, PROMISING_KINDS, STAGES, VIEW_RESULTS, FlowDB, find_row, id_of, query
 
 
 def flow_of(st: Any) -> FlowDB:
@@ -256,18 +255,12 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         f = need()
         aside = await asyncio.to_thread(people_aside)
         tracks = await asyncio.to_thread(people_tracks_said)
+        # this one find, whatever its status (a hidden one too): the whole list capped at 5000 lost every find past it once there were
+        # 6980 (19 Nov 2026), and its page answered 404
         body: dict[str, Any] = await asyncio.to_thread(
-            lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), aside=aside, tracks=tracks)
+            lambda: query(f.db, None, "any", None, 1, 0, flow=flow_of(st), aside=aside, tracks=tracks, only=frozenset({find_id}))
         )
-        hidden: dict[str, Any] = {"finds": []}
-        if not any(x["id"] == find_id for x in body["finds"]) and find_row(f.db, find_id) is not None:
-            for hs in HIDDEN:  # a find kept out of the lists (a blend too) still has its page
-                hidden = await asyncio.to_thread(
-                    partial(query, f.db, None, hs, None, 5000, 0, flow=flow_of(st), aside=aside, tracks=tracks)
-                )
-                if any(x["id"] == find_id for x in hidden["finds"]):
-                    break
-        for x in body["finds"] + hidden["finds"]:
+        for x in body["finds"]:
             if x["id"] == find_id:
                 return enrich({"finds": [x]})["finds"][0]
         raise HTTPException(404, "no such find")
