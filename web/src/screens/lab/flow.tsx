@@ -1296,9 +1296,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const leadParams = useMemo<Record<string, string>>(
     (): Record<string, string> => {
       const lead = a.params['lead'];
-      return task?.kind === 'cell' && lead ? { task: 'finding', kind: 'finding', finding: lead, find: lead } : {};
+      // the series the service names for it (why.ask.kind: moves, red, anomaly…), else the generic check of a find
+      const kind = a.params['lead_kind'] || 'finding';
+      return task?.kind === 'cell' && lead ? { task: kind, kind, finding: lead, find: lead } : {};
     },
-    [task?.kind, a.params['lead']],
+    [task?.kind, a.params['lead'], a.params['lead_kind']],
   );
   const leadView = useLabTask({
     view,
@@ -1321,6 +1323,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     visitOf: a.visitOf,
     ready: a.ready,
     embedded: true,
+    ...(a.params['lead_text'] ? { leadText: a.params['lead_text'] } : {}),
   });
   // the series the lab is set up for: the lead's while its questions are open, else the task's own
   const leadOpen = !!leadView.kind && leadView.blind;

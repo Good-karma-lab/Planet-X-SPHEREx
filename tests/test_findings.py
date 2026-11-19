@@ -978,3 +978,17 @@ def test_one_find_is_read_whatever_its_place_in_the_list(tmp_path: Path) -> None
     db.db.commit()
     got = query(db, None, "any", None, 1, 0, only=frozenset({"red:05150"}))
     assert [f["id"] for f in got["finds"]] == ["red:05150"]
+
+
+def test_movers_and_brown_dwarfs_before_tracks_before_planet_x_peaks() -> None:
+    """The user, 19 Nov 2026: an unexplained mover or brown-dwarf candidate (at its 5 sigma bar, already looked at) stands above the
+    strongest track nobody has looked at, and every track above the strongest unexplained Planet X peak."""
+    from service.findings import promise_of
+
+    weakest_mover = min(promise_of(k, "unexplained", 5.0, 3) for k in ("mover", "browndwarf"))
+    strongest_track = promise_of("film", "unexplained", 99.0, 0)
+    weakest_track = promise_of("film", "unexplained", 5.0, 3)
+    strongest_peak = promise_of("peak", "unexplained", 99.0, 0)
+    assert weakest_mover > strongest_track and weakest_track >= strongest_peak
+    assert promise_of("peak", "unchecked", 9.0, 0) < weakest_track  # the undated peaks of page 1 go below the tracks
+    assert promise_of("browndwarf", "unexplained", 99.0, 0) == 100

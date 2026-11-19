@@ -57,7 +57,7 @@ export interface Task {
   ra: number | null;
   dec: number | null;
   /** a square handed out for a lead in it: which find, its kind and promise (GET /api/tasks/next) */
-  why?: { finding_id?: string; kind?: string; promise?: number } | null;
+  why?: { finding_id?: string; kind?: string; promise?: number; ra?: number; dec?: number; text?: string; ask?: { kind?: string; finding_id?: string; series?: string } } | null;
   state: 'open' | 'done';
   result: string | null;
   mark_ids: string[];
@@ -247,6 +247,18 @@ export async function taskDone(id: string, result: string, markIds: string[] = [
 }
 
 /** The place in the lab where a task is done. */
+/** A square given for a lead in it (task.why): the lead, the kind of its question series and its place, for the lab's address. */
+export function leadParams(why: NonNullable<Task['why']>): Record<string, string> {
+  const id = why.ask?.finding_id ?? why.finding_id;
+  if (!id) return {};
+  return {
+    lead: id,
+    ...(why.ask?.kind ? { lead_kind: why.ask.kind } : {}),
+    ...(why.text ? { lead_text: why.text } : {}),
+    ...(why.ra != null && why.dec != null ? { lead_ra: why.ra.toFixed(5), lead_dec: why.dec.toFixed(5) } : {}),
+  };
+}
+
 export function taskHash(t: Task): string {
   if (t.kind === 'finding' && t.finding_id && (t.ra == null || t.dec == null)) return `#/findings?lead=${encodeURIComponent(t.finding_id)}`;
   const q = new URLSearchParams();
@@ -262,7 +274,7 @@ export function taskHash(t: Task): string {
   if (t.kind === 'cell' && t.cell_id) q.set('cell', t.cell_id);
   if (t.kind === 'cell' && t.quarter) q.set('quarter', t.quarter);
   // a square given for a lead in it: the lab selects that find and asks its questions before the quarter's look
-  if (t.kind === 'cell' && t.why?.finding_id) q.set('lead', t.why.finding_id);
+  if (t.kind === 'cell' && t.why) for (const [k, v] of Object.entries(leadParams(t.why))) q.set(k, v);
   if (t.kind === 'finding' && t.finding_id) q.set('finding', t.finding_id);
   return `#/lab?${q}`;
 }

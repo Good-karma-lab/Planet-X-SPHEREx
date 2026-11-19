@@ -5,6 +5,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Mark } from '../../lib/marks';
+import { leadParams } from '../../lib/account';
 import { clearDo, pendingDo, useSignIn } from './signin';
 
 export type TaskKind = 'cell' | 'finding' | 'moves' | 'red' | 'anomaly' | 'find_again' | 'recentre' | 'bad_picture' | 'second_look';
@@ -232,7 +233,7 @@ export interface NextTask {
   /** a find's question series (spec §5e) */
   series?: { id: string; steps: SeriesStep[] } | null;
   /** a square given for a lead in it: which find */
-  why?: { finding_id?: string; kind?: string; promise?: number } | null;
+  why?: { finding_id?: string; kind?: string; promise?: number; ra?: number; dec?: number; text?: string; ask?: { kind?: string; finding_id?: string; series?: string } } | null;
   /** a track's pictures (its visits), to tap where it is missing */
   pictures?: { i: number; mjd?: number | null; ra?: number | null; dec?: number | null }[] | null;
   /** the other kinds: their question and answers */
@@ -270,7 +271,7 @@ export function taskParams(t: NextTask): Record<string, string> | null {
     kind: t.kind,
     ...(t.cell_id ? { cell: t.cell_id } : {}),
     ...(t.quarter ? { quarter: t.quarter } : {}),
-    ...(t.kind === 'cell' && t.why?.finding_id ? { lead: t.why.finding_id } : {}),
+    ...(t.kind === 'cell' && t.why ? leadParams(t.why) : {}),
     // the find is the lab's selected object (`find`): the one thing the task rings brightly (an exposure is no find)
     ...(t.finding_id && t.kind !== 'bad_picture' ? { finding: t.finding_id, find: t.finding_id } : {}),
     ...(t.finding_id && t.kind === 'bad_picture' ? { exposure: t.finding_id } : {}),
@@ -305,6 +306,8 @@ export interface TaskArgs {
   ready?: boolean;
   /** a lead's questions inside a square's task: no "Next" of its own (the square's look follows), no second Mark button */
   embedded?: boolean;
+  /** the service's words for the lead (why.text: "a Planet X peak · promise 86") */
+  leadText?: string;
 }
 
 /** The task as the lab works with it: the panel, the step on show, the service's body, and the taps. */
@@ -516,7 +519,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       {si.popup}
       <div class="tp-head">
         <b>{a.embedded ? 'Lead' : 'Task'}</b>
-        <span>{a.embedded ? 'first, then the quarter' : T.title}</span>
+        <span>{a.embedded ? (a.leadText ?? 'first, then the quarter') : T.title}</span>
         {focusKind(task.kind) && (
           <label class="tp-others" title="Show the other rings and names of the field as usual (in a task only the object in question is bright)">
             <input type="checkbox" checked={a.others} onChange={(e) => a.setOthers((e.target as HTMLInputElement).checked)} data-testid="task-others" />

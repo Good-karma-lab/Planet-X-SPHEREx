@@ -1615,7 +1615,12 @@ STAGE_OF_STATUS = {
 }
 VIEW_RESULTS = ("moves", "artefact", "known", "nothing", "marks")
 # the promise of a finding, 0..100: what a person should look at first
-PROMISE_BASE = {"browndwarf": 70.0, "peak": 65.0, "mover": 60.0, "film": 50.0, "pair": 30.0, "red": 10.0, "anomaly": 10.0}
+# the order by kind, in bands that do not overlap (the user, 19 Nov 2026: a moving star or a brown dwarf before Planet Nine): an unexplained
+# mover or brown-dwarf candidate (80 + up to 20 for its significance, so at least 90 at its 5 sigma bar) stands above every time-lapse track
+# (55, at most 80 with the unseen bonus), and every track above every Planet X peak (32, at most 57); red sources and anomalies
+# (0, at most 25) stay below every lead, a weak unchecked peak included. A peak stands with the tracks only
+# once the link of its passes confirms it (the jump): no peak has that yet, so none does
+PROMISE_BASE = {"browndwarf": 80.0, "mover": 80.0, "film": 55.0, "peak": 32.0, "pair": 25.0, "red": 0.0, "anomaly": 0.0}
 PROMISE_STATUS = {"unexplained": 1.0, "unchecked": 0.8, "known": 0.25}  # anything else (a residual, a galaxy, a halo, below the bar): 0.05
 PROMISE_SIGMA_MAX = 20.0
 PROMISE_UNSEEN = 5.0
@@ -1640,14 +1645,14 @@ FOUND_BY = {
 
 
 def promise_of(kind: str, status: str, sigma: float | None, viewers: int) -> int:
-    """promise = round(f × (base + min(20, 2σ)) + 5 if nobody has looked and f ≥ 0.8), where base is by kind (brown dwarf candidate 70,
-    Planet X peak 65, mover 60, time-lapse track 50, changing pair 30, red source 10, spectral anomaly 10), σ is the find's own
-    significance (its score, else its signal to noise), and f is by what the catalogues said (unexplained 1, not yet checked 0.8,
-    known 0.25, an artefact 0.05). So an unexplained mover the catalogues do not name stands above every known one, and every mover,
-    dwarf, peak and track that is still a lead stands above every red source and anomaly."""
+    """promise = round(f × (base + min(20, 2σ)) + 5 if nobody has looked and f ≥ 0.8), where base is by kind in bands that do not overlap
+    (mover and brown-dwarf candidate 80, time-lapse track 55, Planet X peak 32, changing pair 25, red source and spectral anomaly 0),
+    σ is the find's own significance (its score, else its signal to noise), and f is by what the catalogues said (unexplained 1, not yet
+    checked 0.8, known 0.25, an artefact 0.05). So an unexplained mover or brown dwarf stands above every track, and every track above
+    every Planet X peak; every lead stands above every red source and anomaly."""
     f = PROMISE_STATUS.get(status, 0.05)
     s = min(PROMISE_SIGMA_MAX, 2.0 * max(0.0, float(sigma or 0.0)))
-    return round(f * (PROMISE_BASE.get(kind, 10.0) + s) + (PROMISE_UNSEEN if viewers == 0 and f >= 0.8 else 0.0))
+    return round(min(100.0, f * (PROMISE_BASE.get(kind, 10.0) + s) + (PROMISE_UNSEEN if viewers == 0 and f >= 0.8 else 0.0)))
 
 
 class FlowDB:

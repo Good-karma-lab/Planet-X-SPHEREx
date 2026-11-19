@@ -741,8 +741,15 @@ export function Lab({ route }: { route: Route }) {
   // in a task the find is the task's object (the cabinet's and the lab's own task links name it `finding`)
   // a square given for a lead in it (`lead=`): the lead is selected at its own place, from its record in Findings
   const leadId = p['task'] && p['kind'] === 'cell' ? (p['lead'] ?? '') : '';
-  const leadRec = useFindRecord(leadId);
-  const leadAt = leadRec && leadRec !== 'failed' && leadRec.ra != null && leadRec.dec != null ? { ra: leadRec.ra, dec: leadRec.dec } : null;
+  // its place: the task's own (why.ra/dec, in the address), else its record in Findings
+  const leadOwn = [Number(p['lead_ra']), Number(p['lead_dec'])];
+  const leadHas = p['lead_ra'] != null && p['lead_dec'] != null && leadOwn.every(Number.isFinite);
+  const leadRec = useFindRecord(leadId && !leadHas ? leadId : '');
+  const leadAt = leadHas
+    ? { ra: leadOwn[0]!, dec: leadOwn[1]! }
+    : leadRec && leadRec !== 'failed' && leadRec.ra != null && leadRec.dec != null
+      ? { ra: leadRec.ra, dec: leadRec.dec }
+      : null;
   const findId = p['find'] ?? (p['task'] ? (p['finding'] ?? (leadAt ? leadId : '')) : '');
   const findShown = useRef('');
   const selectFind = () => {

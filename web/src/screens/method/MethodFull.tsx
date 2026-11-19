@@ -28,8 +28,13 @@ const wanted = (): string | null => {
 
 // Numbers on this page that the layout itself carries come from runs on the production service.
 // the version of this account: bumped, with a line in CHANGES, whenever an algorithm or a constant it states changes
-export const METHOD_VERSION = { id: 'M41', date: '2026-11-18' };
+export const METHOD_VERSION = { id: 'M42', date: '2026-11-19' };
 const CHANGES: [string, string, string][] = [
+  [
+    'M42',
+    '2026-11-19',
+    'The order of the leads: movers and brown-dwarf candidates before time-lapse tracks before Planet X peaks, in promise bands that do not overlap.',
+  ],
   [
     'M41',
     '2026-11-18',

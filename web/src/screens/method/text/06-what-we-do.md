@@ -62,6 +62,15 @@ People look at squares, at machine finds ("Does it really move?"), at red source
 
 "Not sure" at any step is "Can't tell", which is never wrong and never paid. A mark put on the picture has a kind too: one that moves starts the checks on its own; one that is in no catalogue asks every catalogue again; two people calling the same machine find an artefact set it aside (it leaves Findings' leads and the Candidates).
 
+**The order of the leads (promise).** Findings, "Give me a square" and the checks of machine findings all take the leads in one order. Each find gets a promise: f × (base + min(20, 2σ)), plus 5 while nobody has looked at it, at most 100. σ is the find's own significance, and f is what the catalogues said: 1 for unexplained, 0.8 for not yet checked, 0.25 for known, 0.05 for an artefact. The base is by kind, in bands that do not overlap:
+
+- **80**: a mover between passes, or a brown-dwarf candidate, that passed the blend and catalogue checks (at least 90 at its 5σ bar);
+- **55**: a time-lapse track (at most 80);
+- **32**: a Planet X peak (at most 57);
+- **25**: a changing pair; **0**: a red source or a spectral anomaly.
+
+So an unexplained star that moves, or a brown dwarf, always comes before a track, and a track before a Planet X peak. A peak would join the tracks only once the link of its passes confirms it (the jump); no peak has that yet. On 19 November 2026 no mover and no brown-dwarf candidate is open (the 4 movers are known; the brown-dwarf candidates are known, blends or galaxies), so the first page of Promising is time-lapse tracks.
+
 **Agreement.** The answers of one find settle by weighted agreement: 3 of agreeing weight, or 5 answers given. Each person weighs 1 until five of their answers were judged, then 0.5 plus the share they got right, between 0.5 and 1.5. Every fifth task of a person in a series is a **control object** whose answer is already known, judged at once and counted in that share: a find the catalogues name (a known asteroid's track should step along the arrow; a known mover should shift), a find the machine set aside itself (a star's residual, a galaxy, a peak in a halo, a blend: no dot of its own, or it does not shift), or a find earlier people settled unanimously, at least three of three. The finds people set aside are never controls, so nobody is judged by other people's verdicts on the same kind of artefact. The settled result is the one the series ends in; when answers differ and none reaches the weight, people do not agree, and nobody is right or wrong. A Findings card shows the result in one line ("People say: cold brown dwarf, 3 of 3").
 
 [figure: people-counts | What people have answered so far, live: every series, and how often an answer goes against a rule of the machine]
