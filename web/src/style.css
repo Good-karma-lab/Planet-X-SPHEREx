@@ -2424,7 +2424,7 @@ input[type='range']::-moz-range-thumb {
 .about-grid { display: block; column-count: 3; column-gap: 14px; }
 .about-grid > section { break-inside: avoid; margin: 0 0 14px; }
 @media (max-width: 1279.98px) { .about-grid { column-count: 2; } }
-@media (max-width: 599.98px) and (min-height: 480px) { .about-grid { column-count: 1; } }
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) { .about-grid { column-count: 1; } }
 
 /* a panel's body that scrolls fades out above the scans tray (a row cut by the edge reads as scrolled, not as covered); the 28 px of padding keeps the last row clear of the fade when scrolled to the end */
 @media (min-width: 600px) and (min-height: 480px), (min-width: 1280px) {
@@ -2460,3 +2460,11 @@ input[type='range']::-moz-range-thumb {
 /* the sign-in link's tab when the lab goes on in the other one */
 .signed-elsewhere { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; background: var(--bg, #05090c); color: var(--ink); }
 .signed-elsewhere b { font: 650 20px var(--font); }
+
+/* an address that names no screen (screens/missing.tsx) */
+.missing-screen { display: grid; place-items: center; padding: 24px 16px; }
+.missing { max-width: 520px; text-align: center; }
+.missing-k { font: 600 13px var(--mono); color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; overflow-wrap: anywhere; }
+.missing h1 { font-size: 30px; line-height: 1.15; margin: 12px 0 10px; }
+.missing p { color: var(--muted); margin: 0 0 22px; }
+.missing-go { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
