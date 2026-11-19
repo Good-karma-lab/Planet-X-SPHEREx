@@ -351,6 +351,14 @@ HALO_ARCSEC = 30.0  # a peak this close to a bright star is that star's halo or 
 HALO_G = 12.0
 KINDS = ("deep", "distant")
 KNOWN_MAX = 8  # leads of a result that are looked up (the strongest first)
+
+
+def lead_indices(candidates: list[dict[str, Any]]) -> list[int]:
+    """The places in the list of the leads that are looked up: the first KNOWN_MAX peaks the photometry confirms (a lead may stand after
+    eight peaks that are not: the second echo of Eris in its scan was the tenth peak)."""
+    return [i for i, c in enumerate(candidates) if c.get("ok")][:KNOWN_MAX]
+
+
 FILE_VERSION = "k1"
 
 
@@ -460,8 +468,10 @@ class FpxIdentifier:
             self.kick_event.set()
         out = dict(result)
 
+        asked = set(lead_indices(result["candidates"]))
+
         def with_known(i: int, c: dict[str, Any]) -> dict[str, Any]:
-            if i >= KNOWN_MAX or not c.get("ok"):
+            if i not in asked:
                 return c  # only the leads (peaks the photometry confirms) are looked up
             known = (found or {}).get(i, {"state": "pending"})
             if known.get("state") == "residual":  # not a lead: the halo of a bright star, or no measured distance
@@ -490,9 +500,9 @@ class FpxIdentifier:
         }
         whole = True
         asked = 0
-        for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
-            if not c.get("ok"):
-                continue  # a peak the photometry does not confirm is not a lead: nothing to name
+        cands = result.get("candidates") or []
+        for i in lead_indices(cands):  # a peak the photometry does not confirm is not a lead: nothing to name
+            c = cands[i]
             if i in found and found[i].get("state") == "none" and not found[i].get("screened"):
                 # an answer kept before the residual rule: JPL named nothing, so the edge and the bright-star halo are checked now
                 pl0 = places_of(kind, result, c)
@@ -552,7 +562,7 @@ class FpxIdentifier:
             if not meta or meta.get("status") != "ok" or not any(c.get("ok") for c in meta.get("candidates") or []):
                 continue
             have = self.cached(kind, key) or {}
-            need = [i for i, c in enumerate(meta["candidates"][:KNOWN_MAX]) if c.get("ok")]
+            need = lead_indices(meta["candidates"])
             if need and all(settled(kind, have.get(i, {})) for i in need):
                 self.complete.add((kind, key))
                 continue
