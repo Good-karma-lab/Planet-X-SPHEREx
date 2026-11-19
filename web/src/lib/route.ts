@@ -1,7 +1,8 @@
 // Hash routes hold the whole state of a screen so that any view opens by a link (docs/plan/04-ui.md, 4.1 rule 9).
 
 // 'me' is the cabinet, 'leaders' the public leaderboard (#/leaders)
-export const SCREENS = ['landing', 'globe', 'lab', 'planetx', 'findings', 'index', 'method', 'about', 'me', 'leaders', 'u'] as const; // 'u' is a public profile, #/u/<slug> (flow-accounts)
+// 'missing' is an address that names no screen: it says so, with the ways back (an unknown address used to open the landing page silently)
+export const SCREENS = ['landing', 'globe', 'lab', 'planetx', 'findings', 'index', 'method', 'about', 'me', 'leaders', 'u', 'missing'] as const; // 'u' is a public profile, #/u/<slug> (flow-accounts)
 export type Screen = (typeof SCREENS)[number];
 
 export interface Route {
@@ -11,18 +12,33 @@ export interface Route {
 
 export const DEFAULT_SCREEN: Screen = 'landing';
 
+// other names people type or links carry for a screen: #/explore is the globe (the landing page is the front door), #/globe stays valid for old links
+const ALIASES: Record<string, Screen> = {
+  explore: 'globe',
+  cabinet: 'me',
+  account: 'me',
+  profile: 'me',
+  'planet-x': 'planetx',
+  'planet-nine': 'planetx',
+  planet9: 'planetx',
+  leaderboard: 'leaders',
+  finds: 'findings',
+  home: 'landing',
+};
+
 export function parseHash(hash: string): Route {
   const raw = hash.replace(/^#\/?/, '');
   const q = raw.indexOf('?');
-  // #/explore is the globe (the landing page is the front door); #/globe stays valid for old links
   const path = q < 0 ? raw : raw.slice(0, q);
   // #/findings/<id> is the permanent page of one finding: the id after the screen's name (case kept), as params.id
   const slash = path.indexOf('/');
   const name0 = (slash < 0 ? path : path.slice(0, slash)).toLowerCase();
-  const name = name0 === 'explore' ? 'globe' : name0;
+  const name = ALIASES[name0] ?? name0;
   const query = q < 0 ? '' : raw.slice(q + 1);
-  const screen = (SCREENS as readonly string[]).includes(name) ? (name as Screen) : DEFAULT_SCREEN;
+  const known = (SCREENS as readonly string[]).includes(name) && name !== 'missing';
+  const screen: Screen = !name ? DEFAULT_SCREEN : known ? (name as Screen) : 'missing';
   const params: Record<string, string> = {};
+  if (screen === 'missing') params['path'] = path;
   for (const [k, v] of new URLSearchParams(query)) params[k] = v;
   if ((screen === 'findings' || screen === 'u') && slash >= 0 && path.length > slash + 1) {
     try {

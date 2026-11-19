@@ -8,12 +8,20 @@ describe('hash routes', () => {
       params: { ra: '269.4479', dec: '4.7687', fov: '5' },
     });
   });
-  it('opens the landing page for an empty or unknown screen; #/explore (and old #/globe links) is the globe', () => {
+  it('opens the landing page for an empty address and says so for an unknown one; #/explore (and old #/globe links) is the globe', () => {
     expect(parseHash('').screen).toBe('landing');
-    expect(parseHash('#/nowhere').screen).toBe('landing');
+    expect(parseHash('#/').screen).toBe('landing');
+    expect(parseHash('#/nowhere')).toEqual({ screen: 'missing', params: { path: 'nowhere' } });
+    expect(parseHash('#/missing').screen).toBe('missing');
     expect(parseHash('#/explore').screen).toBe('globe');
     expect(parseHash('#/globe').screen).toBe('globe');
     expect(formatHash({ screen: 'globe', params: {} })).toBe('#/explore');
+  });
+  it('takes the other names of a screen: #/cabinet, #/planet-x, #/leaderboard', () => {
+    expect(parseHash('#/cabinet').screen).toBe('me');
+    expect(parseHash('#/Cabinet?work=marks')).toEqual({ screen: 'me', params: { work: 'marks' } });
+    expect(parseHash('#/planet-x').screen).toBe('planetx');
+    expect(parseHash('#/leaderboard').screen).toBe('leaders');
   });
   it('round-trips', () => {
     const r = { screen: 'lab' as const, params: { ra: '331.077', dec: '-56.794', fov: '5' } };
