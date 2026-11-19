@@ -837,6 +837,9 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
     <>
       <section class="card glass fbar">
         <div class="fkinds" role="group" aria-label="Kind">
+          <span class="fgroup-h" aria-hidden="true">
+            What
+          </span>
           {people > 0 && (
             <button class={kind === 'submitted' ? 'on' : ''} aria-pressed={kind === 'submitted'} onClick={() => setKind('submitted')}>
               Found by people <span>{people}</span>
@@ -847,6 +850,9 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
           {more2.map(([k, l]) => chip(k, l))}
         </div>
         <div class="fkinds fstat" role="group" aria-label="Status">
+          <span class="fgroup-h" aria-hidden="true">
+            Status
+          </span>
           {stages
             .filter(
               (s) =>
@@ -872,6 +878,9 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
         </div>
         {viewOn && (
           <div class="fkinds fstat" role="group" aria-label="Visible in the picture">
+            <span class="fgroup-h" aria-hidden="true">
+              In the picture
+            </span>
             <button class={!unseen ? 'on' : ''} aria-pressed={!unseen} onClick={() => setUnseen(false)}>
               Visible in the picture <span>{h?.visibility.in_view.visible ?? NONE}</span>
               {h && h.visibility.in_view.not_measured > 0 && (
@@ -899,18 +908,19 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
           </span>
           {(() => {
             const n = (c: number) => `${c} ${c === 1 ? 'find' : 'finds'}`;
-            const line = `${
-              cards.stale
-                ? 'updating…'
-                : kind === 'submitted'
-                  ? `${cards.finds.length} findings submitted by people`
-                  : h
-                    ? `${cards.done ? n(h.count) : `${cards.finds.length} of ${h.count} · more as you scroll`} · ${h.total.toLocaleString('en-US')} finds of every kind in all · a find is a lead, not a discovery`
-                    : 'reading the findings…'
+            // short in sight ("48 of 89 · 7,853 in all"); the whole of it on hover
+            const line = cards.stale
+              ? 'updating…'
+              : kind === 'submitted'
+                ? `${cards.finds.length} findings submitted by people`
+                : h
+                  ? `${cards.done ? n(h.count) : `${cards.finds.length} of ${h.count}`} · ${h.total.toLocaleString('en-US')} finds in all`
+                  : 'reading the findings…';
+            const full = `${line}${h && !cards.done && kind !== 'submitted' ? ' · more as you scroll' : ''}${
+              h && kind !== 'submitted' ? ' · a find is a lead, not a discovery' : ''
             }${h && h.identification.pending > 0 ? ` · identifying: ${h.identification.pending} catalogue answers to come` : ''}`;
-            // one line at every width (the whole of it on hover): the panel keeps its height when the numbers change
             return (
-              <span class="lc-line" title={line}>
+              <span class="lc-line" title={full}>
                 {line}
               </span>
             );

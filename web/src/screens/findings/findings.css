@@ -192,3 +192,7 @@ a.btn[aria-busy="true"]::after { content: " · opening…"; }
 
 /* where most searched fields lie (the finds gather there for that reason): one quiet line under the counter */
 .searched-patch { margin: 6px 0 0; font-size: 13px; color: var(--muted); }
+/* the filters in three groups, each with its name in front: What, Status, In the picture */
+.fkinds .fgroup-h { flex: none; align-self: center; min-width: 104px; font: 600 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+.fbar .fkinds + .fkinds { padding-top: 8px; border-top: 1px solid var(--edge-soft, rgba(255, 255, 255, 0.06)); }
+@media (max-width: 599.98px) and (min-height: 480px) { .fkinds .fgroup-h { min-width: 0; } }
