@@ -10,6 +10,8 @@ export interface FindRecord {
   /** its own catalogue answers (sbident is JPL's): what the find's badge stands on */
   idents?: { catalogue: string; state: string; attempts?: number; name?: string | null }[];
   kind: string;
+  ra?: number;
+  dec?: number;
   status?: string;
   stage?: string;
   score?: number | null;

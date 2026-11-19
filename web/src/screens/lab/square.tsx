@@ -248,9 +248,11 @@ export function useSquareLook(a: SquareArgs): SquareLook {
             <b style={{ width: `${Math.round(frac * 100)}%` }} />
           </i>
         )}
-        <span class="sq-line" data-testid="square-look-line">
-          {line2 || why}
-        </span>
+        {(line2 || why) && (
+          <span class="sq-line" data-testid="square-look-line">
+            {line2 || why}
+          </span>
+        )}
         {si.popup}
       </div>
     ) : null;

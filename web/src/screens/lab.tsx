@@ -739,7 +739,11 @@ export function Lab({ route }: { route: Route }) {
   }, [fpx, meta, distRef.available, distRef.ds.state, ra, dec, fov]);
   // a link from Findings (find=<id>): the find sits at the field's centre; once the field is open it is selected and its ring pulses on the picture
   // in a task the find is the task's object (the cabinet's and the lab's own task links name it `finding`)
-  const findId = p['find'] ?? (p['task'] ? (p['finding'] ?? '') : '');
+  // a square given for a lead in it (`lead=`): the lead is selected at its own place, from its record in Findings
+  const leadId = p['task'] && p['kind'] === 'cell' ? (p['lead'] ?? '') : '';
+  const leadRec = useFindRecord(leadId);
+  const leadAt = leadRec && leadRec !== 'failed' && leadRec.ra != null && leadRec.dec != null ? { ra: leadRec.ra, dec: leadRec.dec } : null;
+  const findId = p['find'] ?? (p['task'] ? (p['finding'] ?? (leadAt ? leadId : '')) : '');
   const findShown = useRef('');
   const selectFind = () => {
     const kind = findId.split(':')[0] ?? '';
@@ -759,10 +763,11 @@ export function Lab({ route }: { route: Route }) {
     const fra = Number(p['find_ra']);
     const fdec = Number(p['find_dec']);
     const own = p['find_ra'] != null && p['find_dec'] != null && Number.isFinite(fra) && Number.isFinite(fdec);
+    const at = findId === leadId && leadAt ? leadAt : own ? { ra: fra, dec: fdec } : { ra, dec };
     // a film find is a moving body: no variable-star verdict for it
     setSel({
-      ra: own ? fra : ra,
-      dec: own ? fdec : dec,
+      ra: at.ra,
+      dec: at.dec,
       name,
       finding: findId,
       ...(kind === 'film' ? { moving: { V: null, visits: [] } } : {}),
@@ -4236,7 +4241,15 @@ export function Lab({ route }: { route: Route }) {
             ))}
           </div>
           {ptab === 'task' && flow.taskPanel}
-          {ptab === 'task' && square.button}
+          {ptab === 'task' && !inTask && (
+            // the free lab's actions in one card: the quarter's look (on a square) and a mark of one's own
+            <div class="labact" data-testid="lab-actions">
+              {square.button}
+              <button class="btn sm look-missed" onClick={() => flow.setTool('mark')} title="Put a mark on something that moves or looks odd and has no ring · mark it, say what it is, the checks run" data-testid="look-missed">
+                Mark something the machine missed
+              </button>
+            </div>
+          )}
           <div class="pbody pcol" ref={colRef}>
             {ptab === 'task' && !inTask && !square.cell && <HereSquare ra={ra} dec={dec} open={(q) => (location.hash = formatHash({ screen: 'lab', params: q }))} />}
             {ptab === 'task' && flow.markOpen && (
@@ -4249,17 +4262,6 @@ export function Lab({ route }: { route: Route }) {
               <div class="psh">
                 To look at{foundCount > 0 && <span class="tbadge" data-testid="look-count">{foundCount}</span>}
               </div>
-              {!inTask && (
-                <button
-                  class="mini look-missed"
-                  onClick={() => flow.setTool('mark')}
-                  title="Put a mark on something that moves or looks odd and has no ring"
-                  data-testid="look-missed"
-                >
-                  Mark something the machine missed
-                  <small class="tp-path">mark it · say what it is · the checks run</small>
-                </button>
-              )}
               <SearchRow list={searches} />
                 {pairSel !== null && pairs[pairSel] && (
                   <PairCard

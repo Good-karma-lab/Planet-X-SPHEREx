@@ -2268,7 +2268,7 @@ input[type='range']::-moz-range-thumb {
 .sbar .sline:hover b { color: var(--accent-l); }
 
 /* rail: the words fit (U) */
-.rail .tab { font-size: 9.5px; letter-spacing: 0.04em; padding: 8px 0 6px; gap: 4px; }
+.rail .tab { font-size: 9.5px; letter-spacing: 0.02em; padding: 8px 0 6px; gap: 4px; white-space: nowrap; }
 .rail .tab svg { width: 22px; height: 22px; }
 /* phones: a gap between the words of the rail */
 @media (max-width: 860px), (max-aspect-ratio: 1/1) {
