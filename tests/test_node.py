@@ -202,6 +202,9 @@ def test_a_node_lets_its_background_take_every_worker(monkeypatch: pytest.Monkey
     from service import cpu
 
     assert cpu._Gate(4).low_cap == 3 and cpu._Gate(4, reserve=0).low_cap == 4
+    g = cpu._Gate(4, reserve=0)
+    g.person_at = __import__("time").monotonic()  # a call not marked background came in: on a node it still takes nothing away
+    assert g._cap() == 4
     monkeypatch.setenv("SKY_NODE_MAIN", "https://main.example")
     monkeypatch.setenv("SKY_NODE_SECRET", "k")
     cpu.configure(object(), 4)  # type: ignore[arg-type]
