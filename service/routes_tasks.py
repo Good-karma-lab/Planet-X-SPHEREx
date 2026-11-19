@@ -323,7 +323,9 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
     ]
 
 
-FIND_ROWS_KEEP_S = 20.0  # the whole list of finds is read again in the background when it is older than this
+# the whole list of finds is read again in the background when older than this: the order of the leads changes slowly, and a read (about
+# a second on prod) slows the calls that meet it
+FIND_ROWS_KEEP_S = 120.0
 _FIND_ROWS_LOCK = threading.Lock()  # one read of the whole list at a time (the first, in the foreground; or one in the background)
 log = logging.getLogger("sky.tasks")
 
@@ -371,6 +373,21 @@ def find_rows(st: Any) -> list[dict[str, Any]]:
     if rows is None:
         raise HTTPException(503, "the findings database is not loaded")
     return [dict(r) for r in rows]
+
+
+def prime_find_rows(st: Any, tries: int = 60, wait_s: float = 5.0) -> bool:
+    """Reads the list once right after a start (in a thread), so that the first person's task does not wait for it (20 s after a
+    restart on prod, 19 Nov 2026). The findings database may still be loading: asked again every `wait_s`. -> it was read."""
+    for _ in range(tries):
+        try:
+            find_rows(st)
+            return True
+        except HTTPException:
+            time.sleep(wait_s)
+        except Exception:
+            log.exception("the list of finds could not be read at the start")
+            return False
+    return False
 
 
 CONTROLS_KEEP_S = 120.0  # the hidden finds change only when a catalogue answers: read again after this long

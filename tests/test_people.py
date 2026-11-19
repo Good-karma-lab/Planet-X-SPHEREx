@@ -505,3 +505,18 @@ def test_a_peak_jpl_names_is_no_lead_of_the_tasks(tmp_path: Path) -> None:
     assert [r["status"] for r in lead_findings(st) or []] == ["unchecked"]
     st.fpx_known = Idn()
     assert [r["status"] for r in lead_findings(st, "any") or []] == ["known"]
+
+
+def test_the_list_of_finds_is_read_at_the_start_once_the_findings_are_loaded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import routes_tasks
+
+    st = SimpleNamespace()
+    calls = []
+
+    def loading_then_ready(s: Any, status: str | None = None) -> list[dict[str, Any]] | None:
+        calls.append(1)
+        return None if len(calls) < 3 else [{"finding_id": "film:lead"}]  # None: the findings database is still loading
+
+    monkeypatch.setattr(routes_tasks, "lead_findings", loading_then_ready)
+    assert routes_tasks.prime_find_rows(st, tries=5, wait_s=0.0) is True
+    assert len(calls) == 3 and st._task_finds[1] == [{"finding_id": "film:lead"}]
