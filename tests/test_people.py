@@ -520,3 +520,17 @@ def test_the_list_of_finds_is_read_at_the_start_once_the_findings_are_loaded(tmp
     monkeypatch.setattr(routes_tasks, "lead_findings", loading_then_ready)
     assert routes_tasks.prime_find_rows(st, tries=5, wait_s=0.0) is True
     assert len(calls) == 3 and st._task_finds[1] == [{"finding_id": "film:lead"}]
+
+
+def test_a_node_without_findings_reads_no_list_at_the_start_and_says_no_error(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A1 has no findings table: its start logged a traceback (19 Nov 2026, Release 73)."""
+    from service import routes_tasks
+
+    def no_table(s: Any, status: str | None = None) -> list[dict[str, Any]]:
+        raise sqlite3.OperationalError("no such table: finds")
+
+    monkeypatch.setattr(routes_tasks, "lead_findings", no_table)
+    assert routes_tasks.prime_find_rows(SimpleNamespace(), tries=3, wait_s=0.0) is False
+    assert "Traceback" not in caplog.text and not [r for r in caplog.records if r.exc_info]
