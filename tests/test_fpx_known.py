@@ -316,3 +316,45 @@ def test_a_kept_none_answer_is_screened_once_for_the_residual_rule(tmp_path: Pat
     asyncio.run(idn.sweep())
     kept = idn.cached("deep", "k" * 24)
     assert kept is not None and kept[0]["state"] == "residual"
+
+
+def _echo_places(strong: int) -> list[dict[str, Any]]:
+    """Sedna's places in pass 0; the other passes 0.1° off it (noise lined up along an orbit through it); `strong`: the strongest pass."""
+    out = [dict(p) for p in PLACES]
+    for p in out[1:]:
+        p["ra"] += 0.1
+    for j, p in enumerate(out):
+        p["sn"] = 7.7 if j == strong else 3.5
+    return out
+
+
+def test_a_known_body_in_the_strongest_pass_only_is_its_echo() -> None:
+    """peak:75166a5e0d64 (19 Nov 2026): Eris in its first pass, S/N 7.7 of 8.8; the other passes away from Eris."""
+    out = asyncio.run(fpx_known.identify(fake_jpl(), _echo_places(0), 81.7, 81.7))
+    assert out["state"] == "ok" and out["echo"] is True and out["pass"] == 0 and out["name"].startswith("90377 Sedna")
+    assert out["seps"][0] < 2.0 and max(out["seps"]) > fpx_known.MATCH_ARCSEC
+    assert out["words"].startswith("an echo of Sedna (JPL), not a new body")
+
+
+def test_a_known_body_in_a_weaker_pass_only_is_not_an_echo() -> None:
+    out = asyncio.run(fpx_known.identify(fake_jpl(), _echo_places(1), 81.7, 81.7))
+    assert out["state"] == "none" and out["echo_checked"] is True
+
+
+def test_a_deep_none_kept_before_the_echo_rule_is_asked_once_more(tmp_path: Path) -> None:
+    places = _echo_places(0)
+    by_pass = [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"], "sn": p["sn"]} for p in places]
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "params": {"dmin": 30.0, "dmax": 300.0},
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in places],
+        "candidates": [{"d": 81.7, "ra": places[1]["ra"], "dec": places[1]["dec"], "ok": True, "by_pass": by_pass}],
+    }
+    old = {0: {"state": "none", "screened": True, "at": [places[1]["ra"], places[1]["dec"], 81.7]}}
+    assert not fpx_known.settled("deep", old[0]) and fpx_known.settled("distant", old[0])
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
+    idn._keep("deep", "k" * 24, old)
+    asyncio.run(idn.sweep())
+    kept = idn.cached("deep", "k" * 24)
+    assert kept is not None and kept[0]["state"] == "ok" and kept[0]["echo"] is True
+    assert ("deep", "k" * 24) in idn.complete

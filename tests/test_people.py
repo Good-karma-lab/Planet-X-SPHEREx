@@ -456,3 +456,25 @@ def test_a_track_task_names_the_film_its_search_ran_on(site: tuple[FastAPI, Any]
     assert t["film"] == 61100.4
     t2 = ann.get("/api/tasks/next", params={"kind": "finding", "finding_id": "film:2"}).json()["task"]
     assert "film" not in t2  # a track whose search date is not kept: the lab picks the middle of the visits
+
+
+def test_a_peak_jpl_names_is_no_lead_of_the_tasks(tmp_path: Path) -> None:
+    """The task pool reads the JPL identification of the Planet X peaks as the Findings page does: a named body or an echo is known."""
+    from service.findings import FindingsDB
+    from service.routes_tasks import lead_findings
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 18, "ra": 26.24, "dec": -0.51, "rate": None, "snr": 8.8, "score": 8.8, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([{**base, "id": "peak:eris", "kind": "peak", "data": {"peak": {"ok": True}}}])
+    db.db.commit()
+
+    class Idn:
+        def enrich_findings(self, body: dict[str, Any]) -> dict[str, Any]:
+            for f in body["finds"]:
+                f["status"] = "known"
+            return body
+
+    st = SimpleNamespace(findings=SimpleNamespace(db=db))
+    assert [r["status"] for r in lead_findings(st) or []] == ["unchecked"]
+    st.fpx_known = Idn()
+    assert [r["status"] for r in lead_findings(st, "any") or []] == ["known"]

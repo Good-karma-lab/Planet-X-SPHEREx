@@ -18,6 +18,7 @@ Where the choices come from:
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import json
 import math
@@ -299,6 +300,10 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
         aside, raised = {}, {}
     clips = getattr(st, "clips", None)
     body = query(f.db, None, status, None, 100000, 0, aside=aside, raised=raised, seen=getattr(clips, "seen", None))
+    idn = getattr(st, "fpx_known", None)
+    if idn is not None:  # a Planet X peak JPL names (or a known body's echo) is known here too, as on the Findings page: no lead
+        with contextlib.suppress(Exception):
+            body = idn.enrich_findings(body)
     return [
         {
             "finding_id": x["id"],
