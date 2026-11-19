@@ -6,7 +6,7 @@ const BASE = process.argv[2] ?? 'http://localhost:5190';
 const OUT = process.argv[3] ?? 'test-results/layout';
 const HINTS = process.argv[4] === 'hints';
 fs.mkdirSync(OUT, { recursive: true });
-const ALL = { 1440: [1440, 900], 1280: [1280, 800], 1024: [1024, 768], 860: [860, 1000], 700: [700, 900], 600: [600, 900], 375: [375, 812], 844: [844, 390] };
+const ALL = { 412: [412, 915], 1440: [1440, 900], 1280: [1280, 800], 1024: [1024, 768], 860: [860, 1000], 700: [700, 900], 600: [600, 900], 375: [375, 812], 844: [844, 390] };
 const SIZES = (process.env.SIZES ?? '1440,1024,700,375').split(',').map((k) => ALL[k]);
 const PAGES = [
   ['lab', '/#/lab?ra=269.452&dec=4.693&fov=10'],

@@ -408,3 +408,21 @@ def test_a_none_kept_before_the_large_bodies_is_looked_at_for_them_alone(tmp_pat
     kept = idn.cached("deep", "k" * 24)
     assert kept is not None and kept[0]["state"] == "ok" and kept[0]["echo"] is True and kept[0]["name"].startswith("136199 Eris")
     assert "sb" not in asked  # sbident is not asked again for an old answer
+
+
+def test_a_lead_after_eight_peaks_that_are_not_leads_is_looked_up(tmp_path: Path) -> None:
+    """The second echo of Eris in its scan was its tenth peak: the first eight leads are looked up, not the first eight peaks."""
+    by_pass = [{"ra": p["ra"], "dec": p["dec"], "mjd": p["mjd"]} for p in PLACES]
+    noise = {"d": 83.0, "ra": 1.0, "dec": 1.0, "ok": False, "by_pass": by_pass}
+    meta: dict[str, Any] = {
+        "status": "ok",
+        "params": {"dmin": 30.0, "dmax": 300.0},
+        "passes": [{"pass_mjd0": p["mjd0"], "pass_mjd1": p["mjd1"]} for p in PLACES],
+        "candidates": [*([noise] * 9), {"d": 83.0, "ra": PLACES[1]["ra"], "dec": PLACES[1]["dec"], "ok": True, "by_pass": by_pass}],
+    }
+    assert fpx_known.lead_indices(meta["candidates"]) == [9]
+    idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
+    asyncio.run(idn.sweep())
+    kept = idn.cached("deep", "k" * 24)
+    assert kept is not None and kept[9]["state"] == "ok" and kept[9]["name"].startswith("90377 Sedna")
+    assert idn.annotate("deep", "k" * 24, meta)["candidates"][9]["known"]["state"] == "ok"
