@@ -1400,7 +1400,18 @@ export function Globe() {
             −
           </button>
         </div>
-        <div class="map-ui map-bar" data-testid="map-bar">
+        <div
+          class="map-ui map-bar"
+          data-testid="map-bar"
+          onWheel={(e) => {
+            // a row that slides sideways (a phone, a narrow tablet): the mouse wheel slides it instead of zooming the globe under it
+            const el = e.currentTarget;
+            if (el.scrollWidth <= el.clientWidth + 1 || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return;
+            el.scrollLeft += e.deltaY;
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+        >
           <div class="aimrow dark-glass" role="group" aria-label="Aim">
             <label class="fld" for="gRa">
               <span>RA</span>

@@ -1191,21 +1191,15 @@
   :root .globe-wrap {
     min-height: 0;
   }
-  /* Findings: two columns of cards to 839 px, three from 840 px */
+  /* Findings: as many columns of cards as fit (two in a narrow tablet, three in a wide one) */
   :root .fgrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   }
   /* the tour's card clears the rail */
   :root .tour {
     left: 100px;
   }
 }
-@media (min-width: 840px) and (max-width: 1279.98px) and (min-height: 480px) {
-  :root .fgrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-}
-
 /* ----- tablet with ONE pane (to 999 px wide, or upright): the lab's picture on top, its panel a sheet under the playback. Below 1000 px
    two panes leave the picture under half the width (853 × 798: 400 px, the playback bar wrapped into four rows): one pane gives it
    the whole width the height allows ----- */
@@ -2172,15 +2166,60 @@
   }
 }
 
-/* ----- tablets: the globe's bar of controls wraps instead of running off the edge; "Mark" reads as a button here too ----- */
+/* ----- tablets: the globe's bar of controls wraps (two rows) instead of running off the edge ----- */
 @media (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
   :root .map-ui.map-bar {
     flex-wrap: wrap;
     row-gap: 8px;
   }
-  :root .map-ui.map-bar > .seg:not(.sm) .lbl,
-  :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] .lbl {
-    display: inline;
+  /* as on a desktop: the projection buttons and the Coverage switch are icons (their names are the tooltips), Coverage beside the
+     aim; the sky layers make the second row */
+  :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] {
+    order: 1;
+  }
+  :root .map-ui.map-bar > .seg[aria-label='Camera'] {
+    order: 2;
+  }
+  :root .map-ui.map-bar > .seg[aria-label='Sky background'] {
+    order: 3;
+  }
+  :root .map-ui.map-bar > .give-square {
+    order: 4;
+  }
+}
+/* ----- tablet with one pane (to 999 px wide, or upright): the globe's controls are ONE row that slides sideways, as on a phone (two
+   rows do not fit in 600–999 px); "Give me a square" first, the aim fields last; a mouse wheel slides it too (globe.tsx) ----- */
+@media (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
+  :root .map-ui.map-bar {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  :root .map-ui.map-bar::-webkit-scrollbar {
+    display: none;
+  }
+  :root .map-ui.map-bar > * {
+    flex: none;
+  }
+  :root .map-ui.map-bar > .give-square {
+    position: static;
+    order: -4;
+    flex-direction: row;
+  }
+  :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] {
+    order: -3;
+  }
+  :root .map-ui.map-bar > .seg[aria-label='Sky background'] {
+    order: -2;
+  }
+  :root .map-ui.map-bar > .aimrow {
+    order: 9;
+  }
+  :root .map-ui.map-bar .seg.sm {
+    flex-wrap: nowrap;
   }
 }
 /* the globe's line of mouse words ("scroll to zoom, double-click") is not shown where the pointer is a finger */

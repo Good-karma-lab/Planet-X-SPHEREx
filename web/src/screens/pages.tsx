@@ -13,9 +13,9 @@ import { SearchedCounter, useSearched } from './search/searched';
 mountTour();
 
 
-/** True from 1100 px up: the lead report then sits beside the list instead of sliding over it. */
+/** True on a desktop and a two-pane tablet (responsive.css): the lead report then sits beside the list instead of sliding over it. */
 function useWide() {
-  const q = '(min-width: 1100px)';
+  const q = '(min-width: 1000px) and (max-width: 1279.98px) and (min-height: 480px) and (orientation: landscape), (min-width: 1280px)';
   const [w, setW] = useState(() => matchMedia(q).matches);
   useEffect(() => {
     const m = matchMedia(q);
