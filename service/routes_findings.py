@@ -37,6 +37,8 @@ def card_extras(x: dict[str, Any]) -> dict[str, Any]:
         "field": d.get("field_params"),
         "group": d.get("group"),
         "passes": len((d.get("track") or (d.get("source") or {}).get("track") or {}).get("mjd") or []) or None,
+        # a time-lapse track: the date of the film its search ran on (the lab opens straight on that film: built, never a new one)
+        **({"film": d["film"]} if x.get("kind") == "film" and isinstance(d.get("film"), (int, float)) else {}),
     }
 
 

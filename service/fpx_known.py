@@ -6,6 +6,10 @@ pass dates: a body that stands within MATCH_ARCSEC of the lead in every pass, at
     {"state": "ok", "name": "90377 Sedna (2003 VB12)", "seps": [0.8, 0.5, 0.8], "V": 20.9, "r_au": 83.0, "dates": [...], "words": "..."}
     {"state": "none", ...}   JPL answered: no slow body stands there
     {"state": "unavailable"} JPL did not answer
+
+A known body's echo: a lead of several passes whose strongest pass sits on a known slow body, while its other passes do not, is that
+body seen once with noise lined up along an orbit through it (peak:75166a5e0d64, 19 Nov 2026: Eris in its first pass, S/N 7.7 of
+the 8.8). It is named like a known body, with "echo": true and its own words.
 """
 
 from __future__ import annotations
@@ -144,6 +148,12 @@ def dates_of(place: dict[str, Any]) -> list[float]:
     return [lo + (hi - lo) * k / n for k in range(n + 1)]
 
 
+def short_name(name: str) -> str:
+    """'136199 Eris (2003 UB313)' -> 'Eris'."""
+    short = name.split("(")[0].strip()
+    return short.split(" ", 1)[1] if short.split(" ", 1)[0].isdigit() and " " in short else short
+
+
 async def identify(
     client: httpx.AsyncClient, places: list[dict[str, Any]], d_lo: float, d_hi: float, limit: asyncio.Semaphore | None = None
 ) -> dict[str, Any]:
@@ -166,7 +176,21 @@ async def identify(
     if bodies is None:
         return {"state": "unavailable"}
     best: dict[str, Any] | None = None
-    for b in bodies[:MAX_BODIES]:
+    echo: dict[str, Any] | None = None
+    sns = [pl.get("sn") for pl in places]
+    passes_sn = len(places) > 1 and all(isinstance(x, (int, float)) for x in sns)
+    strong = max(range(len(places)), key=lambda j: float(sns[j] or 0.0)) if passes_sn else None
+    checked = list(bodies[:MAX_BODIES])
+    if strong:  # the strongest pass is not the first: the bodies around it too (an echo stands there, not at the first pass)
+        sp = places[strong]
+        sd = dates_of(sp)
+        sh = 60.0 / 3600.0 if sp.get("mjd") is not None else min(1.5, 0.05 + SLOW_RATE * 12.0 * (sd[-1] - sd[0]) / 3600.0)
+        with contextlib.suppress(httpx.HTTPError, ValueError, KeyError):
+            async with sem:
+                near = await slow_bodies(client, sp["ra"], sp["dec"], sd[len(sd) // 2], sh)
+            names = {b["name"] for b in checked}
+            checked += [b for b in near[:3] if b["name"] not in names]
+    for b in checked:
         mj = [m for pl in places for m in dates_of(pl)]
         try:
             async with sem:
@@ -183,6 +207,23 @@ async def identify(
             s_, m_ = min((_sep(pl["ra"], pl["dec"], t["ra"] or 0.0, t["dec"] or 0.0), m) for m, t in chunk)
             seps.append(round(s_, 1))
             used.append(round(m_, 2))
+        if (
+            strong is not None
+            and max(seps) > MATCH_ARCSEC
+            and seps[strong] <= MATCH_ARCSEC
+            and (echo is None or seps[strong] < echo["seps"][strong])
+        ):
+            ref_s = trk[sum(len(dates_of(pl)) for pl in places[:strong])]
+            echo = {
+                "state": "ok",
+                "echo": True,
+                "pass": strong,
+                "name": b["name"],
+                "seps": seps,
+                "dates": used,
+                "V": None if ref_s["V"] is None else round(float(ref_s["V"]), 1),
+                "r_au": None if ref_s.get("r") is None else round(float(ref_s["r"]), 1),  # type: ignore[arg-type]
+            }
         if max(seps) > MATCH_ARCSEC:
             continue
         ref = trk[len(trk) // 2]
@@ -199,10 +240,16 @@ async def identify(
         }
         if best is None or max(seps) < max(best["seps"]):
             best = cand
+    if best is None and echo is not None:
+        k = int(echo["pass"])
+        echo["words"] = (
+            f"an echo of {short_name(echo['name'])} (JPL), not a new body: it stands {echo['seps'][k]:.1f}″ from JPL's place in its "
+            f"strongest pass, and the other passes only line up noise along an orbit through it"
+        )
+        return echo
     if best is None:
-        return {"state": "none", "bodies_checked": min(len(bodies), MAX_BODIES), "n_slow_bodies": len(bodies)}
-    short = best["name"].split("(")[0].strip()
-    short = short.split(" ", 1)[1] if short.split(" ", 1)[0].isdigit() and " " in short else short
+        return {"state": "none", "bodies_checked": min(len(bodies), MAX_BODIES), "n_slow_bodies": len(bodies), "echo_checked": True}
+    short = short_name(best["name"])
     best["words"] = (
         f"this is {short} (JPL), found blind: it stands {max(best['seps']):.1f}″ or less from JPL's place in "
         f"{'every pass' if len(places) > 1 else 'the pass'}" + (f", at {best['r_au']:.1f} au" if best["r_au"] is not None else "")
@@ -226,7 +273,7 @@ def places_of(kind: str, result: dict[str, Any], c: dict[str, Any]) -> tuple[lis
         if not by or len(by) != len(info):
             return None
         places = [
-            {"ra": q["ra"], "dec": q["dec"], "mjd": q.get("mjd"), "mjd0": i["pass_mjd0"], "mjd1": i["pass_mjd1"]}
+            {"ra": q["ra"], "dec": q["dec"], "mjd": q.get("mjd"), "mjd0": i["pass_mjd0"], "mjd1": i["pass_mjd1"], "sn": q.get("sn")}
             for q, i in zip(by, info, strict=True)
         ]
         return places, float(c["d"]), float(c["d"])
@@ -273,6 +320,14 @@ async def halo_reason(places: list[dict[str, Any]]) -> str | None:
             if _sep(pl["ra"], pl["dec"], a, d) <= HALO_ARCSEC:
                 return f"it stands within {HALO_ARCSEC:.0f}\u2033 of a G = {float(g):.1f} star: the star's halo, not a body"
     return None
+
+
+def settled(kind: str, v: dict[str, Any]) -> bool:
+    """A kept answer that needs no new ask: a name or a residual; a none screened for the residual rule and, for a deep sum (several
+    passes), checked for a known body's echo (answers kept before that rule are asked once more)."""
+    if v.get("state") in ("ok", "residual"):
+        return True
+    return v.get("state") == "none" and bool(v.get("screened")) and (kind != "deep" or bool(v.get("echo_checked")))
 
 
 class FpxIdentifier:
@@ -332,6 +387,8 @@ class FpxIdentifier:
         in a few: an answer already got is never asked again). -> every lead has its answer."""
         t0 = time.monotonic()
         found = {i: v for i, v in (self.cached(kind, key) or {}).items() if v.get("state") in ("ok", "none", "residual")}
+        # a deep sum's none kept before the echo rule: asked again (its old answer stays on the pages until the new one is kept)
+        found = {i: v for i, v in found.items() if not (v.get("state") == "none" and v.get("screened") and not settled(kind, v))}
         whole = True
         asked = 0
         for i, c in enumerate((result.get("candidates") or [])[:KNOWN_MAX]):
@@ -387,10 +444,7 @@ class FpxIdentifier:
                 continue
             have = self.cached(kind, key) or {}
             need = [i for i, c in enumerate(meta["candidates"][:KNOWN_MAX]) if c.get("ok")]
-            if need and all(
-                have.get(i, {}).get("state") in ("ok", "residual") or (have.get(i, {}).get("state") == "none" and have[i].get("screened"))
-                for i in need
-            ):
+            if need and all(settled(kind, have.get(i, {})) for i in need):
                 self.complete.add((kind, key))
                 continue
             self.running.add((kind, key))

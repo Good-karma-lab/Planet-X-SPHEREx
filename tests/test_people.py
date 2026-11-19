@@ -421,3 +421,60 @@ def test_the_controls_come_from_the_real_findings_query(tmp_path: Path) -> None:
     assert "peak:below" not in {r["finding_id"] for r in lead_findings(st, "all") or []}
     ctl = control_rows(st)
     assert [(r["finding_id"], r["status"], r["stage"]) for r in ctl] == [("peak:below", "below", "artefact")]
+
+
+def test_the_finds_list_is_read_once_for_a_while_and_each_caller_gets_copies(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A task asked for read every find three or four times (4–9 s on prod): find_rows keeps the list FIND_ROWS_KEEP_S."""
+    from service import routes_tasks
+    from service.findings import FindingsDB
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([{**base, "id": "film:lead", "kind": "film", "ra": 61.0, "data": {}}])
+    db.db.commit()
+    st = SimpleNamespace(findings=SimpleNamespace(db=db))
+    reads = []
+    real = routes_tasks.lead_findings
+    monkeypatch.setattr(routes_tasks, "lead_findings", lambda s, status=None: reads.append(status) or real(s, status))
+    a = routes_tasks.find_rows(st)
+    a[0]["status"] = "changed by a caller"
+    b = routes_tasks.find_rows(st)
+    assert len(reads) == 1 and b[0]["status"] != "changed by a caller" and b[0]["finding_id"] == "film:lead"
+    st._task_finds = (st._task_finds[0] - routes_tasks.FIND_ROWS_KEEP_S - 1, st._task_finds[1])  # kept long enough: read again
+    routes_tasks.find_rows(st)
+    assert len(reads) == 2
+
+
+def test_a_track_task_names_the_film_its_search_ran_on(site: tuple[FastAPI, Any]) -> None:
+    """The lab opens a track's questions on the film the search made (warmed ahead), not a new film at another date."""
+    app, st = site
+    finds = [dict(f) for f in FINDS]
+    finds[0] = {**finds[0], "data": {**finds[0]["data"], "film": 61100.4}}
+    st.task_findings = lambda: finds
+    ann = _people(app)("ann")
+    t = ann.get("/api/tasks/next", params={"kind": "finding", "finding_id": "film:1"}).json()["task"]
+    assert t["film"] == 61100.4
+    t2 = ann.get("/api/tasks/next", params={"kind": "finding", "finding_id": "film:2"}).json()["task"]
+    assert "film" not in t2  # a track whose search date is not kept: the lab picks the middle of the visits
+
+
+def test_a_peak_jpl_names_is_no_lead_of_the_tasks(tmp_path: Path) -> None:
+    """The task pool reads the JPL identification of the Planet X peaks as the Findings page does: a named body or an echo is known."""
+    from service.findings import FindingsDB
+    from service.routes_tasks import lead_findings
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 18, "ra": 26.24, "dec": -0.51, "rate": None, "snr": 8.8, "score": 8.8, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([{**base, "id": "peak:eris", "kind": "peak", "data": {"peak": {"ok": True}}}])
+    db.db.commit()
+
+    class Idn:
+        def enrich_findings(self, body: dict[str, Any]) -> dict[str, Any]:
+            for f in body["finds"]:
+                f["status"] = "known"
+            return body
+
+    st = SimpleNamespace(findings=SimpleNamespace(db=db))
+    assert [r["status"] for r in lead_findings(st) or []] == ["unchecked"]
+    st.fpx_known = Idn()
+    assert [r["status"] for r in lead_findings(st, "any") or []] == ["known"]
