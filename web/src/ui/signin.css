@@ -39,7 +39,7 @@
 .sx-linkbtn:disabled { color: var(--muted); cursor: default; }
 /* the Cabinet's guest page: the card in the middle of the page */
 .sx-page { display: grid; place-items: center; min-height: min(560px, 70vh); }
-@media (max-width: 480px) { .sx-card { padding: 24px 18px 18px; } .sx-back { align-items: end; padding: 0; } .sx-back .sx-card { width: 100%; border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom)); } }
+@media (max-width: 599.98px) and (min-height: 480px) { .sx-card { padding: 24px 18px 18px; } .sx-back { align-items: end; padding: 0; } .sx-back .sx-card { width: 100%; border-radius: 18px 18px 0 0; padding-bottom: calc(18px + env(safe-area-inset-bottom)); } }
 /* the link on its way: the button says so and turns (not a faded, dead-looking button); the address stays in the field */
 .sx-submit { display: inline-flex; align-items: center; justify-content: center; gap: 10px; }
 .sx-submit.busy, .sx-submit.busy:disabled { opacity: 1; cursor: progress; color: var(--accent-l); background: linear-gradient(180deg, rgba(95, 227, 214, 0.18), rgba(95, 227, 214, 0.08)); }

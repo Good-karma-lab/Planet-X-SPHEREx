@@ -71,7 +71,7 @@
 .mf-scroll { overflow-x: auto; margin: 0 0 14px; }
 .mf-prose table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
 .mf-prose th, .mf-prose td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--edge-soft); vertical-align: top; color: var(--muted); }
-.mf-prose th { color: var(--faint); font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.mf-prose th { color: var(--faint); font: 600 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; }
 
 /* Result callouts */
 .res { border-radius: 12px; padding: 12px 14px; background: rgba(255, 255, 255, 0.04); border: 1px solid var(--edge-soft); border-left: 3px solid var(--accent); margin: 0 0 12px; }
@@ -129,18 +129,18 @@ table.v td.n { font-family: var(--mono); color: var(--ink); white-space: nowrap;
 .limits div { border: 1px dashed rgba(255, 180, 84, 0.35); border-radius: 12px; padding: 12px 14px; color: var(--muted); font-size: 14.5px; }
 .limits b { color: var(--amber); }
 
-@media (max-width: 1320px) {
+@media (max-width: 1279.98px) {
   .row { grid-template-columns: minmax(0, 1fr); }
   .row > .mar { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
   .row > .mar:empty { display: none; }
   .row > .mar .res { margin: 0; }
 }
-@media (max-width: 1100px) {
+@media (max-width: 1279.98px) {
   .mv2 { grid-template-columns: 220px minmax(0, 1fr); }
   .mv2-main { padding: 0 28px 60px; }
   .checks { grid-template-columns: 1fr; }
 }
-@media (max-width: 820px) {
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
   .mv2 { display: block; }
   .mv2-toc { display: none; }
   .mv2-main { padding: 0 16px 60px; }
@@ -165,7 +165,7 @@ table.v td.n { font-family: var(--mono); color: var(--ink); white-space: nowrap;
 
 .mf-prose .mf-lead { font-size: 15.5px; line-height: 1.6; color: var(--ink); margin: 0 0 18px; }
 .mf-prose .mf-result { margin: 4px 0 14px; padding: 9px 12px; border-left: 3px solid var(--accent-l); background: rgba(3, 9, 13, 0.45); border-radius: 0 6px 6px 0; color: var(--ink); }
-.mf-prose .mf-result-k { font: 600 10.5px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-l); margin-right: 8px; }
+.mf-prose .mf-result-k { font: 600 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-l); margin-right: 8px; }
 .mf-prose .mf-fig { margin: 4px 0 16px; }
 .mf-prose .mf-figslot { min-height: 0; }
 .mf-prose .mf-fig figcaption { font: 500 11.5px var(--mono); color: var(--muted); margin-top: 4px; }
@@ -180,7 +180,7 @@ table.v td.n { font-family: var(--mono); color: var(--ink); white-space: nowrap;
 .depthbars .dt { height: 12px; border-radius: 6px; background: rgba(160, 200, 215, 0.1); overflow: hidden; }
 .depthbars .dt i { display: block; height: 100%; border-radius: 6px; }
 .depthbars b { font: 600 13px var(--mono); text-align: right; color: var(--ink); }
-@media (max-width: 820px) { .depthbars .db { grid-template-columns: 1fr 70px; } .depthbars .dt { grid-column: 1 / -1; order: 3; } }
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) { .depthbars .db { grid-template-columns: 1fr 70px; } .depthbars .dt { grid-column: 1 / -1; order: 3; } }
 
 /* the live recordings */
 .mf-fig video.mf-vid {
@@ -203,7 +203,7 @@ table.v td.n { font-family: var(--mono); color: var(--ink); white-space: nowrap;
 .er-axis { position: relative; margin: 4px 124px 0 244px; height: 18px; font: 11px var(--mono); color: var(--faint, #7d96a0); }
 .er-axis span { position: absolute; transform: translateX(-50%); }
 .er-axis em { position: absolute; right: -28px; font-style: normal; }
-@media (max-width: 700px) { .er-row { grid-template-columns: 1fr; gap: 4px; } .er-v { text-align: left; } .er-axis { margin: 4px 0 0; } }
+@media (max-width: 599.98px) and (min-height: 480px) { .er-row { grid-template-columns: 1fr; gap: 4px; } .er-v { text-align: left; } .er-axis { margin: 4px 0 0; } }
 
 /* the version of the account and what changed in it */
 .mchanges { margin: 6px 0 14px; font-size: 13px; color: var(--muted); }

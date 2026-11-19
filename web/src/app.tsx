@@ -5,6 +5,7 @@ import { parseHash, type Route, type Screen } from './lib/route';
 import { Globe } from './screens/globe';
 import { Lab } from './screens/lab';
 import { InfoPage } from './screens/pages';
+import { MissingPage } from './screens/missing';
 import { Landing } from './screens/landing';
 import { PlanetXPage } from './screens/planetx/PlanetX';
 import { icon } from './ui/icons';
@@ -65,7 +66,7 @@ export function App() {
   return (
     <div class="app">
       <nav class="rail">
-        <a class="brand" href="#/" title="SPHEREx Space: the front page">
+        <a class="brand" href="#/" title="SPHEREx Space: the front page" aria-label="SPHEREx Space: the front page">
           <span
             class="logo"
             dangerouslySetInnerHTML={{
@@ -115,6 +116,8 @@ export function App() {
           </div>
         ) : route.screen === 'leaders' ? (
           <Leaders route={route} />
+        ) : route.screen === 'missing' ? (
+          <MissingPage path={route.params['path'] ?? ''} />
         ) : route.screen === 'u' ? (
           <ProfilePage slug={route.params['id'] ?? ''} badge={route.params['badge']} />
         ) : (

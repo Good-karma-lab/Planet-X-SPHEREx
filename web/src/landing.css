@@ -223,7 +223,7 @@
   .lp-blink > div:first-child { opacity: 1; }
   .lp-hop { animation: none; background-position: 50% 0; }
 }
-@media (max-width: 1020px) {
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
   .lp-hero-grid, .lp-team, .lp-challenge { grid-template-columns: 1fr; }
   .lp-steps { grid-template-columns: 1fr; }
   .lp-finds { grid-template-columns: repeat(2, 1fr); }
@@ -234,7 +234,7 @@
   .lp-cols { grid-template-columns: 1fr; }
   .lp-explore-bg { width: 100%; opacity: 0.4; }
 }
-@media (max-width: 560px) {
+@media (max-width: 599.98px) and (min-height: 480px) {
   .lp { font-size: 16px; }
   .lp-wrap { padding: 0 16px; }
   .lp-hero { padding: 104px 0 64px; }
@@ -268,7 +268,7 @@
 /* hero: Barnard's Star across 76 years */
 .lp-path-pic { position: absolute; inset: 0; background: #000 center / cover no-repeat; }
 .lp-plab { position: absolute; transform: translate(0, -50%); font: 500 12px/1.2 var(--lp-mono); color: #e6f0f3; white-space: nowrap; padding: 3px 7px; border-radius: 6px; background: rgba(4, 8, 12, 0.62); transition: background .3s; }
-.lp-plab small { color: #a3bcc5; font-weight: 400; }
+.lp-plab small { color: #a3bcc5; font-weight: 400; font-size: 11px; }
 .lp-plab.hit { background: rgba(255, 180, 84, 0.22); color: #fff; }
 .lp-pnow { position: absolute; transform: translate(0, -50%); font-size: 13.5px; line-height: 1.3; color: #d2dde3; background: rgba(4, 8, 12, 0.76); border: 1px solid rgba(255, 180, 84, 0.6); border-radius: 10px; padding: 7px 11px; white-space: nowrap; }
 .lp-pnow b { color: #fff; font-weight: 600; display: block; }
@@ -283,7 +283,7 @@
 .lp-then img.on { opacity: 1; }
 .lp-then svg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 1; }
 .lp-yr { position: absolute; top: 12px; left: 12px; z-index: 2; font: 500 12px var(--lp-mono); color: #fff; background: rgba(0, 0, 0, 0.66); padding: 6px 9px; border-radius: 999px; }
-@media (max-width: 560px) { .lp-plab { font-size: 10.5px; padding: 2px 5px; } .lp-pnow { font-size: 11.5px; } .lp-pyear { font-size: 18px; } }
+@media (max-width: 599.98px) and (min-height: 480px) { .lp-plab { font-size: 11px; padding: 2px 5px; } .lp-pnow { font-size: 11.5px; } .lp-pyear { font-size: 18px; } }
 
 /* hero legibility over the sky: a scrim behind the text column (the Milky Way crosses it on wide screens), glass on the outline button */
 .lp-hero {
@@ -295,13 +295,13 @@
 .lp .lp-btn-ghost { background: rgba(5, 10, 16, 0.6); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); }
 .lp .lp-btn-ghost:hover { background: rgba(20, 28, 36, 0.75); }
 .lp-trust, .lp-or { text-shadow: 0 1px 10px rgba(0, 0, 0, 0.85); }
-@media (max-width: 900px) {
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
   .lp-hero { background: linear-gradient(180deg, rgba(3, 8, 15, 0.35), rgba(3, 8, 15, 0.62) 30%, rgba(3, 8, 15, 0.62) 80%, rgba(3, 8, 15, 0.2)); }
 }
 
 .lp-pnow.flip { transform: translate(-100%, -50%); text-align: right; }
 /* a phone: the card beside the ring wraps inside the picture instead of running past its left edge */
-@media (max-width: 560px) { .lp-pnow.flip { white-space: normal; max-width: 40%; } }
+@media (max-width: 599.98px) and (min-height: 480px) { .lp-pnow.flip { white-space: normal; max-width: 40%; } }
 /* the latest discovery under the hero's links (shown only when there is one) */
 .lp-disc { display: inline-flex; align-items: center; gap: 12px; margin-top: 22px; padding: 10px 14px 10px 10px; max-width: 460px; border: 1px solid rgba(95, 227, 214, 0.45); border-radius: 14px; background: rgba(6, 12, 16, 0.6); color: var(--lp-text); text-decoration: none; }
 .lp-disc:hover { border-color: var(--lp-accent); }
@@ -320,21 +320,21 @@
 .lp-menu-list { position: absolute; top: calc(100% + 10px); right: 0; min-width: 210px; display: flex; flex-direction: column; padding: 6px; border-radius: 14px; border: 1px solid var(--lp-line); background: rgba(9, 18, 26, 0.92); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); box-shadow: 0 18px 40px rgba(0, 0, 0, 0.5); }
 .lp-menu-list a { display: flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 9px; color: var(--lp-muted); font-size: 15px; }
 .lp-menu-list a:hover, .lp-menu-list a:focus-visible { color: var(--lp-text); background: rgba(95, 227, 214, 0.08); }
-@media (max-width: 1079.98px) {
+@media (max-width: 1279.98px) {
   .lp-top .lp-wrap { gap: 12px; }
   .lp-nav { gap: 10px; }
   /* :root raises these above the touch-window rule for the bar's links (responsive.css) */
   :root .lp-nav > a:not(.lp-btn) { display: none; }
   .lp-menu { display: block; }
 }
-@media (max-width: 420px) {
+@media (max-width: 599.98px) and (min-height: 480px) {
   .lp-top .lp-wrap { gap: 8px; }
   .lp-brand { gap: 8px; font-size: 16px; }
   .lp-mark { width: 26px; height: 26px; }
   .lp-nav { gap: 6px; }
   .lp-nav .lp-btn-sm { padding: 0 13px; font-size: 14px; }
 }
-@media (max-width: 379.98px) {
+@media (max-width: 599.98px) and (min-height: 480px) {
   .lp-brand { gap: 7px; font-size: 15px; }
   .lp-mark { width: 24px; height: 24px; }
   .lp-nav .lp-btn-sm { padding: 0 12px; font-size: 13.5px; }
@@ -351,16 +351,10 @@
 .lp-menu-list a.lp-menu-me { gap: 10px; color: var(--lp-text); border-bottom: 1px solid var(--lp-line); border-radius: 9px 9px 0 0; margin-bottom: 4px; min-height: 52px; }
 .lp-menu-me small { display: block; font-size: 12px; color: var(--lp-muted); max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
 .lp-menu-me > span:last-child { display: flex; flex-direction: column; line-height: 1.25; }
-@media (min-width: 560px) { :root .lp-nav .lp-menu-list a.lp-menu-me { display: none; } }
-@media (max-width: 559.98px) {
+@media (min-width: 600px) and (min-height: 480px), (min-width: 1280px), (max-height: 479.98px) and (max-width: 1279.98px) { :root .lp-nav .lp-menu-list a.lp-menu-me { display: none; } }
+@media (max-width: 599.98px) and (min-height: 480px) {
   :root .lp-nav > a.lp-me { display: none; }
   .lp-menu-ini { display: grid; }
-}
-/* 1080–1280 px: all the section links are in the bar, so the Cabinet is the initial alone (its name on hover) */
-@media (min-width: 1080px) and (max-width: 1279.98px) {
-  .lp-nav { gap: 20px; }
-  .lp-nav > a.lp-me { padding: 0 4px; width: 40px; }
-  .lp-me-word { display: none; }
 }
 /* a trust line that wraps (a phone) keeps its dot beside its first line */
 .lp-trust li::before { flex: none; align-self: flex-start; margin-top: 8px; }

@@ -56,5 +56,5 @@
 .px-proof li { display: grid; grid-template-columns: 110px 1fr; gap: 2px 10px; padding: 7px 0; border-bottom: 1px solid var(--edge-soft); font-size: 12.5px; }
 .px-proof li em { grid-column: 2; font-style: normal; font-family: var(--mono); color: var(--accent-l); }
 .px-proof li span { color: var(--muted); }
-@media (max-width: 1100px) { .px-grid { grid-template-columns: 1fr; } .px-bar { grid-template-columns: 130px 1fr 52px; } }
-@media (max-width: 600px) { .px-stage { height: 340px; } .px-form { grid-template-columns: 1fr 1fr 1fr; } }
+@media (max-width: 1279.98px) { .px-grid { grid-template-columns: 1fr; } .px-bar { grid-template-columns: 130px 1fr 52px; } }
+@media (max-width: 599.98px) and (min-height: 480px) { .px-stage { height: 340px; } .px-form { grid-template-columns: 1fr 1fr 1fr; } }

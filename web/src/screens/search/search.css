@@ -12,7 +12,7 @@
 .pair-crops { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0; }
 .pair-crop { margin: 0; }
 .pair-crop canvas { width: 96px; height: 96px; image-rendering: pixelated; border: 1px solid var(--edge-soft); border-radius: 4px; display: block; }
-.pair-crop figcaption { font: 500 10.5px var(--mono); color: var(--muted); margin-top: 3px; }
+.pair-crop figcaption { font: 500 11px var(--mono); color: var(--muted); margin-top: 3px; }
 .leadbtn { white-space: normal; text-align: left; }
 .dsbox { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
 .dsbox .sechead { display: flex; justify-content: space-between; align-items: baseline; }

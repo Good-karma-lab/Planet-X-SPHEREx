@@ -4003,6 +4003,7 @@ export function Lab({ route }: { route: Route }) {
                 setPlaying(!playing);
               }}
               title="Play / pause (Space)"
+              aria-label={playing && frame === null ? 'Pause' : 'Play'}
               dangerouslySetInnerHTML={{ __html: icon(playing && frame === null ? 'pause' : 'play', 16) }}
             />
             <div class="seg sm scale" role="group" aria-label="Time scale">

@@ -44,7 +44,7 @@
 }
 .px3-tag small {
   color: var(--muted);
-  font: 500 10.5px var(--mono);
+  font: 500 11px var(--mono);
   margin-left: 4px;
 }
 .px3-tag.dim {
@@ -237,7 +237,7 @@
   bottom: 10px;
   max-width: 36%;
   text-align: right;
-  font: 10.5px/1.45 var(--mono);
+  font: 11px/1.45 var(--mono);
   color: rgba(214, 231, 237, 0.45);
 }
 .px3-hint {
@@ -359,7 +359,7 @@
   color: var(--accent);
 }
 .pill {
-  font: 500 10.5px var(--mono);
+  font: 500 11px var(--mono);
   font-style: normal;
   padding: 2px 8px;
   border-radius: 999px;
@@ -564,7 +564,7 @@
   text-align: right;
 }
 /* phone and portrait: the model on top, the panel below; one finger scrolls the page, two fingers turn and zoom */
-@media (max-width: 860px), (max-aspect-ratio: 1/1) {
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
   .screen.px3 {
     display: flex;
     flex-direction: column;
@@ -645,7 +645,7 @@
 .px3-foot {
   padding: 8px 16px 10px;
   border-top: 1px solid var(--edge-soft);
-  font: 10.5px/1.45 var(--mono);
+  font: 11px/1.45 var(--mono);
   color: rgba(214, 231, 237, 0.5);
 }
 .px3-credit {

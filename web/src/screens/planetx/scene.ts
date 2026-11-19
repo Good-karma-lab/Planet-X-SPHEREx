@@ -424,7 +424,7 @@ export class PxScene {
     };
     // the wheel zooms only where the page itself does not scroll (the full-height desktop layout), or with Ctrl/⌘ held
     const wheel = (e: WheelEvent) => {
-      const pageScrolls = window.matchMedia('(max-width: 860px), (max-aspect-ratio: 1/1)').matches;
+      const pageScrolls = window.matchMedia('(max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait)').matches;
       if (pageScrolls && !e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
       zoom(Math.exp(e.deltaY * 0.0012));

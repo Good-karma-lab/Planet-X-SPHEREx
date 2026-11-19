@@ -56,12 +56,16 @@ const taskOf = (hash: string) => {
   return q.get('kind') || q.get('task') || '';
 };
 
-/** where the card goes: never over the control itself (nor over the sheet it is in); kept inside the window (16 px gutter). A big
+/** where the card goes: never over the control itself (nor over the sheet it is in); kept inside the window (16 px gutter) and off the
+ *  rail. A big
  *  control (the picture) has the card inside it, under its title row. */
 function place(r: DOMRect, w: number, h: number, upFirst: boolean): { left: number; top: number; up: boolean } {
   const W = window.innerWidth;
   const H = window.innerHeight;
-  const left = Math.max(16, Math.min(W - w - 16, r.left + r.width / 2 - w / 2));
+  // never over the rail of screens at the left (a tablet, a desktop): the card stays over the screen itself
+  const main = typeof document === 'undefined' ? null : document.querySelector('main');
+  const edge = Math.max(16, (main?.getBoundingClientRect().left ?? 0) + 8);
+  const left = Math.max(edge, Math.min(W - w - 16, r.left + r.width / 2 - w / 2));
   if (r.height > H * 0.45) return { left, top: Math.max(16, r.top + 56), up: false };
   const above = r.top - h - 12;
   const below = r.bottom + 12;
