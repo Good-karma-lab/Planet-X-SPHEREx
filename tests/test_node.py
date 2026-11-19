@@ -195,3 +195,17 @@ def test_a_node_runs_two_squares_at_once_each_under_its_slot(monkeypatch: pytest
         return list(await asyncio.gather(slot(0), slot(1)))
 
     assert asyncio.run(both()) == ["a1s0", "a1s1"]
+
+
+def test_a_node_lets_its_background_take_every_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A node serves nobody at the page: no worker is kept free for people (one of four idled while hundreds of calls waited)."""
+    from service import cpu
+
+    assert cpu._Gate(4).low_cap == 3 and cpu._Gate(4, reserve=0).low_cap == 4
+    monkeypatch.setenv("SKY_NODE_MAIN", "https://main.example")
+    monkeypatch.setenv("SKY_NODE_SECRET", "k")
+    cpu.configure(object(), 4)  # type: ignore[arg-type]
+    try:
+        assert cpu.stats()["background_cap"] == 4
+    finally:
+        cpu.configure(None, 1)

@@ -50,7 +50,12 @@ class _Gate:
 
     def __init__(self, workers: int, reserve: int | None = None) -> None:
         self.total = workers + 1
-        r = max(1, min(workers - 1, workers // 3 if reserve is None else reserve)) if workers > 1 else 0
+        if workers <= 1:
+            r = 0
+        elif reserve is None:
+            r = max(1, min(workers - 1, workers // 3))
+        else:
+            r = max(0, min(workers - 1, reserve))  # as given: a node keeps none
         self.low_cap = max(1, workers - r)
         self.used = 0
         self.used_low = 0
@@ -127,7 +132,11 @@ def configure(pool: Executor | None, workers: int, factory: Callable[[], Executo
     _pool = pool
     _factory = factory
     _workers = max(1, workers)
-    _gate = _Gate(workers) if pool is not None else None
+    # a second node serves nobody at the page (service/node.py): its background (the squares it searches) may take every worker; the
+    # reserve kept one of four idle while 355 of its calls waited (19 Nov 2026)
+    from service import node as _node
+
+    _gate = _Gate(workers, reserve=0 if _node.is_node() else None) if pool is not None else None
 
 
 def workers() -> int:
