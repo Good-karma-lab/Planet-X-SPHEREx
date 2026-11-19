@@ -30,9 +30,23 @@ export function settle(height: number, speed: number, h: Record<Detent, number>)
  * `peek`: the parts of the sheet that are its header (always on screen). `under`: the last thing of the pane behind; when the
  * window is tall, the sheet at rest reaches up to it, so that no empty band is left between the two.
  */
-export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string; label: string; under?: string; start?: Detent }) {
+export function SheetGrip({
+  peek,
+  label,
+  under,
+  start = 'peek',
+  resetKey,
+}: {
+  peek: string;
+  label: string;
+  under?: string;
+  start?: Detent;
+  /** what the sheet shows (a field, a task): when it changes the sheet comes back to its height at rest */
+  resetKey?: string;
+}) {
   const grip = useRef<HTMLButtonElement>(null);
   const [detent, setDetent] = useState<Detent>(start);
+  useEffect(() => setDetent(start), [resetKey]);
   const [active, setActive] = useState(false);
   const live = useRef({ detent, head: 0, heights: { peek: 0, half: 0, full: 0 } as Record<Detent, number> });
   live.current.detent = detent;
@@ -43,11 +57,14 @@ export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string
     if (!g || !sheet) return;
     const root = document.documentElement;
     const measure = () => {
+      const host = sheet.parentElement;
       const on = getComputedStyle(sheet).getPropertyValue('--sheet').trim() === '1';
       setActive(on);
       if (!on) {
         sheet.style.removeProperty('--sheet-h');
         sheet.style.removeProperty('--sheet-drag');
+        host?.style.removeProperty('--sheet-h');
+        if (host) delete host.dataset.sheet;
         root.style.removeProperty('--sheet-peek');
         delete sheet.dataset.detent;
         return;
@@ -71,6 +88,9 @@ export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string
       live.current.heights = h;
       sheet.style.setProperty('--sheet-h', `${h[live.current.detent]}px`);
       sheet.dataset.detent = live.current.detent;
+      // the pane behind knows the sheet's height and place too (the lab keeps its playback bar on top of a sheet pulled up)
+      host?.style.setProperty('--sheet-h', `${h[live.current.detent]}px`);
+      if (host) host.dataset.sheet = live.current.detent;
       // the pane behind keeps the header's height of its bottom clear, so that nothing of it lies under the sheet at rest
       root.style.setProperty('--sheet-peek', `${head}px`);
     };
@@ -121,6 +141,8 @@ export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string
         sheet.dataset.dragging = '1';
         // while it moves the sheet has its full height and is shifted down, so that the page is not laid out again on every move
         sheet.style.setProperty('--sheet-h', `${live.current.heights.full}px`);
+        sheet.parentElement?.style.setProperty('--sheet-h', `${live.current.heights.full}px`);
+        if (sheet.parentElement) sheet.parentElement.dataset.sheet = 'drag';
       }
       const dt = Math.max(1, e.timeStamp - from.lastT);
       from.v = 0.7 * from.v + 0.3 * ((from.lastY - e.clientY) / dt);
@@ -128,6 +150,7 @@ export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string
       from.lastT = e.timeStamp;
       const h = Math.max(live.current.heights.peek, Math.min(live.current.heights.full, from.h + dy));
       sheet.style.setProperty('--sheet-drag', `${live.current.heights.full - h}px`);
+      sheet.parentElement?.style.setProperty('--sheet-drag', `${live.current.heights.full - h}px`);
     };
     const up = (e: PointerEvent) => {
       const f = from;
@@ -140,12 +163,16 @@ export function SheetGrip({ peek, label, under, start = 'peek' }: { peek: string
       delete sheet.dataset.dragging;
       sheet.dataset.settling = '1';
       sheet.style.setProperty('--sheet-drag', `${H.full - H[to]}px`);
+      sheet.parentElement?.style.setProperty('--sheet-drag', `${H.full - H[to]}px`);
       const done = () => {
         sheet.removeEventListener('transitionend', done);
         clearTimeout(timer);
         delete sheet.dataset.settling;
         sheet.style.setProperty('--sheet-h', `${H[to]}px`);
         sheet.style.removeProperty('--sheet-drag');
+        sheet.parentElement?.style.setProperty('--sheet-h', `${H[to]}px`);
+        sheet.parentElement?.style.removeProperty('--sheet-drag');
+        if (sheet.parentElement) sheet.parentElement.dataset.sheet = to;
         sheet.dataset.detent = to;
         setDetent(to);
       };

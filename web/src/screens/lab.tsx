@@ -857,6 +857,15 @@ export function Lab({ route }: { route: Route }) {
     }
   }, [ra, dec, fov, valid]);
 
+  // the playback bar's height, for a sheet pulled up on a phone: it leaves the bar and 90 px of the picture (responsive.css)
+  useEffect(() => {
+    const bar = document.querySelector('.lab .tbar') as HTMLElement | null;
+    const lab = bar?.closest('.lab') as HTMLElement | null;
+    if (!bar || !lab || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(() => lab.style.setProperty('--tbar-h', `${bar.offsetHeight}px`));
+    ro.observe(bar);
+    return () => ro.disconnect();
+  }, [valid]);
   // on a phone the status line and the band buttons stand under the picture, each as tall as it is: the room under the picture follows them (no empty gap)
   useEffect(() => {
     const v = document.querySelector('.vsq') as HTMLElement | null;
@@ -4172,6 +4181,32 @@ export function Lab({ route }: { route: Route }) {
                 {(copied || exportNote || recording) && <span class="t">{copied || exportNote || 'Recording…'}</span>}
               </summary>
               <span class="acts-menu">
+              {/* a phone: the rarer controls of the bar (the two passes of the Blink, the speed, every band or none) are here, not in
+                  a row that slides past the edge of the window */}
+              <span class="am-phone am-row" role="group" aria-label="Passes of the Blink">
+                {flow.blinkPick}
+              </span>
+              <label class="am-phone am-row">
+                <span>Speed</span>
+                <select
+                  class="inp"
+                  value={String(speed)}
+                  onChange={(e) => setSpeed(Number((e.target as HTMLSelectElement).value))}
+                  aria-label="Playback speed"
+                >
+                  {[0.25, 0.5, 1, 2, 4].map((v) => (
+                    <option value={String(v)}>{`${v}×`}</option>
+                  ))}
+                </select>
+              </label>
+              <span class="am-phone am-row" role="group" aria-label={view === 'det' ? 'Detectors' : 'Bands'}>
+                <button class="mini" onClick={() => set(view === 'det' ? { dets: null } : { bands: null })}>
+                  {view === 'det' ? 'Every detector' : 'Every band'}
+                </button>
+                <button class="mini" onClick={() => set(view === 'det' ? { dets: 'none' } : { bands: 'none' })}>
+                  None
+                </button>
+              </span>
               <button
                 class="mini"
                 onClick={() => {
@@ -4235,7 +4270,12 @@ export function Lab({ route }: { route: Route }) {
         <aside class="panel">
           {/* phones and upright tablets: the panel is a bottom sheet pulled up by this grabber (not displayed on a desktop) */}
           {/* at rest the free lab shows its tab bar, the same on every tab (a tab's own first line made the picture jump) */}
-          <SheetGrip peek=".taskpanel, .sqlook, .ptabs" under=".lab .tbar" label="Lab panel" />
+          <SheetGrip
+            peek=".taskpanel, .sqlook, .ptabs"
+            under=".lab .tbar"
+            label="Lab panel"
+            resetKey={`${p['ra']},${p['dec']},${fov},${p['task'] ?? ''},${p['finding'] ?? ''}`}
+          />
           <div class="ptabs" role="tablist" aria-label="Panel" data-testid="panel-tabs">
             {(
               [

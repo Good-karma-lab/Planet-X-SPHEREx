@@ -391,6 +391,8 @@ export function Globe() {
   const [decIn, setDecIn] = useState(formatDec(a.dec));
   const [, setDatesTick] = useState(0);
   // the Coverage layer (the grid of squares over any background): on from the switch, or from a link with cov=1 (the landing's "Start searching")
+  // a phone: the layers, projection, camera and aim fields of the bar are open (behind "Layers")
+  const [layersOpen, setLayersOpen] = useState(false);
   // "path 1950→2050 drawn ×19 larger than true" when the selected object's path is drawn larger than true (set by the drawing loop)
   const [pathNote, setPathNote] = useState('');
   const pathNoteRef = useRef('');
@@ -1416,7 +1418,7 @@ export function Globe() {
           </button>
         </div>
         <div
-          class="map-ui map-bar"
+          class={`map-ui map-bar${layersOpen ? ' layers-open' : ''}`}
           data-testid="map-bar"
           onWheel={(e) => {
             // a row that slides sideways (a phone, a narrow tablet): the mouse wheel slides it instead of zooming the globe under it
@@ -1536,6 +1538,17 @@ export function Globe() {
               <span class="lbl">Coverage</span>
             </button>
           </div>
+          {/* a phone: the sky layers, the projection, the camera and the aim fields wait behind one button (the first row keeps four) */}
+          <button
+            type="button"
+            class="layers-btn"
+            aria-expanded={layersOpen}
+            data-testid="layers-btn"
+            onClick={() => setLayersOpen(!layersOpen)}
+          >
+            Layers
+            <span dangerouslySetInnerHTML={{ __html: icon('caret-down', 14) }} style={{ display: 'contents' }} />
+          </button>
           <GiveSquare
             onSquare={(t) => {
               setGiven(t);
@@ -1725,6 +1738,8 @@ export function Globe() {
           title={catOpen ? 'Slide the catalogue away' : 'Slide the catalogue out'}
         >
           <span class="cat-arrow">{catOpen ? '›' : '‹'}</span>
+          {/* a phone: the catalogue is the search (a name or coordinates), a magnifier in the first row */}
+          <span class="cat-ico" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon('magnifying-glass', 20) }} />
           <span class="cat-word">Catalogue</span>
         </button>
         <aside class="catalog glass">
