@@ -70,6 +70,7 @@ from service.routes_pairs import make_pairs_router
 from service.routes_planetx import make_planetx_router
 from service.routes_search import make_router
 from service.routes_searched import make_searched_router
+from service.routes_tasks import prime_find_rows
 from service.searched import Searched
 from service.spectrum import Spectra, place_at, spectrum_params
 from service.storage import product_db_path
@@ -238,6 +239,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if not (STANDBY or FINDINGS_READONLY):  # one process asks JPL (the standby only reads the kept answers): two would double the rate
             st.fpx_known.start()
         checks_of(st).resume()  # check jobs a restart interrupted run again at once, not on the first request
+        # the list of finds the tasks are drawn from, read once now: the first person's task does not wait for it
+        asyncio.get_running_loop().run_in_executor(None, prime_find_rows, st)
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         if st.index is not None:
