@@ -103,6 +103,8 @@ class State:
         self.executor: ProcessPoolExecutor | None = None
         self.index_health: dict[str, Any] | None = None
         self.quicklook: QuickLook | None = None
+        self.lead_film_key: Any = None  # the film a track lead's task plays, and its warming (the sweep's lab fields)
+        self.warm_lead_film: Any = None
         self.nodes_summary: Any = None  # the second nodes' state for /health (service/routes_node.py)
         self.node_status: dict[str, Any] = {}
         self.warm_searches: dict[str, Any] = {}
@@ -335,6 +337,26 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         return key, st.scheduler.submit(fieldjob.KIND, key, params, fn, priority, "heavy", fieldjob.memory_estimate_mb(params["fov"]))
 
     st.submit_field = submit_field  # the square quarters build ahead with it (service/quarters.py)
+
+    def lead_film_key(ra: float, dec: float, fov: float, mjd: float) -> tuple[str, dict[str, Any]] | None:
+        """The film a track lead's task plays (its pass, on its task's field): its key and params (a database read)."""
+        return warm_key(WarmField("lead", ra, dec, fov, round(mjd, 1)))
+
+    async def warm_lead_film(ra: float, dec: float, fov: float, mjd: float) -> bool:
+        """Build that film ahead (the sweep's lab fields): a track's questions open on it, and a cold one kept the lab loading."""
+        assert st.store is not None and st.scheduler is not None
+        k = await asyncio.to_thread(lead_film_key, ra, dec, fov, mjd)
+        if k is None:
+            return False
+        fkey, fparams = k
+        if not st.store.is_complete(fkey):
+            fjob = st.scheduler.jobs.get(st.scheduler.by_key.get(fkey, "")) or submit_film(fkey, fparams, Priority.P2)
+            while fjob.state not in ("done", "error", "cancelled"):
+                await asyncio.sleep(3.0)
+        return st.store.is_complete(fkey)
+
+    st.lead_film_key = lead_film_key
+    st.warm_lead_film = warm_lead_film
 
     async def exposure_flags_loop() -> None:
         """The exposures people agreed are broken, read every minute (service/exposure_flags.py)."""
