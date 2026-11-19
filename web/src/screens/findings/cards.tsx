@@ -39,6 +39,8 @@ export interface CardFind {
   field: { ra: number; dec: number; fov: number } | null;
   group: string | null;
   passes: number | null;
+  /** a time-lapse track: the date (MJD) of the film its search ran on (the service's card says it) */
+  film?: number | null;
 }
 
 export const STAGE_LABEL: Record<string, string> = {
@@ -112,20 +114,28 @@ export function checkHref(f: CardFind): string {
         find_ra: f.ra.toFixed(5),
         find_dec: f.dec.toFixed(5),
       };
-  return formatHash({ screen: 'lab', params: { ...base, task: 'finding', finding: f.id } });
+  const film: Record<string, string> = fp && f.film != null ? { film: String(f.film) } : {}; // straight in Days, on the film the search ran on
+  return formatHash({ screen: 'lab', params: { ...base, ...film, task: 'finding', finding: f.id } });
 }
 
+export const TASK_WAIT_MS = 8000;
+
 /** "Check this finding": the task is taken from the service (it is kept for a signed-in user), then the lab opens with it. Without the
- *  accounts of the service, or when it does not answer in two seconds, the lab opens with the find alone. */
-export async function takeTask(f: CardFind): Promise<void> {
+ *  accounts of the service, or when it does not answer in TASK_WAIT_MS, the lab opens with the find alone (on the field and film its
+ *  search ran on). The button says "opening…" meanwhile, and a second click does nothing. */
+export async function takeTask(f: CardFind, btn?: HTMLElement | null): Promise<void> {
+  if (btn?.getAttribute('aria-busy') === 'true') return;
+  // the text itself is Preact's: "· opening…" is drawn by CSS (a[aria-busy]::after), the button's name stays
+  btn?.setAttribute('aria-busy', 'true');
   let href = checkHref(f);
   try {
-    const t = await Promise.race([nextTask('finding', f.id), new Promise<null>((res) => setTimeout(() => res(null), 2500))]);
-    if (t) href = taskHash(t); // the lab's own address of the task (a guest gets one too; it is kept for a signed-in user)
+    const t = await Promise.race([nextTask('finding', f.id), new Promise<null>((res) => setTimeout(() => res(null), TASK_WAIT_MS))]);
+    if (t) href = taskHash(t, f.film); // the lab's own address of the task (a guest gets one too; it is kept for a signed-in user)
   } catch {
     // no accounts here: the find alone
   }
   location.hash = href;
+  btn?.removeAttribute('aria-busy'); // the card may be shown again (Back): it is a plain button again
 }
 
 /** A finding a person submitted (`GET /api/findings/submitted`, the accounts of the service) as a card: its picture is the time-lapse of its place. */
@@ -350,7 +360,7 @@ export function FindCard({
               class={f.visible ? '' : 'wait'}
               title="How far the brightest point inside the ring stands above the noise of this picture"
             >
-              S/N {f.visible_sn.toFixed(1)} in the ring
+              {f.visible_sn.toFixed(1)}× the noise in the ring
             </span>
           )}
         </span>
@@ -376,7 +386,7 @@ export function FindCard({
           href={checkHref(f)}
           onClick={(e) => {
             e.preventDefault();
-            void takeTask(f);
+            void takeTask(f, e.currentTarget as HTMLElement);
           }}
         >
           Check this finding

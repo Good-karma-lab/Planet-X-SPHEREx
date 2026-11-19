@@ -259,6 +259,12 @@ function Hero({ mine, take }: { mine: Mine; take: (k: 'cell' | 'finding') => voi
             <i style={{ width: `${Math.round(toNext * 100)}%` }} />
           </span>
           <span class="mono-s">{!s ? '' : s.next_level_at == null ? 'the highest level' : `${num(s.next_level_at - s.points)} to ${nextName}`}</span>
+          {s && s.waiting > 0 && (
+            // points for an answer come when the finding is settled and the answer matches the others': say they are on their way
+            <span class="mono-s cb-waiting" data-testid="hero-waiting" title="An answer earns points when enough people have answered the same finding and yours matches theirs">
+              {s.waiting} {s.waiting === 1 ? 'answer waits' : 'answers wait'} for other people’s answers
+            </span>
+          )}
         </div>
       </div>
       <div class="cb-stats">
@@ -423,7 +429,8 @@ function WorkPanel({ mine, work, run }: { mine: Mine; work: Work; run: (p: Promi
                   href={taskHash(t)}
                   pic={{ ra: t.ra, dec: t.dec, label: `square ${t.cell_id}` }}
                   title={`${t.cell_id}${t.quarter ? ` · ${t.quarter}` : ''}`}
-                  line={`${t.done_at ? `closed ${ago(t.done_at)}` : `taken ${ago(t.created)}`}${t.mark_ids.length ? ` · ${t.mark_ids.length} marks` : ''}`}
+                  // an open square earns its points once it is looked through: a minute with every pass shown
+                  line={`${t.done_at ? `closed ${ago(t.done_at)}` : `given ${ago(t.created)} · not looked through yet`}${t.mark_ids.length ? ` · ${t.mark_ids.length} marks` : ''}`}
                   side={<span class={`badge st-${t.state}`}>{t.state === 'done' ? (RESULT[t.result ?? ''] ?? 'done') : 'open'}</span>}
                 />
               ))}
@@ -569,7 +576,7 @@ export function Cabinet({ route }: { route: Route }) {
                   </a>
                 </div>
                 {invs.length === 0 ? (
-                  <Empty text="No investigations yet" />
+                  <Empty text="No investigations yet. An investigation keeps the objects you follow together: in the lab, select an object and Add to investigation" />
                 ) : (
                   <div class="cb-invlist">
                     {invs.map((inv) => (

@@ -58,6 +58,8 @@ export interface Task {
   dec: number | null;
   /** a square handed out for a lead in it: which find, its kind and promise (GET /api/tasks/next) */
   why?: { finding_id?: string; kind?: string; promise?: number; ra?: number; dec?: number; text?: string; ask?: { kind?: string; finding_id?: string; series?: string } } | null;
+  /** a time-lapse track's task: the date of the film its search ran on (MJD); the lab plays that film, the one warmed ahead */
+  film?: number | null;
   state: 'open' | 'done';
   result: string | null;
   mark_ids: string[];
@@ -259,7 +261,9 @@ export function leadParams(why: NonNullable<Task['why']>): Record<string, string
   };
 }
 
-export function taskHash(t: Task): string {
+/** A track task opens straight in the Days scale on its search's own film (`film`): the one the service warmed for it. `film` beside
+ *  the task: the card's own date, when the service's task does not say it. */
+export function taskHash(t: Task, film?: number | null): string {
   if (t.kind === 'finding' && t.finding_id && (t.ra == null || t.dec == null)) return `#/findings?lead=${encodeURIComponent(t.finding_id)}`;
   const q = new URLSearchParams();
   if (t.ra != null && t.dec != null) {
@@ -276,6 +280,8 @@ export function taskHash(t: Task): string {
   // a square given for a lead in it: the lab selects that find and asks its questions before the quarter's look
   if (t.kind === 'cell' && t.why) for (const [k, v] of Object.entries(leadParams(t.why))) q.set(k, v);
   if (t.kind === 'finding' && t.finding_id) q.set('finding', t.finding_id);
+  const f = t.film ?? film;
+  if (t.kind === 'finding' && t.finding_id?.startsWith('film:') && f != null && Number.isFinite(f)) q.set('film', String(f));
   return `#/lab?${q}`;
 }
 

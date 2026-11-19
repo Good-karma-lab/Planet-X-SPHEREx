@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks';
-import { nextTask, taskHash, type Task } from '../lib/account';
+import { currentUser, nextTask, taskHash, type Task } from '../lib/account';
 import { aim, type AimState } from '../lib/aim';
 import { idleLoop, visibleInterval } from '../lib/idle';
 import { formatHash } from '../lib/route';
@@ -348,7 +348,7 @@ function covLine(_tick: number): string {
   const c = coverageNow();
   if (!c) return 'reading the grid…';
   const searched = c.counts?.searched ?? [...c.cells.values()].filter((x) => x.state === 'searched').length;
-  return `${searched.toLocaleString('en-US')} of ${c.total.toLocaleString('en-US')} squares searched`;
+  return `${searched.toLocaleString('en-US')} of ${c.total.toLocaleString('en-US')} sky squares (20′) searched`;
 }
 
 export function Globe() {
@@ -1537,11 +1537,17 @@ export function Globe() {
                     {given.why.promise != null && (
                       <span class="cov-nw">
                         {' · '}
-                        <span class="cov-promise" title="Promise: how much this is worth looking at first, 0–100" tabIndex={0}>
-                          promise {given.why.promise}
+                        <span class="cov-promise" title="How much this is worth looking at first, from 0 to 100 (the machine's guess from how strong and how new the find is)" tabIndex={0}>
+                          worth a look: {given.why.promise} of 100
                         </span>
                       </span>
                     )}
+                  </div>
+                )}
+                {given?.cell_id === cell.id && currentUser() && (
+                  // "Give me a square" hands the square out as a task: it waits in the Cabinet until it is looked through
+                  <div class="cov-given mono-s" data-testid="cov-given">
+                    Given to you · waits in your Cabinet
                   </div>
                 )}
                 <div class="cov-state" data-testid="cov-state">
@@ -1549,9 +1555,11 @@ export function Globe() {
                   {covStateWord(cell)}
                 </div>
                 <dl class="cov-facts">
-                  <dt>Finds</dt>
+                  <dt title="Every find in the whole 20′ square, of every kind: tracks, Planet X peaks, red sources, odd spectra. The lab opens one quarter of it at a time">
+                    Finds in the square
+                  </dt>
                   <dd data-testid="cov-finds">{cell.state === 'searched' || cell.n_finds ? cell.n_finds.toLocaleString('en-US') : '—'}</dd>
-                  <dt>Bar</dt>
+                  <dt title="How faint and how slow a moving object the machine's search of this square could still catch">Search reach</dt>
                   <dd data-testid="cov-bar">{barText(cell.bar) || (cell.state === 'searched' ? 'not kept' : '—')}</dd>
                   <dt>Viewed by</dt>
                   <dd data-testid="cov-viewers">{cell.viewers === 1 ? '1 person' : `${cell.viewers.toLocaleString('en-US')} people`}</dd>
@@ -1565,13 +1573,18 @@ export function Globe() {
                   )}
                 </dl>
                 <div class="cov-btns">
-                  <button class="btn sm" data-testid="cov-open" onClick={() => openLab(cell.open.ra, cell.open.dec, cell.open.fov)}>
-                    Open in the lab
+                  <button
+                    class="btn sm"
+                    data-testid="cov-open"
+                    title="Look around freely: no task, nothing is counted"
+                    onClick={() => openLab(cell.open.ra, cell.open.dec, cell.open.fov)}
+                  >
+                    {given?.cell_id === cell.id ? 'Just look' : 'Open in the lab'}
                   </button>
                   <button
                     class="btn sm primary"
                     data-testid="cov-take"
-                    title="Open the lab with the task: look through this square"
+                    title="Open the lab with the task: look through this square a quarter at a time (a look of a minute with every pass counts)"
                     onClick={() => {
                       if (given && given.cell_id === cell.id) {
                         location.hash = taskHash(given);
@@ -1590,7 +1603,7 @@ export function Globe() {
                       });
                     }}
                   >
-                    Take this square
+                    {given?.cell_id === cell.id ? 'Start looking' : 'Take this square'}
                   </button>
                 </div>
               </>

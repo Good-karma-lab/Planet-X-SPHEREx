@@ -253,8 +253,9 @@ export function barText(bar: Record<string, unknown> | null): string {
   if (!bar) return '';
   if (bar['kind'] === 'sweep') {
     const parts = [];
-    if (bar['mover_sigma'] != null) parts.push(`movers above ${Number(bar['mover_sigma'])}σ`);
-    if (bar['mover_shift_arcsec'] != null) parts.push(`shift of ${Number(bar['mover_shift_arcsec'])}″ or more`);
+    // plain words: σ is the noise of the picture; ″ an arcsecond
+    if (bar['mover_sigma'] != null) parts.push(`moving dots ${Number(bar['mover_sigma'])}× brighter than the noise`);
+    if (bar['mover_shift_arcsec'] != null) parts.push(`moved ${Number(bar['mover_shift_arcsec'])}″ or more`);
     if (bar['passes'] != null) parts.push(`${Number(bar['passes'])} passes`);
     return parts.join(' · ');
   }

@@ -471,3 +471,6 @@
 /* the minute's look fills along the look button's own bottom edge: no empty band between the card's two buttons */
 .lab .panel > .labact > .sqlook { position: relative; }
 .lab .panel > .labact > .sqlook .lookbar { position: absolute; left: 10px; right: 10px; top: 30px; margin: 0; pointer-events: none; }
+
+/* a guest is told before answering that an answer needs a name: one small link in the line, the line keeps its height */
+.taskpanel .tp-line .tp-guest { min-height: 0; padding: 0; font: 600 11px var(--mono); text-transform: none; letter-spacing: 0; flex: none; }

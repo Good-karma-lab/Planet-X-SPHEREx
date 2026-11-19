@@ -273,7 +273,7 @@ export function ReviewPanel() {
       </div>
       <div class="rv-work">
         <ol class="rv-queue" data-testid="review-queue">
-          {q.waiting.length === 0 && <li class="rv-empty mono-s">nothing waits for a verdict</li>}
+          {q.waiting.length === 0 && <li class="rv-empty mono-s">nothing waits for a verdict: a finding comes here once people have checked it and it was submitted</li>}
           {q.waiting.map((w) => {
             const t = tally(w.checks);
             return (

@@ -62,7 +62,7 @@ describe('what a square is', () => {
     expect(kindOf({ state: 'new', finds: 0, viewers: 0 })).toBeNull();
   });
   it('says the bar in plain words', () => {
-    expect(barText({ kind: 'sweep', mover_sigma: 5, mover_shift_arcsec: 3, passes: 4 })).toBe('movers above 5σ · shift of 3″ or more · 4 passes');
+    expect(barText({ kind: 'sweep', mover_sigma: 5, mover_shift_arcsec: 3, passes: 4 })).toBe('moving dots 5× brighter than the noise · moved 3″ or more · 4 passes');
     expect(barText({ kind: 'import', searches: ['passes'], fov_arcmin: 5, partial: true })).toBe('a 5′ field at the centre searched (part of the square)');
     expect(barText(null)).toBe('');
   });
