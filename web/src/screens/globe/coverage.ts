@@ -28,6 +28,8 @@ export interface CovCell {
   state: CellState;
   finds: number;
   viewers: number;
+  /** the search node at work on it when that is not the main one */
+  by?: string;
   /** from the API (`corners=1`): the centre and the four corners, SW, SE, NE, NW */
   ra?: number;
   dec?: number;
@@ -45,6 +47,8 @@ export interface CellCard {
   bar: Record<string, unknown> | null;
   searched_at: string | null;
   field_key: string | null;
+  /** the search node at work on it, when that is not the main one (service/node.py: "a1" is the second node) */
+  by?: string | null;
   /** where the lab opens the square: its first quarter not looked through by this person, at 10′ */
   open: { ra: number; dec: number; fov: number; quarter?: string | null };
 }
@@ -215,6 +219,7 @@ export async function loadCell(id: string): Promise<CellCard | null> {
       bar: (j['bar'] as Record<string, unknown> | null) ?? null,
       searched_at: (j['searched_at'] as string | null) ?? null,
       field_key: (j['field_key'] as string | null) ?? null,
+      by: typeof j['by'] === 'string' ? (j['by'] as string) : null,
       open: (j['open'] as CellCard['open']) ?? firstQuarter(id, c),
     };
   }
@@ -227,6 +232,7 @@ export async function loadCell(id: string): Promise<CellCard | null> {
     n_finds: k?.finds ?? 0,
     finds: [],
     viewers: k?.viewers ?? 0,
+    by: k?.by ?? null,
     bar: null,
     searched_at: null,
     field_key: null,

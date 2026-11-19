@@ -327,13 +327,15 @@ function hashAim(): { ra: number; dec: number } | null {
 }
 
 const covKind = (c: CellCard): Kind | null => kindOf({ state: c.state, finds: c.n_finds, viewers: c.viewers });
+/** a search node by its name: the second node is "a1", one of its slots "a1s0" (service/node.py) */
+const nodeWord = (by: string) => (/^a1(s\d+)?$/.test(by) ? 'the second node' : `node ${by}`);
 /** The state of a square in the words of its card. */
 function covStateWord(c: CellCard): string {
   const base =
     c.state === 'searched'
       ? 'Searched by the machine'
       : c.state === 'searching'
-        ? 'Being searched now'
+        ? `Being searched now${c.by ? ` · by ${nodeWord(c.by)}` : ''}`
         : c.state === 'queued'
           ? 'In the queue of the search'
           : c.state === 'failed'
