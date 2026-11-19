@@ -746,10 +746,15 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
     async def headers_and_people(request: Request, call_next: Any) -> Response:
         # a person is working when they ask for new work (a field, a film, a spectrum, an anomaly search); looking at the globe or at
         # finished products does not pause the warm set
+        # a check of the deployed site (its scripts send X-Sky-Check: 1) is not a person: the sweep goes on. The header changes nothing else
         path = request.url.path
-        if st.scheduler is not None and (
-            path in (f"{API_PREFIX}/fields", f"{API_PREFIX}/film", f"{API_PREFIX}/spectrum")
-            or (path == f"{API_PREFIX}/anomalies" and request.query_params.get("start") == "1")
+        if (
+            st.scheduler is not None
+            and request.headers.get("x-sky-check") != "1"
+            and (
+                path in (f"{API_PREFIX}/fields", f"{API_PREFIX}/film", f"{API_PREFIX}/spectrum")
+                or (path == f"{API_PREFIX}/anomalies" and request.query_params.get("start") == "1")
+            )
         ):
             st.scheduler.saw_person()
         response: Response = await call_next(request)

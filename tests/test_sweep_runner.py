@@ -280,3 +280,17 @@ def test_a_track_leads_field_and_film_are_warmed_where_its_task_opens(tmp_path: 
     store.write_meta("field", key, {"passes": [{}, {}]})
     store.complete(key)
     assert lead not in [{k: v for k, v in p.items() if k != "film_mjd"} for p in sweep_runner.top_find_fields(st)]
+
+
+def test_the_days_squares_come_from_their_rows_and_a_restart_keeps_them(tmp_path: Path) -> None:
+    """squares_today lived in the process: each restart said 0 (five restarts on 19 Nov 2026). It is read from the squares' rows."""
+    r, st, _ = make(tmp_path, ids=["red:ccc333", "anomaly:ddd444"])
+    ce = r.next_square()
+    asyncio.run(r.square(ce))
+    today = r.snapshot()
+    assert today["squares_today"] == 1 and today["finds_today"] == 2
+    # a node's square sent back to the main service is not the main service's own sweep; an old square is not today's
+    st.grid.put("node-square", "searched", source="node:a1", searched_at="2026-11-19T10:00:00Z")
+    st.grid.put("old-square", "searched", source="sweep", searched_at="2020-01-01T10:00:00Z")
+    again = sweep_runner.SweepRunner(st, None, None)  # a restart: a new runner, the same rows
+    assert again.snapshot()["squares_today"] == 1

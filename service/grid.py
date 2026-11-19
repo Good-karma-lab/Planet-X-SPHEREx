@@ -348,6 +348,19 @@ class GridDB:
             (cid, state, *row.values(), time.time()),
         )
 
+    def searched_on(self, day: str, source: str = "sweep") -> dict[str, Any]:
+        """The squares this source searched on a UTC day (YYYY-MM-DD), from their rows: how many, their finds and seconds."""
+        r = (
+            self._conn()
+            .execute(
+                "SELECT COUNT(*), COALESCE(SUM(finds),0), COALESCE(SUM(seconds),0) FROM grid_cells"
+                " WHERE state='searched' AND source=? AND searched_at>=? AND searched_at<?",
+                (source, f"{day}T", f"{day}U"),
+            )
+            .fetchone()
+        )
+        return {"squares_today": int(r[0]), "finds_today": int(r[1]), "seconds_today": float(r[2])}
+
     def quarters_of(self, cid: str, viewer: str) -> set[str]:
         """The quarters of a square this viewer has looked through (all four for a whole-square view of before the quarters)."""
         got: set[str] = set()

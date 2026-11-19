@@ -18,7 +18,10 @@ interface Find {
 }
 
 test.beforeAll(async ({ browser }) => {
-  page = await (await browser.newContext()).newPage();
+  const ctx = await browser.newContext();
+  // a check, not a person: the site's own API calls say so (X-Sky-Check), so a run against the deployed site does not pause its sweep
+  await ctx.route('**/api/**', (r) => r.continue({ headers: { ...r.request().headers(), 'x-sky-check': '1' } }));
+  page = await ctx.newPage();
   await page.addInitScript(() => localStorage.setItem('spherex-hints-seen-off', '1')); // the newcomer's hints have their own test
 });
 test.afterAll(async () => {
