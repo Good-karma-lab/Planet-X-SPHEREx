@@ -26,6 +26,9 @@ function useWide() {
   return w;
 }
 
+const FINDINGS_HINT =
+  'Every find of every searched field, each checked against the catalogues. Every number is measured by this system on SPHEREx Level-2 files.';
+
 function FindingsPage() {
   const searched = useSearched();
   const [leadId, setLeadId] = useLeadParam();
@@ -34,10 +37,20 @@ function FindingsPage() {
     <>
       <div class="pg-h">
         <h1>Findings</h1>
-        <p class="hint">Every find of every searched field, each checked against the catalogues. Every number is measured by this system on SPHEREx Level-2 files.</p>
+        <p class="hint">{FINDINGS_HINT}</p>
       </div>
       <SearchedCounter fields={searched} leads={false} />
-      <FindingsView wide={wide} leadId={leadId} setLeadId={setLeadId} />
+      <FindingsView
+        wide={wide}
+        leadId={leadId}
+        setLeadId={setLeadId}
+        intro={
+          <>
+            <p class="hint">{FINDINGS_HINT}</p>
+            <SearchedCounter fields={searched} leads={false} />
+          </>
+        }
+      />
       <p class="fmethod">
         <a href="#/method?sec=validation">How we know it works → Method, validation</a>
       </p>

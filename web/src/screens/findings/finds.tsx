@@ -1,4 +1,5 @@
 import { visibleInterval } from '../../lib/idle';
+import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { formatHash } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
@@ -724,7 +725,27 @@ function useFind(id: string | null): Find | null {
   return f;
 }
 
-export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: string | null; setLeadId: (id: string | null) => void }) {
+export function FindingsView({
+  leadId,
+  setLeadId,
+  intro,
+}: {
+  wide: boolean;
+  leadId: string | null;
+  setLeadId: (id: string | null) => void;
+  /** the page's words and counters: on a phone they stand in the sheet of filters, not above the cards */
+  intro?: ComponentChildren;
+}) {
+  // a phone: the filters are a sheet opened by one button in the top corner; the cards are one to a screen, swiped sideways
+  const [sheet, setSheet] = useState(false);
+  // a phone: which card is on the screen (the line under the row says it)
+  const [at, setAt] = useState(0);
+  useEffect(() => {
+    if (!sheet) return;
+    const k = (e: KeyboardEvent) => e.key === 'Escape' && setSheet(false);
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [sheet]);
   const [kind, setKind] = useState<KindSel>('promising');
   const [stage, setStage] = useState<StageSel>('any');
   // the findings the signed-in user closed a task on (the accounts of the service): "Viewed by me"
@@ -835,7 +856,26 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
   };
   return (
     <>
-      <section class="card glass fbar">
+      <button
+        type="button"
+        class="btn ffilter-btn"
+        aria-expanded={sheet}
+        aria-controls="findings-filters"
+        data-testid="filters-open"
+        onClick={() => setSheet(true)}
+      >
+        Filters
+        {active.filter((a) => a.clear).length > 0 && <span class="ffilter-n">{active.filter((a) => a.clear).length}</span>}
+      </button>
+      {sheet && <div class="fsheet-back" aria-hidden="true" onClick={() => setSheet(false)} />}
+      <section id="findings-filters" class={`card glass fbar${sheet ? ' open' : ''}`} aria-label="Filters">
+        <div class="fsheet-head">
+          <b>Filters</b>
+          <button type="button" class="btn sm" data-testid="filters-done" onClick={() => setSheet(false)}>
+            Done
+          </button>
+        </div>
+        {intro && <div class="fsheet-intro">{intro}</div>}
         <div class="fkinds" role="group" aria-label="Kind">
           <span class="fgroup-h" aria-hidden="true">
             What
@@ -928,7 +968,16 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
         </p>
       </section>
       <div class="fgrid-wrap">
-        <ol class={`fgrid${cards.stale ? ' stale' : ''}`} aria-busy={cards.loading}>
+        <ol
+          class={`fgrid${cards.stale ? ' stale' : ''}`}
+          aria-busy={cards.loading}
+          onScroll={(e) => {
+            // a phone's row of cards: the next page comes while three cards are still ahead (a desktop's list never scrolls sideways)
+            const el = e.currentTarget;
+            if (el.scrollWidth > el.clientWidth + 1) setAt(Math.round(el.scrollLeft / (el.clientWidth + 12)));
+            if (el.scrollWidth > el.clientWidth + 1 && el.scrollLeft + el.clientWidth > el.scrollWidth - 3 * el.clientWidth) more.current();
+          }}
+        >
           {cards.finds.map((f) => (
             <FindCard
               key={f.id}
@@ -972,6 +1021,11 @@ export function FindingsView({ leadId, setLeadId }: { wide: boolean; leadId: str
           )}
         </ol>
         <div ref={end} class="fend" />
+        {cards.finds.length > 1 && (
+          <p class="fpos mono-s" aria-live="polite">
+            {Math.min(at + 1, cards.finds.length)} of {h && !cards.done ? h.count : cards.finds.length} · swipe for the next
+          </p>
+        )}
       </div>
       {cards.failed && <p class="mono-s">the findings did not load; the page asks again when the filter is changed</p>}
       {cards.loading && h && cards.finds.length === 0 && <p class="mono-s fempty">updating…</p>}
