@@ -12,6 +12,8 @@
 /* ===== everywhere: the parts that exist only for touch windows are not displayed ===== */
 .tab-more,
 .sheet-grip,
+.layers-btn,
+.cat-ico,
 .fpos,
 .touch-only,
 .vsq .float.touch-only {
@@ -2787,5 +2789,78 @@
   }
   :root .tbar .acts > summary {
     min-width: 44px;
+  }
+}
+
+/* ----- phones: the globe's first row is four: search (the catalogue), Give me a square, Layers ▾, Coverage; the sky layers, the
+   projection, the camera and the aim fields open under it from "Layers" (mobile review 19 Nov) ----- */
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px) {
+  :root .map-ui.map-bar {
+    padding-left: 62px;
+  }
+  :root .cat-drawer:not(.open) .cat-handle {
+    width: 46px;
+    padding: 0;
+    justify-content: center;
+  }
+  :root .cat-drawer:not(.open) .cat-handle .cat-word {
+    display: none;
+  }
+  :root .cat-drawer:not(.open) .cat-handle .cat-ico {
+    display: inline-flex;
+  }
+  :root .map-ui.map-bar > .give-square {
+    order: -4;
+  }
+  :root .map-ui.map-bar > .layers-btn {
+    order: -3;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex: none;
+    min-height: var(--hit);
+    padding: 0 11px;
+    border-radius: 12px;
+    border: 1px solid var(--edge);
+    background: rgba(8, 18, 24, 0.82);
+    color: var(--ink);
+    font: 600 14px var(--font);
+  }
+  :root .map-ui.map-bar > .layers-btn[aria-expanded='true'] {
+    border-color: var(--edge-hi);
+    color: var(--accent-l);
+  }
+  :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] {
+    order: -2;
+  }
+  :root .map-ui.map-bar > .seg[aria-label='Grid of squares'] .lbl {
+    display: none;
+  }
+  :root .map-ui.map-bar:not(.layers-open) > .aimrow,
+  :root .map-ui.map-bar:not(.layers-open) > .seg[aria-label='Projection'],
+  :root .map-ui.map-bar:not(.layers-open) > .seg[aria-label='Camera'],
+  :root .map-ui.map-bar:not(.layers-open) > .seg[aria-label='Sky background'] {
+    display: none;
+  }
+  :root .map-ui.map-bar.layers-open {
+    flex-wrap: wrap;
+    overflow: visible;
+    -webkit-mask-image: none;
+    mask-image: none;
+    background: rgba(6, 12, 18, 0.94);
+    padding-bottom: 10px;
+  }
+  :root .map-ui.map-bar.layers-open > .seg[aria-label='Sky background'] {
+    order: 2;
+    flex-wrap: wrap;
+  }
+  :root .map-ui.map-bar.layers-open > .seg[aria-label='Projection'] {
+    order: 3;
+  }
+  :root .map-ui.map-bar.layers-open > .seg[aria-label='Camera'] {
+    order: 4;
+  }
+  :root .map-ui.map-bar.layers-open > .aimrow {
+    order: 5;
   }
 }
