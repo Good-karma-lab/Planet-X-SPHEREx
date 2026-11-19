@@ -66,7 +66,7 @@ export function App() {
   return (
     <div class="app">
       <nav class="rail">
-        <a class="brand" href="#/" title="SPHEREx Space: the front page">
+        <a class="brand" href="#/" title="SPHEREx Space: the front page" aria-label="SPHEREx Space: the front page">
           <span
             class="logo"
             dangerouslySetInnerHTML={{

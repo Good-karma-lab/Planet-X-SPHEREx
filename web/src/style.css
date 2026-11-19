@@ -180,7 +180,7 @@ a {
   gap: 5px;
   padding: 10px 0 8px;
   color: var(--muted);
-  font: 600 10.5px var(--font);
+  font: 600 11px var(--font);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   border: 1px solid transparent;
@@ -209,7 +209,7 @@ main {
 
 /* ===== shared controls ===== */
 .h2 {
-  font: 600 10.5px var(--mono);
+  font: 600 11px var(--mono);
   text-transform: uppercase;
   letter-spacing: 0.14em;
   color: var(--muted);
@@ -419,7 +419,7 @@ main {
   gap: 5px;
   border-radius: 6px;
   padding: 1px 8px;
-  font: 600 10.5px var(--mono);
+  font: 600 11px var(--mono);
   letter-spacing: 0.05em;
   text-transform: uppercase;
   background: rgba(255, 255, 255, 0.05);
@@ -499,7 +499,7 @@ input[type='range']::-moz-range-thumb {
 }
 .aim .field label {
   color: var(--faint);
-  font: 600 10.5px var(--mono);
+  font: 600 11px var(--mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   min-width: 26px;
@@ -617,7 +617,7 @@ input[type='range']::-moz-range-thumb {
   font-weight: 650;
 }
 .bchip em {
-  font: 500 10.5px var(--mono);
+  font: 500 11px var(--mono);
   font-style: normal;
   color: var(--muted);
 }
@@ -664,7 +664,7 @@ input[type='range']::-moz-range-thumb {
   position: absolute;
   left: 5px;
   bottom: 3px;
-  font: 600 10.5px var(--font);
+  font: 600 11px var(--font);
   color: #e8f0f4;
   text-shadow:
     0 0 3px #000,
@@ -762,7 +762,7 @@ input[type='range']::-moz-range-thumb {
   flex: none;
 }
 .panel-label em {
-  font: 500 10.5px var(--mono);
+  font: 500 11px var(--mono);
   font-style: normal;
   color: var(--muted);
 }
@@ -1251,7 +1251,7 @@ input[type='range']::-moz-range-thumb {
 }
 .covkey {
   display: block;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.3;
   color: var(--muted);
   margin-top: 2px;
@@ -1524,7 +1524,7 @@ input[type='range']::-moz-range-thumb {
 }
 .tbl th {
   color: var(--muted);
-  font: 600 10.5px var(--mono);
+  font: 600 11px var(--mono);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
@@ -1556,7 +1556,7 @@ input[type='range']::-moz-range-thumb {
   }
   .tab {
     padding: 4px 6px;
-    font-size: 10.5px;
+    font-size: 11px;
   }
   .tab svg {
     width: 20px;
@@ -1878,7 +1878,7 @@ input[type='range']::-moz-range-thumb {
   background: #000;
 }
 .vsq .refbox span {
-  font: 600 10.5px var(--font);
+  font: 600 11px var(--font);
   color: #e8f0f4;
   text-shadow:
     0 0 3px #000,
@@ -2124,7 +2124,7 @@ input[type='range']::-moz-range-thumb {
   font-size: 11.5px;
 }
 .lab .tl-labels {
-  font-size: 10.5px;
+  font-size: 11px;
 }
 .lab .btn {
   font-size: 12px;
@@ -2133,7 +2133,7 @@ input[type='range']::-moz-range-thumb {
   gap: 5px;
 }
 .lab .h2 {
-  font-size: 10.5px;
+  font-size: 11px;
 }
 .lab .mvrow,
 .lab .anrow {
@@ -2220,7 +2220,7 @@ input[type='range']::-moz-range-thumb {
 .lab .panel { display: flex; flex-direction: column; }
 .psec { display: flex; flex-direction: column; gap: 6px; padding: 4px 0 8px; border-bottom: 1px solid var(--edge-soft); }
 .psec:last-child { border-bottom: 0; }
-.psh { font: 650 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+.psh { font: 650 11px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
 .psub { font-size: 11px; color: var(--faint); margin-top: 2px; }
 .swgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; }
 .sw { display: flex; align-items: center; gap: 8px; min-height: 24px; cursor: pointer; user-select: none; white-space: nowrap; min-width: 0; font-size: 12px; color: var(--ink); }
@@ -2230,9 +2230,9 @@ input[type='range']::-moz-range-thumb {
 .sw input:checked::after { transform: translateX(11px); background: #fff; }
 .sw input:disabled { opacity: 0.35; cursor: default; }
 .sw.dis { color: var(--faint); cursor: default; }
-.sw .why { margin-left: auto; font-size: 10.5px; font-style: normal; color: var(--faint); }
+.sw .why { margin-left: auto; font-size: 11px; font-style: normal; color: var(--faint); }
 .sbar { flex: none; max-height: 38%; overflow: auto; border-top: 1px solid var(--edge-soft); background: rgba(6, 14, 20, 0.92); padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 3px; }
-.sbh { display: flex; justify-content: space-between; align-items: baseline; font: 650 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+.sbh { display: flex; justify-content: space-between; align-items: baseline; font: 650 11px var(--font); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
 .sbh em { font-style: normal; letter-spacing: 0; text-transform: none; font-weight: 500; color: var(--faint); }
 .sline { display: grid; grid-template-columns: minmax(0, 1fr) 90px 72px; align-items: center; gap: 8px; min-height: 22px; font-size: 12px; }
 .sline b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -2246,12 +2246,12 @@ input[type='range']::-moz-range-thumb {
 .ssum { font-size: 11px; color: var(--faint); line-height: 1.35; margin: -2px 0 2px; }
 .sline { grid-template-columns: minmax(0, 1fr) 80px 96px; }
 .vsq .fbands { flex-wrap: nowrap; gap: 3px; }
-.vsq .fbands .bchip { padding: 2px 6px; font-size: 10.5px; gap: 4px; }
-.vsq .fbands .bchip em { font-size: 10.5px; }
-.vsq .fbands .mini { height: 22px; padding: 0 6px; font-size: 10.5px; }
+.vsq .fbands .bchip { padding: 2px 6px; font-size: 11px; gap: 4px; }
+.vsq .fbands .bchip em { font-size: 11px; }
+.vsq .fbands .mini { height: 22px; padding: 0 6px; font-size: 11px; }
 .psec .coords { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .psec .coords .field { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.psec .coords label { font: 600 10.5px var(--font); color: var(--muted); }
+.psec .coords label { font: 600 11px var(--font); color: var(--muted); }
 .psec .coords .inp { min-width: 0; width: 100%; font: 500 12px var(--mono); padding: 4px 7px; }
 
 /* lab v2.3: square view buttons, the Findings tab, the scans bar */
@@ -2261,19 +2261,19 @@ input[type='range']::-moz-range-thumb {
 .vsquare .vi svg { width: 30px; height: 30px; }
 .vsquare:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
 .vsquare.on { background: rgba(95, 227, 214, 0.14); border-color: rgba(95, 227, 214, 0.6); color: var(--accent-l); }
-.tbadge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 999px; background: var(--accent); color: #02161a; font: 700 10.5px var(--font); }
+.tbadge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin-left: 5px; border-radius: 999px; background: var(--accent); color: #02161a; font: 700 11px var(--font); }
 .fsec { gap: 4px; }
 .fsh { font: 650 12px var(--font); color: var(--ink); }
 .sbar { cursor: pointer; }
 .sbar .sline:hover b { color: var(--accent-l); }
 
 /* rail: the words fit (U) */
-.rail .tab { font-size: 9.5px; letter-spacing: 0.02em; padding: 8px 0 6px; gap: 4px; white-space: nowrap; }
+.rail .tab { font-size: 11px; letter-spacing: 0.02em; padding: 8px 0 6px; gap: 4px; white-space: nowrap; }
 .rail .tab svg { width: 22px; height: 22px; }
 /* phones: a gap between the words of the rail */
 @media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px) {
   .rail .tabs { gap: 4px; }
-  .rail .tab { font-size: 8px; letter-spacing: 0; padding: 4px 2px; white-space: nowrap; flex: 1 1 auto; }
+  .rail .tab { font-size: 11px; letter-spacing: 0; padding: 4px 2px; white-space: nowrap; flex: 1 1 auto; }
   .rail .tab svg { width: 20px; height: 20px; }
 }
 /* the lab's frame never moves: fixed-height time bar, no wrapping */
@@ -2296,7 +2296,7 @@ input[type='range']::-moz-range-thumb {
   .tab {
     padding: 4px 1px;
     letter-spacing: 0;
-    font-size: 9.5px;
+    font-size: 11px;
   }
   .tab span {
     text-overflow: clip;
@@ -2310,7 +2310,7 @@ input[type='range']::-moz-range-thumb {
   .vsq .fbands { flex-wrap: wrap; max-width: calc(100% - 12px); bottom: 6px; }
   .vsq .fbands .bchip b { max-width: 48px; overflow: hidden; text-overflow: ellipsis; }
   .vsq .fbands .bchip .dot { display: none; }
-  .vsq .fstatus { bottom: 70px; font-size: 10.5px; }
+  .vsq .fstatus { bottom: 70px; font-size: 11px; }
   .tbar { height: auto; flex-wrap: wrap; row-gap: 6px; padding: 6px; }
   .tbar .tl-mid { order: 9; flex-basis: 100%; }
   .tbar .seg.scale button { padding: 3px 6px; font-size: 11px; }
@@ -2318,10 +2318,10 @@ input[type='range']::-moz-range-thumb {
 
 /* a picture under 760 px: compact buttons on one row, nothing hidden at the edges (QA r5) */
 .vsq.compact .fbands { gap: 2px; padding: 3px 4px; }
-.vsq.compact .fbands .bchip { padding: 2px 5px; font-size: 10.5px; }
+.vsq.compact .fbands .bchip { padding: 2px 5px; font-size: 11px; }
 .vsq.compact .fbands .bchip em, .vsq.compact .fbands .bchip .dot { display: none; }
-.vsq.compact .fbands .mini { height: 20px; padding: 0 5px; font-size: 10.5px; }
-.vsq.compact .fstatus { font-size: 10.5px; bottom: 44px; }
+.vsq.compact .fbands .mini { height: 20px; padding: 0 5px; font-size: 11px; }
+.vsq.compact .fstatus { font-size: 11px; bottom: 44px; }
 /* a narrow window: the time bar wraps instead of hiding its last controls behind the panel */
 @media (max-width: 1279.98px) {
   .tbar { height: auto; flex-wrap: wrap; row-gap: 6px; }
@@ -2359,7 +2359,7 @@ input[type='range']::-moz-range-thumb {
 .vsq :focus-visible { outline: 2px solid var(--amber, #ffb454); outline-offset: 1px; }
 
 /* the scans: a header with a clear chevron; opened (default), one line per scan; folded, the same scans in one wrapped line */
-.sbar .tray-head { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 0 4px; background: none; border: 0; color: var(--muted); cursor: pointer; font: 650 10.5px var(--font); letter-spacing: 0.12em; text-transform: uppercase; }
+.sbar .tray-head { display: flex; align-items: center; justify-content: space-between; width: 100%; padding: 0 0 4px; background: none; border: 0; color: var(--muted); cursor: pointer; font: 650 11px var(--font); letter-spacing: 0.12em; text-transform: uppercase; }
 .sbar .tray-head b { font-weight: 650; }
 .sbar .tray-head .chev { display: inline-grid; place-items: center; width: 24px; height: 18px; border: 1px solid var(--edge); border-radius: 6px; background: rgba(255, 255, 255, 0.04); color: var(--accent-l); font-size: 12px; letter-spacing: 0; }
 .sbar .tray-head:hover .chev { border-color: var(--edge-hi); }
@@ -2371,7 +2371,7 @@ input[type='range']::-moz-range-thumb {
 .sbar .sline-px b { white-space: nowrap; }
 .sbar .sline-px .sval { text-align: right; }
 .sbar .sline-px .sacts { display: inline-flex; gap: 4px; }
-.btn.mini { padding: 0 7px; height: 20px; min-height: 0; font-size: 10.5px; line-height: 18px; }
+.btn.mini { padding: 0 7px; height: 20px; min-height: 0; font-size: 11px; line-height: 18px; }
 
 /* a tile of a wall whose detector or band has no exposure in the season shown says so (it is never a black tile with only a marker) */
 .vsq .panel-empty { position: absolute; z-index: 2; display: grid; place-items: center; padding: 10px; text-align: center; pointer-events: none; }
@@ -2383,7 +2383,7 @@ input[type='range']::-moz-range-thumb {
 .about-grid { align-items: start; }
 /* tiles of a wall under 200 px: the message sits at the top, small, clear of the marker in the middle */
 .vsq .panel-empty.small { place-items: start center; padding: 6px 4px; }
-.vsq .panel-empty.small span { font-size: 10.5px; line-height: 1.25; padding: 3px 5px; max-width: 96%; }
+.vsq .panel-empty.small span { font-size: 11px; line-height: 1.25; padding: 3px 5px; max-width: 96%; }
 /* a screen under 860 px high: the panel keeps its fixed layout (tabs, a scrolling body, the scans tray in its own region at the bottom: nothing above it can push it); the tray starts folded to one line there */
 
 /* the scans never reflow while a count or a % changes: fixed columns, digits of one width */
@@ -2404,7 +2404,7 @@ input[type='range']::-moz-range-thumb {
 .adesrow { margin-top: 4px; }
 
 /* the timeline's restart marker: the loop starts at the first season and comes back to it */
-.tl-labels span.restart::before { content: '↻'; margin-right: 3px; color: var(--accent); font-size: 10.5px; }
+.tl-labels span.restart::before { content: '↻'; margin-right: 3px; color: var(--accent); font-size: 11px; }
 
 /* the Object tab keeps the room its content will fill (portrait, catalogue rows, light curves), so that what follows it in a single column (the scans tray) does not jump when they arrive */
 @media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
