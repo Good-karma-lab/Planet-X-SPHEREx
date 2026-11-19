@@ -21,10 +21,12 @@ from __future__ import annotations
 import contextlib
 import importlib
 import json
+import logging
 import math
 import random
 import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -321,24 +323,51 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
     ]
 
 
-FIND_ROWS_KEEP_S = 20.0  # the whole list of finds is read at most this often (a read of every find took seconds under a lock)
+FIND_ROWS_KEEP_S = 20.0  # the whole list of finds is read again in the background when it is older than this
+_FIND_ROWS_LOCK = threading.Lock()  # one read of the whole list at a time (the first, in the foreground; or one in the background)
+log = logging.getLogger("sky.tasks")
+
+
+def _refresh_finds(st: Any) -> None:
+    """One background read of the whole list; a failed read keeps the list there was (and says so in the log)."""
+    try:
+        rows = lead_findings(st)
+        if rows is not None:
+            st._task_finds = (time.monotonic(), rows)
+    except Exception:
+        log.exception("the list of finds could not be read again: the one read at %s stays", getattr(st, "_task_finds", (None,))[0])
+    finally:
+        st._task_finds_busy = False
+        _FIND_ROWS_LOCK.release()
 
 
 def find_rows(st: Any) -> list[dict[str, Any]]:
     """The machine findings in the Findings page's order (a test may put its own list in `st.task_findings`); 503 without them.
-    Read again after FIND_ROWS_KEEP_S: one task asked for used to read every find three or four times (4–9 s on prod, 19 Nov 2026),
-    and the page gave up waiting. Each caller gets its own copies of the rows."""
+    The list is kept and handed out at once; older than FIND_ROWS_KEEP_S it is read again in the background (one read at a time), so
+    no caller waits for it but the first after a start. One task asked for used to read every find three or four times (4–9 s on prod,
+    19 Nov 2026), then the caller after each expiry paid the whole read (1.4 s on the machine, 3.4 s from outside). Each caller gets its
+    own copies of the rows."""
     source = getattr(st, "task_findings", None)
     if callable(source):
         rows = source()
     else:
         got: tuple[float, list[dict[str, Any]]] | None = getattr(st, "_task_finds", None)  # on the state: one per app
-        if got is not None and time.monotonic() - got[0] < FIND_ROWS_KEEP_S:
-            rows = got[1]
+        if got is None:
+            with _FIND_ROWS_LOCK:  # the first read: the callers that come meanwhile wait for it and take it
+                got = getattr(st, "_task_finds", None)
+                if got is None:
+                    rows0 = lead_findings(st)
+                    if rows0 is not None:
+                        st._task_finds = got = (time.monotonic(), rows0)
+            rows = got[1] if got is not None else None
         else:
-            rows = lead_findings(st)
-            if rows is not None:
-                st._task_finds = (time.monotonic(), rows)
+            rows = got[1]
+            stale = time.monotonic() - got[0] >= FIND_ROWS_KEEP_S and not getattr(st, "_task_finds_busy", False)
+            if stale and _FIND_ROWS_LOCK.acquire(blocking=False):
+                st._task_finds_busy = True
+                t = threading.Thread(target=_refresh_finds, args=(st,), name="task-finds", daemon=True)
+                st._task_finds_thread = t
+                t.start()
     if rows is None:
         raise HTTPException(503, "the findings database is not loaded")
     return [dict(r) for r in rows]
