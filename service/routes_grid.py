@@ -12,6 +12,7 @@ only when they confirm it themselves; a square is viewed by people when all four
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, Literal
 
@@ -66,7 +67,15 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         cs = grid.cells_near(ra, dec, radius)
         ids = [c.id for c in cs]
         rows, views = D().rows(ids), D().viewers(ids)
-        return {"cells": [grid.view_of(c, rows.get(c.id), views.get(c.id, 0)) for c in cs]}
+        inside = await asyncio.to_thread(finds_per_cell, st, cs)
+        out = []
+        for c in cs:
+            v = grid.view_of(c, rows.get(c.id), views.get(c.id, 0))
+            # the finds that lie in the square, whichever search made them (a Planet X peak, a time-lapse track): the sweep's own count
+            # holds only its movers and brown dwarfs, so the square of the top peak showed as "searched, no find" (18 Nov 2026)
+            v["finds"] = max(v["finds"], inside.get(c.id, 0))
+            out.append(v)
+        return {"cells": out}
 
     def user_of(request: Request | None) -> dict[str, Any] | None:
         cu = getattr(st, "current_user", None)
@@ -80,7 +89,7 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
         row = D().get(cid)
         out = grid.view_of(ce, row, D().viewers([cid]).get(cid, 0))
         out["finds"] = json.loads((row or {}).get("find_ids") or "[]") or finds_in(st, ce)
-        out["n_finds"] = int((row or {}).get("finds") or 0)
+        out["n_finds"] = max(int((row or {}).get("finds") or 0), len(out["finds"]))  # whichever search made them
         out["field_key"] = (row or {}).get("field_key") or field_key_of(st, ce)
         out["open"] = {"ra": round(ce.ra, 5), "dec": round(ce.dec, 5), "fov": grid.QUARTER_FOV_ARCMIN, "quarter": None}
         out["error"] = (row or {}).get("error")
@@ -142,6 +151,29 @@ def field_key_of(st: Any, ce: grid.Cell) -> str | None:
 
 
 FIND_KINDS = ("mover", "browndwarf", "pair", "film", "peak")  # red sources and spectral anomalies are not finds of a square's search
+
+
+def finds_per_cell(st: Any, cs: list[grid.Cell]) -> dict[str, int]:
+    """{square id: how many Findings rows lie in it} for these squares, in one read of the box around them."""
+    import sqlite3
+
+    store_dir = getattr(getattr(st, "cfg", None), "store_dir", None)
+    path = store_dir / "findings.db" if store_dir is not None else None
+    if not cs or path is None or not path.is_file():
+        return {}
+    d0, d1 = min(c.dec0 for c in cs), max(c.dec1 for c in cs)
+    try:
+        with sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=2) as conn:
+            q = f"SELECT ra, dec FROM finds WHERE kind IN ({','.join('?' * len(FIND_KINDS))}) AND dec>=? AND dec<?"
+            pts = conn.execute(q, (*FIND_KINDS, d0, d1)).fetchall()
+    except sqlite3.Error:
+        return {}
+    out: dict[str, int] = {}
+    for c in cs:
+        n = sum(1 for ra_, dec_ in pts if c.dec0 <= dec_ < c.dec1 and c.ra0 <= ra_ % 360.0 < c.ra1)
+        if n:
+            out[c.id] = n
+    return out
 
 
 def finds_in(st: Any, ce: grid.Cell) -> list[str]:

@@ -451,6 +451,12 @@ def view_of(ce: Cell, row: dict[str, Any] | None, viewers: int) -> dict[str, Any
         "viewers": viewers,
         "bar": json.loads(bar) if isinstance(bar, str) else bar,
         "searched_at": row.get("searched_at"),
+        # being searched by a second node (service/node.py): its name, for the globe's card
+        **(
+            {"by": str(row.get("source"))[5:]}
+            if str(row.get("source") or "").startswith("node:") and row.get("state") == "searching"
+            else {}
+        ),
     }
 
 

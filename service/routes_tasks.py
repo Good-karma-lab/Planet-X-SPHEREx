@@ -199,7 +199,7 @@ def promising_quarters(st: Any) -> list[dict[str, Any]]:
             cur = best.get((ce.id, q))
             if cur is None or int(f.get("promise") or 0) > cur["promise"]:
                 best[(ce.id, q)] = {"cell_id": ce.id, "quarter": q, "promise": int(f.get("promise") or 0), "finding_id": f["finding_id"],
-                                    "kind": f.get("kind")}  # fmt: skip
+                                    "kind": f.get("kind"), "ra": float(f["ra"]), "dec": float(f["dec"])}  # fmt: skip
         rows = sorted(best.values(), key=lambda r: (-r["promise"], r["cell_id"], QUARTERS.index(r["quarter"])))
     _promising.update(at=time.time(), rows=rows, st=st)
     return list(rows)
@@ -257,6 +257,30 @@ def cell_field_key(acc: accounts.Accounts, cell_id: str) -> str | None:
     except sqlite3.OperationalError:
         return None
     return None if r is None else r["field_key"]
+
+
+KIND_WORD = {"film": "a time-lapse track", "peak": "a Planet X peak", "mover": "a mover", "browndwarf": "a brown-dwarf candidate",
+             "pair": "a changing pair"}  # fmt: skip
+
+
+def why_of(p: dict[str, Any]) -> dict[str, Any]:
+    """Why a quarter is given: the promising find in it, where it is, the card's words, and the question series to ask about it (the
+    lab opens the quarter with that find's questions: /api/tasks/next?kind=<ask.kind>&finding_id=<ask.finding_id>)."""
+    from service.accounts import people
+
+    kind = str(p.get("kind") or "")
+    series = people.series_of(kind)
+    return {
+        "finding_id": p["finding_id"],
+        "kind": kind,
+        "promise": p["promise"],
+        "ra": round(float(p["ra"]), 6) if p.get("ra") is not None else None,
+        "dec": round(float(p["dec"]), 6) if p.get("dec") is not None else None,
+        "text": f"{KIND_WORD.get(kind, 'a find')} · promise {p['promise']}",
+        "ask": {"kind": "moves" if series in ("track", "slow", "peak") else series, "finding_id": p["finding_id"], "series": series}
+        if series
+        else None,
+    }
 
 
 def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | None:
@@ -468,7 +492,7 @@ def make_tasks_router(st: Any) -> APIRouter:
             raise HTTPException(503, "the sky grid is not loaded")
         rows = [r for r in rows if len(taken.get(r["cell_id"], set())) < len(QUARTERS)]
         # the squares where the machine's finds are most promising first: a quarter nobody has looked through yet that holds one of
-        # the best leads (Findings' Promising), a random one of the first SPREAD (people are spread), never a famous target's square
+        # the best leads (Findings' Promising), the most promising first, never a famous target's square
         # for a newcomer; then the stock's order below
         searched = {r["cell_id"]: r for r in rows}
         pq = [p for p in promising_quarters(st) if p["cell_id"] in searched and p["quarter"] not in taken.get(p["cell_id"], set())]
@@ -480,9 +504,11 @@ def make_tasks_router(st: Any) -> APIRouter:
         # come in as they are made; until then the stock's own built quarters are given
         pq = [p for p in pq[:READY_SCAN] if qs.ready(p["cell_id"], p["quarter"])]
         if pq:
-            p = RNG.choice(pq[:SPREAD])
+            # the most promising quarter not looked through yet (the user: "Give me a square" gives the top find's quarter, not a random
+            # one of the first few)
+            p = pq[0]
             row = searched[p["cell_id"]]
-            why = {"finding_id": p["finding_id"], "kind": p["kind"], "promise": p["promise"]}
+            why = why_of(p)
             return {**row, "quarter": p["quarter"], "fov": QUARTER_FOV, **quarter_place(p["cell_id"], p["quarter"]), "why": why}
         viewed = quarters_viewed(acc, [r["cell_id"] for r in rows[:500]])
         # the square whose least-looked open quarter has the fewest viewers; the grid's own order among equals

@@ -103,6 +103,8 @@ class State:
         self.executor: ProcessPoolExecutor | None = None
         self.index_health: dict[str, Any] | None = None
         self.quicklook: QuickLook | None = None
+        self.nodes_summary: Any = None  # the second nodes' state for /health (service/routes_node.py)
+        self.node_status: dict[str, Any] = {}
         self.warm_searches: dict[str, Any] = {}
         # the square quarters built ahead (service/quarters.py): set by the tasks router, the stock loop's last step for /health
         self.quarters: Any = None
@@ -762,6 +764,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "quarter_stock": {"target": quarters.STOCK, **st.quarter_stock} if st.quarters is not None else None,
             "bd_queue": {"done": len(st.bd_queue.done), **st.bd_queue_last} if st.bd_queue is not None else None,
             "sweep": st.sweep.snapshot() if st.sweep is not None else None,
+            # the second nodes searching squares for this service (service/node.py): their square, step and squares today
+            "nodes": await asyncio.to_thread(st.nodes_summary) if callable(st.nodes_summary) else None,
             "machine": st.machine.as_dict() if st.machine is not None else None,
             "s3": None if st.s3 is None else {**st.s3.stats.__dict__, "breaker": st.s3.breaker.snapshot()},
             "cpu": cpu.stats(),

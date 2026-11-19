@@ -148,7 +148,7 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """ "Give me a square": the quarters holding the best leads (Findings' Promising kinds) that nobody has looked through come first,
-    a random one of the first few, never a famous target's square for a newcomer; the task says which find; red sources do not count."""
+    the most promising first, never a famous target's square for a newcomer; the task says which find and why; red sources do not count."""
     import random
 
     from service import accounts, grid, routes_tasks
@@ -181,6 +181,19 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
         got.add((t["cell_id"], t["quarter"], (t.get("why") or {}).get("finding_id")))
     assert got == {("294-0150", "SW", "browndwarf:1")}  # the newcomer never gets the famous square's track
     assert routes_tasks.quarter_of(grid.by_id("294-0150"), *at("294-0150", "SW")) == "SW"
+    # the task says why in the card's words, where the find is, and which question series to open it with
+    t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    w = t["why"]
+    assert w["text"] == "a brown-dwarf candidate · promise 77" and (w["ra"], w["dec"]) == tuple(round(v, 6) for v in at("294-0150", "SW"))
+    assert w["ask"] == {"kind": "moves", "finding_id": "browndwarf:1", "series": "slow"}
+    # the most promising quarter, every time (not a random one of the first few): a second built lead of lower promise is not given
+    finds.append(lead("peak:2", "peak", "294-0150", "NE", 70))
+    fake(st, {("294-0150", "SW"), ("294-0148", "NW"), ("294-0150", "NE")})
+    monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
+    assert {_client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]["why"]["finding_id"] for _ in range(6)} == {
+        "browndwarf:1"
+    }
+    finds.pop()
     # not built yet: not given first (it took 1 min 45 s cold); the stock builds it, and the stock's built quarters are given meanwhile
     fake(st, set())
     monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
