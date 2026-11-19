@@ -234,8 +234,6 @@
 .taskpanel .tp-pic { min-width: 30px; justify-content: center; }
 .taskpanel .tp-pic.on { border-color: rgba(255, 107, 107, 0.8); color: #ffb3b3; background: rgba(255, 107, 107, 0.14); }
 .taskpanel .tp-none { font: 500 11px var(--mono); color: var(--muted); }
-.taskpanel .tp-missed { align-self: flex-start; }
-.panel .pcol .look-missed { align-self: flex-start; margin: 2px 0 8px; }
 
 /* ---- lab v2: the panel's rows (one column, the count on the right, never wrapped) ---- */
 .lab .panel { width: 372px; }
@@ -433,7 +431,6 @@
 .objcard .oc-add .oc-menu { flex: 1 1 100%; }
 /* a word with its meaning on hover: a dotted underline says so */
 .hov[title] { text-decoration: underline dotted rgba(160, 190, 200, 0.45); text-underline-offset: 3px; cursor: help; }
-.look-missed { display: inline-flex; flex-direction: column; align-items: flex-start; gap: 1px; height: auto; padding-top: 5px; padding-bottom: 5px; }
 /* a mark's checks as they answer, and its verdict */
 .objcard .oc-steps li.bad { color: #ffb3b3; border-color: rgba(255, 120, 120, 0.5); background: rgba(255, 120, 120, 0.07); white-space: normal; }
 .objcard .oc-checks { display: flex; flex-wrap: wrap; gap: 4px 8px; margin: -2px 0 8px; font: 500 11px var(--mono); color: var(--muted); align-items: center; }
@@ -458,3 +455,19 @@
 .vsq .loadov.first { top: auto; bottom: 62px; transform: translate(-50%, 0); width: min(420px, calc(100% - 32px)); background: rgba(8, 16, 22, 0.88); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
 .vsq .loadov.first .lo-media { display: none; }
 .vsq .loadov .lo-first { display: block; padding: 8px 14px 0; font: 600 11.5px var(--mono); color: #ffd08a; letter-spacing: 0.02em; }
+
+/* "Mark something the machine missed": a button of the same system as the answers above it (height, padding, type), as wide as
+   its column; its way (mark it, say what it is, the checks run) is on hover */
+.taskpanel .tp-missed {
+  height: auto; min-height: 38px; width: 100%; box-sizing: border-box; padding: 6px 12px; font-size: 13px;
+  display: flex; align-items: center; justify-content: center; white-space: normal; text-align: center; align-self: stretch;
+}
+/* the free lab's action card: the quarter's look and one's own mark, one under the other, both full width */
+.lab .panel > .labact { margin: 8px 14px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(95, 227, 214, 0.3);
+  background: rgba(95, 227, 214, 0.05); display: flex; flex-direction: column; gap: 8px; }
+.lab .panel > .labact > .sqlook { margin: 0; padding: 0; border: 0; background: none; display: flex; flex-direction: column; gap: 6px; }
+.lab .panel > .labact .btn { width: 100%; justify-content: center; min-height: 36px; box-sizing: border-box; }
+.lab .panel > .labact .look-missed { height: auto; white-space: normal; text-align: center; }
+/* the minute's look fills along the look button's own bottom edge: no empty band between the card's two buttons */
+.lab .panel > .labact > .sqlook { position: relative; }
+.lab .panel > .labact > .sqlook .lookbar { position: absolute; left: 10px; right: 10px; top: 30px; margin: 0; pointer-events: none; }

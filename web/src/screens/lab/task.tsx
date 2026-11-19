@@ -231,6 +231,8 @@ export interface NextTask {
   quarter?: string | null;
   /** a find's question series (spec §5e) */
   series?: { id: string; steps: SeriesStep[] } | null;
+  /** a square given for a lead in it: which find */
+  why?: { finding_id?: string; kind?: string; promise?: number } | null;
   /** a track's pictures (its visits), to tap where it is missing */
   pictures?: { i: number; mjd?: number | null; ra?: number | null; dec?: number | null }[] | null;
   /** the other kinds: their question and answers */
@@ -268,6 +270,7 @@ export function taskParams(t: NextTask): Record<string, string> | null {
     kind: t.kind,
     ...(t.cell_id ? { cell: t.cell_id } : {}),
     ...(t.quarter ? { quarter: t.quarter } : {}),
+    ...(t.kind === 'cell' && t.why?.finding_id ? { lead: t.why.finding_id } : {}),
     // the find is the lab's selected object (`find`): the one thing the task rings brightly (an exposure is no find)
     ...(t.finding_id && t.kind !== 'bad_picture' ? { finding: t.finding_id, find: t.finding_id } : {}),
     ...(t.finding_id && t.kind === 'bad_picture' ? { exposure: t.finding_id } : {}),
@@ -300,6 +303,8 @@ export interface TaskArgs {
   visitOf?: (mjd: number) => number | null;
   /** the picture is drawn: until then a question is shown but not answered (nobody can answer it honestly yet) */
   ready?: boolean;
+  /** a lead's questions inside a square's task: no "Next" of its own (the square's look follows), no second Mark button */
+  embedded?: boolean;
 }
 
 /** The task as the lab works with it: the panel, the step on show, the service's body, and the taps. */
@@ -510,8 +515,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     <div class={`taskpanel k-${task.kind}`} data-testid="task-panel">
       {si.popup}
       <div class="tp-head">
-        <b>Task</b>
-        <span>{T.title}</span>
+        <b>{a.embedded ? 'Lead' : 'Task'}</b>
+        <span>{a.embedded ? 'first, then the quarter' : T.title}</span>
         {focusKind(task.kind) && (
           <label class="tp-others" title="Show the other rings and names of the field as usual (in a task only the object in question is bright)">
             <input type="checkbox" checked={a.others} onChange={(e) => a.setOthers((e.target as HTMLInputElement).checked)} data-testid="task-others" />
@@ -542,7 +547,9 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               Cabinet
             </a>
           </div>
-          {done.next ? (
+          {a.embedded ? (
+            <div class="mono-s">then the quarter below</div>
+          ) : done.next ? (
             <button class="btn sm primary tp-next" onClick={() => a.open(done.next!)} data-testid="task-next">
               Next: {T.title.toLowerCase()}
             </button>
@@ -550,9 +557,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
             <div class="mono-s">{done.none}</div>
           )}
           {/* the way to report what the machine missed stays after the answers too */}
-          <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
+          <button class="mini tp-missed" style={a.embedded ? { display: 'none' } : undefined} onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring · mark it, say what it is, the checks run" data-testid="task-missed">
             Mark something the machine missed
-            <small class="tp-path">mark it · say what it is · the checks run</small>
           </button>
         </div>
       )}
@@ -657,9 +663,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               ))}
             </button>
           ))}
-          <button class="mini tp-missed" onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring" data-testid="task-missed">
+          <button class="mini tp-missed" style={a.embedded ? { display: 'none' } : undefined} onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring · mark it, say what it is, the checks run" data-testid="task-missed">
             Mark something the machine missed
-            <small class="tp-path">mark it · say what it is · the checks run</small>
           </button>
         </div>
       ) : (
@@ -695,11 +700,11 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         <button
           class="mini tp-missed"
           onClick={a.markMissed}
-          title="Put a mark on something that moves or looks odd and has no ring"
+          title="Put a mark on something that moves or looks odd and has no ring · mark it, say what it is, the checks run"
           data-testid="task-missed"
+          style={a.embedded ? { display: 'none' } : undefined}
         >
           Mark something the machine missed
-          <small class="tp-path">mark it · say what it is · the checks run</small>
         </button>
       )}
     </div>

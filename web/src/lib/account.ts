@@ -261,6 +261,8 @@ export function taskHash(t: Task): string {
   q.set('kind', t.kind); // the lab of a guest cannot look a task up by its id
   if (t.kind === 'cell' && t.cell_id) q.set('cell', t.cell_id);
   if (t.kind === 'cell' && t.quarter) q.set('quarter', t.quarter);
+  // a square given for a lead in it: the lab selects that find and asks its questions before the quarter's look
+  if (t.kind === 'cell' && t.why?.finding_id) q.set('lead', t.why.finding_id);
   if (t.kind === 'finding' && t.finding_id) q.set('finding', t.finding_id);
   return `#/lab?${q}`;
 }

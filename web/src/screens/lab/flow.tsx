@@ -1292,15 +1292,51 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     visitOf: a.visitOf,
     ready: a.ready,
   });
-  const taskRef = useRef(taskView);
-  taskRef.current = taskView;
+  // a square given for a lead in it (`lead=`): the lead's own question series, first, above the square's look
+  const leadParams = useMemo<Record<string, string>>(
+    (): Record<string, string> => {
+      const lead = a.params['lead'];
+      return task?.kind === 'cell' && lead ? { task: 'finding', kind: 'finding', finding: lead, find: lead } : {};
+    },
+    [task?.kind, a.params['lead']],
+  );
+  const leadView = useLabTask({
+    view,
+    others,
+    setOthers: (on) => a.set({ others: on ? '1' : null }),
+    params: leadParams,
+    open: a.open,
+    ra: a.ra,
+    dec: a.dec,
+    fieldKey: a.grid ? fieldKey(a.ra, a.dec, a.fov) : null,
+    marksHere,
+    pass: a.pass,
+    passesTotal: a.passes.length,
+    square: null,
+    markMissed: () => {
+      setRuler([]);
+      setTool('mark');
+    },
+    showPicture: (mjd) => a.showVisit(mjd),
+    visitOf: a.visitOf,
+    ready: a.ready,
+    embedded: true,
+  });
+  // the series the lab is set up for: the lead's while its questions are open, else the task's own
+  const leadOpen = !!leadView.kind && leadView.blind;
+  const act = leadOpen ? leadView : taskView;
+  const actTask = leadOpen ? taskOfParams(leadParams) : task;
+  const blindAny = taskView.blind || leadView.blind;
+  const taskRef = useRef({ ...taskView, blind: blindAny });
+  taskRef.current = { ...taskView, blind: blindAny };
   // set up the lab for the step on show (once per step, when what it needs has arrived)
   const setUp = useRef('');
-  const stepKey = `${taskKey}|${taskView.show ?? ''}|${taskView.body ? 1 : 0}`;
+  const stepKey = `${taskKey}|${leadOpen ? 'lead' : ''}|${act.show ?? ''}|${act.body ? 1 : 0}`;
   useEffect(() => {
+    const task = actTask;
     if (!task || setUp.current === stepKey) return;
-    const show = taskView.show;
-    const body = taskView.body;
+    const show = act.show;
+    const body = act.body;
     const visits = (body?.pictures ?? []).map((q) => q.mjd).filter((m): m is number => typeof m === 'number');
     if (show === 'blink' || show === 'pictures') {
       // a track: the visits of its pass, in the Days scale
@@ -1334,7 +1370,14 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       a.showPass(body.predicted.mjd);
     } else setUp.current = stepKey;
   }, [stepKey, track, anomaly]);
-  const taskPanel = taskView.panel;
+  const taskPanel = leadView.kind ? (
+    <>
+      {leadView.panel}
+      {taskView.panel}
+    </>
+  ) : (
+    taskView.panel
+  );
 
   const cur = open ? (marks.find((m) => m.id === open) ?? null) : null;
   // the open mover mark's checks (its investigation): followed while they run, ended by their verdict
@@ -1758,7 +1801,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const selHeld = heldPlace && a.epochNow != null ? heldAt(known, heldPlace.ra, heldPlace.dec, a.epochNow) : null;
   return {
     selHeld,
-    blind: taskView.blind,
+    blind: blindAny,
     draw,
     pointer: (p) => {
       ptr.current = p;
