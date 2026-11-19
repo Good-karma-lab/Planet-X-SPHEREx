@@ -316,13 +316,27 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
     ]
 
 
+FIND_ROWS_KEEP_S = 20.0  # the whole list of finds is read at most this often (a read of every find took seconds under a lock)
+
+
 def find_rows(st: Any) -> list[dict[str, Any]]:
-    """The machine findings in the Findings page's order (a test may put its own list in `st.task_findings`); 503 without them."""
+    """The machine findings in the Findings page's order (a test may put its own list in `st.task_findings`); 503 without them.
+    Read again after FIND_ROWS_KEEP_S: one task asked for used to read every find three or four times (4–9 s on prod, 19 Nov 2026),
+    and the page gave up waiting. Each caller gets its own copies of the rows."""
     source = getattr(st, "task_findings", None)
-    rows = source() if callable(source) else lead_findings(st)
+    if callable(source):
+        rows = source()
+    else:
+        got: tuple[float, list[dict[str, Any]]] | None = getattr(st, "_task_finds", None)  # on the state: one per app
+        if got is not None and time.monotonic() - got[0] < FIND_ROWS_KEEP_S:
+            rows = got[1]
+        else:
+            rows = lead_findings(st)
+            if rows is not None:
+                st._task_finds = (time.monotonic(), rows)
     if rows is None:
         raise HTTPException(503, "the findings database is not loaded")
-    return list(rows)
+    return [dict(r) for r in rows]
 
 
 CONTROLS_KEEP_S = 120.0  # the hidden finds change only when a catalogue answers: read again after this long
@@ -629,6 +643,9 @@ def make_tasks_router(st: Any) -> APIRouter:
         if kind in ("moves", "red", "anomaly", "finding") and task.get("finding_id"):
             row = find_row(st, task["finding_id"])
             task["fov"] = task_fov(row)  # the whole track in the picture
+            film = ((row or {}).get("data") or {}).get("film")
+            if str(task["finding_id"]).startswith("film:") and isinstance(film, (int, float)):
+                task["film"] = float(film)  # the film its search ran on: the lab plays it (warmed), not a new one at another date
             fp = ((row or {}).get("data") or {}).get("field_params") or {}
             place = track_place(row) if str(task["finding_id"]).startswith("film:") else None
             if place is not None:
@@ -641,7 +658,7 @@ def make_tasks_router(st: Any) -> APIRouter:
             if series is not None:
                 task["series"] = {"id": series, "steps": people.steps_of(series)}
                 if series == "track":
-                    task["pictures"] = people.picture_list(find_row(st, task["finding_id"]))
+                    task["pictures"] = people.picture_list(row)
         elif kind in ASK:
             q, answers = ASK[kind]
             task["question"] = q
