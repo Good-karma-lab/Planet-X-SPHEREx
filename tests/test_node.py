@@ -131,3 +131,31 @@ def test_a_node_sends_what_it_made_since_the_square_began(tmp_path: Path) -> Non
     products, files = node.made_since(store, tmp_path, time.time() - 5)
     assert [p["key"] for p in products] == ["d" * 24] and files == [{"path": "movers/x.json", "text": "{}"}]
     assert node.made_since(store, tmp_path, time.time() + 60) == ([], [])
+
+
+def test_health_says_what_each_node_does(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """/health `nodes`: the square a node holds, its step (from its heartbeat) and its squares today; a square being searched by a
+    node says so on the globe (`by`)."""
+    monkeypatch.setenv("SKY_NODE_SECRET", "k1")
+    st = SimpleNamespace(
+        cfg=SimpleNamespace(store_dir=tmp_path), grid=GridDB(tmp_path / "product.sqlite"), store=Store(tmp_path), findings=None
+    )
+    app = FastAPI()
+    app.include_router(make_node_router(st))
+    c = TestClient(app)
+
+    def post(path: str, payload: dict[str, Any]) -> Any:
+        body = json.dumps(payload).encode()
+        return c.post(path, content=body, headers={"content-type": "application/json", "x-sky-node": node.sign("k1", body)})
+
+    first = post("/api/internal/lease", {"node": "a1"}).json()["square"]
+    post("/api/internal/result", _body("c" * 24, first["id"]))
+    held = post("/api/internal/lease", {"node": "a1"}).json()["square"]
+    assert post("/api/internal/status", {"node": "a1", "sweep": {"state": "searching", "step": "Find Planet X", "per_hour": 2.4}}).json()[
+        "ok"
+    ]
+    got = st.nodes_summary()["a1"]
+    assert got["square"] == held["id"] and got["step"] == "Find Planet X" and got["squares_today"] == 1 and got["finds_today"] == 1
+    assert got["seen_s"] <= 2 and got["state"] == "searching"
+    assert grid.view_of(grid.by_id(held["id"]), st.grid.get(held["id"]), 0)["by"] == "a1"
+    assert "by" not in grid.view_of(grid.by_id(first["id"]), st.grid.get(first["id"]), 0)  # searched: no longer being searched

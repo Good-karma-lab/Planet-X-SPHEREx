@@ -286,6 +286,14 @@ class SweepRunner:
         except Exception as e:  # the lease ends and the main service lends the square again
             return f"not sent: {type(e).__name__}: {e}"[:160]
 
+    async def heartbeat_loop(self) -> None:
+        """A node tells the main service what its sweep is doing, every minute, a square of an hour included (a failure is said
+        nowhere: the next beat tries again)."""
+        while True:
+            with contextlib.suppress(Exception):
+                await asyncio.to_thread(node.call, "/api/internal/status", {"node": node.node_name(), "sweep": self.snapshot()}, 20.0)
+            await asyncio.sleep(60.0)
+
     async def send_late(self) -> None:
         """What finished after a square went back (its Find Planet X searches) is sent again at node.LATE_AFTER_S."""
         keep = []
@@ -326,6 +334,8 @@ class SweepRunner:
 
     # ---- the loop ---------------------------------------------------------------------------------------------------------------
     async def loop(self) -> None:
+        if node.is_node():
+            self._beat_task = asyncio.get_running_loop().create_task(self.heartbeat_loop())
         await asyncio.sleep(120.0)  # the service settles (the warm set, the stock) first
         while True:
             if time.time() - self._last_strip > 3600.0:

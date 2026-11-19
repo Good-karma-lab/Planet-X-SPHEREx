@@ -37,6 +37,15 @@ PRODUCT_KINDS = ("field", "filmsearch", "distant", "deep")  # rows and metas onl
 # again on the main service when someone opens it (a stripped film row would say it is there)
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS node_results (
+  cell_id TEXT NOT NULL,
+  node TEXT NOT NULL,
+  at REAL NOT NULL,
+  finds INTEGER NOT NULL DEFAULT 0,
+  products INTEGER NOT NULL DEFAULT 0,
+  files INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS node_results_at ON node_results(at);
 CREATE TABLE IF NOT EXISTS node_leases (
   cell_id TEXT PRIMARY KEY,
   node TEXT NOT NULL,
@@ -111,6 +120,32 @@ class Leases:
 
     def release(self, cell_id: str) -> None:
         self.db.execute("DELETE FROM node_leases WHERE cell_id = ?", (cell_id,))
+
+    def record(self, cell_id: str, node: str, finds: int, products: int, files: int) -> None:
+        """A square a node sent back (the grid row's own `source` may be rewritten later: this log keeps who searched it)."""
+        self.db.execute("INSERT INTO node_results VALUES (?,?,?,?,?,?)", (cell_id, node, time.time(), finds, products, files))
+
+    def summary(self, status: dict[str, dict[str, Any]], now: float | None = None) -> dict[str, Any]:
+        """{node: {square, since, step, state, seen_s, squares_today, finds_today, squares_all}} for /health (`status`: the heartbeats)."""
+        t = now if now is not None else time.time()
+        day0 = t - (t % 86400.0)
+        out: dict[str, Any] = {}
+        for r in self.db.execute("SELECT node, cell_id, given FROM node_leases ORDER BY given"):
+            out.setdefault(r["node"], {})["square"] = r["cell_id"]
+            out[r["node"]]["since"] = round(r["given"])
+        q = (
+            "SELECT node, SUM(at >= ?) today, SUM(CASE WHEN at >= ? THEN finds ELSE 0 END) finds_today, COUNT(*) n"
+            " FROM node_results GROUP BY node"
+        )
+        for r in self.db.execute(q, (day0, day0)):
+            out.setdefault(r["node"], {}).update(
+                squares_today=int(r["today"] or 0), finds_today=int(r["finds_today"] or 0), squares_all=int(r["n"])
+            )
+        for name, hb in status.items():
+            sw = hb.get("sweep") or {}
+            out.setdefault(name, {}).update(step=sw.get("step"), state=sw.get("state"), seen_s=round(t - float(hb.get("at") or 0)),
+                                            per_hour=sw.get("per_hour"))  # fmt: skip
+        return out
 
 
 def safe_rel(path: str) -> PurePosixPath | None:

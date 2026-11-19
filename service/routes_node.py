@@ -15,6 +15,7 @@ from service.storage import product_db_path
 def make_node_router(st: Any) -> APIRouter:
     r = APIRouter()
     state: dict[str, Any] = {"leases": None, "order": None}
+    st.node_status = {}  # {node: {at, sweep}}: the last heartbeat of each node (this process; /health reads it)
 
     def leases() -> node.Leases:
         if state["leases"] is None:
@@ -79,9 +80,24 @@ def make_node_router(st: Any) -> APIRouter:
         except ValueError as e:
             raise HTTPException(422, str(e)) from e
         await asyncio.to_thread(leases().release, sq)
+        row = body.get("row") or {}
+        await asyncio.to_thread(leases().record, sq, body["node"], int(row.get("finds") or 0), got["products"], got["files"])
         f = getattr(st, "findings", None)
         if f is not None and hasattr(f, "kick"):
             f.kick.set()  # the collector reads the new result files now
         return {"ok": True, **got}
 
+    @r.post("/api/internal/status", include_in_schema=False)
+    async def status(request: Request) -> Any:
+        """A node's heartbeat: what its sweep is doing (shown in /health and on the globe's squares)."""
+        body = await signed(request)
+        st.node_status[body["node"]] = {"at": __import__("time").time(), "sweep": body.get("sweep") or {}}
+        return {"ok": True}
+
+    def nodes_summary() -> dict[str, Any] | None:
+        if not node.secret():
+            return None
+        return leases().summary(getattr(st, "node_status", {}))
+
+    st.nodes_summary = nodes_summary
     return r
