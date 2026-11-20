@@ -5,7 +5,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Mark } from '../../lib/marks';
-import { leadParams } from '../../lib/account';
+import { handedTask, handTask, leadParams, type Task } from '../../lib/account';
 import { clearDo, pendingDo, useSignIn } from './signin';
 
 export type TaskKind = 'cell' | 'finding' | 'moves' | 'red' | 'anomaly' | 'find_again' | 'recentre' | 'bad_picture' | 'second_look';
@@ -254,10 +254,36 @@ export async function takeTask(kind: Takeable, ref?: string | null): Promise<Nex
     if (ref) q.set(kind === 'cell' ? 'cell_id' : 'finding_id', ref);
     const r = await fetch(`/api/tasks/next?${q.toString()}`);
     if (!r.ok) return 'failed';
-    return ((await r.json()) as { task: NextTask | null }).task;
+    const t = ((await r.json()) as { task: NextTask | null }).task;
+    if (t) handTask(t as unknown as Task); // the lab opens it next by its id: the same task, not another one
+    return t;
   } catch {
     return 'failed';
   }
+}
+
+/** The body of the lab's task. A task opened by its id is the one handed over (Findings, the globe and the cabinet took it a moment
+ *  ago: no second task for one click). Else, as before: a bare id is looked up in my tasks; an id with its square or find (a link from
+ *  another tab) and a task named by its kind are taken from the service. null: nothing to show. */
+export async function taskBody(task: LabTask, exposure: string | null): Promise<{ body: NextTask } | { line: string } | null> {
+  if (task.id) {
+    const h = handedTask(task.id);
+    if (h) return { body: h as unknown as NextTask };
+  }
+  const ref = task.kind === 'cell' ? task.cell_id : task.kind === 'bad_picture' ? exposure : task.finding_id;
+  if (task.id && !ref) {
+    try {
+      const r = await fetch('/api/me/tasks');
+      const d = r.ok ? ((await r.json()) as { tasks?: NextTask[] }) : null;
+      const t = d?.tasks?.find((x) => x.id === task.id);
+      return t ? { body: t } : null;
+    } catch {
+      return null;
+    }
+  }
+  const t = await takeTask(task.kind as Takeable, ref);
+  if (t === 'failed' || !t) return { line: t === 'failed' ? 'Tasks did not answer' : 'No task here' };
+  return { body: t };
 }
 
 /** The lab address of a task: its place, the size it is looked at (the service's, else a square 20′ and a find 5′), and the task itself. */
@@ -375,25 +401,12 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     setDone(null);
     if (!task) return;
     let stop = false;
-    const ref = task.kind === 'cell' ? task.cell_id : task.kind === 'bad_picture' ? (a.params['exposure'] ?? null) : task.finding_id;
-    if (task.id && !ref) {
-      void fetch('/api/me/tasks')
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d: { tasks?: NextTask[] } | null) => {
-          const t = d?.tasks?.find((x) => x.id === task.id);
-          if (t && !stop) setBody(t);
-        })
-        .catch(() => {});
-      return () => {
-        stop = true;
-      };
-    }
-    void takeTask(task.kind as Takeable, ref).then((t) => {
-      if (stop) return;
-      if (t === 'failed' || !t) setLine(t === 'failed' ? 'Tasks did not answer' : 'No task here');
+    void taskBody(task, a.params['exposure'] ?? null).then((r) => {
+      if (stop || !r) return;
+      if ('line' in r) setLine(r.line);
       else {
-        setId(t.id);
-        setBody(t);
+        setId(r.body.id);
+        setBody(r.body);
       }
     });
     return () => {

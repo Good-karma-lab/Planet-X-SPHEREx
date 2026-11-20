@@ -3,7 +3,7 @@
 // ("I have looked through this quarter") or a square task's closing answer. Opening a field never counts; a guest never counts.
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { useUser } from '../../lib/account';
+import { handTask, useUser, type Task } from '../../lib/account';
 import { clearDo, pendingDo, useSignIn } from './signin';
 
 export type Quarter = 'NE' | 'NW' | 'SE' | 'SW';
@@ -310,6 +310,7 @@ export function HereSquare({ ra, dec, open }: { ra: number; dec: number; open: (
       const r = await fetch(`/api/tasks/next?${p}`);
       const t = r.ok ? ((await r.json()) as { task: { id: string; ra: number | null; dec: number | null; cell_id: string | null; quarter: string | null } | null }).task : null;
       if (!t || t.ra == null || t.dec == null) return setLine(r.ok ? 'No square is waiting for a look' : 'Tasks did not answer');
+      handTask(t as unknown as Task); // the lab opens it by its id: this task, not a second one
       open({ ra: t.ra.toFixed(5), dec: t.dec.toFixed(5), fov: '10', task: t.id, kind: 'cell', ...(t.cell_id ? { cell: t.cell_id } : {}), ...(t.quarter ? { quarter: t.quarter } : {}) });
     } catch {
       setLine('Tasks did not answer');
