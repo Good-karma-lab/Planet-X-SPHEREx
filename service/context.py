@@ -412,6 +412,8 @@ class CatalogueContext:
             for left in (first, second):
                 if left is not None and not left.done():
                     left.cancel()
+                elif left is not None and not left.cancelled():
+                    left.exception()  # read: a mirror that failed beside the one that answered is no "never retrieved" in the log
         raise err or RuntimeError("no SIMBAD mirror")
 
     async def resolve(self, name: str) -> dict[str, Any] | None:
