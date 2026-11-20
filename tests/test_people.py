@@ -442,12 +442,18 @@ def test_the_finds_list_is_read_once_for_a_while_and_each_caller_gets_copies(tmp
     b = routes_tasks.find_rows(st)
     assert len(reads) == 1 and b[0]["status"] != "changed by a caller" and b[0]["finding_id"] == "film:lead"
     # kept long enough: the kept list is handed out at once and read again in the background, once however many callers come
-    st._task_finds = (st._task_finds[0] - routes_tasks.FIND_ROWS_KEEP_S - 1, st._task_finds[1])
+    # (an unchanged database is kept on: its age is renewed; a changed one is read: test_the_tasks_controls_and_quarters_read_the_finds_once)
+    st._task_finds = (st._task_finds[0] - routes_tasks.FIND_ROWS_KEEP_S - 1, *st._task_finds[1:])
     old_at = st._task_finds[0]
     assert routes_tasks.find_rows(st)[0]["finding_id"] == "film:lead"
     routes_tasks.find_rows(st)
     st._task_finds_thread.join(5)
-    assert len(reads) == 2 and st._task_finds[0] > old_at
+    assert len(reads) == 1 and st._task_finds[0] > old_at
+    st._task_finds_read -= routes_tasks.FIND_ROWS_MAX_S  # and after FIND_ROWS_MAX_S it is read anyway
+    st._task_finds = (st._task_finds[0] - routes_tasks.FIND_ROWS_KEEP_S - 1, *st._task_finds[1:])
+    routes_tasks.find_rows(st)
+    st._task_finds_thread.join(5)
+    assert len(reads) == 2
 
 
 def test_a_failed_background_read_of_the_finds_keeps_the_list_there_was(
@@ -455,7 +461,7 @@ def test_a_failed_background_read_of_the_finds_keeps_the_list_there_was(
 ) -> None:
     from service import routes_tasks
 
-    st = SimpleNamespace(_task_finds=(0.0, [{"finding_id": "film:old"}]))
+    st = SimpleNamespace(_task_finds=(0.0, [{"finding_id": "film:old", "_listed": True}], None), _task_finds_read=0.0)
 
     def broken(s: Any, status: str | None = None) -> list[dict[str, Any]]:
         raise sqlite3.OperationalError("database is locked")
@@ -463,13 +469,13 @@ def test_a_failed_background_read_of_the_finds_keeps_the_list_there_was(
     monkeypatch.setattr(routes_tasks, "lead_findings", broken)
     assert routes_tasks.find_rows(st) == [{"finding_id": "film:old"}]
     st._task_finds_thread.join(5)
-    assert st._task_finds == (0.0, [{"finding_id": "film:old"}]) and st._task_finds_busy is False
+    assert st._task_finds == (0.0, [{"finding_id": "film:old", "_listed": True}], None) and st._task_finds_busy is False
     assert "could not be read again" in caplog.text
     # the lock is free again: the next caller starts the next read
-    monkeypatch.setattr(routes_tasks, "lead_findings", lambda s, status=None: [{"finding_id": "film:new"}])
+    monkeypatch.setattr(routes_tasks, "lead_findings", lambda s, status=None: [{"finding_id": "film:new", "_listed": True}])
     routes_tasks.find_rows(st)
     st._task_finds_thread.join(5)
-    assert st._task_finds[1] == [{"finding_id": "film:new"}]
+    assert routes_tasks.find_rows(st) == [{"finding_id": "film:new"}]
 
 
 def test_a_track_task_names_the_film_its_search_ran_on(site: tuple[FastAPI, Any]) -> None:
@@ -534,3 +540,127 @@ def test_a_node_without_findings_reads_no_list_at_the_start_and_says_no_error(
     monkeypatch.setattr(routes_tasks, "lead_findings", no_table)
     assert routes_tasks.prime_find_rows(SimpleNamespace(), tries=3, wait_s=0.0) is False
     assert "Traceback" not in caplog.text and not [r for r in caplog.records if r.exc_info]
+
+
+# --------------------------------------------------------------------------------------- Release 79: the answer counts, finds spread
+
+
+def test_a_series_answer_is_a_check_of_the_find_my_findings_and_the_order_see_it(site: tuple[FastAPI, Any]) -> None:
+    """The answer of a question series wrote only its own table: My findings, "Viewed by me", "checked by" and the order of the
+    finds handed out read acc_credits `checked`, and saw nothing (20 Nov 2026). "Can't tell" is no check, as before."""
+    app, st = site
+    user = _people(app)
+    ann = user("ann")
+    t = ann.get("/api/tasks/next", params={"kind": "finding", "finding_id": "film:2"}).json()["task"]
+    assert ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["some", "done", "dot"], "pictures": [3]}).status_code == 200
+    db = accounts.get(st).db
+    assert db.check_counts() == {"film:2": 1}
+    mine = ann.get("/api/me/findings").json()
+    rows = mine.get("findings", mine) if isinstance(mine, dict) else mine
+    assert any(r["finding_id"] == "film:2" and r["role"] == "checked" and r["result"] == "partial" for r in rows)
+    assert [c["name"] for c in db.credits_of(["film:2"])["film:2"]] == ["Ann"]
+    # answered twice (the task closed again): one check
+    ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["no"], "pictures": []})
+    assert db.check_counts() == {"film:2": 1}
+
+
+def test_two_people_in_a_row_are_given_different_finds(site: tuple[FastAPI, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    """ "Check a finding" handed every guest and every new person the same top find (the order by checks stood still, and among
+    equals it was the page's first). A random one of the first FINDING_SPREAD equal ones; a find somebody checked goes below."""
+    import random
+
+    from service import routes_tasks
+
+    app, st = site
+    user = _people(app)
+    got = set()
+    for seed in range(10):
+        monkeypatch.setattr(routes_tasks, "RNG", random.Random(seed))
+        got.add(TestClient(app).get("/api/tasks/next", params={"kind": "finding"}).json()["task"]["finding_id"])
+    assert len(got) > 1 and got <= {"film:1", "film:2", "mover:1", "peak:1"}  # the strong kinds' turn, spread
+    # a find checked by one person goes below the unchecked ones of its group
+    monkeypatch.setattr(routes_tasks, "RNG", random.Random(0))
+    for name in ("ann", "bob", "cid"):
+        c = user(name)
+        t = c.get("/api/tasks/next", params={"kind": "finding"}).json()["task"]
+        c.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["no"], "pictures": []})
+    checked = accounts.get(st).db.check_counts()
+    assert sum(checked.values()) == 3 and len(checked) == 3  # three people, three different finds
+    nxt = user("dee").get("/api/tasks/next", params={"kind": "finding"}).json()["task"]["finding_id"]
+    assert nxt not in checked
+
+
+def test_the_tasks_controls_and_quarters_read_the_finds_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One whole read of the finds for the tasks, the control objects and the promising quarters (each read it apart: three whole
+    reads every two minutes and one every minute held the event loop 2–4 s on prod, 20 Nov 2026); an unchanged database is not
+    read again when the list is old, a changed one is."""
+    from service import routes_tasks
+    from service.findings import FindingsDB
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([
+        {**base, "id": "peak:below", "kind": "peak", "data": {"peak": {"ok": False}}},
+        {**base, "id": "film:lead", "kind": "film", "ra": 61.0, "data": {}},
+    ])  # fmt: skip
+    db.db.commit()
+    st = SimpleNamespace(findings=SimpleNamespace(db=db))
+    reads: list[Any] = []
+    real = routes_tasks.lead_findings
+    monkeypatch.setattr(routes_tasks, "lead_findings", lambda s, status=None: reads.append(status) or real(s, status))
+    monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
+    assert [r["finding_id"] for r in routes_tasks.find_rows(st)] == ["film:lead"]
+    assert [r["finding_id"] for r in routes_tasks.control_rows(st)] == ["peak:below"]
+    routes_tasks.promising_quarters(st)
+    assert reads == ["any"] and all("_listed" not in r for r in routes_tasks.find_rows(st) + routes_tasks.control_rows(st))
+    # old, the database unchanged: not read again
+    st._task_finds = (st._task_finds[0] - routes_tasks.FIND_ROWS_KEEP_S - 1, *st._task_finds[1:])
+    routes_tasks.find_rows(st)
+    st._task_finds_thread.join(5)
+    assert reads == ["any"] and time_now_ok(st)
+    # old, a find added: read again
+    db.write_finds([
+        {**base, "id": "peak:below", "kind": "peak", "data": {"peak": {"ok": False}}},
+        {**base, "id": "film:lead", "kind": "film", "ra": 61.0, "data": {}},
+        {**base, "id": "film:new", "kind": "film", "ra": 62.0, "data": {}},
+    ])  # fmt: skip
+    db.db.commit()
+    st._task_finds = (st._task_finds[0] - routes_tasks.FIND_ROWS_KEEP_S - 1, *st._task_finds[1:])
+    routes_tasks.find_rows(st)
+    st._task_finds_thread.join(5)
+    assert reads == ["any", "any"] and {r["finding_id"] for r in routes_tasks.find_rows(st)} == {"film:lead", "film:new"}
+
+
+def time_now_ok(st: Any) -> bool:
+    import time
+
+    return time.monotonic() - st._task_finds[0] < 5
+
+
+def test_the_findings_query_reads_the_tables_once_while_the_database_is_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import findings
+    from service.findings import FindingsDB, query
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([{**base, "id": "film:a", "kind": "film", "data": {"x": 1}}])
+    db.db.commit()
+    reads = []
+    real = FindingsDB.idents_of
+    monkeypatch.setattr(FindingsDB, "idents_of", lambda self, ids: reads.append(1) or real(self, ids))
+    a = query(db, None, "any", None, 100, 0)
+    a["finds"][0]["data"]["x"] = 99  # a caller's change stays its own
+    a["finds"][0]["idents"].append({"catalogue": "mine"})
+    b = query(db, None, "any", None, 100, 0)
+    assert len(reads) == 1 and b["finds"][0]["data"] == {"x": 1} and all(i["catalogue"] != "mine" for i in b["finds"][0]["idents"])
+    fa, fb = {**base, "id": "film:a", "kind": "film", "data": {"x": 1}}, {**base, "id": "film:b", "kind": "film", "ra": 61.0, "data": {}}
+    db.write_finds([fa, fb])
+    db.db.commit()
+    c = query(db, None, "any", None, 100, 0)
+    assert len(reads) == 2 and {f["id"] for f in c["finds"]} == {"film:a", "film:b"}
+    # another connection's commit is seen too (the sweep writes through its own)
+    other = FindingsDB(tmp_path / "findings.db", writer=True)
+    other.write_finds([fa, fb, {**base, "id": "film:c", "kind": "film", "ra": 62.0, "data": {}}])
+    other.db.commit()
+    assert {f["id"] for f in query(db, None, "any", None, 100, 0)["finds"]} == {"film:a", "film:b", "film:c"} and len(reads) == 3
+    assert findings.read_base is not None

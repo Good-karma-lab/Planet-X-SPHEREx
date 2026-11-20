@@ -225,6 +225,8 @@ def test_cell_tasks_walk_the_least_viewed_squares(site: tuple[FastAPI, _State, _
     from service import routes_tasks
 
     monkeypatch.setattr(routes_tasks, "SPREAD", 1)
+    monkeypatch.setattr(routes_tasks, "FINDING_SPREAD", 1)
+    monkeypatch.setattr(routes_tasks, "BUSY_QUARTER_S", 0.0)  # the order itself: a quarter the guest just took is not kept from the others
     app, st, mail = site
     guest = _client(app)
     assert guest.get("/api/tasks/next", params={"kind": "cell"}).status_code == 503  # no grid yet
@@ -269,7 +271,12 @@ def test_cell_tasks_walk_the_least_viewed_squares(site: tuple[FastAPI, _State, _
     assert bob.post(f"/api/me/tasks/{t['id']}/done", json={"result": "nothing", "mark_ids": []}).json()["task"]["state"] == "done"
 
 
-def test_finding_tasks_and_the_credit(site: tuple[FastAPI, _State, _Mail]) -> None:
+def test_finding_tasks_and_the_credit(site: tuple[FastAPI, _State, _Mail], monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import routes_tasks
+
+    monkeypatch.setattr(
+        routes_tasks, "FINDING_SPREAD", 1
+    )  # the order itself (the spread: test_two_people_in_a_row_are_given_different_finds)
     app, st, mail = site
     c = _sign_in(app, mail)
     assert c.get("/api/tasks/next", params={"kind": "finding"}).status_code == 503  # no findings database
@@ -292,7 +299,12 @@ def test_finding_tasks_and_the_credit(site: tuple[FastAPI, _State, _Mail]) -> No
     assert [(f["finding_id"], f["role"], f["status"]) for f in mine] == [("mover:2", "checked", "in_review")]
 
 
-def test_finding_tasks_give_the_strong_kinds_before_the_many_red_sources(site: tuple[FastAPI, _State, _Mail]) -> None:
+def test_finding_tasks_give_the_strong_kinds_before_the_many_red_sources(
+    site: tuple[FastAPI, _State, _Mail], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from service import routes_tasks
+
+    monkeypatch.setattr(routes_tasks, "FINDING_SPREAD", 1)  # the order itself, nobody spread over the first few equal ones
     app, st, mail = site
     c = _sign_in(app, mail)
     row = {"field_key": "k", "ra": 1.0, "dec": 2.0, "status": "unexplained"}

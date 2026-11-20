@@ -343,6 +343,14 @@ class AccountsDB:
                 out.setdefault(r["cell_id"], set()).update({r["quarter"]} if r["quarter"] else {"NW", "NE", "SW", "SE"})
         return out
 
+    def quarters_taken_since(self, since: float) -> set[tuple[str, str]]:
+        """{(square, quarter)} anybody (a guest too) took a task for since `since` (epoch seconds)."""
+        rows = self._conn().execute(
+            "SELECT cell_id, quarter FROM acc_tasks WHERE kind='cell' AND cell_id IS NOT NULL AND quarter IS NOT NULL AND created>=?",
+            (since,),
+        )
+        return {(r["cell_id"], r["quarter"]) for r in rows}
+
     def task_refs(self, user_id: str, kind: str) -> set[str]:
         """The squares (or findings) this user already has a task for."""
         col = "cell_id" if kind == "cell" else "finding_id"

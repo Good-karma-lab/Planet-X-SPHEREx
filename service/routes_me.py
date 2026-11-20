@@ -409,6 +409,10 @@ def make_me_router(st: Any) -> APIRouter:
             raise HTTPException(422, str(e)) from None
         acc.db.claim_task(task_id, u["id"])
         done = acc.db.finish_task(task_id, result, body.mark_ids)
+        if result != people.CANT_TELL and task["finding_id"]:
+            # the person checked this find: My findings, "Viewed by me", "checked by" and the order of the finds handed out read it
+            # (the answer of a series wrote only its own table: none of them saw it, 20 Nov 2026)
+            acc.db.credit(task["finding_id"], u["id"], "checked", result)
         return {"task": done, "points": points, "achievements": scoring.get(st, acc.db).award(u["id"]),
                 "result": {"id": result, "label": people.label_of(series, result)},
                 "agreement": agreement_of(acc, series, task["finding_id"])}  # fmt: skip

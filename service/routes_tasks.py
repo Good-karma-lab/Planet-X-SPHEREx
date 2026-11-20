@@ -165,6 +165,8 @@ READY_SCAN = 40  # quarters looked at for a built one before a cold one is given
 SPREAD = 8  # people are given a random one of the first SPREAD quarters (built ones first), so not everyone gets the same square
 PROMISING_TTL_S = 60.0
 # a square task this old is not handed back, nor its square continued: the person moved on (it was given again 11 h later)
+BUSY_QUARTER_S = 30 * 60.0  # a quarter somebody took a task for this recently is not given to another (the user, 20 Nov 2026)
+FINDING_SPREAD = 4  # a finding task is a random one of the first few equal leads, so not everyone is given the same find
 OPEN_TASK_KEEP_S = 2 * 3600.0  # the promising quarters are worked out again at most this often
 _promising: dict[str, Any] = {"at": 0.0, "rows": [], "st": None}  # kept for one service state (a test's app never sees another's)
 
@@ -189,7 +191,7 @@ def promising_quarters(st: Any) -> list[dict[str, Any]]:
     try:
         from service.findings import PROMISING_KINDS
 
-        finds = lead_findings(st) or []
+        finds = [r for r in (all_rows(st) or []) if r.get("_listed")]
     except Exception:
         finds = []
     if g is not None:
@@ -302,6 +304,9 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
         aside, raised = {}, {}
     clips = getattr(st, "clips", None)
     body = query(f.db, None, status, None, 100000, 0, aside=aside, raised=raised, seen=getattr(clips, "seen", None))
+    from service.findings import HIDDEN
+
+    listed = {x["id"] for x in body["finds"] if x["status"] not in HIDDEN}  # in the default list (status None), as its filter decides
     idn = getattr(st, "fpx_known", None)
     if idn is not None:  # a Planet X peak JPL names (or a known body's echo) is known here too, as on the Findings page: no lead
         with contextlib.suppress(Exception):
@@ -318,24 +323,58 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             "visible": x.get("visible"),
             "promise": x.get("promise") or 0,
             **({"raised": x["people_raised"]} if "people_raised" in x else {}),
+            **({"_listed": x["id"] in listed} if status == "any" else {}),
         }
         for x in body["finds"]
     ]
 
 
-# the whole list of finds is read again in the background when older than this: the order of the leads changes slowly, and a read (about
-# a second on prod) slows the calls that meet it
+# the whole list of finds (the hidden ones too) is read again in the background when older than this: the order of the leads changes
+# slowly, and a read (1–4 s on prod) holds the event loop. One list for the tasks, the control objects and the promising quarters: each
+# read it apart before (three whole reads every two minutes and one every minute, 20 Nov 2026)
 FIND_ROWS_KEEP_S = 120.0
+FIND_ROWS_MAX_S = 900.0  # an unchanged database is not read again for this long (what the JPL names and the clips' measures change)
 _FIND_ROWS_LOCK = threading.Lock()  # one read of the whole list at a time (the first, in the foreground; or one in the background)
 log = logging.getLogger("sky.tasks")
 
 
-def _refresh_finds(st: Any) -> None:
-    """One background read of the whole list; a failed read keeps the list there was (and says so in the log)."""
+def _rows_sig(st: Any) -> tuple[Any, ...] | None:
+    """What the list is read from: the findings database's changes and what people set aside or raised (read as lead_findings reads
+    them: none where they cannot be read). None: not known."""
+    f = getattr(st, "findings", None)
+    if f is None:
+        return None
     try:
-        rows = lead_findings(st)
-        if rows is not None:
-            st._task_finds = (time.monotonic(), rows)
+        changes = f.db.changes()
+    except Exception:
+        return None
+    try:
+        from service.accounts import field_people, people
+
+        aside, raised = field_people.set_aside(st), people.raised(st)
+    except Exception:
+        aside, raised = {}, {}
+    return (changes, tuple(sorted((k, repr(v)) for k, v in aside.items())), tuple(sorted(raised.items())))
+
+
+def _read_rows(st: Any) -> tuple[float, list[dict[str, Any]], tuple[Any, ...] | None] | None:
+    sig = _rows_sig(st)
+    rows = lead_findings(st, "any")
+    return None if rows is None else (time.monotonic(), rows, sig)
+
+
+def _refresh_finds(st: Any) -> None:
+    """One background read of the whole list; a failed read keeps the list there was (and says so in the log). An unchanged database
+    (and the same set-aside and raised finds) is not read again but every FIND_ROWS_MAX_S."""
+    try:
+        old = getattr(st, "_task_finds", None)
+        sig = _rows_sig(st)
+        if old is not None and sig is not None and old[2] == sig and time.monotonic() - float(st._task_finds_read) < FIND_ROWS_MAX_S:
+            st._task_finds = (time.monotonic(), old[1], sig)
+        else:
+            got = _read_rows(st)
+            if got is not None:
+                st._task_finds, st._task_finds_read = got, got[0]
     except Exception:
         log.exception("the list of finds could not be read again: the one read at %s stays", getattr(st, "_task_finds", (None,))[0])
     finally:
@@ -343,36 +382,43 @@ def _refresh_finds(st: Any) -> None:
         _FIND_ROWS_LOCK.release()
 
 
+def all_rows(st: Any) -> list[dict[str, Any]] | None:
+    """Every machine finding (the hidden ones too) in the Findings page's order, each with `_listed` (in the default list). Kept and
+    handed out at once; older than FIND_ROWS_KEEP_S it is read again in the background (one read at a time), so no caller waits for it
+    but the first after a start. None when the findings database is not loaded. The rows are shared: do not change them."""
+    got: tuple[float, list[dict[str, Any]], Any] | None = getattr(st, "_task_finds", None)  # on the state: one per app
+    if got is None:
+        with _FIND_ROWS_LOCK:  # the first read: the callers that come meanwhile wait for it and take it
+            got = getattr(st, "_task_finds", None)
+            if got is None:
+                got = _read_rows(st)
+                if got is not None:
+                    st._task_finds, st._task_finds_read = got, got[0]
+        return got[1] if got is not None else None
+    stale = time.monotonic() - got[0] >= FIND_ROWS_KEEP_S and not getattr(st, "_task_finds_busy", False)
+    if stale and _FIND_ROWS_LOCK.acquire(blocking=False):
+        st._task_finds_busy = True
+        t = threading.Thread(target=_refresh_finds, args=(st,), name="task-finds", daemon=True)
+        st._task_finds_thread = t
+        t.start()
+    return got[1]
+
+
+def _own(r: dict[str, Any]) -> dict[str, Any]:
+    return {k: v for k, v in r.items() if k != "_listed"}
+
+
 def find_rows(st: Any) -> list[dict[str, Any]]:
-    """The machine findings in the Findings page's order (a test may put its own list in `st.task_findings`); 503 without them.
-    The list is kept and handed out at once; older than FIND_ROWS_KEEP_S it is read again in the background (one read at a time), so
-    no caller waits for it but the first after a start. One task asked for used to read every find three or four times (4–9 s on prod,
-    19 Nov 2026), then the caller after each expiry paid the whole read (1.4 s on the machine, 3.4 s from outside). Each caller gets its
-    own copies of the rows."""
+    """The machine findings of the default list in the Findings page's order (a test may put its own list in `st.task_findings`); 503
+    without them. From all_rows: one task asked for used to read every find three or four times (4–9 s on prod, 19 Nov 2026). Each caller
+    gets its own copies of the rows."""
     source = getattr(st, "task_findings", None)
     if callable(source):
-        rows = source()
-    else:
-        got: tuple[float, list[dict[str, Any]]] | None = getattr(st, "_task_finds", None)  # on the state: one per app
-        if got is None:
-            with _FIND_ROWS_LOCK:  # the first read: the callers that come meanwhile wait for it and take it
-                got = getattr(st, "_task_finds", None)
-                if got is None:
-                    rows0 = lead_findings(st)
-                    if rows0 is not None:
-                        st._task_finds = got = (time.monotonic(), rows0)
-            rows = got[1] if got is not None else None
-        else:
-            rows = got[1]
-            stale = time.monotonic() - got[0] >= FIND_ROWS_KEEP_S and not getattr(st, "_task_finds_busy", False)
-            if stale and _FIND_ROWS_LOCK.acquire(blocking=False):
-                st._task_finds_busy = True
-                t = threading.Thread(target=_refresh_finds, args=(st,), name="task-finds", daemon=True)
-                st._task_finds_thread = t
-                t.start()
+        return [dict(r) for r in source()]
+    rows = all_rows(st)
     if rows is None:
         raise HTTPException(503, "the findings database is not loaded")
-    return [dict(r) for r in rows]
+    return [_own(r) for r in rows if r.get("_listed")]
 
 
 def prime_find_rows(st: Any, tries: int = 60, wait_s: float = 5.0) -> bool:
@@ -396,9 +442,6 @@ def prime_find_rows(st: Any, tries: int = 60, wait_s: float = 5.0) -> bool:
     return False
 
 
-CONTROLS_KEEP_S = 120.0  # the hidden finds change only when a catalogue answers: read again after this long
-
-
 def control_rows(st: Any) -> list[dict[str, Any]]:
     """The finds the default list hides (a star's residual, a galaxy, below the bar, a halo, a blend) as control objects of the
     question series: their right answer is known (people.CONTROL_EXPECT by their stage, "artefact"), and their stage keeps them
@@ -411,13 +454,8 @@ def control_rows(st: Any) -> list[dict[str, Any]]:
         return []  # a test's own list of finds stands for the whole pool
     from service.findings import HIDDEN
 
-    got: tuple[float, list[dict[str, Any]]] | None = getattr(st, "_task_controls", None)  # on the state: one per app
-    if got is not None and time.monotonic() - got[0] < CONTROLS_KEEP_S:
-        return got[1]
     hidden = set(HIDDEN) - {"set_aside"}
-    rows = [r for r in (lead_findings(st, "any") or []) if r.get("status") in hidden]
-    st._task_controls = (time.monotonic(), rows)
-    return rows
+    return [_own(r) for r in (all_rows(st) or []) if r.get("status") in hidden]
 
 
 def find_row(st: Any, finding_id: str) -> dict[str, Any] | None:
@@ -588,7 +626,13 @@ def make_tasks_router(st: Any) -> APIRouter:
         # the best leads (Findings' Promising), the most promising first, never a famous target's square
         # for a newcomer; then the stock's order below
         searched = {r["cell_id"]: r for r in rows}
-        pq = [p for p in promising_quarters(st) if p["cell_id"] in searched and p["quarter"] not in taken.get(p["cell_id"], set())]
+        # a quarter somebody else took in the last BUSY_QUARTER_S is not given: a crowd of newcomers is spread over the leads' quarters
+        # instead of all looking at the top one (the user's decision for the launch, 20 Nov 2026)
+        busy = acc.db.quarters_taken_since(time.time() - BUSY_QUARTER_S)
+        pq = [
+            p for p in promising_quarters(st)
+            if p["cell_id"] in searched and p["quarter"] not in taken.get(p["cell_id"], set()) and (p["cell_id"], p["quarter"]) not in busy
+        ]  # fmt: skip
         if pq:
             seen_q = quarters_viewed(acc, list({p["cell_id"] for p in pq}))
             fresh = newcomer(acc, user_id)
@@ -627,6 +671,7 @@ def make_tasks_router(st: Any) -> APIRouter:
         # stock: a random one of the first SPREAD built quarters (else of the first SPREAD open ones), not everyone the same
         if newcomer(acc, user_id):
             order = [o for o in order if o[3]["cell_id"] not in famous_cells()] or order
+        order = [o for o in order if (o[3]["cell_id"], o[4]) not in busy] or order  # nobody else's quarter of the last half hour
         ready = [(r, q) for _, _, _, r, q in order[:READY_SCAN] if qs.ready(r["cell_id"], q)]
         pool = ready[:SPREAD] or [(r, q) for _, _, _, r, q in order[:SPREAD]]
         if not pool:
@@ -652,10 +697,19 @@ def make_tasks_router(st: Any) -> APIRouter:
         seen = acc.db.task_refs(user_id, "finding") if user_id else set()
         checked = acc.db.check_counts()
         leads = [r for r in rows if r.get("status") in LEADS and r["finding_id"] not in seen]
+
         # a find people raised first, then the strong kinds before the many red sources and anomalies (finding_group), then the
         # least checked, then the most promising; stable: the page's order among the equal
-        leads.sort(key=lambda r: ("raised" not in r, finding_group(r), checked.get(r["finding_id"], 0), -int(r.get("promise") or 0)))
-        return leads[0] if leads else None
+        def rank(r: dict[str, Any]) -> tuple[bool, Any, int]:
+            return ("raised" not in r, finding_group(r), checked.get(r["finding_id"], 0))
+
+        leads.sort(key=lambda r: (*rank(r), -int(r.get("promise") or 0)))
+        if not leads:
+            return None
+        # a random one of the first FINDING_SPREAD equal ones (raised alike, the same group, as many checks): the order alone handed
+        # everyone the same find (20 Nov 2026)
+        top = [r for r in leads[:FINDING_SPREAD] if rank(r) == rank(leads[0])]
+        return RNG.choice(top)
 
     def next_judged(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
         """A question series (spec §5e): moves (tracks, slow movers, Planet X peaks), red, anomaly."""
