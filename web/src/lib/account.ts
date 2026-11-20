@@ -238,7 +238,43 @@ async function syncMarks(): Promise<void> {
 export async function nextTask(kind: 'cell' | 'finding', ref?: string): Promise<Task | null> {
   const q = new URLSearchParams({ kind });
   if (ref) q.set(kind === 'cell' ? 'cell_id' : 'finding_id', ref);
-  return (await api<{ task: Task | null }>(`/api/tasks/next?${q}`)).task;
+  const t = (await api<{ task: Task | null }>(`/api/tasks/next?${q}`)).task;
+  if (t) handTask(t);
+  return t;
+}
+
+// A task taken here and opened in the lab by its id is handed over as it is: the lab does not ask the service for another one (one
+// "Check this finding" is one task). Kept in memory and, for a reload of the same tab, in sessionStorage (the last HANDED_KEEP).
+const HANDED_KEY = 'sky-handed-tasks';
+const HANDED_KEEP = 20;
+const handed = new Map<string, Task>();
+
+function handedStore(): Record<string, Task> {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(HANDED_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, Task>) : {};
+  } catch {
+    return {};
+  }
+}
+
+/** Keep a task taken from the service for the lab that opens it next. */
+export function handTask(t: Task): void {
+  handed.delete(t.id);
+  handed.set(t.id, t);
+  while (handed.size > HANDED_KEEP) handed.delete(handed.keys().next().value as string);
+  try {
+    const all = { ...handedStore(), [t.id]: t };
+    const ids = Object.keys(all).slice(-HANDED_KEEP);
+    globalThis.sessionStorage?.setItem(HANDED_KEY, JSON.stringify(Object.fromEntries(ids.map((i) => [i, all[i]]))));
+  } catch {
+    /* the memory copy is enough within the page */
+  }
+}
+
+/** The task handed over under this id (taken by Findings, the globe or the cabinet), or null. */
+export function handedTask(id: string): Task | null {
+  return handed.get(id) ?? handedStore()[id] ?? null;
 }
 
 /** Close a task (needs a signed-in user). result: nothing | marks for a square; moves | artefact | known for a finding. */

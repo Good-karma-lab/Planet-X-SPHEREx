@@ -40,11 +40,15 @@ test('1. a guest signs in by the e-mail link (dev mode)', async () => {
 });
 
 let findingId = '';
+let taskAsks = 0; // GET /api/tasks/next from the click on "Check this finding" on: one click is one task
 
 test('2. Findings: "Check this finding" opens the lab with the task', async () => {
   await page.getByTestId('nav-findings').click();
   const go = page.getByRole('link', { name: 'Check this finding' }).first();
   await expect(go).toBeVisible({ timeout: 30_000 });
+  page.on('request', (r) => {
+    if (r.method() === 'GET' && r.url().includes('/api/tasks/next')) taskAsks++;
+  });
   // the list is still filling in while its first cards show: a click that lands while it moves is made again
   await expect(async () => {
     if (!/#\/lab\?/.test(page.url())) await go.click({ timeout: 3000 });
@@ -68,6 +72,7 @@ test('3. the lab shows the task panel for that finding: the first question of it
   await expect(page.getByTestId('task-answer-not_sure')).toBeVisible();
   await expect(page.getByTestId('task-line')).toContainText(/Question 1 · up to \d/);
   await expect(page.getByTestId('task-missed')).toBeVisible();
+  expect(taskAsks).toBe(1); // Findings took the task; the lab opened that one and asked for no other
   await shot('3-task-panel');
 });
 
