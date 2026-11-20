@@ -989,8 +989,13 @@ input[type='range']::-moz-range-thumb {
   width: 100%;
   justify-content: center;
 }
+/* a main button that cannot be pressed yet looks off, like any other (its glow made "Done" look ready: test of 20 Nov, S4) */
 .btn.primary:disabled {
-  opacity: 0.55;
+  opacity: 0.5;
+  background: rgba(255, 255, 255, 0.03);
+  border-color: var(--edge);
+  color: var(--muted);
+  box-shadow: none;
 }
 .searches {
   display: flex;
@@ -2468,3 +2473,8 @@ input[type='range']::-moz-range-thumb {
 .missing h1 { font-size: 30px; line-height: 1.15; margin: 12px 0 10px; }
 .missing p { color: var(--muted); margin: 0 0 22px; }
 .missing-go { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+/* why a task's "Done" is off: the line under the pictures to tap */
+.taskpanel .tp-need {
+  color: #ffd27a;
+  font-size: 12px;
+}

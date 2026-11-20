@@ -4,7 +4,7 @@ import { HereSquare, useSquareLook } from './lab/square';
 import { FindStatus, rateWord, useFindRecord } from './lab/passport';
 import { SearchMark, SearchRow, searchingLine, useRetry, type SearchInfo } from './lab/progress';
 import type { ComponentChildren } from 'preact';
-import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import { aim } from '../lib/aim';
 import { FieldClient, mjdToDate, type FieldMeta, type PassMeta } from '../lib/field';
 import { idleLoop } from '../lib/idle';
@@ -881,6 +881,20 @@ export function Lab({ route }: { route: Route }) {
     v.querySelectorAll('.fstatus, .fbands').forEach((e) => ro?.observe(e));
     return () => ro?.disconnect();
   }, [valid, view, film, time, bandsWait]);
+  // the room a sheet at rest has under the picture at its full width and the playback bar (phones, upright tablets): the sheet at
+  // rest takes that room, and where a task is higher, only its question and answers (the rest when it is pulled up). The sheet at
+  // rest was as high as the whole task, and the picture got what was left: 205 px of 360 on a phone, 551 of 642 on a tablet (20 Nov)
+  const sheetRoom = useCallback(() => {
+    const st = stageRef.current;
+    const bar = document.querySelector('.lab .tbar') as HTMLElement | null;
+    const panel = document.querySelector('.lab .panel') as HTMLElement | null;
+    if (!st || !bar || !panel) return 0;
+    const s = st.getBoundingClientRect();
+    const b = bar.getBoundingClientRect();
+    const side = Math.floor(st.clientWidth);
+    const gap = Math.max(0, b.top - s.bottom);
+    return Math.floor(panel.getBoundingClientRect().bottom - (s.top + side + gap + b.height));
+  }, []);
   // the picture is always square and as large as the free space allows
   useLayoutEffect(() => {
     const el = stageRef.current;
@@ -4273,6 +4287,8 @@ export function Lab({ route }: { route: Route }) {
           <SheetGrip
             peek=".taskpanel, .sqlook, .ptabs"
             under=".lab .tbar"
+            room={sheetRoom}
+            need=".ptabs, .taskpanel .tp-ask, .taskpanel .tp-tree, .taskpanel .tp-btns, .taskpanel .tp-pics, .taskpanel .tp-need, .tp-stack .tp-head, .sqlook"
             label="Lab panel"
             resetKey={`${p['ra']},${p['dec']},${fov},${p['task'] ?? ''},${p['finding'] ?? ''}`}
           />

@@ -2459,8 +2459,8 @@
 /* ----- phones: a task's example picture belongs to the sheet pulled up; at rest the task is its question, one line and its
    answers, so that the lab's own picture keeps its size ----- */
 @media (max-width: 599.98px) and (min-height: 480px) {
-  :root .lab .panel[data-detent='peek'] .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done):not(.tp-pics),
-  :root .lab .panel:not([data-detent]) .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done):not(.tp-pics) {
+  :root .lab .panel[data-detent='peek'] .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done):not(.tp-pics):not(.tp-need),
+  :root .lab .panel:not([data-detent]) .taskpanel > :not(.tp-head):not(.tp-ask):not(.tp-line):not(.tp-btns):not(.tp-tree):not(.tp-done):not(.tp-pics):not(.tp-need) {
     display: none;
   }
   :root .taskpanel .tp-tree,
@@ -2792,9 +2792,10 @@
   }
 }
 
-/* ----- phones: the globe's first row is four: search (the catalogue), Give me a square, Layers ▾, Coverage; the sky layers, the
-   projection, the camera and the aim fields open under it from "Layers" (mobile review 19 Nov) ----- */
-@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px) {
+/* ----- phones and tablets: the globe's first row is four: search (the catalogue), Give me a square, Layers ▾, Coverage; the sky
+   layers, the projection, the camera and the aim fields open under it from "Layers" (mobile review 19 Nov; on a tablet the aim
+   fields were past the right edge in a row that slid sideways, test of 20 Nov, M14) ----- */
+@media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 1279.98px) and (min-height: 480px) {
   :root .map-ui.map-bar {
     padding-left: 62px;
   }
@@ -2862,5 +2863,102 @@
   }
   :root .map-ui.map-bar.layers-open > .aimrow {
     order: 5;
+    flex-wrap: wrap;
+    max-width: 100%;
+    row-gap: 6px;
+  }
+}
+
+/* =====================================================================================================================
+   THE LAB WITH A TASK, at rest (exploratory test of 20 Nov: S1, S2, M12). The sheet at rest is the room under the picture at its
+   full width (ui/Sheet.tsx `room`, lab.tsx); where the task is higher, its question and its answers only. What else the task card
+   holds (the tabs, the key of the rings, "Mark something the machine missed", the line of the step) is seen when the sheet is pulled
+   up; Mark is on the picture too.
+   ===================================================================================================================== */
+/* a square given for its lead: "1 · Lead", then "2 · Task"; the card not open folds to its header line (every width) */
+.tp-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.tp-stack .taskpanel.lead .tp-head b::before {
+  content: '1 · ';
+}
+.tp-stack .taskpanel:not(.lead) .tp-head b::before {
+  content: '2 · ';
+}
+.tp-stack[data-open='lead'] > .taskpanel:not(.lead) > :not(.tp-head),
+.tp-stack[data-open='task'] > .taskpanel.lead > :not(.tp-head),
+.tp-stack[data-open='lead'] > .taskpanel:not(.lead) .tp-others,
+.tp-stack[data-open='task'] > .taskpanel.lead .tp-others {
+  display: none !important;
+}
+.tp-stack[data-open='lead'] > .taskpanel:not(.lead) .tp-head span::after {
+  content: ' · after the lead';
+}
+.tp-stack[data-open='task'] > .taskpanel.lead .tp-head span::after {
+  content: ' · answered';
+}
+.tp-stack[data-open='lead'] > .taskpanel:not(.lead),
+.tp-stack[data-open='task'] > .taskpanel.lead {
+  opacity: 0.7;
+}
+/* the two cards' header lines say their order whenever the sheet is up (a low phone hides a card's header otherwise) */
+:root .lab .panel:not([data-detent='peek']) .tp-stack > .taskpanel > .tp-head {
+  display: flex;
+}
+/* every window with a sheet (data-detent is set only where the panel is one): at rest a task is its question and its answers; the
+   tabs, the key of the rings, Mark (also on the picture), the step's line and its Back are there when the sheet is pulled up */
+@media (max-width: 1279.98px) {
+  :root .lab .panel[data-detent='peek']:has(.taskpanel) > .ptabs,
+  :root .lab .panel[data-detent='peek'] .taskpanel .tp-key,
+  :root .lab .panel[data-detent='peek'] .taskpanel .tp-missed,
+  :root .lab .panel[data-detent='peek'] .taskpanel .tp-line {
+    display: none;
+  }
+  :root .lab .panel[data-detent='peek'] .taskpanel .tp-tree .tp-ans,
+  :root .lab .panel[data-detent='peek'] .taskpanel .tp-btns .btn {
+    min-height: 44px;
+  }
+  /* no card header and no room kept for a longer step: the sheet at rest is as high as this question */
+  :root .lab .panel[data-detent='peek'] .taskpanel .tp-head {
+    display: none;
+  }
+  :root .lab .panel[data-detent='peek'] .taskpanel .tp-tree {
+    min-height: 0;
+  }
+  /* a square with its lead: at rest the open card alone, its question saying which of the two it is; both cards when pulled up */
+  :root .lab .panel[data-detent='peek'] .tp-stack[data-open='lead'] > .taskpanel:not(.lead),
+  :root .lab .panel[data-detent='peek'] .tp-stack[data-open='task'] > .taskpanel.lead {
+    display: none !important;
+  }
+  :root .lab .panel[data-detent='peek'] .tp-stack[data-open='lead'] > .taskpanel.lead .tp-ask::before {
+    content: '1 of 2 · ';
+    color: var(--muted);
+  }
+  :root .lab .panel[data-detent='peek'] .tp-stack[data-open='task'] > .taskpanel:not(.lead) .tp-ask::before {
+    content: '2 of 2 · ';
+    color: var(--muted);
+  }
+}
+
+/* ----- Findings on a phone (test of 20 Nov, M8): the first card's "Check this finding" above the bottom navigation; the picture keeps
+   its size, the words under it take less room (the look, the noise and "viewed by me" on one line). The next page's "reading the
+   findings…" is not written under the list: it stood in sight all the time ----- */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .fcard-body {
+    padding: 10px 14px 12px;
+    gap: 3px;
+  }
+  :root .fcard-meta {
+    display: flex;
+    flex-flow: row wrap;
+    gap: 2px 12px;
+  }
+  :root .ipage .fcard-go {
+    margin-top: 4px;
+  }
+  :root .ipage p.freading {
+    display: none;
   }
 }

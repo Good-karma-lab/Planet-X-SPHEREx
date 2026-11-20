@@ -532,7 +532,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   taskTrack.pts = pictures.filter((q): q is { i: number; mjd: number; ra: number; dec: number } => q.mjd != null && q.ra != null && q.dec != null);
   taskTrack.missing = missing;
   view.panel = (
-    <div class={`taskpanel k-${task.kind}`} data-testid="task-panel">
+    <div class={`taskpanel k-${task.kind}${a.embedded ? ' lead' : ''}`} data-testid="task-panel">
       {si.popup}
       <div class="tp-head">
         <b>{a.embedded ? 'Lead' : 'Task'}</b>
@@ -619,6 +619,12 @@ export function useLabTask(a: TaskArgs): LabTaskView {
             </button>
           ))}
           {!pictures.length && <span class="tp-none">The pictures of this track are not given</span>}
+        </div>
+      )}
+      {!done && step?.tap && missing.length === 0 && pictures.length > 0 && (
+        // why "Done" is off, in sight on every screen (it was only a tooltip, which a phone never shows: test of 20 Nov, S4)
+        <div class="tp-need mono-s" data-testid="task-need">
+          Tap at least one picture to finish
         </div>
       )}
       {!done && task.kind === 'cell' && a.square && !a.square.canCount && a.square.why !== 'Sign in to count your look' && (
