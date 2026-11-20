@@ -736,8 +736,17 @@ class FindingsDB:
         self._migrate()
 
     def changes(self) -> tuple[int, int]:
-        """What changes whenever the database does: a commit of another connection (data_version) or a write of this one (total_changes)."""
-        return int(self.db.execute("PRAGMA data_version").fetchone()[0]), int(self.db.total_changes)
+        """What changes whenever the database does: a commit of another connection (data_version) or a write of this one (total_changes).
+        Call it under _READ, as every read of this connection. The writer of this process writes through the same connection without
+        that lock: a pragma that comes back empty meanwhile (it did on prod, 20 Nov) counts as a change, never twice the same."""
+        try:
+            row = self.db.execute("PRAGMA data_version").fetchone()
+        except sqlite3.Error:
+            row = None
+        if row is None:
+            self._unknown = getattr(self, "_unknown", 0) - 1
+            return self._unknown, self._unknown
+        return int(row[0]), int(self.db.total_changes)
 
     def _migrate(self) -> None:
         self.db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
@@ -1755,6 +1764,24 @@ def find_row(db: FindingsDB, find_id: str) -> dict[str, Any] | None:
     return {**{k: r[k] for k in ("id", "kind", "place", "fov", "ra", "dec", "rate")}, "data": json.loads(r["data"] or "{}")}
 
 
+def read_some(
+    db: FindingsDB, ids: list[str]
+) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, dict[str, list[dict[str, Any]]]]]:
+    """read_base for a few finds (`ids=`: the lab's record of its find, a review): only their rows. Every find is judged on its own rows,
+    so the finds a query returns are the same; its counts are those of these finds. One find took the whole read (6 s on prod, 20 Nov).
+    Call it under _READ."""
+    rows: list[dict[str, Any]] = []
+    for k in range(0, len(ids), 500):
+        chunk = ids[k : k + 500]
+        for r in db.db.execute(f"SELECT * FROM finds WHERE id IN ({','.join('?' * len(chunk))})", chunk):
+            rows.append(
+                {**{c: r[c] for c in r.keys() if c not in ("data", "scans", "versions")},  # noqa: SIM118 (a Row iterates its values)
+                 "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "versions": json.loads(r["versions"] or "{}")}
+            )  # fmt: skip
+    have = [r["id"] for r in rows]
+    return rows, db.idents_of(have), db.related(have)
+
+
 def read_base(db: FindingsDB) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, dict[str, list[dict[str, Any]]]]]:
     """(rows of finds with their JSON read, catalogue answers, related rows) as the tables hold them: what every query starts from. Read
     once while the database is unchanged (FindingsDB.changes); each call gets its own copy (a marshal copy: a fifth of the read). A whole
@@ -1777,7 +1804,7 @@ def read_base(db: FindingsDB) -> tuple[list[dict[str, Any]], dict[str, list[dict
     except ValueError:  # a value marshal cannot copy (none expected): read every time, as before
         db._base = None
         return rows, idents, rel
-    if db.changes() == sig:  # nothing was written while it was read
+    if sig[0] >= 0 and db.changes() == sig:  # nothing was written while it was read (and the version was known)
         db._base = (sig, blob)
     return rows, idents, rel
 
@@ -1812,7 +1839,7 @@ def query(
     the old one). Every find also carries the flow fields (flow_fields)."""
     with _READ:
         views = flow.views() if flow is not None else {}
-        rows, idents, rel = read_base(db)
+        rows, idents, rel = read_some(db, sorted(only)) if only is not None else read_base(db)
     items: list[dict[str, Any]] = []
     for r in rows:
         f = {
