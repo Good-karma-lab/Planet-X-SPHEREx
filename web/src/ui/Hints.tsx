@@ -204,7 +204,9 @@ export function Hints() {
   }
   // counted on this screen (the hints of other screens come there): "1 of 3" in the lab, no counter where there is one hint
   const here = HINTS.filter((h) => h.screen === hint.screen && h.task === hint.task);
-  const n = here.indexOf(hint) + 1;
+  // the number in the order they are seen: a hint whose control is not on screen yet waits, and the next one is "2 of 3", not "3 of 3"
+  // (it showed its place in the list: "1 of 3" then "3 of 3", test of 20 Nov, M7)
+  const n = here.filter((h) => seen.has(h.id)).length + 1;
   return (
     <>
       {/* the control the hint is about, outlined */}

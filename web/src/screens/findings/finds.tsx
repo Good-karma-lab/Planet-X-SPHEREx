@@ -1048,7 +1048,7 @@ export function FindingsView({
           ))}
         </div>
       )}
-      {cards.loading && !cards.stale && cards.finds.length > 0 && <p class="mono-s">reading the findings…</p>}
+      {cards.loading && !cards.stale && cards.finds.length > 0 && <p class="mono-s freading">reading the findings…</p>}
       {atlas ? (
         <LeadPanel lead={ATLAS_LEAD} onClose={() => setLeadId(null)} inline={false} />
       ) : leadId && sel ? (

@@ -17,6 +17,12 @@ export function detentHeights(full: number, peek: number, win: number): Record<D
   return { peek: p, half, full: Math.max(half, full) };
 }
 
+/** The height of a sheet at rest given the room under the pane behind at its full size (`free`), the header's height (`head`) and
+ *  what of it must be seen at rest (`least`): the room when the header fits in it; else the room or `least`, whichever is more. */
+export function restHeight(head: number, free: number, least: number): number {
+  return head <= free ? Math.floor(free) : Math.max(Math.floor(free), Math.min(head, least), 0);
+}
+
 /** Where a sheet let go at `height` (moving at `speed` px/ms, up is positive) comes to rest. */
 export function settle(height: number, speed: number, h: Record<Detent, number>): Detent {
   // a flick goes one step in its direction; a slow release goes to the nearest height
@@ -36,11 +42,20 @@ export function SheetGrip({
   under,
   start = 'peek',
   resetKey,
+  room,
+  need,
 }: {
   peek: string;
   label: string;
   under?: string;
   start?: Detent;
+  /** the room the pane behind leaves under itself at its full size (px), worked out from its own size, not from where it is now: the
+   *  sheet at rest takes that room, and no more than it unless `need` asks (the lab's picture keeps its full size: the sheet at rest
+   *  was as high as the whole task, and the picture got what was left, 205 px of 360 on a phone, 20 Nov 2026). Replaces `under`. */
+  room?: () => number;
+  /** with `room`: the parts that are seen at rest even where the room is smaller (a task's question and its answers); the rest of
+   *  the header is seen when the sheet is pulled up */
+  need?: string;
   /** what the sheet shows (a field, a task): when it changes the sheet comes back to its height at rest */
   resetKey?: string;
 }) {
@@ -48,6 +63,10 @@ export function SheetGrip({
   const [detent, setDetent] = useState<Detent>(start);
   useEffect(() => setDetent(start), [resetKey]);
   const [active, setActive] = useState(false);
+  const roomRef = useRef(room);
+  roomRef.current = room;
+  const needRef = useRef(need);
+  needRef.current = need;
   const live = useRef({ detent, head: 0, heights: { peek: 0, half: 0, full: 0 } as Record<Detent, number> });
   live.current.detent = detent;
 
@@ -82,9 +101,26 @@ export function SheetGrip({
       if (live.current.detent === 'peek' || !live.current.head) live.current.head = Math.ceil(end);
       const head = live.current.head;
       const box = sheet.getBoundingClientRect();
-      const u = under ? document.querySelector<HTMLElement>(under) : null;
-      const room = u && u.getBoundingClientRect().height > 0 ? Math.floor(box.bottom - u.getBoundingClientRect().bottom) : 0;
-      const h = detentHeights(full, Math.max(head, room), window.innerHeight);
+      let rest: number;
+      const free = roomRef.current?.();
+      if (free != null) {
+        // the room under the pane at its full size; where the header is higher, at least what `need` names
+        let least = head;
+        if (needRef.current) {
+          least = g.getBoundingClientRect().bottom - top;
+          sheet.querySelectorAll<HTMLElement>(needRef.current).forEach((e) => {
+            const r = e.getBoundingClientRect();
+            if (r.height > 0) least = Math.max(least, r.bottom - top);
+          });
+          least = Math.ceil(least) + 8;
+        }
+        rest = restHeight(head, free, least);
+      } else {
+        const u = under ? document.querySelector<HTMLElement>(under) : null;
+        const gap = u && u.getBoundingClientRect().height > 0 ? Math.floor(box.bottom - u.getBoundingClientRect().bottom) : 0;
+        rest = Math.max(head, gap);
+      }
+      const h = detentHeights(full, rest, window.innerHeight);
       live.current.heights = h;
       sheet.style.setProperty('--sheet-h', `${h[live.current.detent]}px`);
       sheet.dataset.detent = live.current.detent;
@@ -92,7 +128,7 @@ export function SheetGrip({
       host?.style.setProperty('--sheet-h', `${h[live.current.detent]}px`);
       if (host) host.dataset.sheet = live.current.detent;
       // the pane behind keeps the header's height of its bottom clear, so that nothing of it lies under the sheet at rest
-      root.style.setProperty('--sheet-peek', `${head}px`);
+      root.style.setProperty('--sheet-peek', `${roomRef.current ? h.peek : head}px`);
     };
     measure();
     const ro = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
@@ -101,6 +137,7 @@ export function SheetGrip({
       sheet.querySelectorAll<HTMLElement>(peek).forEach((e) => ro?.observe(e));
       const u = under ? document.querySelector<HTMLElement>(under) : null;
       if (u?.parentElement) ro?.observe(u.parentElement);
+      if (u && roomRef.current) ro?.observe(u); // the room under the pane follows the thing under it (the lab's playback bar: one row or two)
     };
     watch();
     const mo = new MutationObserver(() => {

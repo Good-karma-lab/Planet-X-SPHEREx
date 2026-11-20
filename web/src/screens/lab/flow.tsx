@@ -1390,11 +1390,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       a.showPass(body.predicted.mjd);
     } else setUp.current = stepKey;
   }, [stepKey, track, anomaly]);
+  // a square given for its lead: two cards in their order, "1 · Lead" then "2 · Task"; the one not open folds to its header line, so
+  // the order is said and the sheet at rest holds one question (two stacked cards took the picture's height, 20 Nov 2026)
   const taskPanel = leadView.kind ? (
-    <>
+    <div class="tp-stack" data-open={leadOpen ? 'lead' : 'task'} data-testid="task-stack">
       {leadView.panel}
       {taskView.panel}
-    </>
+    </div>
   ) : (
     taskView.panel
   );
