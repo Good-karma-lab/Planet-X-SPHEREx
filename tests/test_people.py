@@ -664,3 +664,99 @@ def test_the_findings_query_reads_the_tables_once_while_the_database_is_unchange
     other.db.commit()
     assert {f["id"] for f in query(db, None, "any", None, 100, 0)["finds"]} == {"film:a", "film:b", "film:c"} and len(reads) == 3
     assert findings.read_base is not None
+
+
+def test_one_find_asked_by_id_is_read_alone_and_is_the_same_as_in_the_whole_list(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """GET /api/v1/findings?ids=… (the lab's record of its find) read and judged every find: 6 s on prod for one (20 Nov 2026)."""
+    from service import findings
+    from service.findings import FindingsDB, query
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([{**base, "id": f"film:{i}", "kind": "film", "ra": 60.0 + i, "data": {"i": i}} for i in range(30)])
+    whole = {f["id"]: f for f in query(db, None, "any", None, 100, 0)["finds"]}
+    monkeypatch.setattr(findings, "read_base", lambda d: (_ for _ in ()).throw(AssertionError("the whole list was read")))
+    got = query(db, None, None, None, 100, 0, only=frozenset({"film:3", "film:7", "nope"}))
+    assert [f["id"] for f in got["finds"]] == ["film:7", "film:3"] or {f["id"] for f in got["finds"]} == {"film:3", "film:7"}
+    for f in got["finds"]:
+        assert {k: v for k, v in f.items() if k != "updated"} == {k: v for k, v in whole[f["id"]].items() if k != "updated"}
+
+
+def test_an_empty_answer_of_the_version_pragma_counts_as_a_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The writer of the main instance writes through the same connection without the read lock; PRAGMA data_version came back empty
+    beside it and the list answered 500 (prod, 20 Nov 2026). Such an answer is a change, never cached, never the same twice."""
+    from service.findings import FindingsDB, query
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([{**base, "id": "film:a", "kind": "film", "data": {}}])
+
+    class Empty:
+        def __init__(self, real: Any) -> None:
+            self.real = real
+
+        def execute(self, q: str, *a: Any) -> Any:
+            return SimpleNamespace(fetchone=lambda: None) if q.startswith("PRAGMA data_version") else self.real.execute(q, *a)
+
+        def __getattr__(self, k: str) -> Any:
+            return getattr(self.real, k)
+
+    real = db.db
+    db.db = Empty(real)  # type: ignore[assignment]
+    a, b = db.changes(), db.changes()
+    assert a != b and a[0] < 0 and b[0] < 0
+    assert [f["id"] for f in query(db, None, "any", None, 10, 0)["finds"]] == ["film:a"]
+    assert db._base is None  # not kept: the version was not known
+    db.db = real
+
+
+def test_the_finds_are_read_from_many_threads_while_the_writer_writes(tmp_path: Path) -> None:
+    """R79 under load: lists, single finds, the tasks' snapshot and its version read at once from several threads, the writer
+    writing the list and the catalogue answers through the same connection meanwhile; no read fails."""
+    import threading
+
+    from service import routes_tasks
+    from service.findings import FindingsDB, query
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": ["k"]}
+    finds = [{**base, "id": f"film:{i}", "kind": "film", "ra": 60.0 + i * 0.01, "data": {}} for i in range(200)]
+    db.write_finds(finds)
+    st = SimpleNamespace(findings=SimpleNamespace(db=db))
+    errors: list[BaseException] = []
+    stop = threading.Event()
+
+    def guard(fn: Any) -> Any:
+        def run() -> None:
+            try:
+                while not stop.is_set():
+                    fn()
+            except BaseException as e:
+                errors.append(e)
+                stop.set()
+
+        return run
+
+    def writer() -> None:
+        n = 0
+        while not stop.is_set():
+            n += 1
+            db.write_finds(finds[: 150 + n % 50])
+            db.put_ident(f"film:{n % 150}", "sbident", "none", None, None, None, {}, 1)
+            db.db.commit()
+
+    jobs = [
+        guard(lambda: query(db, None, None, None, 50, 0)),
+        guard(lambda: query(db, None, "any", None, 50, 0, only=frozenset({"film:3"}))),
+        guard(lambda: routes_tasks._rows_sig(st)),
+        guard(lambda: routes_tasks._read_rows(st)),
+        guard(writer),
+    ]
+    threads = [threading.Thread(target=j, daemon=True) for j in jobs]
+    for t in threads:
+        t.start()
+    stop.wait(4.0)
+    stop.set()
+    for t in threads:
+        t.join(10)
+    assert errors == []

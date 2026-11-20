@@ -345,7 +345,10 @@ def _rows_sig(st: Any) -> tuple[Any, ...] | None:
     if f is None:
         return None
     try:
-        changes = f.db.changes()
+        from service.findings import _READ
+
+        with _READ:  # the connection is read by one thread at a time (a read beside a list's read broke it: 500 on prod, 20 Nov)
+            changes = f.db.changes()
     except Exception:
         return None
     try:
