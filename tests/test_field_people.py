@@ -318,3 +318,13 @@ def test_jpl_still_being_asked_is_checking_not_a_failure(site: tuple[FastAPI, An
     db = field_people.get(st, accounts.get(st).db).db
     row = db._conn().execute("SELECT data FROM acc_people_jobs WHERE id='single:mv-0000301'").fetchone()
     assert '"tries": 0' in row[0]  # no try spent
+
+
+def test_a_mark_is_named_by_its_square_and_quarter_not_its_coordinates() -> None:
+    """The notification "Your mark at RA 51.2345° Dec +7.1234° is a known body" (20 Nov 2026): a person knows the square, not the
+    coordinates."""
+    from service import grid
+    from service.accounts.field_people import mark_place
+
+    qc = grid.quarter(grid.by_id("294-0150"), "SW")
+    assert mark_place({"ra": qc.ra, "dec": qc.dec}) == "in square 294-0150 (SW)"

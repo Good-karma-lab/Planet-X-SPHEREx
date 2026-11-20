@@ -171,7 +171,9 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
         lead("film:1", "film", "294-0148", "NW", 60),  # the famous square's
         lead("mover:1", "mover", "294-0149", "SE", 40, status="known"),  # known: not a lead
     ]
-    monkeypatch.setattr(routes_tasks, "lead_findings", lambda st: finds)
+    monkeypatch.setattr(routes_tasks, "all_rows", lambda st: [dict(f, _listed=True) for f in finds])
+    # each guest here is the first in half an hour (the busy quarters: test_a_quarter_somebody_just_took_is_not_given_to_another)
+    monkeypatch.setattr(routes_tasks, "BUSY_QUARTER_S", 0.0)
     monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
     monkeypatch.setattr(routes_tasks, "famous_cells", lambda: {"294-0148"})
     got = set()
@@ -205,6 +207,42 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
     monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
     t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
     assert "why" not in t
+
+
+def test_a_quarter_somebody_just_took_is_not_given_to_another(
+    site: tuple[FastAPI, _State, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The user, 20 Nov 2026 (for the launch): a crowd of newcomers is not sent to the top find's quarter all at once. A quarter
+    somebody (a guest too) took in the last BUSY_QUARTER_S is not given to another; the next most promising one is, then the stock's;
+    after half an hour the top one is given again."""
+    from service import accounts, grid, routes_tasks
+
+    app, st, _mail = site
+    _fake_grid(st)
+
+    def lead(fid: str, cell: str, q: str, promise: int) -> dict[str, Any]:
+        qc = grid.quarter(grid.by_id(cell), q)
+        return {
+            "finding_id": fid,
+            "kind": "browndwarf",
+            "ra": qc.ra,
+            "dec": qc.dec,
+            "status": "unexplained",
+            "promise": promise,
+            "_listed": True,
+        }
+
+    finds = [lead("browndwarf:1", "294-0150", "SW", 77), lead("browndwarf:2", "294-0150", "NE", 60)]
+    fake(st, {("294-0150", "SW"), ("294-0150", "NE")})
+    monkeypatch.setattr(routes_tasks, "all_rows", lambda st: finds)
+    monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
+    got = [_client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"] for _ in range(3)]
+    assert [(t["cell_id"], t["quarter"]) for t in got[:2]] == [("294-0150", "SW"), ("294-0150", "NE")]
+    assert "why" not in got[2] and (got[2]["cell_id"], got[2]["quarter"]) not in {("294-0150", "SW"), ("294-0150", "NE")}
+    accounts.get(st).db._conn().execute("UPDATE acc_tasks SET created=created-?", (routes_tasks.BUSY_QUARTER_S + 60,))
+    again = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    assert (again["cell_id"], again["quarter"], again["why"]["finding_id"]) == ("294-0150", "SW", "browndwarf:1")
 
 
 def test_an_old_open_square_task_is_not_given_again(

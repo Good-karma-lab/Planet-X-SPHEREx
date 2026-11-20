@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import marshal
 import math
 import sqlite3
 import threading
@@ -731,7 +732,12 @@ class FindingsDB:
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.read_only = False
         self.version = SCHEMA
+        self._base: tuple[tuple[int, int], bytes] | None = None  # query's read of the tables, kept while the database is unchanged
         self._migrate()
+
+    def changes(self) -> tuple[int, int]:
+        """What changes whenever the database does: a commit of another connection (data_version) or a write of this one (total_changes)."""
+        return int(self.db.execute("PRAGMA data_version").fetchone()[0]), int(self.db.total_changes)
 
     def _migrate(self) -> None:
         self.db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
@@ -1749,6 +1755,33 @@ def find_row(db: FindingsDB, find_id: str) -> dict[str, Any] | None:
     return {**{k: r[k] for k in ("id", "kind", "place", "fov", "ra", "dec", "rate")}, "data": json.loads(r["data"] or "{}")}
 
 
+def read_base(db: FindingsDB) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, dict[str, list[dict[str, Any]]]]]:
+    """(rows of finds with their JSON read, catalogue answers, related rows) as the tables hold them: what every query starts from. Read
+    once while the database is unchanged (FindingsDB.changes); each call gets its own copy (a marshal copy: a fifth of the read). A whole
+    read of 13,000 finds held the event loop 2–4 s on prod two or three times a minute (20 Nov 2026), because every list read it again.
+    Call it under _READ."""
+    sig = db.changes()
+    if db._base is not None and db._base[0] == sig:
+        rows, idents, rel = marshal.loads(db._base[1])
+        return rows, idents, rel
+    rows = [
+        {**{k: r[k] for k in r.keys() if k not in ("data", "scans", "versions")},  # noqa: SIM118 (a Row iterates its values)
+         "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "versions": json.loads(r["versions"] or "{}")}
+        for r in db.db.execute("SELECT * FROM finds").fetchall()
+    ]  # fmt: skip
+    ids = [r["id"] for r in rows]
+    idents = db.idents_of(ids)
+    rel = db.related(ids)
+    try:
+        blob = marshal.dumps((rows, idents, rel))
+    except ValueError:  # a value marshal cannot copy (none expected): read every time, as before
+        db._base = None
+        return rows, idents, rel
+    if db.changes() == sig:  # nothing was written while it was read
+        db._base = (sig, blob)
+    return rows, idents, rel
+
+
 def query(
     db: FindingsDB,
     kind: str | None,
@@ -1779,17 +1812,13 @@ def query(
     the old one). Every find also carries the flow fields (flow_fields)."""
     with _READ:
         views = flow.views() if flow is not None else {}
-        rows = db.db.execute("SELECT * FROM finds").fetchall()
-        ids = [r["id"] for r in rows]
-        idents = db.idents_of(ids)
-        rel = db.related(ids)
+        rows, idents, rel = read_base(db)
     items: list[dict[str, Any]] = []
     for r in rows:
         f = {
             "id": r["id"], "slug": slug_of(r["id"]), "kind": r["kind"], "place": r["place"], "fov": r["fov"], "ra": r["ra"], "dec": r["dec"], "epoch": r["epoch"],
             "rate": r["rate"], "rate_unit": rate_unit(r["kind"]), "snr": r["snr"], "score": r["score"], "chance": r["chance"],
-            "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "updated": r["updated"],
-            "versions": json.loads(r["versions"] or "{}"), **rel[r["id"]],
+            "data": r["data"], "scans": r["scans"], "updated": r["updated"], "versions": r["versions"], **rel[r["id"]],
         }  # fmt: skip
         if tracks and r["id"] in tracks:
             f = people_tracks.apply(f, tracks[r["id"]])

@@ -132,6 +132,21 @@ def mover_groups(points: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
     return groups
 
 
+def mark_place(mark: dict[str, Any]) -> str:
+    """Where a mark is, in words a person knows: "in square 291-0151 (NE)", the sky grid's square and quarter; the bare coordinates
+    only where there is no grid (they were the whole text: "at RA 51.2345° Dec +7.1234°", 20 Nov 2026)."""
+    try:
+        from service.routes_tasks import _grid, quarter_of
+
+        g = _grid()
+        if g is not None:
+            ce = g.cell_at(float(mark["ra"]), float(mark["dec"]))
+            return f"in square {ce.id} ({quarter_of(ce, float(mark['ra']), float(mark['dec']))})"
+    except Exception:
+        pass
+    return f"at RA {float(mark['ra']):.4f}° Dec {float(mark['dec']):+.4f}°"
+
+
 class FieldPeople:
     def __init__(self, st: Any, db: AccountsDB) -> None:
         self.st = st
@@ -235,9 +250,7 @@ class FieldPeople:
             d, name, v = min(near)
             data = {"tries": tries + 1, "name": name, "sep": round(d, 1), "v": v}
             c.execute("UPDATE acc_people_jobs SET state='known', data=?, updated=? WHERE id=?", (json.dumps(data), time.time(), jid))
-            self.db.notify(
-                user_id, "checks", f"Your mark at RA {mark['ra']:.4f}° Dec {mark['dec']:+.4f}° is a known body: {name} (JPL).", None
-            )
+            self.db.notify(user_id, "checks", f"Your mark {mark_place(mark)} is a known body: {name} (JPL).", None)
             return {"effect": "moves", "state": "known", "name": name, "sep": round(d, 1)}
         data = {"tries": tries + 1, "bodies": len(got.get("rows") or [])}
         c.execute("UPDATE acc_people_jobs SET state='no_body', data=?, updated=? WHERE id=?", (json.dumps(data), time.time(), jid))
