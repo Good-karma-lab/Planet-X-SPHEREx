@@ -565,7 +565,7 @@
 }
 /* phone and portrait: the model on top, the panel below; one finger scrolls the page, two fingers turn and zoom */
 @media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px), (min-width: 600px) and (max-width: 999.98px) and (min-height: 480px), (min-width: 1000px) and (max-width: 1279.98px) and (orientation: portrait) {
-  .screen.px3 {
+  :root .screen.px3 {
     display: flex;
     flex-direction: column;
   }

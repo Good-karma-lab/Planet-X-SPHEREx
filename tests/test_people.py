@@ -502,10 +502,8 @@ def test_a_peak_jpl_names_is_no_lead_of_the_tasks(tmp_path: Path) -> None:
     db.db.commit()
 
     class Idn:
-        def enrich_findings(self, body: dict[str, Any]) -> dict[str, Any]:
-            for f in body["finds"]:
-                f["status"] = "known"
-            return body
+        def verdict_on(self, f: dict[str, Any]) -> dict[str, Any] | None:
+            return {"state": "ok", "words": "an echo of Eris (JPL), not a new body"}
 
     st = SimpleNamespace(findings=SimpleNamespace(db=db))
     assert [r["status"] for r in lead_findings(st) or []] == ["unchecked"]

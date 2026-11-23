@@ -449,6 +449,7 @@ class FpxIdentifier:
         self.failed_at: dict[tuple[str, str], float] = {}
         self.running: set[tuple[str, str]] = set()
         self.complete: set[tuple[str, str]] = set()
+        self._read: dict[str, tuple[int, list[dict[str, Any]]]] = {}  # verdict_on: the files as last read, by name
 
     def path(self, kind: str, key: str) -> Path:
         return self.dir / f"{kind}-{key}.{FILE_VERSION}.json"
@@ -595,43 +596,27 @@ class FpxIdentifier:
                 await self.task
         await self.client.aclose()
 
-    def enrich_findings(self, body: dict[str, Any]) -> dict[str, Any]:
-        """The Findings answer with the JPL identification on its Find Planet X peaks: a peak that is a known body reads
-        'this is Sedna (JPL), found blind' and counts as known."""
-        changed = 0
-        gone = 0
-        for f in body.get("finds", []):
-            if f.get("kind") != "peak":
-                continue
-            pk = (f.get("data") or {}).get("peak") or {}
-            scans = f.get("scans") or []
-            kind = (f.get("data") or {}).get("search", "distant")
-            found = self.cached(kind, scans[0]) if scans and kind in KINDS else None
-            if found is None:
-                continue
-            for v in found.values():
-                at = v.get("at") or [None, None, None]
-                if at[0] is not None and abs(at[0] - f["ra"]) < 1e-4 and abs(at[1] - f["dec"]) < 1e-4:
-                    pk["known"] = v
-                    if v.get("state") == "ok":
-                        if f.get("status") != "known":
-                            changed += 1
-                        f["status"], f["verdict"] = "known", v["words"][0].upper() + v["words"][1:] + "."
-                    elif v.get("state") == "residual":
-                        pk["ok"] = False  # not a lead: the pages' lead rule (ok peaks) drops it
-                        f["verdict"] = "A residual, not a lead: " + str(v.get("reason"))
-                        gone += 1
-        if gone and isinstance(body.get("counts", {}).get("peak"), dict):
-            c = body["counts"]["peak"]  # the residuals are not leads: they leave the counts of what is open
-            for k in ("unexplained", "unchecked"):
-                take = min(gone, c.get(k, 0))
-                c[k] = c.get(k, 0) - take
-                gone -= take
-        if changed and isinstance(body.get("counts", {}).get("peak"), dict):
-            c = body["counts"]["peak"]
-            c["known"] = c.get("known", 0) + changed
-            for k in ("unexplained", "unchecked"):
-                take = min(changed, c.get(k, 0))
-                c[k] = c.get(k, 0) - take
-                changed -= take
-        return body
+    def verdict_on(self, f: dict[str, Any]) -> dict[str, Any] | None:
+        """What JPL said of a Planet X peak of Findings (the kept answers; nothing is asked), or None. Each file is read once while it
+        stands unchanged."""
+        scans = f.get("scans") or []
+        kind = (f.get("data") or {}).get("search", "distant")
+        if f.get("kind") != "peak" or not scans or kind not in KINDS:
+            return None
+        p = self.path(kind, scans[0])
+        try:
+            at = p.stat().st_mtime_ns
+        except OSError:
+            return None
+        hit = self._read.get(p.name)
+        if hit is None or hit[0] != at:
+            try:
+                hit = (at, list((self.cached(kind, scans[0]) or {}).values()))
+            except (OSError, ValueError):
+                return None
+            self._read[p.name] = hit
+        for v in hit[1]:
+            where = v.get("at") or [None, None, None]
+            if where[0] is not None and abs(where[0] - f["ra"]) < 1e-4 and abs(where[1] - f["dec"]) < 1e-4:
+                return dict(v)
+        return None

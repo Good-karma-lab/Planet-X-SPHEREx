@@ -10,6 +10,7 @@ confirmed) is the new field `stage`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import time
 from pathlib import Path
@@ -99,6 +100,9 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     list_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
     list_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
+    # two lists are made at a time: each is Python work that takes its turn with the event loop's, and forty at once (a crowd with forty
+    # different filters) left the loop a fortieth
+    list_gate = asyncio.Semaphore(2)
 
     def need() -> Any:
         f = getattr(st, "findings", None)
@@ -106,9 +110,12 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             raise HTTPException(503, "the findings database is not loaded")
         return f
 
-    def enrich(body: dict[str, Any]) -> dict[str, Any]:
+    def names() -> Any:
+        """What JPL said of the Planet X peaks (None: not looked up here)."""
         idn = getattr(st, "fpx_known", None)
-        body = idn.enrich_findings(body) if idn is not None else body
+        return idn.verdict_on if idn is not None else None
+
+    def enrich(body: dict[str, Any]) -> dict[str, Any]:
         clips = clips_or_none()
         people = credits([f["id"] for f in body["finds"]])
         for f in body["finds"]:
@@ -142,14 +149,14 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     async def every_find() -> list[dict[str, Any]]:
         f = need()
-        body = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), sort="promise"))
+        body = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), sort="promise", names=names()))
         body["finds"].sort(key=lambda x: x["kind"] not in PROMISING_KINDS)  # the pictures of the promising kinds are made first
         return list(body["finds"])
 
     async def findings(
         kind: str | None = Query(None),
         status: str | None = Query(
-            None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside|blend|unverified)$"
+            None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside|blend|unverified|chain)$"
         ),
         place: str | None = Query(None),
         limit: int = Query(300, ge=1, le=2000),
@@ -192,9 +199,10 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         list_inflight[ckey] = fut
         try:
-            made = await make_list(
-                f, kind, status, place, limit, offset, sort, stage, waiting, many, rank, ids, noted, clips, visibility, lite
-            )
+            async with list_gate if ids is None else contextlib.nullcontext():  # a few finds by id wait for no list
+                made = await make_list(
+                    f, kind, status, place, limit, offset, sort, stage, waiting, many, rank, ids, noted, clips, visibility, lite
+                )
             fut.set_result(made)
             list_cache[ckey] = (time.monotonic(), made)
             while len(list_cache) > LIST_KEEP:
@@ -235,6 +243,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 aside=aside,
                 raised=raised,
                 tracks=tracks,
+                names=names(),
             )
         )
         if (
@@ -247,7 +256,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             and hasattr(f, "set_front")
         ):
             f.set_front(tuple(x["id"] for x in body["finds"][:24]))  # identified first, kept for the next start
-        body = enrich(body)
+        body = await asyncio.to_thread(enrich, body)  # it reads the clips' files and the accounts' database
         if lite:
             body["finds"] = [{**{k: x.get(k) for k in LITE_KEYS}, **card_extras(x)} for x in body["finds"]]
         return body
@@ -260,11 +269,13 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         # this one find, whatever its status (a hidden one too): the whole list capped at 5000 lost every find past it once there were
         # 6980 (19 Nov 2026), and its page answered 404
         body: dict[str, Any] = await asyncio.to_thread(
-            lambda: query(f.db, None, "any", None, 1, 0, flow=flow_of(st), aside=aside, tracks=tracks, only=frozenset({find_id}))
+            lambda: query(
+                f.db, None, "any", None, 1, 0, flow=flow_of(st), aside=aside, tracks=tracks, only=frozenset({find_id}), names=names()
+            )
         )
         for x in body["finds"]:
             if x["id"] == find_id:
-                return enrich({"finds": [x]})["finds"][0]
+                return (await asyncio.to_thread(enrich, {"finds": [x]}))["finds"][0]
         raise HTTPException(404, "no such find")
 
     async def viewed(find_id: str, body: dict[str, Any] = Body(default={})) -> Any:  # noqa: B008

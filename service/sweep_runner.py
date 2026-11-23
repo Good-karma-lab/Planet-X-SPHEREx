@@ -87,6 +87,7 @@ def top_find_fields(st: Any) -> list[dict[str, Any]]:
         flow=flow_of(st),
         sort="promise",
         kinds=("mover", "browndwarf", "peak", "film", "pair"),
+        names=getattr(getattr(st, "fpx_known", None), "verdict_on", None),
     )
     out: list[dict[str, Any]] = []
     for f in body.get("finds") or []:

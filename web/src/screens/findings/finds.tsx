@@ -38,12 +38,14 @@ const STATUS_WORD: Record<string, string> = {
   below: 'too faint to count',
   set_aside: 'set aside by people',
   unverified: 'not checked in the exposures',
+  chain: 'a chain through a known asteroid',
 };
 const STATUS_WHY: Record<string, string> = {
   blend: 'Two sources side by side: their blend stood still while the ring moved. Not a lead',
   halo: 'A bump in the glow of a bright star. Not a lead',
   residual: 'What is left after a known source is taken away. Not a lead',
   below: 'Fainter than this field needs to count a find',
+  chain: 'One known asteroid linked with noise: it stands on the track but moves differently. Not a lead',
   set_aside: 'People agreed it is an artefact',
   unverified: 'A straight line through the visits whose light was never checked in the exposures. Not a lead',
 };
@@ -61,7 +63,7 @@ export interface Find {
   snr: number | null;
   score: number | null;
   chance: number | null;
-  status: 'unexplained' | 'unchecked' | 'known' | 'residual' | 'blend' | 'halo' | 'galaxy' | 'below' | 'set_aside' | 'unverified';
+  status: 'unexplained' | 'unchecked' | 'known' | 'residual' | 'blend' | 'halo' | 'galaxy' | 'below' | 'set_aside' | 'unverified' | 'chain';
   verdict: string;
   idents: Ident[];
   data: Record<string, any>;

@@ -167,26 +167,16 @@ def test_findings_peaks_that_are_known_bodies_say_so(tmp_path: Path) -> None:
     }
     idn = fpx_known.FpxIdentifier(FakeStore(meta), tmp_path, client=fake_jpl())
     asyncio.run(idn.sweep())
-    body: dict[str, Any] = {
-        "counts": {"peak": {"all": 1, "unexplained": 0, "unchecked": 1, "known": 0}},
-        "finds": [
-            {
-                "id": "peak:1",
-                "kind": "peak",
-                "ra": 60.712549,
-                "dec": 8.608244,
-                "status": "unchecked",
-                "verdict": "",
-                "scans": ["k" * 24],
-                "data": {"search": "deep", "peak": {"d": 83.0}},
-            }
-        ],
-    }
-    out = idn.enrich_findings(body)
-    f = out["finds"][0]
-    assert f["status"] == "known" and f["verdict"].startswith("This is Sedna (JPL), found blind")
-    assert f["data"]["peak"]["known"]["name"].startswith("90377 Sedna")
-    assert out["counts"]["peak"] == {"all": 1, "unexplained": 0, "unchecked": 0, "known": 1}
+    find = {"id": "peak:1", "kind": "peak", "ra": 60.712549, "dec": 8.608244, "scans": ["k" * 24], "data": {"search": "deep"}}
+    said = idn.verdict_on(find)
+    assert said is not None and said["state"] == "ok" and said["words"].startswith("this is Sedna (JPL), found blind")
+    assert said["name"].startswith("90377 Sedna")
+    said["name"] = "changed"  # a caller's change stays its own
+    assert (idn.verdict_on(find) or {})["name"].startswith("90377 Sedna")
+    assert idn.verdict_on({**find, "ra": 60.8}) is None and idn.verdict_on({**find, "kind": "mover"}) is None
+    assert idn.verdict_on({**find, "scans": ["e" * 24]}) is None
+    idn._keep("deep", "k" * 24, {})  # the file written again is read again
+    assert idn.verdict_on(find) is None
 
 
 def test_an_answer_got_is_kept_while_another_lead_waits_for_jpl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,23 +261,8 @@ def test_the_sweep_keeps_a_residual_and_the_result_stops_calling_it_a_lead(tmp_p
     assert asyncio.run(idn.sweep()) == 1
     out = idn.annotate("distant", "d" * 24, meta)["candidates"][0]
     assert out["ok"] is False and out["known"]["state"] == "residual" and "edge" in out["residual"]
-    body: dict[str, Any] = {
-        "counts": {"peak": {"all": 1, "unexplained": 0, "unchecked": 1, "known": 0}},
-        "finds": [
-            {
-                "id": "peak:1",
-                "kind": "peak",
-                "ra": 133.74,
-                "dec": -7.35,
-                "status": "unchecked",
-                "verdict": "",
-                "scans": ["d" * 24],
-                "data": {"search": "distant", "peak": {"ok": True}},
-            }
-        ],
-    }
-    res = idn.enrich_findings(body)
-    assert res["finds"][0]["data"]["peak"]["ok"] is False and res["counts"]["peak"]["unchecked"] == 0
+    find = {"id": "peak:1", "kind": "peak", "ra": 133.74, "dec": -7.35, "scans": ["d" * 24], "data": {"search": "distant"}}
+    assert (idn.verdict_on(find) or {})["state"] == "residual"
 
 
 def test_a_gateway_failure_of_jpl_is_asked_again_before_a_lead_is_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
