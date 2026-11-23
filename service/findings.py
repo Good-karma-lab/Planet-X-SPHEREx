@@ -678,13 +678,20 @@ class _Maintenance:
 
 
 def pending_ids(
-    path: str, limit: int, targets: frozenset[str], now: float, conn: sqlite3.Connection | None = None, front: tuple[str, ...] = ()
+    path: str,
+    limit: int,
+    targets: frozenset[str],
+    now: float,
+    conn: sqlite3.Connection | None = None,
+    front: tuple[str, ...] = (),
+    leads: tuple[str, ...] = (),
 ) -> list[str]:
     """The ids of the finds with a catalogue not yet answered (or that did not answer and may be asked again). The most promising first
     (as Findings orders them), then the kinds that matter most (Find Planet X peaks, movers, brown dwarfs, film tracks, then pairs),
     the test targets' before the rest within each rank, and within that the longest waiting. It reads every find and what each catalogue
     said, so the identification loop runs it in a worker process (service/cpu.py) on its own read-only connection: in the API process it
-    took the GIL from the event loop."""
+    took the GIL from the event loop. `leads`: the unexplained tracks (the visible ones first): JPL is asked about the rest of their visits
+    before what else waits, after the first page (26 of 28 stood behind 1,100 finds that never run out, 23 Nov 2026)."""
     db = conn or sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=10.0)
     try:
         db.row_factory = sqlite3.Row
@@ -696,7 +703,8 @@ def pending_ids(
         if conn is None:
             db.close()
     out: list[tuple[tuple[int, int, int, int, int, float], str]] = []
-    at_front = {fid: n for n, fid in enumerate(front)}
+    at_front = {fid: n for n, fid in enumerate(dict.fromkeys((*front, *leads)))}
+    is_lead = frozenset(leads)
     for r in rows:
         data = json.loads(r["data"] or "{}")
         want = want_of(r["kind"], r["ra"], r["dec"], data)
@@ -720,6 +728,8 @@ def pending_ids(
             if d is not None and rest and not old:
                 if now - d["tried"] >= RETRY_S * (2 ** min(d["attempts"], 5)) or not d["attempts"]:
                     worst = 0.0
+                    if r["id"] in is_lead:
+                        tier = 0
             elif d is None or old:
                 worst = 0.0 if worst is None else min(worst, 0.0)  # never asked, or asked the old way
                 tier = 0
@@ -1015,6 +1025,8 @@ def _ident_from(cat: str, ans: dict[str, Any]) -> tuple[str, str | None, float |
 
 
 class Findings:
+    leads: tuple[str, ...] = ()  # the unexplained tracks, as the last judged finds say (set_leads)
+
     def __init__(
         self, store: Store, store_dir: Path, catalogue: Any, movers: Any, pairs: Any, dwarfs: Any, anomalies: Any, writer: bool = True
     ) -> None:
@@ -1061,6 +1073,12 @@ class Findings:
         self.front = ids
         with contextlib.suppress(OSError):
             atomic_write_bytes(self._front_path(), json.dumps(list(ids)).encode())
+
+    def set_leads(self, snap: Snapshot) -> None:
+        """The unexplained tracks as they are judged now, the visible ones first: JPL is asked about the rest of their visits first."""
+        got = [f for f in snap.items if f["kind"] == "film" and f["status"] == "unexplained"]
+        got.sort(key=lambda f: (f["visible"] is False, -f["promise"], -(f["score"] or 0.0), f["id"]))
+        self.leads = tuple(f["id"] for f in got)
 
     def _front_now(self) -> tuple[str, ...]:
         """The first 24 of Promising as the page orders them (without who has looked: the page's own list replaces it when served)."""
@@ -1464,7 +1482,7 @@ class Findings:
                 if not self.front:  # after a restart, until a visitor loads Findings: the first page as the page would order it
                     self.front = await asyncio.to_thread(self._front_now)
                 ids = await cpu.run(
-                    pending_ids, str(self.db.path), 8, frozenset(t["n"] for t in self.targets), time.time(), None, self.front
+                    pending_ids, str(self.db.path), 8, frozenset(t["n"] for t in self.targets), time.time(), None, self.front, self.leads
                 )
                 batch = await asyncio.to_thread(self.db.rows_of, ids)
                 if not batch:
@@ -2072,10 +2090,30 @@ class Snapshot:
     def __init__(self, packed: list[Any], judge: Callable[[Any, bool], dict[str, Any]]) -> None:
         self.packed, self._judge = packed, judge
         self.items: list[dict[str, Any]] = []
+        self._groups: list[tuple[dict[str, Any], int]] | None = None
         self.pending = self.unavailable = self.missing_decisive = 0
 
     def judge(self, n: int, whole: bool = True) -> dict[str, Any]:
         return self._judge(self.packed[n], whole)
+
+    def groups(self, *, with_place: bool = False, only: frozenset[str] | None = None) -> list[tuple[dict[str, Any], int]]:
+        """[(what the filters and the counts read of a find, how many finds have it)], in the order first met. Kept for the plain case."""
+        if self._groups is not None and not with_place and only is None:
+            return self._groups
+        tally: dict[tuple[Any, ...], int] = {}
+        for f in self.items:
+            k = (
+                f["kind"], f["status"], f["place"] if with_place else None, f["stage"], f["viewers"] == 0 and f["stage"] == "new",
+                f["note"] is not None, f["visible"], only is not None and f["id"] in only,
+            )  # fmt: skip
+            tally[k] = tally.get(k, 0) + 1
+        got = [
+            (dict(zip(("kind", "status", "place", "stage", "waiting", "noted", "visible", "asked"), k, strict=True)), n)
+            for k, n in tally.items()
+        ]
+        if not with_place and only is None:
+            self._groups = got
+        return got
 
 
 def snapshot(
@@ -2238,31 +2276,16 @@ def query(
         }
         for k in KINDS
     }
-    for f in items:
-        tally = counts.setdefault(
-            f["kind"],
-            {
-                "all": 0,
-                "unexplained": 0,
-                "unchecked": 0,
-                "known": 0,
-                "residual": 0,
-                "galaxy": 0,
-                "below": 0,
-                "halo": 0,
-                "set_aside": 0,
-                "blend": 0,
-                "unverified": 0,
-                "chain": 0,
-                "weak": 0,
-                "leads": 0,
-            },
-        )
+    # what the counts read is the same for a few hundred combinations of it: they are counted once per snapshot, and a request's filters are
+    # asked of a combination, not of 26,000 finds five times over
+    groups = snap.groups(with_place=bool(place), only=only)
+    for f, n in groups:
+        tally = counts.setdefault(f["kind"], dict.fromkeys(next(iter(counts.values())), 0))
         if f["status"] not in HIDDEN:  # a star's residual and a galaxy are not leads: counted apart
-            tally["all"] += 1
-        tally[f["status"]] = tally.get(f["status"], 0) + 1  # a status these lists do not know is counted, never a KeyError
+            tally["all"] += n
+        tally[f["status"]] = tally.get(f["status"], 0) + n  # a status these lists do not know is counted, never a KeyError
         if f["status"] in ("unexplained", "unchecked"):
-            tally["leads"] += 1  # what is still a lead: not a known body, a galaxy, a star's residual or below the bar
+            tally["leads"] += n  # what is still a lead: not a known body, a galaxy, a star's residual or below the bar
 
     def passes(f: dict[str, Any]) -> bool:
         """Every filter of the request but the kind ones (the kind chips count under the others: counts_view)."""
@@ -2274,17 +2297,17 @@ def query(
             )
             and (not place or f["place"] == place)
             and (not stage or f["stage"] == stage)
-            and (not waiting or (f["viewers"] == 0 and f["stage"] == "new"))
-            and (only is None or f["id"] in only)
-            and (not noted or f["note"] is not None)
+            and (not waiting or f["waiting"])
+            and (only is None or f["asked"])
+            and (not noted or f["noted"])
             and (visibility != "seen" or f["visible"] is not False)
             and (visibility != "unseen" or f["visible"] is False)
         )
 
     counts_view: dict[str, int] = dict.fromkeys(KINDS, 0)
-    for f in items:
+    for f, n in groups:
         if passes(f):
-            counts_view[f["kind"]] = counts_view.get(f["kind"], 0) + 1
+            counts_view[f["kind"]] = counts_view.get(f["kind"], 0) + n
 
     def passes_but_stage(f: dict[str, Any]) -> bool:
         """Every filter of the request but the stage ones (stage, waiting, noted): the stage chips count under the others."""
@@ -2297,17 +2320,17 @@ def query(
                 else f["status"] == status
             )
             and (not place or f["place"] == place)
-            and (only is None or f["id"] in only)
+            and (only is None or f["asked"])
             and (visibility != "seen" or f["visible"] is not False)
             and (visibility != "unseen" or f["visible"] is False)
         )
 
     stage_view: dict[str, int] = {"waiting": 0, "noted": 0, **dict.fromkeys(STAGES, 0)}
-    for f in items:
+    for f, n in groups:
         if passes_but_stage(f):
-            stage_view["waiting"] += int(f["viewers"] == 0 and f["stage"] == "new")
-            stage_view["noted"] += int(f["note"] is not None)
-            stage_view[f["stage"]] = stage_view.get(f["stage"], 0) + 1
+            stage_view["waiting"] += n if f["waiting"] else 0
+            stage_view["noted"] += n if f["noted"] else 0
+            stage_view[f["stage"]] = stage_view.get(f["stage"], 0) + n
     sel = [
         f
         for f in items
@@ -2331,10 +2354,10 @@ def query(
         return "visible" if f["visible"] else "not_visible" if f["visible"] is False else "not_measured"
 
     by_kind: dict[str, dict[str, int]] = {}
-    for f in items:
+    for f, n in groups:
         if f["status"] not in HIDDEN:
             t = by_kind.setdefault(f["kind"], {"visible": 0, "not_visible": 0, "not_measured": 0})
-            t[vis_of(f)] += 1
+            t[vis_of(f)] += n
     in_view = {"visible": 0, "not_visible": 0, "not_measured": 0}
     for f in sel:
         in_view[vis_of(f)] += 1
@@ -2384,11 +2407,11 @@ def query(
                 f["id"],
             )
         )
-    shown = [f for f in items if f["status"] not in HIDDEN]
-    stages = {s: sum(1 for f in items if f["stage"] == s) for s in STAGES}
+    shown = [(f, n) for f, n in groups if f["status"] not in HIDDEN]
+    stages = {s: sum(n for f, n in groups if f["stage"] == s) for s in STAGES}
     page = sel[offset : offset + limit]
     if slim:
-        finds = page
+        finds = [dict(f) for f in page]  # a caller's change stays its own: the snapshot and its groups are shared
     else:
         finds = [snap.judge(f["_n"]) for f in page]
         with _READ:
@@ -2397,7 +2420,7 @@ def query(
             f.update(rel[f["id"]])
     return {
         "count": len(sel),
-        "total": sum(1 for f in items if f["status"] not in HIDDEN),
+        "total": sum(n for _, n in shown),
         "counts": counts,
         # per kind, the finds that pass this request's every filter but the kind ones (status, stage, waiting, visibility, …): the
         # numbers of the kind chips under the filters in use
@@ -2406,12 +2429,12 @@ def query(
         "stage_view": stage_view,
         "labels": KIND_LABEL,
         "stages": stages,
-        "waiting": sum(1 for f in shown if f["viewers"] == 0 and f["stage"] == "new"),
-        "waiting_promising": sum(1 for f in shown if f["viewers"] == 0 and f["stage"] == "new" and f["kind"] in PROMISING_KINDS),
-        "promising": sum(1 for f in shown if f["kind"] in PROMISING_KINDS),
+        "waiting": sum(n for f, n in shown if f["waiting"]),
+        "waiting_promising": sum(n for f, n in shown if f["waiting"] and f["kind"] in PROMISING_KINDS),
+        "promising": sum(n for f, n in shown if f["kind"] in PROMISING_KINDS),
         "promising_kinds": list(PROMISING_KINDS),
         "visibility": {"by_kind": by_kind, "in_view": in_view},
-        "noted": sum(1 for f in shown if f["note"] is not None),
+        "noted": sum(n for f, n in shown if f["noted"]),
         "identification": {
             "pending": pending,
             "unavailable": unavailable,

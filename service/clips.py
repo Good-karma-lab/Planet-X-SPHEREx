@@ -24,6 +24,7 @@ import io
 import json
 import math
 import os
+import threading
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
@@ -885,6 +886,10 @@ class Clips:
         self.building: dict[str, asyncio.Task[str | None]] = {}
         self.failed: dict[str, str] = {}
         self._fields: tuple[float, list[Source]] = (0.0, [])
+        self._listing, self._listing_visits = threading.Lock(), threading.Lock()
+        self._sky: tuple[list[Source], Any, Any] | None = (
+            None  # (the sources it was made of, their centres' unit vectors, cos of their reach)
+        )
         self._seen: dict[str, tuple[bool | None, float | None]] = {}
         self._visits: tuple[float, list[tuple[str, dict[str, Any], dict[str, Any]]]] = (0.0, [])
         self.pre: dict[str, Any] = {"running": False, "rounds": 0, "made": 0, "left": None, "now": None}
@@ -918,8 +923,14 @@ class Clips:
 
     def sources(self) -> list[Source]:
         t, have = self._fields
-        if time.time() - t < 20.0:
-            return have
+        if time.time() - t < 20.0 or (t and self._listing.locked()):
+            return have  # (one thread lists the fields again; the others take the list there is)
+        with self._listing:
+            if self._fields[0] != t:
+                return self._fields[1]
+            return self._list_fields()
+
+    def _list_fields(self) -> list[Source]:
         out: list[Source] = []
         for st, own in ((self.store, False), (self.own, True)):
             for row in st.listing((FIELD,)):
@@ -932,11 +943,30 @@ class Clips:
         self._fields = (time.time(), out)
         return out
 
+    def _near(self, ra: float, dec: float) -> list[Source]:
+        """The fields whose picture can hold the place, in their order: its distance from the centre is under half their diagonal (a place
+        outside it is in no pixel of theirs). A card asked each of 1,500 fields for its pixel (40 rare lists: half of their time)."""
+        have = self.sources()
+        sky = self._sky
+        if sky is None or sky[0] is not have:
+            g = [s.grid for s in have]
+            a, d = np.radians([q.ra0 for q in g]), np.radians([q.dec0 for q in g])
+            # a pixel's tangent-plane radius is never under its angle on the sky; two pixels of margin
+            reach = np.radians([(q.n + 4) * q.step_arcsec * 0.7072 / 3600.0 for q in g])
+            sky = self._sky = (
+                have,
+                np.stack([np.cos(d) * np.cos(a), np.cos(d) * np.sin(a), np.sin(d)], axis=-1),
+                np.cos(np.minimum(reach, np.pi)),
+            )
+        ar, dr = math.radians(ra), math.radians(dec)
+        dots = sky[1] @ np.array([math.cos(dr) * math.cos(ar), math.cos(dr) * math.sin(ar), math.sin(dr)]) if have else np.empty(0)
+        return [have[i] for i in np.nonzero(dots >= sky[2] - 1e-12)[0]]
+
     def source_for(self, find: dict[str, Any], window_arcmin: float = WINDOW_ARCMIN) -> Source | None:
         """The best finished field that holds the whole window round the find: the finest grid, then the most passes, then the smallest."""
         ra, dec = float(find["ra"]), float(find["dec"])
         best: tuple[tuple[float, int, float], Source] | None = None
-        for s in self.sources():
+        for s in self._near(ra, dec):
             g = s.grid
             x, y = (float(v) for v in g.sky_to_grid(ra, dec))
             half = window_arcmin * 30.0 / g.step_arcsec
@@ -954,13 +984,16 @@ class Clips:
         first = (d.get("visits") or [{}])[0]
         ra, dec = float(first.get("ra", find["ra"])), float(first.get("dec", find["dec"]))
         t, have = self._visits
-        if time.time() - t > 30.0:
-            have = []
-            for row in self.store.listing((FILM,)):
-                meta = self.store.read_meta(FILM, row["key"]) if row["complete"] else None
-                if meta and meta.get("frames"):
-                    have.append((row["key"], row["params"], meta))
-            self._visits = (time.time(), have)
+        if time.time() - t > 30.0 and not (t and self._listing_visits.locked()):
+            with self._listing_visits:
+                if self._visits[0] == t:
+                    have = []
+                    for row in self.store.listing((FILM,)):
+                        meta = self.store.read_meta(FILM, row["key"]) if row["complete"] else None
+                        if meta and meta.get("frames"):
+                            have.append((row["key"], row["params"], meta))
+                    self._visits = (time.time(), have)
+                have = self._visits[1]
         for key, p, meta in have:
             if want is None or abs(float(p.get("mjd", -1e9)) - float(want)) > 0.06:
                 continue

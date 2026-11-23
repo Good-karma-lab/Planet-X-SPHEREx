@@ -8,6 +8,8 @@ Caches (docs/plan/05-architecture.md, 5.6):
 from __future__ import annotations
 
 import asyncio
+import threading
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -25,6 +27,9 @@ from service.reader.s3 import S3, ReadError
 from service.storage import digest, load_npz, save_npz, sharded
 
 BAND_ROWS = 64
+# the layouts kept in memory, the latest used: 270 KB each, and without a limit every exposure ever read stayed (73,000 on prod, 20 GB).
+# A square reads up to 1,100 exposures, six squares in a row 4,900; one that left is read from disk again (12 ms, in a thread)
+LAYOUTS_KEEP = 6000
 HEADER_PROBE = 32768  # first read at each header: enough for every header seen so far (IMAGE ~26 kB, PSF 43 kB needs two)
 Plane = Literal["image", "flags", "variance", "zodi"]
 
@@ -33,7 +38,8 @@ Plane = Literal["image", "flags", "variance", "zodi"]
 class FileReader:
     s3: S3
     store: Path
-    _layouts: dict[str, Layout] = field(default_factory=dict)
+    _layouts: OrderedDict[str, Layout] = field(default_factory=OrderedDict)
+    _layouts_lock: threading.Lock = field(default_factory=threading.Lock)
     _locks: dict[str, asyncio.Lock] = field(default_factory=dict)
     _wcs: dict[str, Any] = field(default_factory=dict)
 
@@ -57,17 +63,36 @@ class FileReader:
     def _headers_path(self, key: str) -> Path:
         return sharded(self.store / "raw" / "headers", digest("headers-v1", key), ".npz")
 
-    async def layout(self, key: str) -> Layout:
-        if key in self._layouts:
-            return self._layouts[key]
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        async with lock:
-            if key in self._layouts:
-                return self._layouts[key]
-            # the cached headers are read and parsed in a thread: hundreds of exposures at once held the event loop for over a second
-            lay = await asyncio.to_thread(self._layout_from_cache, key) or await self._walk(key)
-            self._layouts[key] = lay
+    def _kept(self, key: str) -> Layout | None:
+        with self._layouts_lock:
+            lay = self._layouts.get(key)
+            if lay is not None:
+                self._layouts.move_to_end(key)
             return lay
+
+    def _keep(self, key: str, lay: Layout) -> None:
+        with self._layouts_lock:
+            self._layouts[key] = lay
+            self._layouts.move_to_end(key)
+            while len(self._layouts) > LAYOUTS_KEEP:
+                self._layouts.popitem(last=False)
+
+    async def layout(self, key: str) -> Layout:
+        lay = self._kept(key)
+        if lay is not None:
+            return lay
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        try:
+            async with lock:
+                lay = self._kept(key)
+                if lay is None:
+                    # the cached headers are read and parsed in a thread: hundreds at once held the event loop for over a second
+                    lay = await asyncio.to_thread(self._layout_from_cache, key) or await self._walk(key)
+                    self._keep(key, lay)
+                return lay
+        finally:  # those who wait hold the lock itself; one that nobody waits for is not kept either
+            if not lock.locked() and self._locks.get(key) is lock:
+                del self._locks[key]
 
     def _layout_from_cache(self, key: str) -> Layout | None:
         z = load_npz(self._headers_path(key))

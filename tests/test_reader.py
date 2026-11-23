@@ -104,3 +104,60 @@ def test_psf_is_read_once_per_detector_and_layout(tmp_path: Path) -> None:
         await s3.close()
 
     asyncio.run(run())
+
+
+def test_the_layouts_kept_have_a_ceiling_and_one_that_left_is_read_again(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every exposure ever read stayed in memory (270 KB each, 73,000 of them on prod). The least lately used leaves; its answers stay."""
+    from service.reader import files
+
+    monkeypatch.setattr(files, "LAYOUTS_KEEP", 3)
+    made = {f"f{i}.fits": make_file("qr2", n=128)[0] for i in range(6)}
+    bucket = FakeBucket(made)
+
+    async def run() -> None:
+        fr = FileReader(bucket.s3(), tmp_path)
+        first = {k: (await fr.layout(k)).image.ny for k in made}
+        assert list(fr._layouts) == ["f3.fits", "f4.fits", "f5.fits"] and not fr._locks
+        await fr.layout("f3.fits")  # used: the latest again
+        n = len(bucket.requests)
+        assert (await fr.layout("f0.fits")).image.ny == first["f0.fits"] and len(bucket.requests) == n  # from the store, no request
+        assert list(fr._layouts) == ["f5.fits", "f3.fits", "f0.fits"]
+        # many at once, far more than are kept: every answer is right and the ceiling holds
+        got = await asyncio.gather(*(fr.rows(k, "image", 0, 8) for _ in range(12) for k in made))
+        want = [await fr.rows(k, "image", 0, 8) for k in made]
+        for j, g in enumerate(got):
+            np.testing.assert_array_equal(g, want[j % 6])
+        assert len(fr._layouts) <= 3 and not fr._locks
+        with pytest.raises(Exception):  # noqa: B017 (a file that is not there leaves no lock behind)
+            await fr.layout("none.fits")
+        assert not fr._locks
+
+    asyncio.run(run())
+
+
+def test_threads_that_keep_and_take_layouts_never_meet_one_that_left(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import threading
+
+    from service.reader import files
+
+    monkeypatch.setattr(files, "LAYOUTS_KEEP", 5)
+    fr = FileReader(None, tmp_path)  # type: ignore[arg-type]
+    wrong: list[str] = []
+
+    def work(seed: int) -> None:
+        try:
+            for i in range(4000):
+                k = str((i * 7 + seed * 13) % 23)
+                lay: object = fr._kept(k)
+                if lay is not None and lay != f"layout {k}":
+                    wrong.append(k)
+                fr._keep(k, f"layout {k}")  # type: ignore[arg-type]
+        except Exception as e:
+            wrong.append(repr(e))
+
+    ts = [threading.Thread(target=work, args=(n,)) for n in range(8)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert not wrong and len(fr._layouts) == 5
