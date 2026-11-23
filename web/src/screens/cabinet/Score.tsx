@@ -74,7 +74,7 @@ function eventLine(e: ScoreEvent): string {
       return `Does it move? ${e.ref}: answered “${words(e.answer)}”, the stage is “${e.stage}”`;
     case 'red':
     case 'anomaly':
-      return `${e.kind === 'red' ? 'Red source' : 'Spectral anomaly'} ${e.ref}: answered “${words(e.answer)}”, people say “${words(e.result)}”`;
+      return `${e.kind === 'red' ? 'Red source' : 'Odd spectrum'} ${e.ref}: answered “${words(e.answer)}”, people say “${words(e.result)}”`;
     case 'submit':
       return `Finding ${e.ref} submitted: it passed every check`;
     case 'candidate':

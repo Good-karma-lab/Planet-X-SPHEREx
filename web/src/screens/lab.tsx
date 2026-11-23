@@ -402,6 +402,8 @@ function MoversRows({
 }
 
 const identCache = new Map<string, string | null>();
+/** places whose name was asked and did not come (the service or SIMBAD kept silent): no longer on their way */
+const identSilent = new Set<string>();
 
 /** The catalogue name of each mover track (SIMBAD's display name, as the passport's heading has it), asked once per place: undefined while asked or when there is none. */
 function useIdentNames(tracks: Track[]): (string | undefined)[] {
@@ -430,6 +432,7 @@ function useIdentNames(tracks: Track[]): (string | undefined)[] {
           break;
         }
         if (stop) return;
+        if (!identCache.has(k)) identSilent.add(k);
         tick((x) => x + 1);
       }
     })();
@@ -1514,7 +1517,7 @@ export function Lab({ route }: { route: Route }) {
         for (const a of anv.result.anomalies.filter((q) => q.n <= ringMax && !q.identified?.simbad?.name)) {
           const [ara, adec] = atEpoch(a.ra, a.dec, a.pmra, a.pmdec, year);
           const k = near(ara, adec, 10);
-          if (k) k.lines.push(`spectral anomaly ${a.n}`);
+          if (k) k.lines.push(`odd spectrum ${a.n}`);
           else
             marks.push({
               ra: ara,
@@ -3261,7 +3264,7 @@ export function Lab({ route }: { route: Route }) {
   // a scan that failed can be asked again from its own line
   const retryOf: Record<string, (() => void) | undefined> = {
     'Red sources': () => void findRed(),
-    'Spectral anomalies': () => void followAnomalies(true),
+    'Odd spectra': () => void followAnomalies(true),
   };
   const srow = (name: string, frac: number | null, right: string, title: string, testid?: string) => (
     <div class="sline" title={title} data-testid={testid}>
@@ -3631,7 +3634,7 @@ export function Lab({ route }: { route: Route }) {
     ...(FPX_AUTO && !fpx ? fpxLeads : []).map((l, i): FindRow => ({
       key: `px:${i}`,
       name: placeWord(l.ra, l.dec),
-      line: `Find Planet X peak · S/N ${l.sn} · ${l.d} au · photometry ${l.phot != null ? `${l.phot}σ` : 'n/a'}`,
+      line: `Find Planet X peak · signal ${l.sn}× the noise · ${l.d} au`,
       status: 'unexplained',
       uv: uvNow(l.ra, l.dec),
       pick: rowPick(`px:${i}`, l.open),
@@ -3650,6 +3653,7 @@ export function Lab({ route }: { route: Route }) {
     );
   const foundCount = unexplainedCount(findRows);
   const unexplainedOf = (g: 'red' | 'anomaly') => findRows.filter((r) => r.group === g && r.status === 'unexplained').length;
+  const redChecking = (redv?.result?.red ?? []).some((x) => identOf(x.ra, x.dec) === undefined && !identSilent.has(`${x.ra.toFixed(5)},${x.dec.toFixed(5)}`));
   const fieldOn = valid && !!meta;
   const searches: SearchInfo[] = [
     {
@@ -3666,7 +3670,7 @@ export function Lab({ route }: { route: Route }) {
       ours: true,
       retry: dwarfs?.state === 'failed' ? dwarfRetry : null,
     },
-    { name: 'red sources', state: stOf(redv?.state, fieldOn && !!redv), count: String(unexplainedOf('red')), ours: true, retry: redv?.state === 'failed' ? redRetry : null },
+    { name: 'red sources', state: stOf(redv?.state, fieldOn && !!redv), count: String(unexplainedOf('red')), more: redChecking, ours: true, retry: redv?.state === 'failed' ? redRetry : null },
     {
       name: 'anomalies',
       state: stOf(an?.state === 'idle' ? 'running' : an?.state, fieldOn && !!an),
@@ -4463,7 +4467,7 @@ export function Lab({ route }: { route: Route }) {
                   ))}
                 </section>
                 <section class="psec fsec">
-                  <div class="fsh">Spectral anomalies</div>
+                  <div class="fsh">Odd spectra</div>
                   {an?.result && (
                     <div class="ssum">
                       {an.result.reason ||
@@ -4691,7 +4695,7 @@ export function Lab({ route }: { route: Route }) {
                     'search-red',
                   )}
                   {srow(
-                    'Spectral anomalies',
+                    'Odd spectra',
                     anFrac,
                     !an
                       ? 'waiting'

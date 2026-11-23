@@ -590,6 +590,8 @@ class SkyPainter {
   /** the survey on show: a picture is carried over to a new view only while it is the same survey (no half-old, half-new picture after a switch) */
   /** the layers of the picture on show (ids joined with +): the pins stand on the date of THIS picture, not of the layer just asked for */
   shownKey = '';
+  /** a picture with any sky in it has been drawn since the page was opened (the globe says "loading the sky…" until then) */
+  hasPicture = false;
   private switchKey = '';
   private switchSince = 0;
 
@@ -609,6 +611,7 @@ class SkyPainter {
       }
     }
     this.shownKey = key;
+    if (p.painted > 0) this.hasPicture = true;
     const sc = src ?? this.scratch;
     if (!src) {
       sc.width = p.sw;

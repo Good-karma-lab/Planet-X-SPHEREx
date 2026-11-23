@@ -340,7 +340,7 @@ const FIND_NAME: Record<string, string> = {
   mover: 'Moving object',
   browndwarf: 'Brown dwarf candidate',
   red: 'Red source',
-  anomaly: 'Spectral anomaly',
+  anomaly: 'Odd spectrum',
   pair: 'Pair changing',
   film: 'Time-lapse track',
   peak: 'Planet X peak',

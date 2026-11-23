@@ -156,8 +156,13 @@ export function Pic({ findingId, ra, dec, size = 96, label, thumb }: { findingId
       }}
       onMouseLeave={() => setBig(false)}
       onClick={toggle}
-      title={state === 'ready' ? 'Time-lapse of this place: one frame per SPHEREx pass' : state === 'none' && (thumb || ra != null) ? 'No SPHEREx time-lapse here yet' : undefined}
+      title={state === 'idle' ? 'The picture is being made: it appears here by itself' : state === 'ready' ? 'Time-lapse of this place: one frame per SPHEREx pass' : state === 'none' && (thumb || ra != null) ? 'No SPHEREx time-lapse here yet' : undefined}
     >
+      {state === 'idle' && (
+        <span class="cb-wait" data-testid="row-pic-wait">
+          {size >= 80 ? 'picture on the way' : 'on the way'}
+        </span>
+      )}
       {state === 'none' && thumb && <img src={thumb} alt={label} width={size} height={size} />}
       {state === 'none' && !thumb && ra != null && dec != null && <SurveyStamp ra={ra} dec={dec} size={size} />}
       {state === 'ready' && url && <img src={url} alt={`Time-lapse of ${label}`} width={size} height={size} decoding="async" style={look} onLoad={onPicLoad} data-stretch={amp ? amp.toFixed(2) : undefined} />}

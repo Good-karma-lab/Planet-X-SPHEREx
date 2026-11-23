@@ -215,3 +215,10 @@ a.btn[aria-busy="true"]::after { content: " · opening…"; }
 .fbar .fsep { display: none; }
 .fbar .leadcount .lc-line { white-space: normal; }
 @media (prefers-reduced-motion: reduce) { .fbar, .fbar.open { transition: none; } }
+
+/* the list on its way: a turning ring before its words */
+.lc-ring { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; border-radius: 50%; border: 2px solid var(--edge-hi); border-top-color: var(--accent-l); animation: lcring 0.9s linear infinite; }
+@keyframes lcring { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .lc-ring { animation: none; } }
+.fskel .fclip { position: relative; }
+.fskel .fskel-say { position: absolute; left: 0; right: 0; bottom: 14px; padding: 0 12px; text-align: center; }

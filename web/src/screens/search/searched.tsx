@@ -189,14 +189,14 @@ export function SearchedCard({
       <div class="nm">
         <b>{f.fov}′ field</b>{' '}
         <span class="badge orange">
-          {f.state === 'running' ? 'running' : f.found > 0 ? `${f.found} lead${f.found === 1 ? '' : 's'}` : 'nothing above the bar'}
+          {f.state === 'running' ? 'running' : f.found > 0 ? `${f.found} lead${f.found === 1 ? '' : 's'}` : 'nothing found'}
         </span>
       </div>
       <div class="mono-s">{f.kinds.map((k) => kinds[k] ?? k).join(' · ')}</div>
       {f.best && (
         <div class="mono-s">
           best: {f.best.label}
-          {f.best.sn != null ? ` · S/N ${f.best.sn}` : ''} · a lead, not a discovery
+          {f.best.sn != null ? ` · signal ${f.best.sn}× the noise` : ''} · a lead, not a discovery
         </div>
       )}
       {f.searched_at && <div class="mono-s">searched {f.searched_at.slice(0, 10)}</div>}

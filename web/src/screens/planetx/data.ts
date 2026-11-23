@@ -78,11 +78,11 @@ export const RECORDED: Record<string, { verdict: 'ruled out' | 'found' | 'not a 
   ecl: {
     verdict: 'ruled out',
     title: '394 au · D4',
-    text: 'A peak that passed the bar of the Planet Nine search: 0.034 ± 0.006 mJy in D4 (RA 60.94, Dec +8.39, Aug 2025). The NEOWISE archive (2014–2024, about 900 exposures) added along its orbit gives −0.0005 ± 0.0031 mJy, where a body of that flux would stand at 13.6σ.',
+    text: 'A peak that stood out in the Planet Nine search: 0.034 ± 0.006 mJy (millijansky, a brightness) in D4 (RA 60.94, Dec +8.39, Aug 2025). The NEOWISE archive (2014–2024, about 900 exposures) added along its orbit shows nothing (−0.0005 ± 0.0031 mJy), where a body that bright would stand 13.6 times above the noise.',
     rows: [
       ['SPHEREx D4', '0.034 ± 0.006 mJy'],
       ['NEOWISE along the orbit', '−0.0005 ± 0.0031 mJy'],
-      ['Expected if real', '13.6σ'],
+      ['Expected if real', '13.6× the noise'],
     ],
   },
   sedna: {

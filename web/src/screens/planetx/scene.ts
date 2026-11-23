@@ -22,6 +22,8 @@ export interface PxField {
   best: string;
   href: string;
   lead: boolean;
+  /** a line of sight without a label */
+  plain?: boolean;
 }
 
 interface Tag {
@@ -312,6 +314,7 @@ export class PxScene {
       this.placeRay(r);
       this.groups.fields.add(line, end);
       this.rays.set(f.key, r);
+      if (f.plain) continue;
       const t: Tag = { obj: end, html: `${f.name} <small>${f.best}</small>`, group: 'fields', prio: 1, color: f.lead ? '#ffc98a' : '#7ff0e4', href: f.href, key: f.key };
       this.mountTag(t);
       this.tags.push(t);
@@ -470,7 +473,8 @@ export class PxScene {
     const taken: [number, number, number, number][] = this.blocked().map((r) => [r.left - host.left, r.top - host.top, r.right - host.left, r.bottom - host.top]);
     const v = new THREE.Vector3();
     const order = [...this.tags].sort((a, b) => a.prio - b.prio);
-    const hit = (x0: number, y0: number, x1: number, y1: number) => x0 < 2 || y0 < 2 || x1 > w - 2 || y1 > h - 2 || taken.some((r) => x0 < r[2] && x1 > r[0] && y0 < r[3] && y1 > r[1]);
+    const G = 5; // the gap between two labels: side by side with none they read as one
+    const hit = (x0: number, y0: number, x1: number, y1: number) => x0 < 2 || y0 < 2 || x1 > w - 2 || y1 > h - 2 || taken.some((r) => x0 < r[2] + G && x1 > r[0] - G && y0 < r[3] && y1 > r[1]);
     for (const t of order) {
       const el = t.el!;
       const groupOn = !t.group || this.groups[t.group].visible;

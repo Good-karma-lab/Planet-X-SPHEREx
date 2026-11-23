@@ -269,7 +269,7 @@ export function CandList({
       {folded.length > 0 && (
         <details class="cr-group" ref={groupRef} open={openGroup} onToggle={(e) => setOpenGroup((e.target as HTMLDetailsElement).open)} data-testid="cand-group">
           <summary>
-            Red sources and anomalies · {folded.length}
+            Red sources and odd spectra · {folded.length}
           </summary>
           {folded.map(row)}
         </details>

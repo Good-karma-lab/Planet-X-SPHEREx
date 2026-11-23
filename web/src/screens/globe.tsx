@@ -372,6 +372,9 @@ export function Globe() {
   const autoVisible = useRef(false);
   // the layer whose picture is ON SHOW (the painter keeps the old picture until the new layer's tiles are under the view): the epoch caption and the pins follow it
   const [shownLayer, setShownLayer] = useState<SurveyId>(kept.survey);
+  // nothing of any survey has been drawn yet (an empty globe for 8–17 s read as broken: test of 20 Nov, M1)
+  const [skyEmpty, setSkyEmpty] = useState(() => !sky.hasPicture);
+  const skyEmptyRef = useRef(skyEmpty);
   const shownRef = useRef<SurveyId>(kept.survey);
   // the zoom slider: its position (0 = the widest view, 1 = the deepest) follows wheel and pinch; the globe's effect fills the API
   const [zt, setZt] = useState(0.3);
@@ -939,6 +942,10 @@ export function Globe() {
       } else if (settling) {
         if (now >= settleAt) settling = false;
       } else changed = sky.frame(sv, layer, false);
+      if (skyEmptyRef.current && sky.hasPicture) {
+        skyEmptyRef.current = false;
+        setSkyEmpty(false);
+      }
       busyNow = !!anim || settling || changed || dirty.current;
       if (changed || dirty.current) {
         dirty.current = false;
@@ -1399,6 +1406,12 @@ export function Globe() {
     <div class="screen">
       <div class="globe-wrap">
         <canvas ref={cv} aria-label="Sky globe" data-testid="sky" />
+        {skyEmpty && (
+          <div class="sky-wait mono-s" role="status" data-testid="sky-wait">
+            <i aria-hidden="true" />
+            loading the sky…
+          </div>
+        )}
         <div class="zoomctl dark-glass" role="group" aria-label="Zoom" data-testid="zoom-slider">
           <button aria-label="Zoom in" title="Zoom in" onClick={() => zoomApi.current.by(1.5)}>
             +
@@ -1788,7 +1801,7 @@ export function Globe() {
                   : asking === 'none'
                     ? 'SIMBAD knows no object of that name.'
                     : asking === 'slow'
-                      ? 'SIMBAD did not answer in time.'
+                      ? 'The star catalogue SIMBAD did not answer in time.'
                       : 'Nothing in this list.'}{' '}
                 Coordinates work too, e.g. “17h57m48s, +04d41m”.
               </div>

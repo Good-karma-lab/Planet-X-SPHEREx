@@ -11,6 +11,8 @@ export interface SearchInfo {
   frac?: number | null;
   /** what it found, said after the switch ("3 unexplained", "1014") */
   count?: string;
+  /** the count is not final: what it found is still being checked against the catalogues ("11…") */
+  more?: boolean;
   /** a failure on our own server (a 5xx, a job that failed), not an outside archive */
   ours?: boolean;
   /** while failed: seconds to the next try, and the try now */
@@ -70,6 +72,11 @@ export function useRetry(failed: boolean, retry: () => void, key: string): { nex
   };
 }
 
+/** A finished search's number: with "…" while what it found is still being checked (it grew 3 → 23 looking final: test of 20 Nov, M6). */
+export function countWord(s: SearchInfo): string {
+  return s.more ? `${s.count ?? ''}…` : (s.count ?? '✓');
+}
+
 /** The words after a failed search: who did not answer, and when the next try is. */
 export function failWord(s: SearchInfo): string {
   // a catalogue outside that is slow is asked again on its own: said as the normal wait it is, not as a failure
@@ -112,7 +119,7 @@ export function SearchMark({ s }: { s: SearchInfo | null | undefined }) {
     );
   return (
     <span class="sm-done" data-testid={`search-${s.name}`}>
-      {s.count ?? '✓'}
+      {countWord(s)}
     </span>
   );
 }
@@ -127,12 +134,12 @@ export function SearchRow({ list }: { list: SearchInfo[] }) {
           {/* the red sources and the anomalies are the folded group of the list below: their count opens it */}
           {(s.name === 'red sources' || s.name === 'anomalies') && s.state === 'done' && Number(s.count) > 0 ? (
             <button class="sr-open" onClick={() => window.dispatchEvent(new CustomEvent('spherex:open-group'))} title={`Show the ${s.name} in the list`}>
-              {s.name} <b>{s.count}</b>
+              {s.name} <b>{countWord(s)}</b>
             </button>
           ) : (
             <>
               {s.name}{' '}
-              <b>{s.state === 'done' ? (s.count ?? '✓') : s.state === 'running' ? (s.frac != null ? `${Math.round(s.frac * 100)}%` : '…') : s.state === 'failed' ? <SearchMark s={s} /> : '–'}</b>
+              <b>{s.state === 'done' ? countWord(s) : s.state === 'running' ? (s.frac != null ? `${Math.round(s.frac * 100)}%` : '…') : s.state === 'failed' ? <SearchMark s={s} /> : '–'}</b>
             </>
           )}
         </span>

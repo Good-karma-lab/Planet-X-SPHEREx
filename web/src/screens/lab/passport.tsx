@@ -53,7 +53,7 @@ export function FindStatus({ id }: { id: string }) {
   // each number with its meaning on hover (the words stay short on the card)
   const nums: [string, string][] = (
     [
-      [f.snr != null ? `S/N ${f.snr.toFixed(1)}` : '', 'Signal to noise: how far it stands above the noise of the picture'],
+      [f.snr != null ? `signal ${f.snr.toFixed(1)}× noise` : '', 'Signal to noise: how far it stands above the noise of the picture'],
       [f.score != null ? `score ${f.score.toFixed(1)}` : '', "The search's own measure of how strong the find is"],
       [rateWord(f), 'How fast it moves on the sky'],
       [f.promise != null ? `promise ${f.promise}` : '', 'What to look at first, 0 to 100: strength, checks passed, nothing known there'],

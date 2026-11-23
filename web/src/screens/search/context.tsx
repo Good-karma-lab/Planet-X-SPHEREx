@@ -253,7 +253,7 @@ export function ContextRows({
                 text = `asking…${stale ? nextTry : ''}`;
                 tip = 'the catalogue has not answered yet: this page asks again';
               } else if (p?.state === 'unavailable') {
-                text = `no answer${nextTry}`;
+                text = `${row.key === 'simbad' ? 'this star catalogue is not answering; the others are used' : 'no answer'}${nextTry}`;
                 tip = p.error;
               } else if (p?.state === 'none') {
                 // a known source that one catalogue does not list: a quiet "no entry", not the headline of an unknown
