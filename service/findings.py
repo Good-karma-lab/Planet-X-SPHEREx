@@ -20,6 +20,7 @@ import hashlib
 import json
 import marshal
 import math
+import re
 import sqlite3
 import threading
 import time
@@ -77,6 +78,10 @@ SB_TIMEOUT_S = 90.0  # JPL Small-Body Identification answers slowly (a field sea
 SB_MATCH_ARCSEC = 15.0
 SB_RATE_TOL = 0.25
 SB_PA_TOL = 30.0
+# a chain through a known body (chain_of): one visit of the track this close to a body that does not move like it, or two visits within
+# SB_MATCH_ARCSEC of the same body. Of the 48 bodies beside a visit known on 23 Nov 2026, 47 stood under 5.5″ and one at 7.5″; chance
+# would put 84 % of them past 6″
+CHAIN_ARCSEC = 6.0
 GENERIC_TYPES = ("", "*", "Star", "IR", "Radio", "UV", "X", "Blue", "Red", "?")  # a SIMBAD type that explains nothing about a spectrum
 EPOCH = 2025.9
 ECLIPTIC_BAND = 15.0  # degrees of ecliptic latitude: a slow mover there is also checked against the known solar-system bodies
@@ -686,7 +691,12 @@ def pending_ids(
                     or (c == "sbident" and '"two_pass"' not in detail)
                 )
             )
-            if d is None or old:
+            # a film track JPL was asked about at three of its visits only: the rest once, after what decides, waiting longer after a failure
+            rest = d is not None and r["kind"] == "film" and c == "sbident" and d["state"] == "none" and '"all_visits"' not in detail
+            if d is not None and rest and not old:
+                if now - d["tried"] >= RETRY_S * (2 ** min(d["attempts"], 5)) or not d["attempts"]:
+                    worst = 0.0
+            elif d is None or old:
                 worst = 0.0 if worst is None else min(worst, 0.0)  # never asked, or asked the old way
                 tier = 0
             # a deciding one is asked until it answers (the wait grows to 32 RETRY_S); one that adds detail too, but past MAX_ATTEMPTS
@@ -1117,6 +1127,9 @@ class Findings:
                         # arcseconds off: 12304 (1991 SR1) stood 17.7″ from the top time-lapse lead there and 4.4″ in the second pass
                         "two-pass": "true",
                         "suppress-first-pass": "true",
+                        # a moving find: comets and interstellar bodies too. JPL leaves out every body without an absolute magnitude by
+                        # default (3I/ATLAS, C/2025 A6): film:a5b911ea77dc stood on 3I at all seven visits and read "no known body"
+                        **({"mag-required": "false"} if check_rate else {}),
                     },
                     timeout=httpx.Timeout(
                         SB_TIMEOUT_S, connect=10.0
@@ -1152,7 +1165,12 @@ class Findings:
             except (KeyError, ValueError, IndexError):
                 continue
         near.sort(key=lambda x: x[0])
-        out: dict[str, Any] = {"n_bodies": len(data), "vmag_limit": SB_VMAG, "two_pass": True}
+        out: dict[str, Any] = {"n_bodies": len(data), "vmag_limit": SB_VMAG, "two_pass": True, "near": None}
+        for sep, row in near:  # the nearest body of a known brightness, whatever its motion: what a chained track passed through
+            v = _f(row[idx[c_v]]) if c_v in idx else None
+            if sep <= SB_MATCH_ARCSEC and v is not None and v <= SB_VMAG:
+                out["near"] = {"name": str(row[0]).strip(), "sep": round(sep, 1), "v": v}
+                break
         for sep, row in near:
             if sep > SB_MATCH_ARCSEC:
                 break
@@ -1201,15 +1219,11 @@ class Findings:
         return _fnum(m)
 
     async def sbident_visits(self, row: sqlite3.Row) -> dict[str, Any]:
-        """JPL at the dates of the find's visits. A film track: three of its visits (first, middle, last), the same body at two of three at the
-        track's rate; a brown dwarf candidate near the ecliptic: the same body within 15″ at every pass date."""
+        """JPL at the dates of the find's visits. A film track: _film_visits; a brown dwarf candidate near the ecliptic: the same body within 15″ at every pass date."""
         d = json.loads(row["data"])
-        trk = d.get("track") or {}
         if row["kind"] == "film":
-            vis = d.get("visits") or []
-            sel = [vis[i] for i in sorted({0, len(vis) // 2, len(vis) - 1})] if vis else []
-            rate, pa, check, need = _fnum(trk.get("rate")), _fnum(trk.get("pa")), True, max(1, math.ceil(len(sel) * 2 / 3))
-        elif row["kind"] == "peak":
+            return await self._film_visits(row["id"], d)
+        if row["kind"] == "peak":
             ref = _ref_mjd("peak", d)
             sel = [{"ra": row["ra"], "dec": row["dec"], "mjd": ref}] if ref is not None else []
             rate, pa, check, need = None, None, False, 1
@@ -1236,6 +1250,76 @@ class Findings:
             "per_visit": per,
             "n_bodies": max(g.get("n_bodies", 0) for g in got),
         }
+
+    async def _film_visits(self, find_id: str, d: dict[str, Any]) -> dict[str, Any]:
+        """A film track against JPL. First, middle and last visit: the same body at two of three, moving like the track, names it. If none
+        does, every other visit too (a track chained through one or two places of a known body shows there: chain_of), and a body that
+        moves like it at two thirds of all the visits names it. What an earlier check of three visits said is kept, not asked again,
+        unless a visit asked now shows a body that moves like the track."""
+        vis = list(d.get("visits") or [])
+        trk = d.get("track") or {}
+        rate, pa = _fnum(trk.get("rate")), _fnum(trk.get("pa"))
+        if not vis:
+            return {"state": "unavailable", "error": "no visit dates"}
+        first = sorted({0, len(vis) // 2, len(vis) - 1})
+        memo: dict[str, dict[int, dict[str, Any]]] = self.__dict__.setdefault("_visits_said", {})
+        got = memo.setdefault(find_id, {})  # what JPL said so far: a failure half way does not ask again what it answered
+        while len(memo) > 64:
+            memo.pop(next(iter(memo)))
+
+        async def ask(ks: list[int]) -> None:
+            for k in ks:
+                if k not in got:
+                    v = vis[k]
+                    got[k] = await self.sbident(v["ra"], v["dec"], v["mjd"], rate, pa, True)
+
+        def best_of() -> tuple[str | None, int]:
+            names = [str(g["name"]) for g in got.values() if g.get("state") == "ok" and g.get("name")]
+            best = max(sorted(set(names)), key=names.count) if names else None
+            return best, names.count(best) if best is not None else 0
+
+        kept = self._kept_visits(find_id, vis, first)
+        if kept is None:
+            await ask(first)
+        else:
+            got.update({k: v for k, v in kept.items() if k not in got})
+        best, n = best_of()
+        if best is None or n < max(1, math.ceil(len(first) * 2 / 3)):
+            await ask(list(range(len(vis))))
+            if kept is not None and any(g.get("state") == "ok" for k, g in got.items() if k not in kept):
+                for k in kept:
+                    if "note" in got[k]:  # (the kept form: asked before comets were, or with fewer visits)
+                        del got[k]
+                await ask(first)
+            best, n = best_of()
+            if n < max(1, math.ceil(len(vis) * 2 / 3)):
+                best = None
+        memo.pop(find_id, None)
+        per = [
+            {
+                "mjd": vis[k]["mjd"],
+                "state": g["state"],
+                **{c: g.get(c) for c in ("name", "sep", "note")},
+                **({"near": g["near"]} if "near" in g else {}),  # (an earlier answer, kept, does not say)
+            }
+            for k, g in sorted(got.items())
+        ]
+        said = {"two_pass": True, "all_visits": True, "visits_checked": len(got), "visits_matched": n, "per_visit": per}
+        if best is not None:
+            return {**next(g for _, g in sorted(got.items()) if g.get("name") == best), **said}
+        return {"state": "none", **said, "n_bodies": max(int(g.get("n_bodies") or 0) for g in got.values())}
+
+    def _kept_visits(self, find_id: str, vis: list[dict[str, Any]], first: list[int]) -> dict[int, dict[str, Any]] | None:
+        """What the check of three visits (before all of them were asked) said of each: {visit: answer}, or None when there is none."""
+        with _READ:
+            r = self.db.db.execute("SELECT state, detail FROM idents WHERE find_id=? AND catalogue='sbident'", (find_id,)).fetchone()
+        if r is None or r["state"] != "none":
+            return None
+        det = json.loads(r["detail"] or "{}")
+        per = {v.get("mjd"): v for v in det.get("per_visit") or []}
+        if not det.get("two_pass") or any(vis[k]["mjd"] not in per for k in first):
+            return None
+        return {k: {**per[vis[k]["mjd"]], "n_bodies": det.get("n_bodies", 0)} for k in first}
 
     async def bright_neighbour(self, ra: float, dec: float) -> dict[str, Any]:
         """The brightest Gaia DR3 star (G < 10) that stands within 60″ of the place at the epoch (each moved from 2016 with its proper motion)."""
@@ -1285,16 +1369,21 @@ class Findings:
                     "our_pa",
                     "note",
                     "nearest_rejected",
+                    "all_visits",
                     "visits_checked",
                     "visits_matched",
                     "per_visit",
                     "two_pass",
                 )
                 self.db.put_ident(row["id"], "sbident", a["state"], a.get("name"), a.get("sep"), None, {k: a[k] for k in keep if k in a}, a)
-            except BreakerOpenError:
-                pass  # JPL is resting after failures: the find stays pending and is asked later, no attempt spent
-            except (httpx.HTTPError, ValueError) as e:
-                self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": str(e)[:120]})
+            except (httpx.HTTPError, BreakerOpenError, ValueError) as e:
+                r = self.db.db.execute("SELECT state FROM idents WHERE find_id=? AND catalogue='sbident'", (row["id"],)).fetchone()
+                if r is not None and r["state"] in ("ok", "none"):  # asked again for more: what JPL said before stands, asked later
+                    self.db.db.execute(
+                        "UPDATE idents SET tried=?, attempts=attempts+1 WHERE find_id=? AND catalogue='sbident'", (time.time(), row["id"])
+                    )
+                elif not isinstance(e, BreakerOpenError):  # JPL is resting after failures: the find stays pending, no attempt spent
+                    self.db.put_ident(row["id"], "sbident", "unavailable", None, None, None, {"error": str(e)[:120]})
         if "halo" in want:
             try:
                 h = await self.bright_neighbour(row["ra"], row["dec"])
@@ -1435,6 +1524,33 @@ def blend_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str | None:
     return None
 
 
+_BESIDE = re.compile(r"^(.+?) stands ([0-9.]+)″ away but ")  # how a visit's note named a body before `near` was kept
+
+
+def chain_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """A film track that passes through a known body and is not that body: one real body chained with noise. {name, n: visits beside it, of:
+    visits asked, sep: the nearest}, or None. One visit counts within CHAIN_ARCSEC, two of the same body within SB_MATCH_ARCSEC. (4754
+    Panthoos, 5511 Cloanthus and 2017 Wesson led the first page as unexplained tracks, 23 Nov 2026.)"""
+    if f["kind"] != "film":
+        return None
+    sb = next((i for i in idents if i["catalogue"] == "sbident" and i["state"] == "none"), None)
+    per = ((sb or {}).get("detail") or {}).get("per_visit") or []
+    beside: dict[str, list[float]] = {}
+    for v in per:
+        near = v.get("near")
+        if near is None and v.get("name") and v.get("sep") is not None:
+            near = v  # it moves like the track, at too few visits to be the track
+        if "near" not in v and near is None and (m := _BESIDE.match(v.get("note") or "")):
+            near = {"name": m[1], "sep": m[2]}
+        if near is not None and float(near["sep"]) <= SB_MATCH_ARCSEC:
+            beside.setdefault(str(near["name"]).strip(), []).append(float(near["sep"]))
+    hits = [(len(s), -min(s), n) for n, s in beside.items() if len(s) > 1 or min(s) <= CHAIN_ARCSEC]
+    if not hits:
+        return None
+    n, sep, name = max(hits)
+    return {"name": name, "n": n, "of": len(per), "sep": -sep}
+
+
 def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
     """`known` (a catalogue or the scan itself names what it is), `unchecked` (catalogues still to answer or that did not answer, and none explains
     it yet) or `unexplained` (every catalogue answered and none explains it)."""
@@ -1475,6 +1591,8 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         # linked as a straight line, its light never checked in the exposures (on - off): on 18 Nov 2026 the R Draconis track's four
         # strongest points (39-62 sigma in the motion map) held no light at all in the exposures. Not a lead until it is checked
         return "unverified"
+    if kind == "film" and chain_of(f, idents):
+        return "chain"  # one known body chained with noise: shown, marked, not a lead
     if kind in BLEND_KINDS and blend_of(f, idents):
         return "blend"  # a neighbour star or a survey source at its place says it did not move: not a lead
     if kind == "peak" and ok("halo"):
@@ -1536,6 +1654,10 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         return ("Linked as a straight line through the visits, but its light was never checked in the exposures themselves (on − off "
                 "photometry, which every orbit track passes): near bright stars such tracks can be built from the motion maps alone. "
                 "Not counted as a lead.")  # fmt: skip
+    if status == "chain":
+        c = chain_of(f, idents) or {"name": "a known body", "n": 1, "of": 1, "sep": 0.0}
+        return (f"A chain through a known asteroid: {c['name']} stands {c['sep']:.1f}″ from the track at {c['n']} of the {c['of']} visits JPL was "
+                "asked about, but does not move like it. Most likely that body linked with noise. Not counted as a lead.")  # fmt: skip
     if status == "blend":
         why = (blend_of(f, idents) or "").split(":")
         if why[0] == "neighbour" and len(why) >= 4:
@@ -1625,6 +1747,7 @@ STAGE_OF_STATUS = {
     "galaxy": "artefact",
     "below": "artefact",
     "halo": "artefact",
+    "chain": "artefact",  # a track through a known body (chain_of): shown, not a lead
     "blend": "artefact",  # a neighbour blending, or a survey source at its place: it did not move
     "set_aside": "artefact",  # people agreed it is an artefact (service/accounts/field_people.py)
 }
@@ -1934,6 +2057,7 @@ def query(
             "set_aside": 0,
             "blend": 0,
             "unverified": 0,
+            "chain": 0,
             "leads": 0,
         }
         for k in KINDS
@@ -1953,6 +2077,7 @@ def query(
                 "set_aside": 0,
                 "blend": 0,
                 "unverified": 0,
+                "chain": 0,
                 "leads": 0,
             },
         )
@@ -2053,6 +2178,7 @@ def query(
         "set_aside": 7,
         "blend": 8,
         "unverified": 9,
+        "chain": 10,
     }
     # a status this list does not know goes last, never a KeyError (a blend broke every list it was in)
     sel.sort(

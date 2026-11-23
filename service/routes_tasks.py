@@ -318,7 +318,8 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             "dec": x["dec"],
             "status": x["status"],
             "kind": x["kind"],
-            "stage": STAGE_OF_STATUS.get(x["status"]),
+            # a chain through a known body is settled for the tasks (not handed out), but is no final stage of anybody's answer
+            "stage": "chain" if x["status"] == "chain" else STAGE_OF_STATUS.get(x["status"]),
             "visible": x.get("visible"),
             "promise": x.get("promise") or 0,
             **({"raised": x["people_raised"]} if "people_raised" in x else {}),

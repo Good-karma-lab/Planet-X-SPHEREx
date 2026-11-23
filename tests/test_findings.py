@@ -8,6 +8,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 
 from service.findings import SCHEMA, FindingsDB, collect, query, status_of, verdict_of
@@ -339,12 +340,11 @@ def _jpl_by_date(rows_by_mjd: dict[str, list[list[Any]]]) -> Any:
     f = Findings.__new__(Findings)
     f.breaker = Breaker("JPL")
     f.catalogue = type("C", (), {"client": Client()})()
+    f._kept_visits = lambda *a: None  # type: ignore[method-assign]
     return f
 
 
 def test_film_track_is_known_when_the_same_body_stands_where_it_does_at_two_of_three_visits() -> None:
-    import sqlite3 as sq
-
     from service.findings import _iso
 
     mjds = [61000.0, 61005.0, 61010.0]
@@ -352,15 +352,144 @@ def test_film_track_is_known_when_the_same_body_stands_where_it_does_at_two_of_t
     body = [["9952 Test", "2.0", "0.0", "58.0", "0.0", "18.0"]]
     f = _jpl_by_date({days[0]: body, days[2]: body})  # seen at two visits (the middle date has none)
     vis = [{"ra": 120.0, "dec": 10.0, "mjd": m} for m in mjds]
-    db = sq.connect(":memory:")
-    db.row_factory = sq.Row
-    db.execute("CREATE TABLE t (kind, ra, dec, data)")
-    db.execute("INSERT INTO t VALUES ('film', 120.0, 10.0, ?)", (json.dumps({"track": {"rate": 58.0, "pa": 90.0}, "visits": vis}),))
-    row = db.execute("SELECT * FROM t").fetchone()
+    row = _film_row(vis)
     got = asyncio.run(f.sbident_visits(row))
     assert got["state"] == "ok" and got["name"] == "9952 Test" and got["visits_matched"] == 2
     f2 = _jpl_by_date({days[0]: body})  # one of three: not enough
     assert asyncio.run(f2.sbident_visits(row))["state"] == "none"
+
+
+def _film_row(vis: list[dict[str, Any]], rate: float = 58.0, pa: float = 90.0) -> Any:
+    import sqlite3 as sq
+
+    db = sq.connect(":memory:")
+    db.row_factory = sq.Row
+    db.execute("CREATE TABLE t (id, kind, ra, dec, data)")
+    db.execute("INSERT INTO t VALUES ('film:x', 'film', 120.0, 10.0, ?)", (json.dumps({"track": {"rate": rate, "pa": pa}, "visits": vis}),))
+    return db.execute("SELECT * FROM t").fetchone()
+
+
+def _as_kept(got: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"catalogue": "sbident", "state": got["state"], "name": got.get("name"), "detail": json.loads(json.dumps(got))}]
+
+
+def test_a_film_track_is_asked_at_every_visit_and_a_chain_through_a_known_body_is_no_lead() -> None:
+    """4754 Panthoos, 5511 Cloanthus and 2017 Wesson led the first page as unexplained tracks (23 Nov 2026): one real body linked with
+    noise. JPL was asked at three visits of six."""
+    from service.findings import _iso, chain_of, verdict_of
+
+    mjds = [61000.0 + 2 * k for k in range(6)]
+    days = [_iso(m)[:10] for m in mjds]
+    vis = [{"ra": 120.0, "dec": 10.0, "mjd": m} for m in mjds]
+    f = {"kind": "film", "data": {"track": {"method": "orbit", "verified": True}}, "ra": 120.0, "dec": 10.0}
+
+    def say(by: dict[str, list[list[str]]]) -> tuple[str, dict[str, Any]]:
+        got = asyncio.run(_jpl_by_date(by).sbident_visits(_film_row(vis)))
+        return status_of(f, _as_kept(got)), got
+
+    def body(sep: str, rate: str = "10.0", v: str = "18.0", name: str = "4754 Panthoos") -> list[list[str]]:
+        return [[name, sep, "0.0", rate, "0.0", v]]
+
+    st, got = say({days[1]: body("3.6")})  # beside it at a visit the old check never asked
+    assert st == "chain" and got["all_visits"] is True and got["visits_checked"] == 6 and got["state"] == "none"
+    said = chain_of(f, _as_kept(got))
+    assert said == {"name": "4754 Panthoos", "n": 1, "of": 6, "sep": 3.6}
+    assert "4754 Panthoos stands 3.6″" in verdict_of(f, _as_kept(got), "chain")
+    assert say({days[1]: body("9.0")})[0] == "unexplained"  # one visit further than 6″: chance
+    assert say({days[1]: body("9.0"), days[4]: body("13.1")})[0] == "chain"  # the same body at two
+    assert say({days[1]: body("9.0"), days[4]: body("9.0", name="another")})[0] == "unexplained"  # two bodies at one visit each
+    assert say({days[1]: body("3.0", v="n.a.")})[0] == "unexplained"  # no known brightness (a comet's fragment): beside it by chance
+    assert say({days[1]: body("3.0", v="22.5")})[0] == "unexplained"  # too faint to be in the pictures
+    assert say({days[0]: body("3.0", rate="58.0")})[0] == "chain"  # it moves like the track, at one visit of six only
+    assert say({d: body("3.0", rate="58.0") for d in days[:4]})[0] == "known"  # at four of six: the track is the body
+    assert say({})[0] == "unexplained"
+    line = {**f, "data": {"track": {"method": "line", "verified": False}}}
+    assert status_of(line, _as_kept(say({days[1]: body("3.6")})[1])) == "unverified"
+
+
+def test_what_three_visits_said_is_kept_and_a_comet_is_asked_for(tmp_path: Path) -> None:
+    """The 680 tracks already asked about: only their other visits are asked; a visit that shows a body moving like the track (3I/ATLAS,
+    which JPL leaves out unless bodies without a magnitude are asked for) asks the first ones again."""
+    from service.findings import Findings, _iso
+    from service.upstream.breaker import Breaker
+
+    mjds = [61000.0 + k for k in range(5)]
+    vis = [{"ra": 120.0, "dec": 10.0, "mjd": m} for m in mjds]
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    old = {
+        "two_pass": True,
+        "n_bodies": 1,
+        "per_visit": [{"mjd": mjds[k], "state": "none", "name": None, "sep": None, "note": None} for k in (0, 2, 4)],
+    }
+    old["per_visit"][0]["note"] = "4754 Panthoos (5010 T-3) stands 3.6″ away but moves 10″/h toward 39°, not like this find"
+    db.put_ident("film:x", "sbident", "none", None, None, None, old)
+    db.db.commit()
+    assert status_of({"kind": "film", "data": {}}, db.idents_of(["film:x"])["film:x"]) == "chain"  # by the old note, at once
+    asked: list[dict[str, str]] = []
+
+    def run(rows: list[list[str]]) -> dict[str, Any]:
+        class Client:
+            async def get(self, url: str, params: dict[str, str], **_kw: object) -> _Resp:
+                asked.append(params)
+                return _Resp(_jpl(rows))
+
+        f = Findings.__new__(Findings)
+        f.breaker = Breaker("JPL")
+        f.catalogue = type("C", (), {"client": Client()})()
+        f.db = db
+        return asyncio.run(f.sbident_visits(_film_row(vis)))
+
+    got = run([])
+    assert [p["obs-time"][:10] for p in asked] == [_iso(mjds[k])[:10] for k in (1, 3)] and asked[0]["mag-required"] == "false"
+    assert len(got["per_visit"]) == 5 and status_of({"kind": "film", "data": {}}, _as_kept(got)) == "chain"
+    asked.clear()
+    got = run([["C/2025 N1 (ATLAS)", "4.0", "0.0", "58.0", "0.0", "n.a."]])
+    assert got["state"] == "ok" and got["name"] == "C/2025 N1 (ATLAS)" and got["visits_matched"] == 5 and len(asked) == 5
+
+
+def test_a_silent_jpl_does_not_change_what_it_said_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import time as _time
+
+    from service.findings import Findings, pending_ids
+    from service.upstream.breaker import Breaker, BreakerOpenError
+
+    vis = [{"ra": 120.0, "dec": 10.0, "mjd": 61000.0 + k} for k in range(4)]
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {
+        "kind": "film",
+        "place": "far",
+        "fov": 60,
+        "ra": 120.0,
+        "dec": 10.0,
+        "rate": 58.0,
+        "snr": 9.0,
+        "score": 9.0,
+        "chance": 0.0,
+        "scans": [],
+    }
+    db.write_finds([{**base, "id": "film:x", "data": {"track": {"rate": 58.0, "pa": 90.0}, "visits": vis}}])
+    per = [{"mjd": v["mjd"], "state": "none", "name": None, "sep": None, "note": None} for v in vis]
+    db.put_ident("film:x", "sbident", "none", None, None, None, {"two_pass": True, "per_visit": per[:1] + per[2:]})
+    db.db.commit()
+    now = _time.time()
+    assert pending_ids(str(db.path), 10, frozenset(), now) == ["film:x"]  # its other visit waits to be asked
+    row = db.db.execute("SELECT * FROM finds").fetchone()
+    for err in (httpx.ReadTimeout("slow"), BreakerOpenError("JPL", 60.0)):
+        f = Findings.__new__(Findings)
+        f.breaker = Breaker("JPL")
+        f.db = db
+
+        async def fail(r: Any, e: Exception = err) -> dict[str, Any]:
+            raise e
+
+        monkeypatch.setattr(f, "sbident_visits", fail)
+        asyncio.run(f.identify_one(row))
+        assert db.db.execute("SELECT state FROM idents WHERE find_id='film:x'").fetchone()[0] == "none"
+        assert pending_ids(str(db.path), 10, frozenset(), now) == []  # and it is asked again later, not at once
+    assert pending_ids(str(db.path), 10, frozenset(), now + 86400) == ["film:x"]
+    db.put_ident("film:x", "sbident", "none", None, None, None, {"two_pass": True, "all_visits": True, "per_visit": per})
+    db.db.commit()
+    assert pending_ids(str(db.path), 10, frozenset(), now + 86400) == []
 
 
 def test_wanted_identifications_and_the_best_measurement_of_a_merged_object() -> None:
