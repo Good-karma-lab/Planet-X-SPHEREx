@@ -766,6 +766,7 @@ class FindingsDB:
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.read_only = False
         self.version = SCHEMA
+        self._kept_rows: dict[str, tuple[bytes, bytes]] = {}  # read_base: each find's pack and the signature of the rows it was made of
         self._base: tuple[tuple[int, int], list[Any]] | None = None  # query's read of the tables, kept while the database is unchanged
         self._migrate()
 
@@ -955,27 +956,33 @@ class FindingsDB:
             ),
         )
 
-    def idents_of(self, ids: list[str]) -> dict[str, list[dict[str, Any]]]:
-        out: dict[str, list[dict[str, Any]]] = {i: [] for i in ids}
+    def ident_rows_of(self, ids: list[str]) -> dict[str, list[sqlite3.Row]]:
+        """The catalogues' answers of these finds as the table holds them (their JSON not read)."""
+        out: dict[str, list[sqlite3.Row]] = {i: [] for i in ids}
         for k in range(0, len(ids), 500):
             chunk = ids[k : k + 500]
             marks = ",".join("?" for _ in chunk)
             for r in self.db.execute(f"SELECT * FROM idents WHERE find_id IN ({marks})", chunk):
-                out[r["find_id"]].append(
-                    {
-                        "catalogue": r["catalogue"],
-                        "label": CATALOGUE_LABEL.get(r["catalogue"], r["catalogue"]),
-                        "state": r["state"],
-                        "name": r["name"],
-                        "sep": r["sep"],
-                        "type": r["type"],
-                        "detail": json.loads(r["detail"] or "{}"),
-                        "raw": json.loads(r["raw"]) if r["raw"] else None,
-                        "tried": r["tried"],
-                        "attempts": r["attempts"],
-                    }
-                )
+                out[r["find_id"]].append(r)
         return out
+
+    @staticmethod
+    def ident_of(r: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "catalogue": r["catalogue"],
+            "label": CATALOGUE_LABEL.get(r["catalogue"], r["catalogue"]),
+            "state": r["state"],
+            "name": r["name"],
+            "sep": r["sep"],
+            "type": r["type"],
+            "detail": json.loads(r["detail"] or "{}"),
+            "raw": json.loads(r["raw"]) if r["raw"] else None,
+            "tried": r["tried"],
+            "attempts": r["attempts"],
+        }
+
+    def idents_of(self, ids: list[str]) -> dict[str, list[dict[str, Any]]]:
+        return {i: [self.ident_of(r) for r in rows] for i, rows in self.ident_rows_of(ids).items()}
 
 
 def _ident_from(cat: str, ans: dict[str, Any]) -> tuple[str, str | None, float | None, str | None, dict[str, Any]]:
@@ -1992,15 +1999,34 @@ def find_row(db: FindingsDB, find_id: str) -> dict[str, Any] | None:
     return {**{k: r[k] for k in ("id", "kind", "place", "fov", "ra", "dec", "rate")}, "data": json.loads(r["data"] or "{}")}
 
 
-def _rows_of(db: FindingsDB, rows: Iterable[sqlite3.Row]) -> list[Any]:
-    """Each row of `finds` with its JSON read and its catalogue answers, packed on its own (marshal): [(row, idents)] packed."""
-    got = [
-        {**{k: r[k] for k in r.keys() if k not in ("data", "scans", "versions")},  # noqa: SIM118 (a Row iterates its values)
-         "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "versions": json.loads(r["versions"] or "{}")}
-        for r in rows
-    ]  # fmt: skip
-    idents = db.idents_of([r["id"] for r in got])
-    return [marshal.dumps((r, idents[r["id"]])) for r in got]
+def row_sig(r: Iterable[Any], idents: Iterable[Iterable[Any]]) -> bytes:
+    """What a find's rows hold, in 16 bytes. Not hash(): it is the same for -1 and -2. marshal 2 writes no references, so equal rows
+    give equal bytes (an equal row that did not would only be read again)."""
+    return hashlib.blake2b(marshal.dumps((tuple(r), [tuple(i) for i in idents]), 2), digest_size=16).digest()
+
+
+def _rows_of(db: FindingsDB, rows: Iterable[sqlite3.Row], kept: dict[str, tuple[bytes, bytes]] | None = None) -> list[Any]:
+    """Each row of `finds` with its JSON read and its catalogue answers, packed on its own (marshal): [(row, idents)] packed. `kept`
+    ({id: (signature, pack)}, updated here): a find whose rows hold what they held is not read again."""
+    rows = list(rows)
+    said = db.ident_rows_of([r["id"] for r in rows])
+    out: list[Any] = []
+    for r in rows:
+        mine = said[r["id"]]
+        sig = row_sig(r, mine)
+        hit = kept.get(r["id"]) if kept is not None else None
+        if hit is not None and hit[0] == sig:
+            out.append(hit[1])
+            continue
+        got = {
+            **{k: r[k] for k in r.keys() if k not in ("data", "scans", "versions")},  # noqa: SIM118 (a Row iterates its values)
+            "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "versions": json.loads(r["versions"] or "{}"),
+        }  # fmt: skip
+        pack = marshal.dumps((got, [db.ident_of(i) for i in mine]))
+        if kept is not None:
+            kept[r["id"]] = (sig, pack)
+        out.append(pack)
+    return out
 
 
 def read_some(db: FindingsDB, ids: list[str]) -> list[Any]:
@@ -2024,8 +2050,16 @@ def read_base(db: FindingsDB) -> list[Any]:
         return db._base[1]
     out: list[Any] = []
     rows = db.db.execute("SELECT * FROM finds").fetchall()
+    # one catalogue's answer changes one find of 26,000: only the changed ones are read again (1.2 s to 0.4 s of JSON on the Mac). The
+    # whole read was on the stacks of about two of three event loop holds on prod (23 Nov 2026); that it caused them is not shown. The
+    # packs are changed in place: the caller holds _READ
+    kept = db._kept_rows
     for k in range(0, len(rows), 500):
-        out += _rows_of(db, rows[k : k + 500])
+        out += _rows_of(db, rows[k : k + 500], kept)
+    if len(kept) > len(rows):
+        there = {r["id"] for r in rows}
+        for gone in [i for i in kept if i not in there]:
+            del kept[gone]
     if sig[0] >= 0 and db.changes() == sig:  # nothing was written while it was read (and the version was known)
         db._base = (sig, out)
     return out
