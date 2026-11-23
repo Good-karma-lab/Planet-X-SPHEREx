@@ -137,6 +137,7 @@ class State:
         self.coverage_lock = asyncio.Lock()
         self.coverage_task: asyncio.Task[None] | None = None
         self.findings: Findings | None = None
+        self.warm_findings_task: asyncio.Task[None] | None = None
         self.fpx_known: FpxIdentifier | None = None
         self.loopwatch: LoopWatch | None = None
         self.grid: GridDB | None = None
@@ -241,6 +242,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         checks_of(st).resume()  # check jobs a restart interrupted run again at once, not on the first request
         # the list of finds the tasks are drawn from, read once now: the first person's task does not wait for it
         asyncio.get_running_loop().run_in_executor(None, prime_find_rows, st)
+        warm_findings = getattr(st, "warm_findings", None)  # the first lists of Findings, kept ready (service/routes_findings.py)
+        st.warm_findings_task = asyncio.create_task(warm_findings()) if callable(warm_findings) else None
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         if st.index is not None:
@@ -299,6 +302,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         flags_task.cancel()
         if st.grid_import is not None:
             st.grid_import.cancel()
+        if st.warm_findings_task is not None:
+            st.warm_findings_task.cancel()
         if st.findings is not None:
             await st.findings.stop()
         if st.fpx_known is not None:

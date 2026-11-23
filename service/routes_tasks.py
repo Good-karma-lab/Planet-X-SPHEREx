@@ -319,9 +319,11 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             "status": x["status"],
             "kind": x["kind"],
             # a chain through a known body is settled for the tasks (not handed out), but is no final stage of anybody's answer
-            "stage": "chain" if x["status"] == "chain" else STAGE_OF_STATUS.get(x["status"]),
+            "stage": x["status"] if x["status"] in ("chain", "weak") else STAGE_OF_STATUS.get(x["status"]),
             "visible": x.get("visible"),
             "promise": x.get("promise") or 0,
+            **({"ask": x["ask"]} if "ask" in x else {}),
+            **({"echo": True} if x.get("echo") else {}),
             **({"raised": x["people_raised"]} if "people_raised" in x else {}),
             **({"_listed": x["id"] in listed} if status == "any" else {}),
         }
@@ -699,7 +701,7 @@ def make_tasks_router(st: Any) -> APIRouter:
             return one
         seen = acc.db.task_refs(user_id, "finding") if user_id else set()
         checked = acc.db.check_counts()
-        leads = [r for r in rows if r.get("status") in LEADS and r["finding_id"] not in seen]
+        leads = [r for r in rows if r.get("status") in LEADS and r.get("ask", True) and r["finding_id"] not in seen]
 
         # a find people raised first, then the strong kinds before the many red sources and anomalies (finding_group), then the
         # least checked, then the most promising; stable: the page's order among the equal

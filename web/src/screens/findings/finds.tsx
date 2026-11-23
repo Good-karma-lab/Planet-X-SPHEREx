@@ -38,6 +38,7 @@ const STATUS_WORD: Record<string, string> = {
   below: 'too faint to count',
   set_aside: 'set aside by people',
   unverified: 'not checked in the exposures',
+  weak: 'a weak track (signal under 7)',
   chain: 'a chain through a known asteroid',
 };
 const STATUS_WHY: Record<string, string> = {
@@ -45,6 +46,7 @@ const STATUS_WHY: Record<string, string> = {
   halo: 'A bump in the glow of a bright star. Not a lead',
   residual: 'What is left after a known source is taken away. Not a lead',
   below: 'Fainter than this field needs to count a find',
+  weak: 'Its signal is under 7 times the noise: most tracks this weak are noise linked by chance. Not a lead',
   chain: 'One known asteroid linked with noise: it stands on the track but moves differently. Not a lead',
   set_aside: 'People agreed it is an artefact',
   unverified: 'A straight line through the visits whose light was never checked in the exposures. Not a lead',
@@ -63,7 +65,9 @@ export interface Find {
   snr: number | null;
   score: number | null;
   chance: number | null;
-  status: 'unexplained' | 'unchecked' | 'known' | 'residual' | 'blend' | 'halo' | 'galaxy' | 'below' | 'set_aside' | 'unverified' | 'chain';
+  status: 'unexplained' | 'unchecked' | 'known' | 'residual' | 'blend' | 'halo' | 'galaxy' | 'below' | 'set_aside' | 'unverified' | 'chain' | 'weak';
+  /** what the catalogues' colours say a red source or an odd spectrum most likely is */
+  catalogue_class?: { label: string; basis: string } | null;
   verdict: string;
   idents: Ident[];
   data: Record<string, any>;
@@ -448,6 +452,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
           ],
         ] as [string, string][])
       : []),
+    ...(f.catalogue_class ? ([['Most likely', `${f.catalogue_class.label} (${f.catalogue_class.basis})`]] as [string, string][]) : []),
     ...(f.snr != null ? ([['Signal', `${f.snr.toFixed(1)}× the noise`]] as [string, string][]) : []),
     ...(f.score != null ? ([['Score', f.score.toFixed(2)]] as [string, string][]) : []),
     ...(f.chance != null
@@ -577,7 +582,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
 interface CardReply {
   count: number;
   total: number;
-  counts: Record<string, { all: number; leads?: number }>;
+  counts: Record<string, { all: number; leads?: number; weak?: number }>;
   stages: Record<string, number>;
   /** every status's count under the request's other filters (kind, status, place, visibility): the status chips' numbers */
   stage_view?: Record<string, number>;
@@ -594,7 +599,7 @@ interface CardReply {
   finds: CardFind[];
 }
 type KindSel = 'submitted' | 'promising' | 'mover' | 'browndwarf' | 'peak' | 'film' | 'pair' | 'red' | 'anomaly';
-type StageSel = 'any' | 'mine' | 'noted' | 'waiting' | 'new' | 'in_review' | 'submitted' | 'candidate' | 'confirmed' | 'known';
+type StageSel = 'any' | 'mine' | 'noted' | 'weak' | 'waiting' | 'new' | 'in_review' | 'submitted' | 'candidate' | 'confirmed' | 'known';
 const PAGE = 48;
 /** empty card frames while the first page of a list is on its way */
 const SKELETONS = 6;
@@ -687,6 +692,7 @@ function kindQuery(q: URLSearchParams, kind: KindSel) {
 function stageQuery(q: URLSearchParams, stage: StageSel, mine: string[]) {
   if (stage === 'mine') q.set('ids', mine.join(',') || '-');
   else if (stage === 'noted') q.set('noted', '1');
+  else if (stage === 'weak') q.set('status', 'weak');
   else if (stage === 'waiting') q.set('waiting', '1');
   else if (stage !== 'any') q.set('stage', stage);
 }
@@ -813,19 +819,21 @@ export function FindingsView({
     ['red', KIND_SHORT.red!],
     ['anomaly', KIND_SHORT.anomaly!],
   ];
-  const stages: StageSel[] = ['any', 'mine', 'waiting', 'noted', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
+  const stages: StageSel[] = ['any', 'mine', 'waiting', 'noted', 'weak', 'new', 'in_review', 'submitted', 'candidate', 'confirmed', 'known'];
   // the numbers on the status buttons: the list's own reply counts every status under the kind and visibility chosen (stage_view)
   const stageTotal = (s: StageSel) =>
     !h || s === 'any' || s === 'mine' ? 0 : (h.stage_view?.[s] ?? (s === 'waiting' ? h.waiting : s === 'noted' ? 0 : (h.stages[s] ?? 0)));
   // until the first reply every number is a dash of its own place: the chips keep their size and nothing moves when the numbers come
   const NONE = '—';
   const stageCount = (s: StageSel) =>
-    s === 'mine' ? mine.length : s === 'any' || kind === 'submitted' ? null : h ? (h.stage_view?.[s] ?? null) : NONE;
+    s === 'mine' ? mine.length : s === 'weak' ? (h ? (h.counts.film?.weak ?? 0) : NONE) : s === 'any' || kind === 'submitted' ? null : h ? (h.stage_view?.[s] ?? null) : NONE;
   const stageName = (s: StageSel) =>
     s === 'any'
       ? 'Any status'
       : s === 'mine'
         ? 'Viewed by me'
+        : s === 'weak'
+          ? 'Weak tracks (signal under 7)'
         : s === 'noted'
           ? 'Looks like an artefact (machine note)'
           : s === 'waiting'
@@ -925,7 +933,7 @@ export function FindingsView({
           {stages
             .filter(
               (s) =>
-                (s === 'mine' ? !!user : s === 'noted') ||
+                (s === 'mine' ? !!user : s === 'noted' || s === 'weak') ||
                 s === 'any' ||
                 s === 'waiting' ||
                 s === 'new' ||

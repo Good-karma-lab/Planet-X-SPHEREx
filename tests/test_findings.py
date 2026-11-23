@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 """Findings: the finds of the result files, the database, the identification rows and the plain verdicts."""
 
 from __future__ import annotations
@@ -1178,3 +1179,112 @@ def test_only_the_finds_of_the_page_are_read_whole_and_a_slim_list_none(tmp_path
     slim = query(db, None, "any", None, 1000, 0, slim=True)["finds"]
     assert len(slim) == 30 and not asked and [f["id"] for f in slim[2:6]] == [f["id"] for f in page]
     assert "data" not in slim[0] and slim[2]["status"] == page[0]["status"]
+
+
+def test_reuse_ids_finds_the_same_rows_as_looking_at_every_row() -> None:
+    import random
+
+    from service.findings import reuse_ids, same_object
+
+    def brute(finds: list[dict[str, Any]], have: list[dict[str, Any]]) -> None:
+        taken = {f["id"] for f in finds if any(h["id"] == f["id"] for h in have)}
+        for f in finds:
+            if f["id"] in taken:
+                continue
+            for h in have:
+                if h["id"] not in taken and same_object(h, f):
+                    f["id"] = h["id"]
+                    taken.add(h["id"])
+                    break
+
+    rng = random.Random(83)
+    kinds = ["red", "film", "mover", "peak"]
+    have = [
+        {"id": f"o{i}", "kind": rng.choice(kinds), "ra": 10 + rng.random() * 0.02, "dec": -0.01 + rng.random() * 0.02, "rate": rng.choice([None, 1.0, 5.0])}
+        for i in range(600)
+    ]  # fmt: skip
+    finds = [
+        {**h, "id": h["id"] if rng.random() < 0.3 else f"n{i}", "ra": h["ra"] + rng.gauss(0, 1) / 3600, "dec": h["dec"] + rng.gauss(0, 1) / 3600}
+        for i, h in enumerate(rng.sample(have, 400))
+    ]  # fmt: skip
+    a, b = [dict(f) for f in finds], [dict(f) for f in finds]
+    reuse_ids(a, have)
+    brute(b, have)
+    assert [f["id"] for f in a] == [f["id"] for f in b] and any(f["id"].startswith("o") for f in a)
+
+
+def test_a_weak_track_is_kept_behind_its_own_filter_and_a_known_body_is_never_weak(tmp_path: Path) -> None:
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"kind": "film", "place": "far", "fov": 20, "rate": 20.0, "chance": 0.0, "scans": ["k"]}
+
+    def put(i: str, ra: float, z: float) -> dict[str, Any]:
+        return {
+            **base,
+            "id": f"film:{i}",
+            "ra": ra,
+            "dec": 1.0,
+            "snr": z,
+            "score": z,
+            "data": {"track": {"method": "orbit", "verified": True, "z_together": z}},
+        }
+
+    db.write_finds([put("weak", 10.0, 6.9), put("strong", 11.0, 7.0), put("body", 12.0, 5.0)])
+    for i, st in (("weak", "none"), ("strong", "none"), ("body", "ok")):
+        db.put_ident(f"film:{i}", "sbident", st, "1 Ceres" if st == "ok" else None, 2.0, None, {"two_pass": True, "all_visits": True})
+    db.db.commit()
+    out = query(db, None, None, None, 10, 0)
+    assert {f["id"]: f["status"] for f in out["finds"]} == {"film:strong": "unexplained", "film:body": "known"}
+    c = out["counts"]["film"]
+    assert (c["all"], c["weak"], c["leads"], c["known"]) == (2, 1, 1, 1)
+    weak = query(db, None, "weak", None, 10, 0)["finds"]
+    assert [f["id"] for f in weak] == ["film:weak"] and "6.9 times the noise" in weak[0]["verdict"] and weak[0]["stage"] == "new"
+    up = query(db, None, None, None, 10, 0, raised={"film:weak": "moves_old"})["finds"]  # people agree it moves
+    assert {f["id"] for f in up} == {"film:weak", "film:strong", "film:body"}
+    body = next(f for f in out["finds"] if f["status"] == "known")
+    assert body["verdict"].startswith("A known solar-system body is predicted here: JPL Small-Body Identification: 1 Ceres")
+
+
+def test_a_known_body_is_named_by_jpl_not_by_a_star_that_stands_there() -> None:
+    idents = [
+        {"catalogue": "allwise", "label": "AllWISE", "state": "ok", "name": "J110754.33+051334.7", "sep": 6.3},
+        {"catalogue": "sbident", "label": "JPL", "state": "ok", "name": "C/2025 N1 (ATLAS)", "sep": 6.8},
+    ]
+    text = verdict_of({"kind": "film", "data": {}}, idents, "known")
+    assert "C/2025 N1 (ATLAS), 6.8″ away" in text and "J110754" not in text
+
+
+def test_a_red_source_is_classed_by_the_catalogues_and_asked_of_people_only_when_they_say_nothing() -> None:
+    from service.findings import ask_people, catalogue_class
+
+    def ident(c: str, state: str, **k: Any) -> dict[str, Any]:
+        return {"catalogue": c, "state": state, "name": None, "sep": 2.0, "type": None, "detail": {}, **k}
+
+    red = {"kind": "red", "data": {"source": {}}}
+    none = [ident("simbad", "none"), ident("twomass", "none")]
+
+    def label(f: dict[str, Any], w1: float, w2: float, two: str = "none") -> str:
+        ids = [ident("simbad", "none"), ident("twomass", two), ident("allwise", "ok", detail={"W1": w1, "W2": w2})]
+        assert not ask_people(f, ids)  # its colours answer better than an eye
+        got = catalogue_class(f, ids)
+        assert got is not None
+        return got["label"]
+
+    assert label(red, 15.0, 14.1, "ok") == "colours of an active galaxy"
+    assert label(red, 15.0, 13.0).startswith("very red")
+    assert label(red, 15.0, 14.9).startswith("neither")
+    moving = {"kind": "red", "data": {"source": {"moves": True, "pmra": 3139.5, "pmdec": -1537.2}}}
+    assert label(moving, 15.0, 14.9) == "stood still since 2010"
+    typed = [ident("simbad", "ok", type="QSO", name="X"), ident("allwise", "none")]
+    assert (catalogue_class(red, typed) or {})["label"] == "QSO" and not ask_people(red, typed)
+    assert catalogue_class(red, [*none, ident("allwise", "none")]) is None and ask_people(red, [*none, ident("allwise", "none")])
+    assert not ask_people(red, [*none, ident("allwise", "unavailable")])  # not answered yet: not asked
+    assert not ask_people(red, [*none])
+
+
+def test_a_peak_is_not_a_main_belt_body_that_passes_there() -> None:
+    f = _findings_with(_jpl([["12 Victoria", "3.0", "0.0", "40.0", "0.0", "17"], ["136199 Eris", "4.0", "0.0", "1.0", "0.0", "18.7"]]))
+    got = asyncio.run(f.sbident(120.0, 10.0, 61000.0, None, None, False, 15.0))
+    assert got["state"] == "ok" and got["name"] == "136199 Eris"
+    f = _findings_with(_jpl([["12 Victoria", "3.0", "0.0", "40.0", "0.0", "17"]]))
+    assert asyncio.run(f.sbident(120.0, 10.0, 61000.0, None, None, False, 15.0))["state"] == "none"
+    assert asyncio.run(f.sbident(120.0, 10.0, 61000.0, None, None, False))["state"] == "ok"  # (no limit: as for a brown dwarf)

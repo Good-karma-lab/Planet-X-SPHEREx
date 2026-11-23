@@ -11,14 +11,34 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
+import logging
 import os
 import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import Response
 
-from service.findings import KINDS, LITE_KEYS, PROMISING_KINDS, STAGES, VIEW_RESULTS, FlowDB, find_row, id_of, query
+from service import jsonsafe
+from service.findings import (
+    _READ,
+    KINDS,
+    LITE_KEYS,
+    PROMISING_KINDS,
+    STAGES,
+    VIEW_RESULTS,
+    FlowDB,
+    Snapshot,
+    find_row,
+    id_of,
+    query,
+    snapshot,
+)
+from service.storage import atomic_write_bytes
+
+log = logging.getLogger("sky.findings")
 
 
 def flow_of(st: Any) -> FlowDB:
@@ -44,7 +64,23 @@ def card_extras(x: dict[str, Any]) -> dict[str, Any]:
 
 
 LIST_TTL_S = 15.0  # the Findings list is the same for every guest: kept this long
+LIST_STALE_S = 300.0  # ... and handed out at once this long while a fresh one is made behind it
 LIST_KEEP = 64
+SNAP_TTL_S = 30.0  # the judged finds every list is made from: judged again behind a request when older than this
+WARM_S = 60.0  # the pages everybody opens are made again this often, and kept on disk for the next start
+WARM_FILE = "findings-views.json"
+PAGE_SIZE = 48  # the Findings page's (web/src/screens/findings/finds.tsx)
+
+
+def warm_keys() -> list[dict[str, Any]]:
+    """The lists the pages ask for as they open: Findings' Promising and its kinds, the kind chips' numbers, Planet X's peaks."""
+    card = {"status": "all", "sort": "promise", "visibility": "seen", "lite": True, "limit": PAGE_SIZE}
+    return [
+        {**card, "kinds": ",".join(("mover", "browndwarf", "peak", "film", "pair"))},
+        {"status": "all", "visibility": "seen", "lite": True, "limit": 1},
+        *({**card, "kind": k} for k in KINDS),
+        {"status": "all", "kind": "peak", "limit": 2000},
+    ]
 
 
 def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
@@ -100,6 +136,91 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     list_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
     list_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
+    list_tasks: set[asyncio.Task[Any]] = set()  # lists made behind a request (kept here: a task nobody holds may be collected)
+
+    def forget(t: asyncio.Task[Any]) -> None:
+        list_tasks.discard(t)
+        if not t.cancelled():
+            t.exception()  # read: the next request tries again
+
+    snap_kept: dict[str, Any] = {"at": 0.0, "snap": None, "task": None}
+
+    def people_said() -> dict[str, Any]:
+        return {"aside": people_aside(), "raised": people_raised(), "tracks": people_tracks_said()}
+
+    async def make_snap(f: Any) -> Snapshot:
+        clips = clips_or_none()
+        flow = flow_of(st)  # opened here: two threads that open it at once find it locked
+        got: Snapshot = await asyncio.to_thread(
+            lambda: snapshot(
+                f.db, flow=flow, seen=clips.seen if clips is not None else None, names=names(), **people_said()
+            )
+        )  # fmt: skip
+        snap_kept.update(at=time.monotonic(), snap=got)
+        return got
+
+    async def the_snap(f: Any, max_age: float = SNAP_TTL_S) -> Snapshot:
+        """The judged finds: the kept ones at once (judged again behind it when older than `max_age`); the first time they are waited for."""
+        task = snap_kept["task"]
+        if (snap_kept["snap"] is None or time.monotonic() - snap_kept["at"] > max_age) and (task is None or task.done()):
+            task = snap_kept["task"] = asyncio.create_task(make_snap(f))
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())  # read: the next request tries again
+        if snap_kept["snap"] is None:
+            return await asyncio.shield(task)
+        got: Snapshot = snap_kept["snap"]
+        return got
+
+    def ckey_of(q: dict[str, Any]) -> tuple[Any, ...]:
+        many = tuple(k for k in (q.get("kinds") or "").split(",") if k)
+        return (
+            q.get("kind"), q.get("status"), None, q.get("limit", 300), 0, q.get("sort"), None, False, many, None, q.get("visibility"), False,
+            bool(q.get("lite")),
+        )  # fmt: skip
+
+    warm_set = frozenset(ckey_of(q) for q in warm_keys())
+
+    def warm_path() -> Path | None:
+        cfg = getattr(st, "cfg", None)
+        return Path(cfg.store_dir) / WARM_FILE if cfg is not None else None
+
+    async def warm_views() -> None:
+        """The lists the pages open with are there before anybody asks: those of the last run from disk at once, then made from the judged
+        finds and made again every WARM_S; the writer keeps them on disk for the next start (a start took 5–20 s to the first list)."""
+        path = warm_path()
+        if path is not None:
+            with contextlib.suppress(OSError, ValueError):
+                kept = json.loads(await asyncio.to_thread(path.read_text))
+                for q in warm_keys():
+                    body = kept.get(json.dumps(q, sort_keys=True))
+                    if body is not None:  # old enough to be made again at the first request, fresh enough to be handed out
+                        list_cache.setdefault(
+                            ckey_of(q), (time.monotonic() - LIST_TTL_S, Response(body.encode(), media_type="application/json"))
+                        )
+        while True:
+            try:
+                f = getattr(st, "findings", None)
+                if f is not None:
+                    if not await asyncio.to_thread(has_finds, f):
+                        return  # a node (A1) has no findings of its own
+                    if snap_kept["snap"] is None or time.monotonic() - snap_kept["at"] > WARM_S / 2:
+                        await make_snap(f)
+                    out = {}
+                    for q in warm_keys():
+                        made = await made_list(ckey_of(q))
+                        out[json.dumps(q, sort_keys=True)] = bytes(made.body).decode()
+                    if path is not None and not getattr(f.db, "read_only", True) and getattr(f, "writer", False):
+                        await asyncio.to_thread(atomic_write_bytes, path, json.dumps(out).encode())
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                log.exception("the first lists of Findings could not be made")
+            await asyncio.sleep(WARM_S if getattr(st, "findings", None) is not None else 2.0)
+
+    def has_finds(f: Any) -> bool:
+        with _READ:
+            return bool(f.db.db.execute("SELECT 1 FROM sqlite_master WHERE name='finds'").fetchone())
+
+    st.warm_findings = warm_views
     # two lists are made at a time: each is Python work that takes its turn with the event loop's, and forty at once (a crowd with forty
     # different filters) left the loop a fortieth
     list_gate = asyncio.Semaphore(2)
@@ -149,14 +270,15 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     async def every_find() -> list[dict[str, Any]]:
         f = need()
-        body = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow_of(st), sort="promise", names=names()))
+        flow = flow_of(st)
+        body = await asyncio.to_thread(lambda: query(f.db, None, "all", None, 5000, 0, flow=flow, sort="promise", names=names()))
         body["finds"].sort(key=lambda x: x["kind"] not in PROMISING_KINDS)  # the pictures of the promising kinds are made first
         return list(body["finds"])
 
     async def findings(
         kind: str | None = Query(None),
         status: str | None = Query(
-            None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside|blend|unverified|chain)$"
+            None, pattern="^(all|unexplained|unchecked|known|residual|galaxy|below|halo|set_aside|blend|unverified|chain|weak)$"
         ),
         place: str | None = Query(None),
         limit: int = Query(300, ge=1, le=2000),
@@ -182,31 +304,48 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         many = tuple(k for k in (kinds or "").split(",") if k)
         if any(k not in KINDS for k in many):
             raise HTTPException(422, f"kinds are of {', '.join(KINDS)}")
-        f = need()
+        need()
         clips = clips_or_none()
         if clips is not None and os.environ.get("SKY_CLIPS_PRERENDER", "1") == "1":
             clips.prerender(every_find)  # the background queue starts with the first look at the list
-        rank = clips.rank if clips is not None else None
         # every guest asks the same list: the answer of the same question is kept LIST_TTL_S, and requests that arrive while it is
         # being made wait for that one instead of each making their own (a launch-day crowd costs one query, not hundreds)
         ckey = (kind, status, place, limit, offset, sort, stage, waiting, many, ids, visibility, noted, lite)
         hit = list_cache.get(ckey)
-        if hit is not None and time.monotonic() - hit[0] < LIST_TTL_S:
+        age = time.monotonic() - hit[0] if hit is not None else 0.0
+        if hit is not None and age < LIST_TTL_S:
             return hit[1]
         running = list_inflight.get(ckey)
+        if hit is not None and age < LIST_STALE_S:  # handed out at once; the fresh one is made behind it
+            if running is None:
+                t = asyncio.create_task(made_list(ckey))
+                list_tasks.add(t)
+                t.add_done_callback(forget)
+            return hit[1]
         if running is not None:
             return await asyncio.shield(running)
+        return await made_list(ckey)
+
+    async def made_list(ckey: tuple[Any, ...]) -> Response:
+        """The answer of one question, made and kept; those who ask it meanwhile wait for this one."""
+        kind, status, place, limit, offset, sort, stage, waiting, many, ids, visibility, noted, lite = ckey
+        f = need()
+        clips = clips_or_none()
+        rank = clips.rank if clips is not None else None
         fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         list_inflight[ckey] = fut
         try:
+            snap = await the_snap(f) if ids is None else None
             async with list_gate if ids is None else contextlib.nullcontext():  # a few finds by id wait for no list
-                made = await make_list(
-                    f, kind, status, place, limit, offset, sort, stage, waiting, many, rank, ids, noted, clips, visibility, lite
+                body = await make_list(
+                    f, kind, status, place, limit, offset, sort, stage, waiting, many, rank, ids, noted, clips, visibility, lite, snap
                 )
+            made = Response(await asyncio.to_thread(lambda: jsonsafe.dumps(body).encode()), media_type="application/json")
             fut.set_result(made)
-            list_cache[ckey] = (time.monotonic(), made)
-            while len(list_cache) > LIST_KEEP:
-                list_cache.pop(next(iter(list_cache)))
+            list_cache.pop(ckey, None)
+            list_cache[ckey] = (time.monotonic(), made)  # the newest last
+            for k in [k for k in list_cache if k not in warm_set][: max(0, len(list_cache) - LIST_KEEP)]:
+                del list_cache[k]
             return made
         except Exception as e:
             fut.set_exception(e)
@@ -217,11 +356,9 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     async def make_list(
         f: Any, kind: Any, status: Any, place: Any, limit: int, offset: int, sort: Any, stage: Any, waiting: bool, many: tuple[str, ...],
-        rank: Any, ids: str | None, noted: bool, clips: Any, visibility: Any, lite: bool,
+        rank: Any, ids: str | None, noted: bool, clips: Any, visibility: Any, lite: bool, snap: Snapshot | None = None,
     ) -> Any:  # fmt: skip
-        aside = await asyncio.to_thread(people_aside)
-        raised = await asyncio.to_thread(people_raised)
-        tracks = await asyncio.to_thread(people_tracks_said)
+        said = await asyncio.to_thread(people_said) if snap is None else {}
         body: dict[str, Any] = await asyncio.to_thread(
             lambda: query(
                 f.db,
@@ -230,7 +367,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 place,
                 limit,
                 offset,
-                flow=flow_of(st),
+                flow=flow_of(st) if snap is None else None,
                 sort=sort,
                 stage=stage,
                 waiting=waiting,
@@ -240,10 +377,9 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 noted=noted,
                 seen=clips.seen if clips is not None else None,
                 visibility=visibility,
-                aside=aside,
-                raised=raised,
-                tracks=tracks,
                 names=names(),
+                snap=snap,
+                **said,
             )
         )
         if (
