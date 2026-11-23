@@ -157,6 +157,8 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             )
         )  # fmt: skip
         snap_kept.update(at=time.monotonic(), snap=got)
+        if hasattr(f, "set_leads"):
+            f.set_leads(got)
         return got
 
     async def the_snap(f: Any, max_age: float = SNAP_TTL_S) -> Snapshot:

@@ -448,6 +448,114 @@ def test_what_three_visits_said_is_kept_and_a_comet_is_asked_for(tmp_path: Path)
     assert got["state"] == "ok" and got["name"] == "C/2025 N1 (ATLAS)" and got["visits_matched"] == 5 and len(asked) == 5
 
 
+def test_the_unexplained_tracks_are_asked_of_jpl_before_what_never_runs_out(tmp_path: Path) -> None:
+    """26 of 28 unexplained tracks stood behind 1,100 finds no catalogue was asked about (prod, 23 Nov 2026)."""
+    import time as _time
+
+    from service.findings import Findings, Snapshot, pending_ids
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 120.0, "dec": 10.0, "rate": 58.0, "chance": 0.0, "scans": []}
+    tracks = [{**base, "id": f"film:{i}", "kind": "film", "snr": 7.0 + i, "score": 7.0 + i, "data": {}} for i in range(4)]
+    new = [{**base, "id": f"peak:{i}", "kind": "peak", "snr": 9.0, "score": 9.0, "data": {}} for i in range(20)]
+    db.write_finds([*tracks, *new])
+    for i in range(4):
+        for c in ("simbad", "gaia", "ned", "vsx", "allwise", "twomass", "halo"):
+            db.put_ident(f"film:{i}", c, "none", None, None, None, {"blend_r": 1})
+        db.put_ident(f"film:{i}", "sbident", "none", None, None, None, {"two_pass": True, "per_visit": []})
+    db.db.commit()
+    now = _time.time()
+    path = str(db.path)
+    before = pending_ids(path, 100, frozenset(), now)
+    assert all(i.startswith("peak:") for i in before[:20])  # the rest of a track's visits waits for every find never asked
+    leads = ("film:1", "film:3")
+    got = pending_ids(path, 100, frozenset(), now, None, ("peak:5",), leads)
+    assert got[:3] == ["peak:5", "film:1", "film:3"] and set(got) == set(before)  # the first page, the leads in their order, the rest
+    db.put_ident("film:1", "sbident", "none", None, None, None, {"two_pass": True, "all_visits": True, "per_visit": []})
+    db.db.commit()
+    assert "film:1" not in pending_ids(path, 100, frozenset(), now, None, (), leads)  # asked once, no more
+
+    f = Findings.__new__(Findings)
+    snap = Snapshot([], lambda b, w: {})
+    one = {"kind": "film", "status": "unexplained", "promise": 70, "score": 8.0, "visible": False}
+    snap.items = [
+        {**one, "id": "film:h"},
+        {**one, "id": "film:v", "visible": True, "promise": 60},
+        {**one, "id": "film:u", "visible": None, "promise": 50},
+        {**one, "id": "film:w", "status": "weak", "visible": True},
+        {**one, "id": "peak:p", "kind": "peak", "visible": True},
+    ]
+    f.set_leads(snap)
+    assert f.leads == ("film:v", "film:u", "film:h")  # the visible first; no weak track, no other kind
+
+
+def test_the_counts_of_a_list_are_those_of_counting_every_find(tmp_path: Path) -> None:
+    """The counts are taken of the combinations of what the filters read (Snapshot.groups), not of every find."""
+    from service.findings import HIDDEN, query, snapshot
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"fov": 60, "dec": 10.0, "rate": 1.0, "chance": 0.0, "scans": []}
+    kinds = ("film", "peak", "red", "mover")
+    db.write_finds(
+        [
+            {**base, "id": f"{kinds[i % 4]}:{i}", "kind": kinds[i % 4], "place": f"p{i % 3}", "ra": 1.0 + i, "snr": 5.0 + i % 7, "score": 5.0 + i % 7,
+             "data": {"track": {"z_together": 5.0 + i % 7}} if i % 4 == 0 else {}}
+            for i in range(60)
+        ]
+    )  # fmt: skip
+    snap = snapshot(db, seen=lambda f: (None if hash(f["ra"]) % 3 == 0 else hash(f["ra"]) % 3 == 1, None))
+    items = snap.items
+    assert sum(n for _, n in snap.groups()) == 60 and snap.groups() is snap.groups()
+    for place in (None, "p1"):
+        for status in (None, "all", "weak", "unchecked"):
+            for waiting in (False, True):
+                got = query(db, None, status, place, 5, 0, snap=snap, waiting=waiting, visibility="seen")
+
+                def ok(f: dict[str, Any], place: Any = place, status: Any = status, waiting: bool = waiting) -> bool:
+                    hid = f["status"] in HIDDEN
+                    by = f["status"] == status if status in HIDDEN else not hid if status in (None, "all") else f["status"] == status
+                    return (
+                        by and (place is None or f["place"] == place) and (not waiting or f["stage"] == "new") and f["visible"] is not False
+                    )
+
+                want = [f for f in items if ok(f)]
+                assert got["count"] == len(want)
+                assert {k: n for k, n in got["counts_view"].items() if n} == {
+                    k: sum(f["kind"] == k for f in want) for k in kinds if any(f["kind"] == k for f in want)
+                }
+                assert got["total"] == sum(f["status"] not in HIDDEN for f in items)
+                assert got["counts"]["film"]["weak"] == sum(f["kind"] == "film" and f["status"] == "weak" for f in items)
+
+
+def test_a_change_of_a_listed_find_stays_out_of_the_shared_snapshot(tmp_path: Path) -> None:
+    """routes_findings.enrich writes viewers and stage into the finds it is given: the counts and the next list must not see it."""
+    from service.findings import query, snapshot
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {
+        "place": "p",
+        "fov": 60,
+        "dec": 10.0,
+        "rate": 1.0,
+        "chance": 0.0,
+        "scans": [],
+        "kind": "film",
+        "snr": 9.0,
+        "score": 9.0,
+        "data": {},
+    }
+    db.write_finds([{**base, "id": f"film:{i}", "ra": 1.0 + i} for i in range(4)])
+    snap = snapshot(db)
+    for slim in (True, False):
+        a = query(db, None, None, None, 10, 0, snap=snap, slim=slim)
+        assert a["waiting"] == 4
+        for f in a["finds"]:
+            f["viewers"], f["stage"] = 3, "in_review"
+        b = query(db, None, None, None, 10, 0, snap=snap, slim=slim)
+        assert b["waiting"] == 4 and b["stage_view"] == a["stage_view"] and {f["stage"] for f in b["finds"]} == {"new"}
+        assert query(db, None, None, None, 10, 0, snap=snap, stage="new")["count"] == 4 == b["stage_view"]["new"]
+
+
 def test_a_silent_jpl_does_not_change_what_it_said_before(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     import time as _time
 
@@ -794,7 +902,7 @@ def test_the_identification_loop_asks_the_workers_as_background(monkeypatch: pyt
         raise asyncio.CancelledError  # one turn is enough
 
     monkeypatch.setattr(fmod.cpu, "run", run)
-    me = SimpleNamespace(db=SimpleNamespace(path="x"), targets=[], front=("film:1",))
+    me = SimpleNamespace(db=SimpleNamespace(path="x"), targets=[], front=("film:1",), leads=())
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(fmod.Findings.identify_loop(me))  # type: ignore[arg-type]
     assert seen == [3] and seen[0] >= cpu.LOW

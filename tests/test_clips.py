@@ -148,6 +148,51 @@ def test_the_line_through_the_measured_places_and_a_find_that_stands_still() -> 
     assert place_at(peak, 61170.0) == (26.33, -0.44)
 
 
+def test_the_fields_near_a_place_are_all_that_can_hold_it(tmp_path: Path) -> None:
+    """source_for asks only the fields whose reach holds the place: the answer is that of asking every field, its corners too."""
+    store = Store(tmp_path / "main")
+    _field(store, "w" * 24, 60.0)
+    _field(store, "f" * 24, 5.0)
+    clips = Clips(store, tmp_path / "clips")
+    for s in clips.sources():
+        g = s.grid
+        for x, y in ((0, 0), (g.n - 1, 0), (0, g.n - 1), (g.n - 1, g.n - 1), (g.n / 2, 0), (-1, -1), (g.n, g.n)):
+            ra, dec = (float(v) for v in g.grid_to_sky(x, y))
+            assert s in clips._near(ra, dec)
+    assert clips._near(RA0 + 5.0, DEC0) == [] and clips._near((RA0 + 180.0) % 360.0, -DEC0) == []
+    assert Clips(Store(tmp_path / "none"), tmp_path / "c2")._near(1.0, 2.0) == []
+
+
+def test_one_thread_lists_the_fields_again_and_the_others_take_the_list_there_is(tmp_path: Path) -> None:
+    import threading
+    import time
+
+    store = Store(tmp_path / "main")
+    _field(store, "f" * 24, 5.0)
+    clips = Clips(store, tmp_path / "clips")
+    have = clips.sources()
+    clips._fields = (time.time() - 60.0, have)  # old: to be listed again
+    reads: list[int] = []
+    real, go = store.read_meta, threading.Event()
+
+    def slow(kind: str, key: str) -> Any:
+        reads.append(1)
+        go.wait(5.0)
+        return real(kind, key)
+
+    store.read_meta = slow  # type: ignore[method-assign]
+    t = threading.Thread(target=clips.sources)
+    t.start()
+    while not reads:
+        time.sleep(0.01)
+    assert clips.sources() is have  # not waited for, not listed twice
+    go.set()
+    t.join()
+    assert len(reads) == 1 and clips.sources() is not have
+    clips._fields = (0.0, [])  # a field was just built: the list is made before it is handed out
+    assert [s.key for s in clips.sources()] == ["f" * 24] and len(reads) == 2
+
+
 def test_the_finest_field_that_holds_the_window_is_used_and_a_mover_on_the_coarse_grid_wants_its_own(tmp_path: Path) -> None:
     store = Store(tmp_path / "main")
     _field(store, "w" * 24, 60.0)
