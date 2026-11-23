@@ -10,6 +10,7 @@ confirmed) is the new field `stage`.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import time
 from pathlib import Path
@@ -99,6 +100,9 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     list_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
     list_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
+    # two lists are made at a time: each is Python work that takes its turn with the event loop's, and forty at once (a crowd with forty
+    # different filters) left the loop a fortieth
+    list_gate = asyncio.Semaphore(2)
 
     def need() -> Any:
         f = getattr(st, "findings", None)
@@ -195,9 +199,10 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         fut: asyncio.Future[Any] = asyncio.get_running_loop().create_future()
         list_inflight[ckey] = fut
         try:
-            made = await make_list(
-                f, kind, status, place, limit, offset, sort, stage, waiting, many, rank, ids, noted, clips, visibility, lite
-            )
+            async with list_gate if ids is None else contextlib.nullcontext():  # a few finds by id wait for no list
+                made = await make_list(
+                    f, kind, status, place, limit, offset, sort, stage, waiting, many, rank, ids, noted, clips, visibility, lite
+                )
             fut.set_result(made)
             list_cache[ckey] = (time.monotonic(), made)
             while len(list_cache) > LIST_KEEP:
