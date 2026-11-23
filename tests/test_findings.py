@@ -992,3 +992,60 @@ def test_movers_and_brown_dwarfs_before_tracks_before_planet_x_peaks() -> None:
     assert weakest_mover > strongest_track and weakest_track >= strongest_peak
     assert promise_of("peak", "unchecked", 9.0, 0) < weakest_track  # the undated peaks of page 1 go below the tracks
     assert promise_of("browndwarf", "unexplained", 99.0, 0) == 100
+
+
+def test_a_peak_jpl_names_is_known_before_the_filters_and_the_counts(tmp_path: Path) -> None:
+    """Three peaks JPL named came in the answer to status=unexplained as "known", status=known was empty and the counts were wrong
+    (prod, 23 Nov 2026): the name was put on the finds of the page after they were chosen."""
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"kind": "peak", "place": "far", "fov": 18, "rate": None, "snr": 6.0, "score": 6.0, "chance": 0.0, "scans": ["k"]}
+    db.write_finds(
+        [
+            {**base, "id": f"peak:{n}", "ra": 26.0 + i, "dec": 0.4, "data": {"peak": {"ok": True}}}
+            for i, n in enumerate(("eris", "edge", "new"))
+        ]
+    )
+    db.db.commit()
+    said = {
+        "peak:eris": {"state": "ok", "words": "an echo of Eris (JPL), not a new body"},
+        "peak:edge": {"state": "residual", "reason": "the signal grows to the edge"},
+    }
+
+    def names(f: dict[str, Any]) -> dict[str, Any] | None:
+        return said.get(f["id"])
+
+    def ids(status: str | None) -> list[str]:
+        out = query(db, "peak", status, None, 10, 0, names=names)
+        assert out["count"] == len(out["finds"])
+        return sorted(f["id"] for f in out["finds"])
+
+    assert ids("unchecked") == ["peak:new"] and ids("known") == ["peak:eris"] and ids("residual") == ["peak:edge"]
+    assert ids("all") == ["peak:eris", "peak:new"]  # a residual is no lead and not in the list
+    out = query(db, "peak", "known", None, 10, 0, names=names)
+    c = out["counts"]["peak"]
+    assert (c["all"], c["known"], c["unchecked"], c["residual"], c["leads"]) == (2, 1, 1, 1, 1)
+    f = out["finds"][0]
+    assert (
+        f["verdict"] == "An echo of Eris (JPL), not a new body." and f["data"]["peak"]["known"]["state"] == "ok" and f["stage"] == "known"
+    )
+    res = query(db, "peak", "residual", None, 10, 0, names=names)["finds"][0]
+    assert res["data"]["peak"]["ok"] is False and res["verdict"].startswith("A residual, not a lead: the signal")
+    assert query(db, "peak", None, None, 10, 0)["counts"]["peak"]["unchecked"] == 3  # without JPL's word: as the catalogues left them
+
+
+def test_only_the_finds_of_the_page_are_read_whole_and_a_slim_list_none(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"kind": "film", "place": "far", "fov": 60, "dec": 8.4, "rate": None, "snr": 6.0, "chance": 0.0, "scans": ["k"], "data": {}}
+    db.write_finds(
+        [{**base, "id": f"film:{i}", "ra": 60.0 + i, "score": float(i), "positions": [{"label": "v", "mjd": 1.0}]} for i in range(30)]
+    )
+    db.db.commit()
+    asked: list[list[str]] = []
+    real = FindingsDB.related
+    monkeypatch.setattr(FindingsDB, "related", lambda self, ids: asked.append(list(ids)) or real(self, ids))
+    page = query(db, None, "any", None, 4, 2)["finds"]
+    assert len(page) == 4 and asked == [[f["id"] for f in page]] and len(page[0]["positions"]) == 1
+    asked.clear()
+    slim = query(db, None, "any", None, 1000, 0, slim=True)["finds"]
+    assert len(slim) == 30 and not asked and [f["id"] for f in slim[2:6]] == [f["id"] for f in page]
+    assert "data" not in slim[0] and slim[2]["status"] == page[0]["status"]

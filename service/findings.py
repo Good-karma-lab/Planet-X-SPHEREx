@@ -23,7 +23,7 @@ import math
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -732,7 +732,7 @@ class FindingsDB:
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.read_only = False
         self.version = SCHEMA
-        self._base: tuple[tuple[int, int], bytes] | None = None  # query's read of the tables, kept while the database is unchanged
+        self._base: tuple[tuple[int, int], list[Any]] | None = None  # query's read of the tables, kept while the database is unchanged
         self._migrate()
 
     def changes(self) -> tuple[int, int]:
@@ -1751,6 +1751,11 @@ LITE_KEYS = (
 )  # fmt: skip
 
 
+SLIM_KEYS = (
+    "id", "kind", "place", "ra", "dec", "scans", "snr", "score", "status", "stage", "promise", "viewers", "note", "visible", "people_raised",
+)  # fmt: skip
+
+
 # the page asks for many clips and the list at once, each in its own thread: one connection is read by one thread at a time
 _READ = threading.Lock()
 
@@ -1764,49 +1769,43 @@ def find_row(db: FindingsDB, find_id: str) -> dict[str, Any] | None:
     return {**{k: r[k] for k in ("id", "kind", "place", "fov", "ra", "dec", "rate")}, "data": json.loads(r["data"] or "{}")}
 
 
-def read_some(
-    db: FindingsDB, ids: list[str]
-) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, dict[str, list[dict[str, Any]]]]]:
+def _rows_of(db: FindingsDB, rows: Iterable[sqlite3.Row]) -> list[Any]:
+    """Each row of `finds` with its JSON read and its catalogue answers, packed on its own (marshal): [(row, idents)] packed."""
+    got = [
+        {**{k: r[k] for k in r.keys() if k not in ("data", "scans", "versions")},  # noqa: SIM118 (a Row iterates its values)
+         "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "versions": json.loads(r["versions"] or "{}")}
+        for r in rows
+    ]  # fmt: skip
+    idents = db.idents_of([r["id"] for r in got])
+    return [marshal.dumps((r, idents[r["id"]])) for r in got]
+
+
+def read_some(db: FindingsDB, ids: list[str]) -> list[Any]:
     """read_base for a few finds (`ids=`: the lab's record of its find, a review): only their rows. Every find is judged on its own rows,
     so the finds a query returns are the same; its counts are those of these finds. One find took the whole read (6 s on prod, 20 Nov).
     Call it under _READ."""
-    rows: list[dict[str, Any]] = []
+    out: list[Any] = []
     for k in range(0, len(ids), 500):
         chunk = ids[k : k + 500]
-        for r in db.db.execute(f"SELECT * FROM finds WHERE id IN ({','.join('?' * len(chunk))})", chunk):
-            rows.append(
-                {**{c: r[c] for c in r.keys() if c not in ("data", "scans", "versions")},  # noqa: SIM118 (a Row iterates its values)
-                 "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "versions": json.loads(r["versions"] or "{}")}
-            )  # fmt: skip
-    have = [r["id"] for r in rows]
-    return rows, db.idents_of(have), db.related(have)
+        out += _rows_of(db, db.db.execute(f"SELECT * FROM finds WHERE id IN ({','.join('?' * len(chunk))})", chunk).fetchall())
+    return out
 
 
-def read_base(db: FindingsDB) -> tuple[list[dict[str, Any]], dict[str, list[dict[str, Any]]], dict[str, dict[str, list[dict[str, Any]]]]]:
-    """(rows of finds with their JSON read, catalogue answers, related rows) as the tables hold them: what every query starts from. Read
-    once while the database is unchanged (FindingsDB.changes); each call gets its own copy (a marshal copy: a fifth of the read). A whole
-    read of 13,000 finds held the event loop 2–4 s on prod two or three times a minute (20 Nov 2026), because every list read it again.
-    Call it under _READ."""
+def read_base(db: FindingsDB) -> list[Any]:
+    """Every find as the tables hold it (its row with the JSON read, its catalogue answers), each packed on its own: what every query
+    starts from. Read once while the database is unchanged (FindingsDB.changes). One pack of the whole base (90 MB for 25,000 finds) was
+    unpacked in one call that let no other thread run: the event loop stood 4–6 s on prod thirty times an hour (22 Nov 2026). The
+    positions, spectra and light curves (230,000 rows) are read only for the finds a query returns. Call it under _READ."""
     sig = db.changes()
     if db._base is not None and db._base[0] == sig:
-        rows, idents, rel = marshal.loads(db._base[1])
-        return rows, idents, rel
-    rows = [
-        {**{k: r[k] for k in r.keys() if k not in ("data", "scans", "versions")},  # noqa: SIM118 (a Row iterates its values)
-         "data": json.loads(r["data"] or "{}"), "scans": json.loads(r["scans"] or "[]"), "versions": json.loads(r["versions"] or "{}")}
-        for r in db.db.execute("SELECT * FROM finds").fetchall()
-    ]  # fmt: skip
-    ids = [r["id"] for r in rows]
-    idents = db.idents_of(ids)
-    rel = db.related(ids)
-    try:
-        blob = marshal.dumps((rows, idents, rel))
-    except ValueError:  # a value marshal cannot copy (none expected): read every time, as before
-        db._base = None
-        return rows, idents, rel
+        return db._base[1]
+    out: list[Any] = []
+    rows = db.db.execute("SELECT * FROM finds").fetchall()
+    for k in range(0, len(rows), 500):
+        out += _rows_of(db, rows[k : k + 500])
     if sig[0] >= 0 and db.changes() == sig:  # nothing was written while it was read (and the version was known)
-        db._base = (sig, blob)
-    return rows, idents, rel
+        db._base = (sig, out)
+    return out
 
 
 def query(
@@ -1830,26 +1829,32 @@ def query(
     aside: Mapping[str, dict[str, Any]] | None = None,
     raised: Mapping[str, str] | None = None,
     tracks: Mapping[str, dict[str, Any]] | None = None,
+    names: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
+    slim: bool = False,
 ) -> dict[str, Any]:
     """The finds with what the catalogues said. `aside`: the machine finds people set aside as artefacts ({id: {look, agree, total}},
     service/accounts/field_people.set_aside): their status is `set_aside`, kept out of the leads and the default list like a halo.
     `raised`: the finds people raised up the queue ({id: why}, service/accounts/people.raised): first in the promise order.
     `tracks`: what people said about tracks (service/people_tracks.read): a corrected track is under data["people_track"]. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
     stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
-    the old one). Every find also carries the flow fields (flow_fields)."""
+    the old one). Every find also carries the flow fields (flow_fields).
+    `names`: what JPL said of a Planet X peak (FpxIdentifier.verdict_on): a known body (or its echo) is `known`, a residual is `residual`,
+    before every filter and count. `slim`: the finds are only what the lists of tasks need (SLIM_KEYS), never read again in full."""
     with _READ:
         views = flow.views() if flow is not None else {}
-        rows, idents, rel = read_some(db, sorted(only)) if only is not None else read_base(db)
-    items: list[dict[str, Any]] = []
-    for r in rows:
+        packed = read_some(db, sorted(only)) if only is not None else read_base(db)
+    order = {c: i for i, c in enumerate([*list(CATALOGUES), "sbident"])}
+
+    def judge(blob: Any, whole: bool) -> dict[str, Any]:
+        """One find as the page says it, from its own packed copy (a caller's change stays its own)."""
+        r, ids_ = marshal.loads(blob)
         f = {
             "id": r["id"], "slug": slug_of(r["id"]), "kind": r["kind"], "place": r["place"], "fov": r["fov"], "ra": r["ra"], "dec": r["dec"], "epoch": r["epoch"],
             "rate": r["rate"], "rate_unit": rate_unit(r["kind"]), "snr": r["snr"], "score": r["score"], "chance": r["chance"],
-            "data": r["data"], "scans": r["scans"], "updated": r["updated"], "versions": r["versions"], **rel[r["id"]],
+            "data": r["data"], "scans": r["scans"], "updated": r["updated"], "versions": r["versions"],
         }  # fmt: skip
         if tracks and r["id"] in tracks:
             f = people_tracks.apply(f, tracks[r["id"]])
-        ids_ = idents[r["id"]]
         have = {i["catalogue"] for i in ids_}
         for c in want_of(r["kind"], r["ra"], r["dec"], f["data"]):
             if c not in have:
@@ -1866,10 +1871,18 @@ def query(
                         "attempts": 0,
                     }
                 )
-        order = {c: i for i, c in enumerate([*list(CATALOGUES), "sbident"])}
         ids_.sort(key=lambda i: order.get(i["catalogue"], 99))
         _motion_identity(f, ids_)
         st = status_of(f, ids_)
+        said = names(f) if names is not None and f["kind"] == "peak" else None
+        words: str | None = None
+        if said is not None:
+            f["data"].setdefault("peak", {})["known"] = said
+            if said.get("state") == "ok":
+                st, words = "known", said["words"][0].upper() + said["words"][1:] + "."
+            elif said.get("state") == "residual":
+                f["data"]["peak"]["ok"] = False  # the pages' lead rule (ok peaks) drops it
+                st, words = "residual", "A residual, not a lead: " + str(said.get("reason"))
         if aside and f["id"] in aside and st in ("unexplained", "unchecked"):
             st = "set_aside"  # a catalogue's answer (known, a galaxy) stays the stronger word
             f["people_aside"] = aside[f["id"]]
@@ -1877,7 +1890,8 @@ def query(
         if raised and f["id"] in raised and st in ("unexplained", "unchecked"):
             f["people_raised"] = raised[f["id"]]  # moves_old: the old pictures confirm the motion; candidate: a Planet X dot
         f["idents"] = ids_
-        f["verdict"] = verdict_of(f, ids_, st)
+        if whole:
+            f["verdict"] = words if words is not None else verdict_of(f, ids_, st)
         f.update(flow_fields(f, views.get(f["id"])))
         f["note"] = machine_notes().get(f["id"])
         # is the object visible in its own picture (the peak inside the ring against the picture's noise)? None: not measured yet
@@ -1886,7 +1900,27 @@ def query(
             f["promise"] = round(f["promise"] * PROMISE_NOT_VISIBLE)  # below everything the eye can see in its ring
         elif (f["data"] or {}).get("less_certain"):
             f["promise"] = min(f["promise"], PROMISE_LESS_CERTAIN)  # the search itself calls the track less certain
-        items.append(f)
+        return f
+
+    # every find is judged, and only what the filters, the counts and the order read is kept of it; the finds of the page are judged again
+    # whole below. Holding 25,000 whole finds (and their spectra) at once made the collector stop the other threads
+    items: list[dict[str, Any]] = []
+    pending = unavailable = missing_decisive = 0
+    for n, blob in enumerate(packed):
+        f = judge(blob, False)
+        for i in f["idents"]:
+            if i["state"] == "pending":
+                pending += 1
+        away = [i["catalogue"] for i in f["idents"] if i["state"] == "unavailable"]
+        if away:
+            unavailable += len(away)
+            deciding = set(decisive_of(f["kind"], f["ra"], f["dec"], f["data"]))
+            missing_decisive += sum(1 for c in away if c in deciding)
+        one = {k: f[k] for k in SLIM_KEYS if k in f}
+        one["_n"] = n
+        if sort == "promise" and clip_rank is not None and (status not in (None, "all") or f["status"] not in HIDDEN):
+            one["_clip"] = clip_rank(f)
+        items.append(one)
     counts: dict[str, dict[str, int]] = {
         k: {
             "all": 0,
@@ -2027,7 +2061,7 @@ def query(
     if sort == "promise":
         # a find that can have no clip (a track whose visits are not kept, a place no field covers) goes below every find that can;
         # within equal promise the finds whose clip is ready come first: the first screen shows pictures, not empty cards
-        cr = {f["id"]: clip_rank(f) for f in sel} if clip_rank is not None else {}
+        cr = {f["id"]: f.get("_clip", 0) for f in sel}
         # ... and a find that carries a machine note (it looks like an artefact) goes below every clean find
         # ... and a find people raised (they agree it is worth the slow checks) goes before every other
         sel.sort(
@@ -2043,10 +2077,15 @@ def query(
         )
     shown = [f for f in items if f["status"] not in HIDDEN]
     stages = {s: sum(1 for f in items if f["stage"] == s) for s in STAGES}
-    pending = sum(1 for f in items for i in f["idents"] if i["state"] == "pending")
-    unavailable = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable")
-    deciding = {f["id"]: set(decisive_of(f["kind"], f["ra"], f["dec"], f["data"])) for f in items}
-    missing_decisive = sum(1 for f in items for i in f["idents"] if i["state"] == "unavailable" and i["catalogue"] in deciding[f["id"]])
+    page = sel[offset : offset + limit]
+    if slim:
+        finds = page
+    else:
+        finds = [judge(packed[f["_n"]], True) for f in page]
+        with _READ:
+            rel = db.related([f["id"] for f in finds])
+        for f in finds:
+            f.update(rel[f["id"]])
     return {
         "count": len(sel),
         "total": sum(1 for f in items if f["status"] not in HIDDEN),
@@ -2071,5 +2110,5 @@ def query(
             "unavailable_extras": unavailable - missing_decisive,
             "catalogues": [CATALOGUE_LABEL[c] for c in CATALOGUES] + [CATALOGUE_LABEL["sbident"]],
         },
-        "finds": sel[offset : offset + limit],
+        "finds": finds,
     }

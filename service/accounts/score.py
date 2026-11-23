@@ -490,11 +490,14 @@ class Score:
             return {}
         from service.findings import query
 
-        finds = query(f.db, None, None, None, 100000, 0)["finds"]
+        names = getattr(getattr(self.st, "fpx_known", None), "verdict_on", None)
+        finds = query(f.db, None, None, None, 100000, 0, names=names, slim=True)["finds"]
         for rank, x in enumerate(finds):
             if x["id"] == finding_id:
+                one = query(f.db, None, "any", None, 1, 0, only=frozenset({finding_id}))["finds"]
                 jpl = any(
-                    i.get("state") == "ok" and str(i.get("catalogue")) in ("jpl", "sbident", "horizons") for i in x.get("idents") or []
+                    i.get("state") == "ok" and str(i.get("catalogue")) in ("jpl", "sbident", "horizons")
+                    for i in (one[0].get("idents") if one else None) or []
                 )
                 return {"kind": x["kind"], "status": x["status"], "stage": STAGE_OF_STATUS.get(x["status"]), "jpl": jpl, "rank": rank + 1}
         return {}
