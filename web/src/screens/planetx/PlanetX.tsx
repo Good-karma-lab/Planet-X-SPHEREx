@@ -17,7 +17,7 @@ const KNOWN: { who: string; d: string; jpl: string; how: string; ok: boolean; la
     who: 'Eris',
     d: '95.6 ± 0.4 au',
     jpl: 'JPL 95.5',
-    how: '3 passes, 18′ fields · S/N 11.9–14.6 per pass · orbit a 69.4 au, e 0.45 · misfit 1.6″',
+    how: '3 passes, 18′ fields · signal 11.9–14.6× the noise in each · one orbit fits all three to 1.6″',
     ok: true,
     lab: '#/lab?ra=27.378&dec=-0.120&fov=20',
   },
@@ -25,7 +25,7 @@ const KNOWN: { who: string; d: string; jpl: string; how: string; ok: boolean; la
     who: 'Sedna',
     d: '83.0 au',
     jpl: 'JPL 83.0',
-    how: '3 passes, 18′ field, 75–92 au · 6.0 million orbits · sum 8.2σ: above the noise ceiling 8.07σ, below the bar 8.48σ · photometry 7.5σ · 0.5–0.8″ from JPL in every pass',
+    how: '3 passes, 18′ field, 75–92 au · 6.0 million orbits tried · the sum is 8.2× the noise: just over the highest noise peak (8.07), under the 8.48 it needs · brightness 7.5× the noise · 0.5–0.8″ from JPL in every pass',
     ok: false,
     lab: '#/lab?ra=61.7725&dec=8.8408&fov=20',
   },
@@ -33,7 +33,7 @@ const KNOWN: { who: string; d: string; jpl: string; how: string; ok: boolean; la
     who: 'Makemake',
     d: '52.5 ± 0.2 au',
     jpl: 'JPL 52.3',
-    how: '2 passes · S/N 14.6–16.0 per pass · misfit 1.5″ · a third pass would confirm it',
+    how: '2 passes · signal 14.6–16.0× the noise in each · fits to 1.5″ · a third pass would confirm it',
     ok: false,
     lab: '#/lab?ra=202.317&dec=20.157&fov=20',
   },
@@ -245,7 +245,7 @@ export function PlanetXPage() {
             : pk.data.peak?.edge
               ? `Peak · ${(pk.data.peak.d_lo ?? pk.data.peak.d ?? 0).toFixed(0)} au or farther`
               : `Peak · ${(pk.data.peak?.d ?? 0).toFixed(0)} au`}
-          {pk.data.peak?.sn != null ? ` · ${pk.data.peak.sn.toFixed(1)}σ` : ''}
+          {pk.data.peak?.sn != null ? ` · ${pk.data.peak.sn.toFixed(1)}× the noise` : ''}
         </b>
         <em class="pill lead">{pk.data.peak?.known?.state === 'ok' ? 'known body' : 'lead'}</em>
       </div>
@@ -256,7 +256,7 @@ export function PlanetXPage() {
           return near ? `in the ${near.replace(/ field$/, '')} field · ` : '';
         })()}
         RA {pk.ra.toFixed(2)} · Dec {fmtDec(pk.dec)}
-        {pk.data.peak?.phot_sn != null ? ` · photometry ${pk.data.peak.phot_sn.toFixed(1)}σ` : ''}
+        {pk.data.peak?.phot_sn != null ? ` · brightness ${pk.data.peak.phot_sn.toFixed(1)}× the noise` : ''}
       </div>
       {pk.data.peak?.known?.state === 'ok' && pk.data.peak.known.words && (
         <p>{`${pk.data.peak.known.words[0]!.toUpperCase()}${pk.data.peak.known.words.slice(1)}. JPL’s own place and the search’s agree to ${Math.max(...(pk.data.peak.known.seps ?? [0])).toFixed(1)}″.`}</p>
@@ -291,7 +291,7 @@ export function PlanetXPage() {
       .filter(Boolean);
     if (kn.length) return { text: `${[...new Set(kn)].join(', ')}, found blind`, lead: false };
     if (/^(Eris|Makemake)$/.test(nameOf(f))) return { text: 'known body, found blind', lead: false };
-    return { text: 'nothing above the bar', lead: false };
+    return { text: 'nothing found', lead: false };
   };
   // one label per place on the model (the newest search of it)
   const seen = new Set<string>();
@@ -309,6 +309,8 @@ export function PlanetXPage() {
     best: resultOf(f).text,
     href: labHref(f),
     lead: resultOf(f).lead,
+    // a field with no name and nothing found is a line of sight only: its coordinates are in the list (hundreds of them crowded the model)
+    plain: nameOf(f).startsWith('RA ') && resultOf(f).text === 'nothing found',
   }));
   const fieldSig = fields.map((f) => f.key + f.best).join('|') + (leads?.length ?? '-');
 
@@ -367,7 +369,8 @@ export function PlanetXPage() {
           <h1>Planet X</h1>
           <div class="px3-st" data-testid="px-stats">
             <span>
-              <b>{leads == null ? '—' : nLeads}</b> {nLeads === 1 ? 'lead' : 'leads'} in <b>{searched == null ? '—' : mine.length}</b>{' '}
+              {leads == null ? 'loading the leads…' : <b>{nLeads}</b>} {leads == null ? '' : nLeads === 1 ? 'lead' : 'leads'} in{' '}
+              <b>{searched == null ? '…' : mine.length}</b>{' '}
               <span title="Fields of any size where Find Planet X ran (most other searched fields are the time-lapse search only)">fields searched for Planet X</span>
             </span>
             <span>
@@ -455,10 +458,10 @@ export function PlanetXPage() {
       <aside class="px3-panel" aria-label="Planet X">
         <div class="px3-tabs" role="tablist">
           <button role="tab" aria-selected={tab === 'cands'} onClick={() => go('cands')} data-testid="px-tab-cands">
-            Candidates <span class="n">{leads == null ? '—' : nLeads}</span>
+            Candidates <span class="n">{leads == null ? '…' : nLeads}</span>
           </button>
           <button role="tab" aria-selected={tab === 'searched'} onClick={() => go('searched')} data-testid="px-tab-searched">
-            Searched <span class="n">{searched == null ? '—' : mine.length}</span>
+            Searched <span class="n">{searched == null ? '…' : mine.length}</span>
           </button>
           <button role="tab" aria-selected={tab === 'story'} onClick={() => go('story')} data-testid="px-tab-story">
             Story
@@ -467,15 +470,20 @@ export function PlanetXPage() {
         <div class="px3-body">
           {tab === 'cands' && (
             <div data-testid="px-cands">
-              <h4 class="px3-sub">Leads · {leads == null ? '…' : nLeads}</h4>
+              <h4 class="px3-sub">Leads{leads == null ? '' : ` · ${nLeads}`}</h4>
+              {leads == null && (
+                <p class="px3-note" role="status" data-testid="px-leads-wait">
+                  loading the candidates…
+                </p>
+              )}
               {nLeads > 0 && (
                 <p class="px3-note" data-testid="px-lead-note">
-                  Each lead is a peak above its field’s bar. A lead is not a body yet: it needs one orbit through two or three passes and the
+                  Each lead is a peak that stands out of its field’s noise. A lead is not a body yet: it needs one orbit through two or three passes and the
                   check against known bodies.
                 </p>
               )}
               {(leads ?? []).map(card)}
-              {leads != null && nLeads === 0 && <p class="px3-note">No leads above the bar right now.</p>}
+              {leads != null && nLeads === 0 && <p class="px3-note">No leads right now.</p>}
               <h4 class="px3-sub">Ruled out</h4>
               <div
                 class="px3-cand rej"
@@ -684,15 +692,15 @@ function body(i: number, nFields: number, peaks: Peak[]) {
         us, shown on the model as lines of sight.{' '}
         {peaks.length ? (
           <>
-            There {peaks.length === 1 ? 'is' : 'are'} <b>{peaks.length}</b> {peaks.length === 1 ? 'lead' : 'leads'}: peaks above the bar
-            that are not known bodies, each needing one orbit through the passes before it counts.
+            There {peaks.length === 1 ? 'is' : 'are'} <b>{peaks.length}</b> {peaks.length === 1 ? 'lead' : 'leads'}: peaks that stand out of
+            the noise and are not known bodies, each needing one orbit through the passes before it counts.
           </>
         ) : (
-          'No peak passes the bar right now.'
+          'No peak stands out of the noise right now.'
         )}
       </p>
       <p>
-        In the ecliptic D4 field a 394 au candidate passed the bar, but ten years of NEOWISE images would show it at 13.6σ and show nothing:{' '}
+        In the ecliptic D4 field a 394 au candidate stood out, but ten years of NEOWISE images would show it at 13.6 times the noise and show nothing:{' '}
         <b>ruled out</b>.
       </p>
       <p>No Planet Nine has been found. A search that finds nothing does not show that nothing is there.</p>

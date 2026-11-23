@@ -18,7 +18,7 @@ export const TASKS: Record<TaskKind, { title: string; ask: string; answers: [str
   finding: { title: 'Check a machine finding', ask: 'Is this a real object?', answers: [['moves', 'It moves'], ['artefact', 'Artefact'], ['known', 'Known object'], ['cant_tell', 'Can’t tell']] },
   moves: { title: 'Does it really move?', ask: 'The machine says this moves. Does it?', answers: [['moves', 'It moves'], ['still', 'It stands still'], ['artefact', 'It is an artefact'], ['cant_tell', 'Can’t tell']] },
   red: { title: 'A red source', ask: '', answers: [] },
-  anomaly: { title: 'A spectral anomaly', ask: '', answers: [] },
+  anomaly: { title: 'An odd spectrum', ask: '', answers: [] },
   find_again: { title: 'Find it again', ask: 'Tap it if you see it.', answers: [['seen', 'Done'], ['not_seen', 'I don’t see it'], ['cant_tell', 'Not sure']] },
   recentre: {
     title: 'Put the ring on it',

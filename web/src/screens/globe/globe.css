@@ -21,6 +21,11 @@
   .map-ui .map-dates .faint { display: none; }
   .screen .globe-wrap > .covsw { bottom: 66px; right: 10px; }
 }
+/* until the first picture of the sky is drawn; it lets every touch through to the globe */
+.sky-wait { position: absolute; left: 50%; top: 34%; transform: translate(-50%, -50%); z-index: 2; display: flex; align-items: center; gap: 9px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--edge-soft); background: rgba(2, 10, 14, 0.8); color: var(--ink); white-space: nowrap; pointer-events: none; }
+.sky-wait i { width: 13px; height: 13px; border-radius: 50%; border: 2px solid var(--edge-hi); border-top-color: var(--accent-l); animation: skywait 0.9s linear infinite; }
+@keyframes skywait { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .sky-wait i { animation: none; } }
 .known-head { padding: 8px 14px 0; }
 .globe-wrap > .srchsw { top: auto; bottom: 150px; right: 16px; }
 @media (max-width: 599.98px) and (min-height: 480px), (max-height: 479.98px) and (max-width: 1279.98px) { .screen .globe-wrap > .srchsw { bottom: 128px; right: 10px; } }

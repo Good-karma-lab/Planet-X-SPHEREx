@@ -35,7 +35,7 @@ const STATUS_WORD: Record<string, string> = {
   blend: 'blend · stood still',
   halo: "in a bright star's glow",
   galaxy: 'a galaxy',
-  below: 'below the bar',
+  below: 'too faint to count',
   set_aside: 'set aside by people',
   unverified: 'not checked in the exposures',
 };
@@ -43,7 +43,7 @@ const STATUS_WHY: Record<string, string> = {
   blend: 'Two sources side by side: their blend stood still while the ring moved. Not a lead',
   halo: 'A bump in the glow of a bright star. Not a lead',
   residual: 'What is left after a known source is taken away. Not a lead',
-  below: 'Below the bar this field sets for a find',
+  below: 'Fainter than this field needs to count a find',
   set_aside: 'People agreed it is an artefact',
   unverified: 'A straight line through the visits whose light was never checked in the exposures. Not a lead',
 };
@@ -91,11 +91,20 @@ const KIND_SHORT: Record<string, string> = {
   mover: 'Movers',
   browndwarf: 'Brown dwarfs',
   red: 'Red sources',
-  anomaly: 'Spectral anomalies',
+  anomaly: 'Odd spectra',
   pair: 'Pairs changing',
   film: 'Time-lapse tracks',
   peak: 'Planet X peaks',
 };
+/** The line over the list: "48 of 104 promising finds shown · 10,408 found by the machine in all" (shown null: the whole list is here). */
+export function listLine(shown: number | null, count: number, promising: boolean, total: number): string {
+  const what = `${promising ? 'promising ' : ''}${count === 1 ? 'find' : 'finds'}`;
+  const many = (v: number) => v.toLocaleString('en-US');
+  return `${shown === null ? `${many(count)} ${what}` : `${many(shown)} of ${many(count)} ${what} shown`} · ${many(total)} found by the machine in all`;
+}
+/** A catalogue that has not answered: SIMBAD by what it is, since nothing else on the page says so. */
+export const silentWord = (catalogue: string): string =>
+  catalogue === 'simbad' ? 'this star catalogue is not answering; the others are used' : 'did not answer';
 const um = (v: number) => v.toFixed(2).replace(/0$/, '');
 const mjdDate = (m: number | null) => (m == null ? '' : new Date((m - 40587) * 864e5).toISOString().slice(0, 10));
 
@@ -184,7 +193,7 @@ export function titleOf(f: Find): string {
       return top ? `${top.z > 0 ? 'Excess' : 'Deficit'} at ${um(top.lo)}–${um(top.hi)} µm` : 'Odd spectrum';
     }
     case 'pair':
-      return `Pair ${(d.pair?.separation_arcsec ?? 0).toFixed(1)}″ apart · flux change ${(f.score ?? 0).toFixed(1)}σ`;
+      return `Pair ${(d.pair?.separation_arcsec ?? 0).toFixed(1)}″ apart · change ${(f.score ?? 0).toFixed(1)}× the noise`;
     case 'film':
       return `${(f.rate ?? 0).toFixed(1)}″/h object moving in a pass${d.less_certain ? ' (less certain)' : ''}`;
     default: {
@@ -437,7 +446,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
           ],
         ] as [string, string][])
       : []),
-    ...(f.snr != null ? ([['S/N', f.snr.toFixed(1)]] as [string, string][]) : []),
+    ...(f.snr != null ? ([['Signal', `${f.snr.toFixed(1)}× the noise`]] as [string, string][]) : []),
     ...(f.score != null ? ([['Score', f.score.toFixed(2)]] as [string, string][]) : []),
     ...(f.chance != null
       ? ([
@@ -511,7 +520,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
                 <td>{p.label}</td>
                 <td>{mjdDate(p.mjd)}</td>
                 <td>{p.ra != null && p.dec != null ? `${p.ra.toFixed(5)} ${p.dec.toFixed(5)}` : ''}</td>
-                <td>{p.snr != null ? `S/N ${p.snr.toFixed(0)}` : ''}</td>
+                <td>{p.snr != null ? `${p.snr.toFixed(0)}× noise` : ''}</td>
               </tr>
             ))}
           </tbody>
@@ -533,7 +542,7 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
                         ? 'no entry'
                         : 'nothing within 6″'
                     : i.state === 'unavailable'
-                      ? 'did not answer'
+                      ? silentWord(i.catalogue)
                       : 'not asked yet'}
               </td>
               <td>{i.state === 'ok' && i.sep != null ? `${i.sep.toFixed(1)}″` : ''}</td>
@@ -821,6 +830,15 @@ export function FindingsView({
             ? 'Waiting for a look'
             : (STAGE_LABEL[s] ?? s);
   const kindName = (k: KindSel) => (k === 'submitted' ? 'Found by people' : k === 'promising' ? 'Promising' : KIND_SHORT[k]!);
+  // a first list that takes long says so (it took 18–35 s in the test of 20 Nov, with the same words from start to end)
+  const firstWait = cards.loading && !h;
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    setSlow(false);
+    if (!firstWait) return;
+    const t = setTimeout(() => setSlow(true), 3000);
+    return () => clearTimeout(t);
+  }, [firstWait]);
   const viewOn = kind !== 'submitted' && stage !== 'mine';
   // the filters that narrow the list, each with its own one-click clear: the line is always there, so nothing moves when one is set
   const active: { label: string; clear?: () => void }[] = [
@@ -956,20 +974,20 @@ export function FindingsView({
             ))}
           </span>
           {(() => {
-            const n = (c: number) => `${c} ${c === 1 ? 'find' : 'finds'}`;
-            // short in sight ("48 of 89 · 7,853 in all"); the whole of it on hover
+            // short in sight ("48 of 89 finds shown · 7,853 found by the machine in all"); the whole of it on hover
             const line = cards.stale
               ? 'updating…'
               : kind === 'submitted'
                 ? `${cards.finds.length} findings submitted by people`
                 : h
-                  ? `${cards.done ? n(h.count) : `${cards.finds.length} of ${h.count}`} · ${h.total.toLocaleString('en-US')} finds in all`
+                  ? listLine(cards.done ? null : cards.finds.length, h.count, kind === 'promising', h.total)
                   : 'reading the findings…';
             const full = `${line}${h && !cards.done && kind !== 'submitted' ? ' · more as you scroll' : ''}${
               h && kind !== 'submitted' ? ' · a find is a lead, not a discovery' : ''
             }${h && h.identification.pending > 0 ? ` · identifying: ${h.identification.pending} catalogue answers to come` : ''}`;
             return (
-              <span class="lc-line" title={full}>
+              <span class="lc-line" title={full} role="status">
+                {(!h || cards.stale) && cards.loading && kind !== 'submitted' && <i class="lc-ring" aria-hidden="true" />}
                 {line}
               </span>
             );
@@ -1003,7 +1021,11 @@ export function FindingsView({
             cards.finds.length === 0 &&
             Array.from({ length: SKELETONS }, (_, i) => (
               <li key={`sk${i}`} class="fcard glass fskel" aria-hidden="true">
-                <div class="fclip">{i === 0 && <span class="mono-s">reading the findings…</span>}</div>
+                <div class="fclip">{i === 0 && (
+                    <span class="mono-s fskel-say" role="status">
+                      <i class="lc-ring" aria-hidden="true" /> {slow ? 'reading the findings… a first list takes a few seconds' : 'reading the findings…'}
+                    </span>
+                  )}</div>
                 <div class="fcard-body" />
               </li>
             ))}

@@ -268,8 +268,8 @@ function Hero({ mine, take }: { mine: Mine; take: (k: 'cell' | 'finding') => voi
         </div>
       </div>
       <div class="cb-stats">
-        <span>
-          <b>{quarters}</b>quarters
+        <span title="Quarters of squares you have looked through. A square is 20′ and is looked through a quarter (10′) at a time; Squares below lists every one you took">
+          <b>{quarters}</b>looked through
         </span>
         <span>
           <b>{mine.marks.length}</b>marks

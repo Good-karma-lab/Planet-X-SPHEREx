@@ -2,7 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import { peopleLine, usePeople } from './people';
 import { formatDec, formatRA } from '../../lib/sky';
 import { checkHref, KIND_ONE, STAGE_LABEL, takeTask, type CardFind } from './cards';
-import { titleOf, type Find } from './finds';
+import { silentWord, titleOf, type Find } from './finds';
 import './findings.css';
 
 /** A find with the fields of the product flow (`GET /api/v1/findings/{id}`). */
@@ -108,7 +108,7 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
   const looks = Object.entries(f.credit.looks ?? {});
   const nums: [string, string][] = [
     ...(f.rate != null ? ([['Rate', `${f.rate.toFixed(2)} ${f.kind === 'film' ? '″/h' : '″/yr'}`]] as [string, string][]) : []),
-    ...(f.snr != null ? ([['S/N', f.snr.toFixed(1)]] as [string, string][]) : []),
+    ...(f.snr != null ? ([['Signal', `${f.snr.toFixed(1)}× the noise`]] as [string, string][]) : []),
     ...(f.score != null ? ([['Score', f.score.toFixed(2)]] as [string, string][]) : []),
     ['Place', `${formatRA(f.ra)} ${formatDec(f.dec)}`],
     ['Field', `${f.place} · ${f.fov}′`],
@@ -221,7 +221,7 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
                     : i.state === 'none'
                       ? 'nothing there'
                       : i.state === 'unavailable'
-                        ? 'did not answer'
+                        ? silentWord(i.catalogue)
                         : 'not asked yet'}
                 </td>
                 <td>{i.state === 'ok' && i.sep != null ? `${i.sep.toFixed(1)}″` : ''}</td>
@@ -240,7 +240,7 @@ export function FindingPage({ id, back = '#/findings' }: { id: string; back?: st
                   <td>{p.label}</td>
                   <td>{p.mjd == null ? '' : new Date((p.mjd - 40587) * 864e5).toISOString().slice(0, 10)}</td>
                   <td>{p.ra != null && p.dec != null ? `${p.ra.toFixed(5)} ${p.dec.toFixed(5)}` : ''}</td>
-                  <td>{p.snr != null ? `S/N ${p.snr.toFixed(0)}` : ''}</td>
+                  <td>{p.snr != null ? `${p.snr.toFixed(0)}× noise` : ''}</td>
                 </tr>
               ))}
             </tbody>

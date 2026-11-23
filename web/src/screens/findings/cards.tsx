@@ -65,7 +65,7 @@ export const KIND_ONE: Record<string, string> = {
   mover: 'Mover',
   browndwarf: 'Brown dwarf',
   red: 'Red source',
-  anomaly: 'Spectral anomaly',
+  anomaly: 'Odd spectrum',
   pair: 'Pair changing',
   film: 'Time-lapse track',
   peak: 'Planet X peak',
@@ -84,7 +84,7 @@ export function cardTitle(f: CardFind): string {
     case 'film':
       return `${nm || 'Moves within one pass'} · ${(f.rate ?? 0).toFixed(1)}″/h`;
     case 'peak':
-      return `Planet X peak · S/N ${(f.snr ?? f.score ?? 0).toFixed(1)}`;
+      return `Planet X peak · signal ${(f.snr ?? f.score ?? 0).toFixed(1)}× the noise`;
     case 'red':
       return `${nm || 'Red source'} · colour ${(f.score ?? 0).toFixed(1)}`;
     case 'anomaly':
