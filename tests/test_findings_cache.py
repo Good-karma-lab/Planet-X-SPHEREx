@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -27,6 +28,7 @@ def test_a_crowd_costs_one_query_and_another_question_its_own(monkeypatch: pytes
         return {"count": 0, "total": 0, "finds": []}
 
     monkeypatch.setattr(routes_findings, "query", query)
+    monkeypatch.setattr(routes_findings, "snapshot", lambda *a, **k: object())
     st = SimpleNamespace(
         findings=SimpleNamespace(db=object()), fpx_known=None, accounts=None, clips=None, store=None, findings_flow=object()
     )
@@ -55,6 +57,7 @@ def test_a_find_kept_out_of_the_lists_as_a_blend_still_has_its_page(monkeypatch:
         return {"count": 0, "total": 0, "finds": [find] if hit else []}
 
     monkeypatch.setattr(routes_findings, "query", query)
+    monkeypatch.setattr(routes_findings, "snapshot", lambda *a, **k: object())
     monkeypatch.setattr(routes_findings, "find_row", lambda db, fid: {"id": fid} if fid == find["id"] else None)
     st = SimpleNamespace(
         findings=SimpleNamespace(db=object()), fpx_known=None, accounts=None, clips=None, store=None, findings_flow=object()
@@ -68,3 +71,64 @@ def test_a_find_kept_out_of_the_lists_as_a_blend_still_has_its_page(monkeypatch:
         r = c.get(f"/api/v1/findings/{name}")
         assert r.status_code == 200 and r.json()["status"] == "blend"
     assert c.get("/api/v1/findings", params={"status": "blend"}).status_code == 200
+
+
+def test_the_first_lists_are_kept_for_the_next_start_and_a_stale_one_is_handed_out_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Forty people with the page's own filters after a restart (launch day): the lists of the last run are handed out at once from
+    disk, and made again behind them; nobody waits for the finds to be read."""
+    import json
+    import sqlite3
+
+    from service.routes_findings import WARM_FILE, warm_keys
+
+    monkeypatch.setattr(routes_findings, "LIST_TTL_S", 0.2)
+    started = threading.Event()
+    go_on = threading.Event()
+
+    def slow_snapshot(*a: Any, **k: Any) -> object:
+        started.set()
+        go_on.wait(10.0)
+        return object()
+
+    def query(db: Any, kind: Any, status: Any, *a: Any, **k: Any) -> dict[str, Any]:
+        return {"count": 1, "total": 1, "finds": [], "from": "new"}
+
+    monkeypatch.setattr(routes_findings, "snapshot", slow_snapshot)
+    monkeypatch.setattr(routes_findings, "query", query)
+    first = warm_keys()[0]
+    (tmp_path / WARM_FILE).write_text(json.dumps({json.dumps(first, sort_keys=True): json.dumps({"from": "disk", "finds": []})}))
+    con = sqlite3.connect(":memory:", check_same_thread=False)
+    con.execute("CREATE TABLE finds (id)")
+    db = SimpleNamespace(db=con, read_only=False)
+    st = SimpleNamespace(
+        findings=SimpleNamespace(db=db, writer=True), fpx_known=None, accounts=None, clips=None, store=None, findings_flow=object(),
+        cfg=SimpleNamespace(store_dir=tmp_path),
+    )  # fmt: skip
+    app = FastAPI()
+    app.include_router(routes_findings.make_findings_router(st))
+    params = {k: (1 if v is True else v) for k, v in first.items()}
+
+    async def run() -> None:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+            warm = asyncio.create_task(st.warm_findings())
+            await asyncio.to_thread(started.wait, 5.0)
+            t0 = time.monotonic()
+            crowd = await asyncio.gather(*(c.get("/api/v1/findings", params=params) for _ in range(40)))
+            assert time.monotonic() - t0 < 2.0 and all(r.json()["from"] == "disk" for r in crowd)  # the finds are still being read
+            go_on.set()
+            for _ in range(100):
+                if (await c.get("/api/v1/findings", params=params)).json()["from"] == "new":
+                    break
+                await asyncio.sleep(0.05)
+            assert (await c.get("/api/v1/findings", params=params)).json()["from"] == "new"
+            for _ in range(100):
+                kept = json.loads((tmp_path / WARM_FILE).read_text())
+                if len(kept) == len(warm_keys()):
+                    break
+                await asyncio.sleep(0.05)
+            assert all(json.loads(v)["from"] == "new" for v in kept.values()) and len(kept) == len(warm_keys())
+            warm.cancel()
+
+    asyncio.run(run())

@@ -82,6 +82,10 @@ SB_PA_TOL = 30.0
 # SB_MATCH_ARCSEC of the same body. Of the 48 bodies beside a visit known on 23 Nov 2026, 47 stood under 5.5″ and one at 7.5″; chance
 # would put 84 % of them past 6″
 CHAIN_ARCSEC = 6.0
+# a time-lapse track under this signal is not a lead: of 656 tracks on 23 Nov 2026 the 104 at or over it held 56 of the 60 known bodies,
+# and the unexplained ones under it move like noise (25 % along the ecliptic against 33 % by chance; the known ones 83 %)
+WEAK_Z = 7.0
+PEAK_RATE_MAX = 15.0  # ″/h: a body of the outer solar system moves slower (service.fpx_known.SLOW_RATE)
 GENERIC_TYPES = ("", "*", "Star", "IR", "Radio", "UV", "X", "Blue", "Red", "?")  # a SIMBAD type that explains nothing about a spectrum
 EPOCH = 2025.9
 ECLIPTIC_BAND = 15.0  # degrees of ecliptic latitude: a slow mover there is also checked against the known solar-system bodies
@@ -155,7 +159,16 @@ GALAXY_TYPES = frozenset(
     }
 )
 GALAXY_NAMES = ("ACS-GC", "2MASX", "LEDA", "SDSS")  # catalogues of galaxies: a match to one is a galaxy, never a brown dwarf or a mover
-HIDDEN = ("residual", "galaxy", "below", "halo", "set_aside", "blend", "unverified")  # statuses kept out of the leads and the default list
+HIDDEN = (
+    "residual",
+    "galaxy",
+    "below",
+    "halo",
+    "set_aside",
+    "blend",
+    "unverified",
+    "weak",
+)  # statuses kept out of the leads and the default list
 
 
 def is_galaxy(name: str | None, typ: str | None) -> bool:
@@ -475,7 +488,10 @@ def collect(
                 continue
             c0 = (p.get("fields") or [[p.get("ra"), p.get("dec")]])[0] if row["kind"] == "deep" else [p.get("ra"), p.get("dec")]
             place = place_name(targets, float(c0[0]), float(c0[1])) if c0 and c0[0] is not None else "?"
+            t0 = _f(meta.get("t0")) if row["kind"] == "distant" else None  # the date the one-pass search's places are for
             for c in (q for q in meta.get("candidates", []) if q.get("ok")):
+                if t0 is not None and c.get("ref_mjd") is None:
+                    c = {**c, "ref_mjd": t0}
                 cra, cdec = _f(c.get("ra")), _f(c.get("dec"))
                 if cra is None or cdec is None:
                     continue
@@ -520,13 +536,21 @@ def same_object(a: dict[str, Any], b: dict[str, Any]) -> bool:
 def reuse_ids(finds: list[dict[str, Any]], have: list[dict[str, Any]]) -> None:
     """A find already in the table keeps its id (and so its catalogue answers) when the same object comes out of a new sweep a little moved."""
     taken: set[str] = set()
-    for f in finds:
-        if any(h["id"] == f["id"] for h in have):
-            taken.add(f["id"])
+    known = {h["id"] for h in have}
+    order = {h["id"]: n for n, h in enumerate(have)}
+    taken.update(f["id"] for f in finds if f["id"] in known)
+    # only the rows of the same kind within a strip of declination can be the same object: every find against every row held the event
+    # loop 1–2 s a sweep (26,000 of each, 23 Nov 2026)
+    strip = max(MERGE_ARCSEC.values()) / 3600.0
+    near: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for h in have:
+        if h["id"] not in taken:
+            near.setdefault((h["kind"], math.floor(h["dec"] / strip)), []).append(h)
     for f in finds:
         if f["id"] in taken:
             continue
-        for h in have:
+        b = math.floor(f["dec"] / strip)
+        for h in sorted((h for k in (b - 1, b, b + 1) for h in near.get((f["kind"], k), ())), key=lambda h: order[h["id"]]):
             if h["id"] not in taken and same_object(h, f):
                 f["id"] = h["id"]
                 taken.add(h["id"])
@@ -1081,7 +1105,7 @@ class Findings:
             return {"added": 0, "removed": 0, "finds": len(finds)}
         async with self.lock:
             have = await asyncio.to_thread(lambda: [dict(r) for r in self.db.db.execute("SELECT id, kind, ra, dec, rate FROM finds")])
-            reuse_ids(finds, have)
+            await asyncio.to_thread(reuse_ids, finds, have)
             added, removed = await asyncio.to_thread(self.db.write_finds, finds)
             self.db.set_meta("sig", sig)
         return {"added": added, "removed": removed, "finds": len(finds)}
@@ -1096,7 +1120,14 @@ class Findings:
             self.kick.clear()
 
     async def sbident(
-        self, ra: float, dec: float, mjd: float, rate: float | None, pa: float | None, check_rate: bool = True
+        self,
+        ra: float,
+        dec: float,
+        mjd: float,
+        rate: float | None,
+        pa: float | None,
+        check_rate: bool = True,
+        max_rate: float | None = None,
     ) -> dict[str, Any]:
         """JPL's Small-Body Identification at the place and time of a moving find (the position at that very time). A body counts only if it
         stands within 15″, is brighter than V 21, and moves at the find's rate (25 %) and direction (30°); the nearest such body is named with
@@ -1105,10 +1136,18 @@ class Findings:
         if getattr(self, "sb_gate", None) is None:
             self.sb_gate = asyncio.Semaphore(1)
         async with self.sb_gate:
-            return await self._sbident_ask(ra, dec, mjd, rate, pa, check_rate, half)
+            return await self._sbident_ask(ra, dec, mjd, rate, pa, check_rate, half, max_rate)
 
     async def _sbident_ask(
-        self, ra: float, dec: float, mjd: float, rate: float | None, pa: float | None, check_rate: bool, half: float
+        self,
+        ra: float,
+        dec: float,
+        mjd: float,
+        rate: float | None,
+        pa: float | None,
+        check_rate: bool,
+        half: float,
+        max_rate: float | None = None,
     ) -> dict[str, Any]:
         self.breaker.before()
         try:
@@ -1180,6 +1219,9 @@ class Findings:
                 out.update(state="none", note=f"{row[0]} stands {sep:.1f}″ away but JPL gave no rate to compare")
                 continue
             speed, ang = math.hypot(vr, vd), math.degrees(math.atan2(vr, vd)) % 360.0
+            if max_rate is not None and speed > max_rate:
+                out["note"] = f"{str(row[0]).strip()} stands {sep:.1f}″ away but moves {speed:.0f}″/h, too fast for this find"
+                continue
             agrees = (not check_rate) or (
                 rate is not None
                 and pa is not None
@@ -1223,7 +1265,9 @@ class Findings:
         d = json.loads(row["data"])
         if row["kind"] == "film":
             return await self._film_visits(row["id"], d)
+        slow = None
         if row["kind"] == "peak":
+            slow = PEAK_RATE_MAX  # a search at 30-2000 au does not find a main-belt body that happens to pass there
             ref = _ref_mjd("peak", d)
             sel = [{"ra": row["ra"], "dec": row["dec"], "mjd": ref}] if ref is not None else []
             rate, pa, check, need = None, None, False, 1
@@ -1232,7 +1276,7 @@ class Findings:
             rate, pa, check, need = None, None, False, len(sel)
         if not sel:
             return {"state": "unavailable", "error": "no visit dates"}
-        got = [await self.sbident(v["ra"], v["dec"], v["mjd"], rate, pa, check) for v in sel]
+        got = [await self.sbident(v["ra"], v["dec"], v["mjd"], rate, pa, check, slow) for v in sel]
         names = [g["name"] for g in got if g.get("state") == "ok"]
         best = max(set(names), key=names.count) if names else None
         per = [
@@ -1524,6 +1568,49 @@ def blend_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str | None:
     return None
 
 
+AGN_W12 = 0.8  # AllWISE W1 - W2 at or over it: the colours of an active galaxy (Stern et al. 2012)
+BROWN_W12 = 1.5  # ... and over this, with nothing in 2MASS: also those of a cold brown dwarf
+
+
+def catalogue_class(f: dict[str, Any], idents: list[dict[str, Any]]) -> dict[str, str] | None:
+    """What the catalogues' own numbers say a red source or an odd spectrum most likely is, or None: {label, basis}. SIMBAD's type first;
+    else AllWISE's colours (with 2MASS). A class for the reader, never a status: a colour is not an identity."""
+    by = {i["catalogue"]: i for i in idents}
+    sb = by.get("simbad") or {}
+    if sb.get("state") == "ok" and sb.get("type") and str(sb["type"]) not in GENERIC_TYPES:
+        return {"label": str(sb["type"]), "basis": f"SIMBAD: {sb.get('name')}"}
+    aw = by.get("allwise") or {}
+    if aw.get("state") != "ok":
+        return None
+    d = aw.get("detail") or {}
+    w1, w2 = _f(d.get("W1")), _f(d.get("W2"))
+    src = (f.get("data") or {}).get("source") or {}
+    pm = math.hypot(_f(src.get("pmra")) or 0.0, _f(src.get("pmdec")) or 0.0) / 1000.0 if src.get("moves") else 0.0
+    far = pm * (EPOCH - SURVEY_EPOCH["allwise"])
+    if far >= STILL_FACTOR * RADIUS and aw.get("sep") is not None and aw["sep"] <= RADIUS:
+        return {
+            "label": "stood still since 2010",
+            "basis": f"AllWISE has it {aw['sep']:.1f}″ from here; moving as measured it would be {far:.0f}″ away",
+        }
+    if w1 is None or w2 is None:
+        return {"label": "an infrared source", "basis": "AllWISE"}
+    two = (by.get("twomass") or {}).get("state")
+    c12 = w1 - w2
+    basis = f"AllWISE W1−W2 = {c12:.2f}"
+    if c12 >= BROWN_W12 and two == "none":
+        return {"label": "very red: an active galaxy or a cold brown dwarf", "basis": f"{basis}, nothing in 2MASS"}
+    if c12 >= AGN_W12:
+        return {"label": "colours of an active galaxy", "basis": basis}
+    return {"label": "neither an active galaxy's nor a cold brown dwarf's colours", "basis": basis}
+
+
+def ask_people(f: dict[str, Any], idents: list[dict[str, Any]]) -> bool:
+    """Is a red source or an odd spectrum a question for a person? Only once SIMBAD and AllWISE have answered and neither has anything
+    there (and 2MASS has nothing): 14,400 of 15,000 stand in AllWISE, whose colours answer better than an eye does."""
+    by = {i["catalogue"]: i.get("state") for i in idents}
+    return by.get("simbad") == "none" and by.get("allwise") == "none" and by.get("twomass") in ("none", "unavailable")
+
+
 _BESIDE = re.compile(r"^(.+?) stands ([0-9.]+)″ away but ")  # how a visit's note named a body before `near` was kept
 
 
@@ -1593,6 +1680,8 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         return "unverified"
     if kind == "film" and chain_of(f, idents):
         return "chain"  # one known body chained with noise: shown, marked, not a lead
+    if kind == "film" and (z := _f((d.get("track") or {}).get("z_together"))) is not None and z < WEAK_Z:
+        return "weak"  # kept, behind its own filter: under the signal at which tracks are bodies
     if kind in BLEND_KINDS and blend_of(f, idents):
         return "blend"  # a neighbour star or a survey source at its place says it did not move: not a lead
     if kind == "peak" and ok("halo"):
@@ -1654,6 +1743,10 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
         return ("Linked as a straight line through the visits, but its light was never checked in the exposures themselves (on − off "
                 "photometry, which every orbit track passes): near bright stars such tracks can be built from the motion maps alone. "
                 "Not counted as a lead.")  # fmt: skip
+    if status == "weak":
+        z = _f(((f.get("data") or {}).get("track") or {}).get("z_together")) or 0.0
+        return (f"A weak track: its signal, {z:.1f} times the noise, is under {WEAK_Z:.0f}. Of the known bodies this search found, 56 of 60 stand "
+                "above that; of the tracks under it, most move like noise linked by chance. Kept, but not counted as a lead.")  # fmt: skip
     if status == "chain":
         c = chain_of(f, idents) or {"name": "a known body", "n": 1, "of": 1, "sep": 0.0}
         return (f"A chain through a known asteroid: {c['name']} stands {c['sep']:.1f}″ from the track at {c['n']} of the {c['of']} visits JPL was "
@@ -1703,6 +1796,12 @@ def verdict_of(f: dict[str, Any], idents: list[dict[str, Any]], status: str) -> 
                 + (f" ({ident['type']})" if ident.get("type") else "")
                 + f", which moves like it ({ident['basis']})"
             )
+        if kind == "film":  # a star or galaxy of a catalogue that happens to stand there is not the body
+            jpl_said = next((i for i in idents if i["catalogue"] == "sbident" and i["state"] == "ok"), None)
+            if jpl_said is not None:
+                who = f"{jpl_said.get('label', 'JPL')}: {jpl_said['name']}" + (
+                    f", {jpl_said['sep']:.1f}″ away" if jpl_said.get("sep") is not None else ""
+                )
         base = {
             "mover": "A known object that moves like this: ",
             "browndwarf": "A known brown dwarf: ",
@@ -1876,6 +1975,7 @@ LITE_KEYS = (
 
 SLIM_KEYS = (
     "id", "kind", "place", "ra", "dec", "scans", "snr", "score", "status", "stage", "promise", "viewers", "note", "visible", "people_raised",
+    "ask", "echo",
 )  # fmt: skip
 
 
@@ -1931,38 +2031,31 @@ def read_base(db: FindingsDB) -> list[Any]:
     return out
 
 
-def query(
+class Snapshot:
+    """Every find judged once (what the catalogues, JPL and people say of it), as the lists are made from it: `items` are the few fields
+    the filters, the counts and the order read; `judge(n)` makes find n whole again."""
+
+    def __init__(self, packed: list[Any], judge: Callable[[Any, bool], dict[str, Any]]) -> None:
+        self.packed, self._judge = packed, judge
+        self.items: list[dict[str, Any]] = []
+        self.pending = self.unavailable = self.missing_decisive = 0
+
+    def judge(self, n: int, whole: bool = True) -> dict[str, Any]:
+        return self._judge(self.packed[n], whole)
+
+
+def snapshot(
     db: FindingsDB,
-    kind: str | None,
-    status: str | None,
-    place: str | None,
-    limit: int,
-    offset: int,
     *,
     flow: FlowDB | None = None,
-    sort: str | None = None,
-    stage: str | None = None,
-    waiting: bool = False,
-    kinds: tuple[str, ...] | None = None,
-    clip_rank: Callable[[dict[str, Any]], int] | None = None,
     only: frozenset[str] | None = None,
-    noted: bool = False,
     seen: Callable[[dict[str, Any]], tuple[bool | None, float | None]] | None = None,
-    visibility: str | None = None,
     aside: Mapping[str, dict[str, Any]] | None = None,
     raised: Mapping[str, str] | None = None,
     tracks: Mapping[str, dict[str, Any]] | None = None,
     names: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
-    slim: bool = False,
-) -> dict[str, Any]:
-    """The finds with what the catalogues said. `aside`: the machine finds people set aside as artefacts ({id: {look, agree, total}},
-    service/accounts/field_people.set_aside): their status is `set_aside`, kept out of the leads and the default list like a halo.
-    `raised`: the finds people raised up the queue ({id: why}, service/accounts/people.raised): first in the promise order.
-    `tracks`: what people said about tracks (service/people_tracks.read): a corrected track is under data["people_track"]. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
-    stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
-    the old one). Every find also carries the flow fields (flow_fields).
-    `names`: what JPL said of a Planet X peak (FpxIdentifier.verdict_on): a known body (or its echo) is `known`, a residual is `residual`,
-    before every filter and count. `slim`: the finds are only what the lists of tasks need (SLIM_KEYS), never read again in full."""
+) -> Snapshot:
+    """The finds judged: the work every list shares, whatever its filters (see `query` for what each argument says)."""
     with _READ:
         views = flow.views() if flow is not None else {}
         packed = read_some(db, sorted(only)) if only is not None else read_base(db)
@@ -2010,9 +2103,17 @@ def query(
             st = "set_aside"  # a catalogue's answer (known, a galaxy) stays the stronger word
             f["people_aside"] = aside[f["id"]]
         f["status"] = st
+        if st == "weak" and raised and f["id"] in raised:
+            st = "unexplained"  # people agree it moves: the stronger word
+            f["status"] = st
         if raised and f["id"] in raised and st in ("unexplained", "unchecked"):
             f["people_raised"] = raised[f["id"]]  # moves_old: the old pictures confirm the motion; candidate: a Planet X dot
         f["idents"] = ids_
+        if f["kind"] in ("red", "anomaly"):
+            f["catalogue_class"] = catalogue_class(f, ids_)
+            f["ask"] = ask_people(f, ids_)
+        if said is not None and said.get("echo"):
+            f["echo"] = True
         if whole:
             f["verdict"] = words if words is not None else verdict_of(f, ids_, st)
         f.update(flow_fields(f, views.get(f["id"])))
@@ -2027,7 +2128,7 @@ def query(
 
     # every find is judged, and only what the filters, the counts and the order read is kept of it; the finds of the page are judged again
     # whole below. Holding 25,000 whole finds (and their spectra) at once made the collector stop the other threads
-    items: list[dict[str, Any]] = []
+    snap = Snapshot(packed, judge)
     pending = unavailable = missing_decisive = 0
     for n, blob in enumerate(packed):
         f = judge(blob, False)
@@ -2041,9 +2142,49 @@ def query(
             missing_decisive += sum(1 for c in away if c in deciding)
         one = {k: f[k] for k in SLIM_KEYS if k in f}
         one["_n"] = n
-        if sort == "promise" and clip_rank is not None and (status not in (None, "all") or f["status"] not in HIDDEN):
-            one["_clip"] = clip_rank(f)
-        items.append(one)
+        snap.items.append(one)
+    snap.pending, snap.unavailable, snap.missing_decisive = pending, unavailable, missing_decisive
+    return snap
+
+
+def query(
+    db: FindingsDB,
+    kind: str | None,
+    status: str | None,
+    place: str | None,
+    limit: int,
+    offset: int,
+    *,
+    flow: FlowDB | None = None,
+    sort: str | None = None,
+    stage: str | None = None,
+    waiting: bool = False,
+    kinds: tuple[str, ...] | None = None,
+    clip_rank: Callable[[dict[str, Any]], int] | None = None,
+    only: frozenset[str] | None = None,
+    noted: bool = False,
+    seen: Callable[[dict[str, Any]], tuple[bool | None, float | None]] | None = None,
+    visibility: str | None = None,
+    aside: Mapping[str, dict[str, Any]] | None = None,
+    raised: Mapping[str, str] | None = None,
+    tracks: Mapping[str, dict[str, Any]] | None = None,
+    names: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
+    slim: bool = False,
+    snap: Snapshot | None = None,
+) -> dict[str, Any]:
+    """The finds with what the catalogues said. `aside`: the machine finds people set aside as artefacts ({id: {look, agree, total}},
+    service/accounts/field_people.set_aside): their status is `set_aside`, kept out of the leads and the default list like a halo.
+    `raised`: the finds people raised up the queue ({id: why}, service/accounts/people.raised): first in the promise order.
+    `tracks`: what people said about tracks (service/people_tracks.read): a corrected track is under data["people_track"]. Beside the old filters (`kind`, `status`, `place`): `kinds` (several kinds), `stage` (a
+    stage of the flow), `waiting` (leads nobody has looked at yet) and `sort="promise"` (the most promising first; the default order is
+    the old one). Every find also carries the flow fields (flow_fields).
+    `names`: what JPL said of a Planet X peak (FpxIdentifier.verdict_on): a known body (or its echo) is `known`, a residual is `residual`,
+    before every filter and count. `slim`: the finds are only what the lists of tasks need (SLIM_KEYS), never read again in full.
+    `snap`: a snapshot of the finds already judged (the list of the page is made from one that is kept); without it one is made."""
+    if snap is None:
+        snap = snapshot(db, flow=flow, only=only, seen=seen, aside=aside, raised=raised, tracks=tracks, names=names)
+    items = snap.items
+    pending, unavailable, missing_decisive = snap.pending, snap.unavailable, snap.missing_decisive
     counts: dict[str, dict[str, int]] = {
         k: {
             "all": 0,
@@ -2058,6 +2199,7 @@ def query(
             "blend": 0,
             "unverified": 0,
             "chain": 0,
+            "weak": 0,
             "leads": 0,
         }
         for k in KINDS
@@ -2078,6 +2220,7 @@ def query(
                 "blend": 0,
                 "unverified": 0,
                 "chain": 0,
+                "weak": 0,
                 "leads": 0,
             },
         )
@@ -2179,6 +2322,7 @@ def query(
         "blend": 8,
         "unverified": 9,
         "chain": 10,
+        "weak": 11,
     }
     # a status this list does not know goes last, never a KeyError (a blend broke every list it was in)
     sel.sort(
@@ -2187,7 +2331,12 @@ def query(
     if sort == "promise":
         # a find that can have no clip (a track whose visits are not kept, a place no field covers) goes below every find that can;
         # within equal promise the finds whose clip is ready come first: the first screen shows pictures, not empty cards
-        cr = {f["id"]: f.get("_clip", 0) for f in sel}
+        cr: dict[str, int] = {}
+        if clip_rank is not None:
+            for f in sel:
+                if "_clip" not in f:
+                    f["_clip"] = clip_rank(snap.judge(f["_n"], False))  # kept with the snapshot
+                cr[f["id"]] = f["_clip"]
         # ... and a find that carries a machine note (it looks like an artefact) goes below every clean find
         # ... and a find people raised (they agree it is worth the slow checks) goes before every other
         sel.sort(
@@ -2207,7 +2356,7 @@ def query(
     if slim:
         finds = page
     else:
-        finds = [judge(packed[f["_n"]], True) for f in page]
+        finds = [snap.judge(f["_n"]) for f in page]
         with _READ:
             rel = db.related([f["id"] for f in finds])
         for f in finds:

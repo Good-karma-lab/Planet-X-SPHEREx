@@ -140,6 +140,7 @@ CONTROL_EXPECT: dict[tuple[str, str], frozenset[str]] = {
     ("slow", "known"): frozenset({"moves", "moves_old"}),
     ("slow", "artefact"): frozenset({"still", "blend"}),
     ("peak", "artefact"): frozenset({"no_peak", "glow"}),
+    ("peak", "known"): frozenset({"candidate"}),  # a known body the search found blind (not an echo: one pass of it and noise)
     ("red", "galaxy"): frozenset({"galaxy"}),
     ("red", "residual"): frozenset({"artefact"}),
     ("red", "halo"): frozenset({"artefact"}),
@@ -334,6 +335,8 @@ class People:
 
     def expected(self, series: str, row: dict[str, Any]) -> frozenset[str] | None:
         """The right results of a control object, or None when the find is not one."""
+        if series == "peak" and row.get("echo"):
+            return None
         got = CONTROL_EXPECT.get((series, str(row.get("status")))) or CONTROL_EXPECT.get((series, str(row.get("stage"))))
         return got if got is not None else self.gold(series).get(row["finding_id"])
 
@@ -368,7 +371,11 @@ class People:
         for s in {series_of(r.get("kind")) for r in pool}:
             settled |= self.settled_ids(str(s))
         counts = Counter(r[0] for r in self.db._conn().execute("SELECT finding_id FROM acc_series_answers WHERE settled IS NULL"))
-        open_ = [r for r in pool if r.get("stage") is None and r["finding_id"] not in mine and r["finding_id"] not in settled]
+        open_ = [
+            r
+            for r in pool
+            if r.get("stage") is None and r.get("ask", True) and r["finding_id"] not in mine and r["finding_id"] not in settled
+        ]
         open_.sort(key=lambda r: -counts.get(r["finding_id"], 0))  # stable: the Findings page's order among equals
         return open_[0] if open_ else None
 

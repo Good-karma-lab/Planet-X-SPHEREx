@@ -758,3 +758,16 @@ def test_the_finds_are_read_from_many_threads_while_the_writer_writes(tmp_path: 
     for t in threads:
         t.join(10)
     assert errors == []
+
+
+def test_a_red_source_the_catalogues_answer_is_not_handed_out_and_a_known_peak_is_a_control(pp: People) -> None:
+    rows = [
+        {"finding_id": "red:1", "kind": "red", "status": "unexplained", "stage": None, "ask": False},
+        {"finding_id": "red:2", "kind": "red", "status": "unexplained", "stage": None, "ask": True},
+    ]
+    got = pp.pick("red", rows, None, set())
+    assert got is not None and got["finding_id"] == "red:2"
+    assert pp.pick("red", rows[:1], None, set()) is None
+    peak = {"finding_id": "peak:eris", "kind": "peak", "status": "known", "stage": "known"}
+    assert pp.expected("peak", peak) == frozenset({"candidate"})  # a known body found blind: the dot is there
+    assert pp.expected("peak", {**peak, "echo": True}) is None  # one pass of a body and noise: nobody knows what a person sees
