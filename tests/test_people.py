@@ -644,8 +644,8 @@ def test_the_findings_query_reads_the_tables_once_while_the_database_is_unchange
     db.write_finds([{**base, "id": "film:a", "kind": "film", "data": {"x": 1}}])
     db.db.commit()
     reads = []
-    real = FindingsDB.idents_of
-    monkeypatch.setattr(FindingsDB, "idents_of", lambda self, ids: reads.append(1) or real(self, ids))
+    real = FindingsDB.ident_rows_of
+    monkeypatch.setattr(FindingsDB, "ident_rows_of", lambda self, ids: reads.append(1) or real(self, ids))
     a = query(db, None, "any", None, 100, 0)
     a["finds"][0]["data"]["x"] = 99  # a caller's change stays its own
     a["finds"][0]["idents"].append({"catalogue": "mine"})
@@ -678,6 +678,69 @@ def test_one_find_asked_by_id_is_read_alone_and_is_the_same_as_in_the_whole_list
     assert [f["id"] for f in got["finds"]] == ["film:7", "film:3"] or {f["id"] for f in got["finds"]} == {"film:3", "film:7"}
     for f in got["finds"]:
         assert {k: v for k, v in f.items() if k != "updated"} == {k: v for k, v in whole[f["id"]].items() if k != "updated"}
+
+
+def test_a_changed_database_reads_again_only_the_finds_that_changed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """One catalogue's answer made every list read all 26,000 finds again, and the event loop stood for it (prod, 23 Nov 2026)."""
+    from service import findings
+    from service.findings import FindingsDB, query
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 8.0, "score": 8.0, "chance": 0.0, "scans": ["k"]}
+    finds = [{**base, "id": f"film:{i}", "kind": "film", "ra": 60.0 + i, "data": {"i": i}} for i in range(1200)]
+    db.write_finds(finds)
+    db.put_ident("film:1", "gaia", "none", None, None, None, {"n": 1})
+    db.db.commit()
+    query(db, None, "any", None, 5, 0)
+    made: list[int] = []
+    real = findings.marshal.dumps
+    monkeypatch.setattr(findings.marshal, "dumps", lambda x, *v: (made.append(1) if isinstance(x[0], dict) else None) or real(x, *v))
+
+    def whole() -> dict[str, Any]:
+        """What a connection that kept nothing reads."""
+        fresh = FindingsDB(tmp_path / "findings.db", writer=True)
+        return {f["id"]: (f["status"], f["data"], [(i["catalogue"], i["state"], i["detail"]) for i in f["idents"]]) for f in rows(fresh)}
+
+    def rows(d: Any) -> list[dict[str, Any]]:
+        return list(query(d, None, "any", None, 5000, 0)["finds"])
+
+    def mine() -> dict[str, Any]:
+        return {f["id"]: (f["status"], f["data"], [(i["catalogue"], i["state"], i["detail"]) for i in f["idents"]]) for f in rows(db)}
+
+    db.put_ident("film:1", "gaia", "ok", "A star", 1.0, "star", {"n": 2})  # an answer changed in its place
+    db.db.commit()
+    got = mine()
+    assert len(made) == 1 and got == whole()
+    made.clear()
+    other = FindingsDB(tmp_path / "findings.db", writer=True)  # another connection's answer, and one taken away
+    other.put_ident("film:700", "sbident", "ok", "A body", 1.0, "asteroid", {})
+    other.db.execute("DELETE FROM idents WHERE find_id='film:1'")
+    other.db.commit()
+    got = mine()
+    assert len(made) == 2 and got == whole()
+    made.clear()
+    db.db.execute("DELETE FROM finds WHERE id='film:5'")  # a find gone is kept no more
+    db.db.commit()
+    got = mine()
+    assert not made and "film:5" not in got and "film:5" not in db._kept_rows and len(db._kept_rows) == 1199
+
+
+def test_a_number_that_turns_from_minus_one_into_minus_two_is_a_change(tmp_path: Path) -> None:
+    """hash(-1) == hash(-2): the signature of a find's rows is not made of it."""
+    from service.findings import FindingsDB, query, row_sig
+
+    assert hash((1, -1)) == hash((1, -2)) and row_sig((1, -1), []) != row_sig((1, -2), [])
+    assert row_sig((1, "a", None, -1.0), [("x", 2)]) == row_sig((1, "a", None, -1.0), [("x", 2)])
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    base = {"place": "far", "fov": 60, "ra": 60.6, "dec": 8.4, "rate": None, "snr": 8.0, "score": 8.0, "chance": 0.0, "scans": ["k"]}
+    db.write_finds([{**base, "id": "film:a", "kind": "film", "data": {}}])
+    db.put_ident("film:a", "gaia", "none", None, None, None, {})
+    for dec, sep in ((-1.0, -1.0), (-2.0, -1.0), (-2.0, -2.0)):  # every other field stays (updated and tried too)
+        db.db.execute("UPDATE finds SET dec=?", (dec,))
+        db.db.execute("UPDATE idents SET sep=?", (sep,))
+        db.db.commit()
+        f = query(db, None, "any", None, 5, 0)["finds"][0]
+        assert f["dec"] == dec and next(i for i in f["idents"] if i["catalogue"] == "gaia")["sep"] == sep
 
 
 def test_an_empty_answer_of_the_version_pragma_counts_as_a_change(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
