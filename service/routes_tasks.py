@@ -275,8 +275,13 @@ def cell_field_key(acc: accounts.Accounts, cell_id: str) -> str | None:
     return None if r is None else r["field_key"]
 
 
-KIND_WORD = {"film": "something that moves", "peak": "a possible distant planet", "mover": "a star that moves", "browndwarf": "a possible brown dwarf",
-             "pair": "a changing pair"}  # fmt: skip
+KIND_WORD = {
+    "film": "something that moves",
+    "peak": "a possible distant planet",
+    "mover": "a star that moves",
+    "browndwarf": "a possible brown dwarf",
+    "pair": "a changing pair",
+}
 
 
 def why_of(p: dict[str, Any]) -> dict[str, Any]:

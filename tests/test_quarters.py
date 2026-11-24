@@ -186,7 +186,7 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
     # the task says why in the card's words, where the find is, and which question series to open it with
     t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
     w = t["why"]
-    assert w["text"] == "a brown-dwarf candidate · promise 77" and (w["ra"], w["dec"]) == tuple(round(v, 6) for v in at("294-0150", "SW"))
+    assert w["text"] == "a possible brown dwarf · worth a look: 77 of 100" and (w["ra"], w["dec"]) == tuple(round(v, 6) for v in at("294-0150", "SW"))
     assert w["ask"] == {"kind": "moves", "finding_id": "browndwarf:1", "series": "slow"}
     # the most promising quarter, every time (not a random one of the first few): a second built lead of lower promise is not given
     finds.append(lead("peak:2", "peak", "294-0150", "NE", 70))
