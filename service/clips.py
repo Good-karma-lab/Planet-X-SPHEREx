@@ -597,6 +597,41 @@ def is_visible(sn: float, beaten: int, measured: int, contrast: float = 99.0) ->
     return beaten >= CONTROL_SHARE * measured and contrast >= CONTRAST_MIN
 
 
+DOT_RADIUS, DOT_IN, DOT_OUT = 2.0, 4.0, 10.0  # grid pixels: the dot, and the ring of sky around it
+DOT_SN = 4.0  # the dot stands this far above its sky, in the sky's own scatter (never under DOT_FLOOR steps of the picture)
+DOT_FLOOR = 1.5
+DOT_STAR = 0.5  # a place as bright as this share of the dot in the other visits holds a still star, not the dot
+
+
+def dot_in_visit(sky: NDArray[Any], i: int, x: float, y: float) -> bool:
+    """Whether a person sees the track's dot in visit `i` at (x, y) of the visits' pictures (0 = no data): it stands DOT_SN above the
+    ring of sky around it, and the same place is not as bright in the other visits (the first place of film:8ae52fb8ac8b is a star)."""
+
+    def above(k: int) -> tuple[float, float] | None:
+        h, w = sky[k].shape
+        r = math.ceil(DOT_OUT)
+        x0, x1, y0, y1 = max(0, int(x) - r), min(w, int(x) + r + 2), max(0, int(y) - r), min(h, int(y) + r + 2)
+        if x1 <= x0 or y1 <= y0:
+            return None
+        sub = sky[k][y0:y1, x0:x1].astype(np.float64)
+        ok = sub > 0
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        d = np.hypot(xx - x, yy - y)
+        dot, ring = (d <= DOT_RADIUS) & ok, (d > DOT_IN) & (d <= DOT_OUT) & ok
+        if not dot.any() or int(ring.sum()) < 30:
+            return None
+        med = float(np.median(sub[ring]))
+        sig = max(1.4826 * float(np.median(np.abs(sub[ring] - med))), DOT_FLOOR)
+        up = float(sub[dot].max()) - med
+        return up / sig, up
+
+    here = above(i)
+    if here is None or here[0] < DOT_SN:
+        return False
+    others = [o[1] for k in range(len(sky)) if k != i and (o := above(k)) is not None]
+    return not others or float(np.median(others)) <= DOT_STAR * here[1]
+
+
 def track_places(find: dict[str, Any], frames_meta: list[dict[str, Any]]) -> dict[int, tuple[float, float]]:
     """Where the body of a time-lapse track stands in each visit frame from its first to its last measured one: the measured place in
     the frames the search measured, and between them the straight line from one measured place to the next (never beyond the ends)."""
@@ -891,6 +926,7 @@ class Clips:
             None  # (the sources it was made of, their centres' unit vectors, cos of their reach)
         )
         self._seen: dict[str, tuple[bool | None, float | None]] = {}
+        self._visits_seen: dict[str, tuple[int, int]] = {}
         self._visits: tuple[float, list[tuple[str, dict[str, Any], dict[str, Any]]]] = (0.0, [])
         self.pre: dict[str, Any] = {"running": False, "rounds": 0, "made": 0, "left": None, "now": None}
         self._pre_task: asyncio.Task[None] | None = None
@@ -1049,6 +1085,24 @@ class Clips:
         if self.rank(find) == 2:
             return False, None
         return None, None
+
+    def visits_seen(self, find: dict[str, Any]) -> tuple[int, int] | None:
+        """(in how many of a track's own visits its dot is seen on the ordinary picture, how many visits it has); None while its visits
+        are not built here. Measured once per find and kept in memory: nothing is written."""
+        fid = str(find["id"])
+        if fid in self._visits_seen:
+            return self._visits_seen[fid]
+        got = self.visits_for(find)
+        if got is None:
+            return None
+        raw = self.store.read_part(FILM, got[0], "film.sxp")
+        if raw is None:
+            return None
+        pts = ((find.get("data") or {}).get("track") or {}).get("pts") or []
+        sky = decode(raw)[1]["sky"]
+        hits = [dot_in_visit(sky, int(p["f"]), float(p["x"]), float(p["y"])) for p in pts if 0 <= int(p.get("f", -1)) < len(sky)]
+        self._visits_seen[fid] = (sum(hits), len(hits))
+        return self._visits_seen[fid]
 
     def rank(self, find: dict[str, Any]) -> int:
         """For the order of the page: 0 the clip is ready, 1 it can be made, 2 it cannot (nothing covers the place; a track whose visits

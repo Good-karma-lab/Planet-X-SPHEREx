@@ -10,10 +10,11 @@ os.environ.setdefault("SKY_KNOWN_PREWARM", "0")  # a finished field does not ask
 
 @pytest.fixture(autouse=True)
 def _every_kind_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
-    """The tasks' tests walk every kind of find; the kinds switched off for now have their own test (which switches them off)."""
+    """The tasks' tests walk every kind of find with bare rows; the rule of the tracks' visits has its own test."""
     from service.accounts import people
 
     monkeypatch.setattr(people, "KINDS_OFF", frozenset())
+    monkeypatch.setattr(people, "track_seen", lambda row: row.get("visible") is not False or "raised" in row)
 
 
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:

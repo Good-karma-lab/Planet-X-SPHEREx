@@ -269,6 +269,8 @@ export interface LabFlow {
   selHeld: Held | null;
   /** a task's find not answered yet: what the catalogues and Findings say of it waits for the answers */
   blind: boolean;
+  /** a track's task is at its sums: the picture opens on them */
+  trackSum: boolean;
   /** a square's lead has its questions open: the quarter's look waits (it counts on the quarter only) */
   leadOpen: boolean;
 }
@@ -1836,6 +1838,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   return {
     selHeld,
     blind: blindAny,
+    trackSum: act.series === 'track' && act.show === 'sums',
     leadOpen,
     draw,
     pointer: (p) => {

@@ -61,7 +61,10 @@ REPORTS_HIDE = 3  # a comment reported by this many distinct people is hidden
 #: to the next step (`next`) or ends the path with a result. A step with `tap` asks to tap pictures: its one answer "Done" goes on,
 #: and the tapped picture indexes come in the done body (`pictures`). "Not sure" is added to every step.
 SERIES: dict[str, tuple[dict[str, Any], ...]] = {
-    "track": (  # moves within one pass; the Blink of its visits
+    "track": (  # moves within one pass; the Blink of its two sums (no single visit shows a faint body), then its visits
+        {"id": "sum", "question": "It blinks: the visits added along the motion, then added without it. Is there a dot in the ring in the first only?", "show": "sums", "answers": (
+            {"id": "yes", "label": "Yes", "next": "steps"},
+            {"id": "no", "label": "No", "result": "no_dot"})},
         {"id": "steps", "question": "Does one dot step along the arrow?", "show": "blink", "answers": (
             {"id": "every", "label": "Yes, in every picture", "next": "shape"},
             {"id": "some", "label": "Only in some", "next": "missing"},
@@ -258,11 +261,17 @@ def label_of(series: str, result: str | None) -> str:
     return RESULTS.get(series, {}).get(result, result)
 
 
+def full_path(series: str, path: list[str]) -> list[str]:
+    """A track's path of before its sums came first (24 Nov 2026: an old page, an old answer) as it is walked now."""
+    return ["yes", *path] if series == "track" and path and path[0] in ("every", "some") else path
+
+
 def run_path(series: str, path: list[str], pictures: list[int] | None = None) -> str:
     """The result a path of answers leads to (one answer id per step, from the first). Raises AnswerError for an answer the step
     does not have, or a path that stops before its end or goes on after it. A tap step answered with no picture tapped means the
     object is in every picture."""
     steps = {s["id"]: s for s in SERIES[series]}
+    path = full_path(series, path)
     step: dict[str, Any] | None = SERIES[series][0]
     went_some = False
     for i, answer in enumerate(path):
@@ -294,9 +303,16 @@ def picture_list(find: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [{"i": i, "mjd": v.get("mjd"), "ra": v.get("ra"), "dec": v.get("dec")} for i, v in enumerate(visits) if isinstance(v, dict)]
 
 
-# kinds people are not asked about for now. Time-lapse tracks until after the launch (24 Nov 2026): a track "seen" in its added picture
-# showed nothing in three of its five visits (film:8ae52fb8ac8b), and only 3 of 27 were seen at all. They stay in Findings
-KINDS_OFF: frozenset[str] = frozenset({"film"})
+# kinds people are not asked about for now
+KINDS_OFF: frozenset[str] = frozenset()
+VISITS_SHARE = 0.5  # a track is asked about when its dot is seen in at least this share of its own visits
+
+
+def track_seen(row: dict[str, Any]) -> bool:
+    """A track a person can judge: seen in its added picture and in VISITS_SHARE of its own visits (service.clips Clips.visits_seen). A
+    sum alone let through a track with nothing in any of its five visits (film:8ae52fb8ac8b, 24 Nov 2026)."""
+    got = row.get("visits_seen")
+    return row.get("visible") is True and got is not None and got[1] > 0 and got[0] >= VISITS_SHARE * got[1]
 
 
 def askable(row: dict[str, Any]) -> bool:
@@ -305,6 +321,8 @@ def askable(row: dict[str, Any]) -> bool:
     one people raised is asked whatever its picture says."""
     if row.get("kind") in KINDS_OFF:
         return False
+    if row.get("kind") == "film":
+        return track_seen(row)
     return row.get("visible") is not False or "raised" in row
 
 
@@ -378,7 +396,9 @@ class People:
                 done_n += len(got)
         if user_id and done_n % CONTROL_EVERY == CONTROL_EVERY - 1:
             extra = [r for r in (controls() if controls else []) if series_of(r.get("kind")) and (kinds is None or r.get("kind") in kinds)]
-            everyone = [r for r in pool + extra if r.get("kind") not in KINDS_OFF]  # nor a control: it would be the only one of its kind
+            everyone = [
+                r for r in pool + extra if r.get("kind") not in KINDS_OFF and (r.get("kind") != "film" or askable(r))
+            ]  # nor a control of them: it would be the only one of its kind
             cands = [r for r in everyone if r["finding_id"] not in mine and self.expected(str(series_of(r.get("kind"))), r) is not None]
             if cands:
                 return cands[0]
@@ -686,7 +706,7 @@ class People:
             rows = c.execute("SELECT path, result, control FROM acc_series_answers WHERE series=?", (series,)).fetchall()
             steps: dict[str, Counter[str]] = defaultdict(Counter)
             for r in rows:
-                for step, answer in zip(SERIES[series], json.loads(r["path"]), strict=False):
+                for step, answer in zip(SERIES[series], full_path(series, json.loads(r["path"])), strict=False):
                     steps[step["id"]][answer] += 1
             settled = Counter(r[0] or "no agreement" for r in c.execute("SELECT result FROM acc_series_results WHERE series=?", (series,)))
             out["series"][series] = {

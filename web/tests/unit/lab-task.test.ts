@@ -28,11 +28,12 @@ describe('the lab task of an address', () => {
 describe('a question series (spec §5e)', () => {
   it('walks a track: some pictures missing, then dot or streak', () => {
     const track = SERIES.track!;
-    expect(stepAt(track, [])?.id).toBe('steps');
-    expect(stepAt(track, ['some'])?.id).toBe('missing');
-    expect(stepAt(track, ['some'])?.tap).toBe(true);
-    expect(stepAt(track, ['some', 'done'])?.id).toBe('shape');
-    expect(stepAt(track, ['every'])?.id).toBe('shape');
+    expect(stepAt(track, [])).toMatchObject({ id: 'sum', show: 'sums' });
+    expect(stepAt(track, ['yes'])).toMatchObject({ id: 'steps', show: 'blink' });
+    expect(stepAt(track, ['yes', 'some'])).toMatchObject({ id: 'missing', tap: true });
+    expect(stepAt(track, ['yes', 'some', 'done'])?.id).toBe('shape');
+    expect(stepAt(track, ['yes', 'every'])?.id).toBe('shape');
+    expect(stepAt(track, ['yes', 'no'])).toBeNull();
     expect(stepAt(track, ['no'])).toBeNull();
   });
   it('asks only what an eye judges: no spectrum classes, detector places or exposure counts', () => {

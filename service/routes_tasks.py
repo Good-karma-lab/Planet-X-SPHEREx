@@ -310,6 +310,14 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
     )  # fmt: skip
     from service.findings import HIDDEN
 
+    visits: dict[str, tuple[int, int] | None] = {}
+    if clips is not None and hasattr(clips, "visits_seen"):  # the tracks that may be asked about: how many of their own visits show the dot
+        from service.findings import find_row as one
+
+        for x in body["finds"]:
+            if x["kind"] == "film" and x["status"] in LEADS and x.get("visible") is True:
+                full = one(f.db, x["id"])
+                visits[x["id"]] = clips.visits_seen({**x, **full}) if full is not None else None
     listed = {x["id"] for x in body["finds"] if x["status"] not in HIDDEN}  # in the default list (status None), as its filter decides
     return [
         {
@@ -323,6 +331,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             "stage": x["status"] if x["status"] in ("chain", "weak") else STAGE_OF_STATUS.get(x["status"]),
             "visible": x.get("visible"),
             "promise": x.get("promise") or 0,
+            **({"visits_seen": visits[x["id"]]} if x["id"] in visits else {}),
             **({"ask": x["ask"]} if "ask" in x else {}),
             **({"echo": True} if x.get("echo") else {}),
             **({"raised": x["people_raised"]} if "people_raised" in x else {}),
@@ -525,6 +534,11 @@ def task_fov(row: dict[str, Any] | None) -> float:
     span = max(max(ras) - min(ras), max(d for _, d in pts) - min(d for _, d in pts)) * 60.0  # arcmin
     need = span * 1.25 + 2.0
     return next((f for f in TASK_FOVS if f >= need), TASK_FOVS[-1])
+
+
+def asked_of(task: dict[str, Any], kind: str) -> str | None:
+    """The square or the find a task is about."""
+    return task.get("cell_id" if kind == "cell" else "finding_id")
 
 
 #: the question and the answers of the task kinds that are not a series (spec §5e "More ways people help")
@@ -822,11 +836,16 @@ def make_tasks_router(st: Any) -> APIRouter:
         cell_id: str | None = Query(None, max_length=80),
         quarter: str | None = Query(None, pattern="^(NW|NE|SW|SE)$"),
         finding_id: str | None = Query(None, max_length=80),
+        task_id: str | None = Query(None, max_length=40, pattern="^t_[0-9a-f]+$"),
         skip: str = Query("", max_length=4000, description="finds a guest's tab was already given, comma separated"),
     ) -> Any:
         acc = accounts.get(st)
         u = acc.current_user(request)
         uid = u["id"] if u else None
+        if task_id and uid is None:  # a guest's link to a task (a reload, a shared address): that task, not a new one each time
+            mine = acc.db.guest_task(task_id)
+            if mine is not None and mine["kind"] == kind and asked_of(mine, kind) == (cell_id if kind == "cell" else finding_id):
+                return {"task": with_ask(mine)}
         had = set() if uid else {x for x in skip.split(",") if x}
         if finding_id is not None and kind != "cell":
             from service.findings import id_of

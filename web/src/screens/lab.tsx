@@ -446,6 +446,9 @@ function useIdentNames(tracks: Track[]): (string | undefined)[] {
   return tracks.map((t) => identCache.get(`${t.ra_2025_9.toFixed(5)},${t.dec_2025_9.toFixed(5)}`) ?? undefined);
 }
 
+/** the address's words for how the picture looks (its switches), as against where it is and what it shows */
+const LOOKS = new Set(['known', 'movers', 'red', 'ano', 'people', 'traj', 'arch', 'others', 'blend', 'trim', 'lin', 'boost', 'sharp', 'sat', 'ref', 'morph', 'mot', 'rings', 'art', 'marker', 'bands', 'dets', 'spd']);
+
 export function Lab({ route }: { route: Route }) {
   const p = route.params;
   const squareTaskRef = useRef(false);
@@ -502,7 +505,10 @@ export function Lab({ route }: { route: Route }) {
       if (v === null) delete next[k];
       else next[k] = v;
     }
-    location.hash = formatHash({ screen: 'lab', params: next });
+    const to = formatHash({ screen: 'lab', params: next });
+    // how the picture looks is no step of the history: Back leaves the place, not the last switch
+    if (Object.keys(params).every((k) => LOOKS.has(k))) location.replace(to);
+    else location.hash = to;
   };
 
   const targets = useRef<
@@ -3270,7 +3276,7 @@ export function Lab({ route }: { route: Route }) {
     set({ film: passMjd ? passMjd.toFixed(1) : '0', view: null });
   };
   /** Months, with a layer that belongs to the passes switched on */
-  const monthsWith = (on: Record<string, string>) => {
+  const monthsWith = (on: Record<string, string | null>) => {
     setFrame(null);
     set({ film: null, ...on });
   };
@@ -3979,6 +3985,7 @@ export function Lab({ route }: { route: Route }) {
               )}
               {distShow && dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
               {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && <PeakSum id={findId} />}
+              {flow.trackSum && findId.startsWith('film:') && view === 'picture' && <PeakSum id={findId} track />}
               <div
                 class="float ftitle"
                 data-testid="field-title"
@@ -4136,9 +4143,8 @@ export function Lab({ route }: { route: Route }) {
                 <button
                   key={k}
                   class={time === k && film === null ? 'on' : ''}
-                  title={film !== null ? `${tip} (Months scale only)` : tip}
-                  disabled={film !== null}
-                  onClick={() => set({ time: k === 'loop' ? null : k })}
+                  title={film !== null ? `${tip} (opens Months)` : tip}
+                  onClick={() => (film !== null ? monthsWith({ time: k === 'loop' ? null : k }) : set({ time: k === 'loop' ? null : k }))}
                   data-testid={`time-${k}`}
                 >
                   <span dangerouslySetInnerHTML={{ __html: icon(ico, 14) }} style={{ display: 'contents' }} />
@@ -5120,7 +5126,7 @@ export function Lab({ route }: { route: Route }) {
                       ft.state === 'ok'
                         ? 'the asteroid search found no track in this pass'
                         : 'the asteroid search of this pass has not finished yet',
-                      '',
+                      ft.state === 'ok' ? 'no track in this pass' : 'still searching',
                       false,
                       film === null ? machineSearch : null,
                     )}
