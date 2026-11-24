@@ -286,3 +286,33 @@ def test_a_track_lead_opens_centred_on_its_visits_with_a_margin() -> None:
     assert track_place({"data": {}}) is None
     # the middle of the visits, not their order: the first visit may be anywhere along the track
     assert track_place(row([(50.1, 7.0), (50.0, 7.0), (50.05, 7.0)]))[0] == pytest.approx(50.05)
+
+
+def test_squares_take_turns_around_the_sky(monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import routes_tasks
+
+    ra = {"a": 50.0, "b": 51.0, "c": 52.0, "d": 200.0, "e": 10.0}
+    monkeypatch.setattr(routes_tasks, "_grid", lambda: SimpleNamespace(by_id=lambda c: SimpleNamespace(ra=ra[c])))
+    cells = ["a", "b", "c", "d", "e", "unknown"]
+    turn = routes_tasks.spread_ranks(cells)
+    assert turn[:5] == [0, 1, 2, 0, 0]
+    assert [cells[i] for i in sorted(range(5), key=lambda i: (turn[i], i))] == ["a", "d", "e", "b", "c"]
+    monkeypatch.setattr(routes_tasks, "_grid", lambda: None)
+    assert routes_tasks.spread_ranks(["a", "b"]) == [0, 1]  # no grid: the order stays
+
+
+def test_after_a_square_with_a_lead_a_plain_one_is_given(
+    site: tuple[FastAPI, _State, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from service import routes_tasks
+
+    app, st, _mail = site
+    _fake_grid(st)
+    fake(st, {(c, q) for c in ("294-0148", "294-0150") for q in ("NE", "NW", "SE", "SW")})
+    lead = {"cell_id": "294-0150", "quarter": "SW", "promise": 77, "finding_id": "peak:1", "kind": "peak", "ra": 1.0, "dec": 2.0}
+    monkeypatch.setattr(routes_tasks, "promising_quarters", lambda s: [lead])
+    guest = _client(app)
+    assert "why" in guest.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    monkeypatch.setattr(routes_tasks, "BUSY_QUARTER_S", 0.0)
+    assert "why" not in guest.get("/api/tasks/next", params={"kind": "cell", "plain": 1}).json()["task"]

@@ -852,12 +852,16 @@ export function FindingsView({
       : s === 'mine'
         ? 'Viewed by me'
         : s === 'weak'
-          ? 'Weak tracks (signal under 7)'
+          ? 'Too faint to judge'
         : s === 'noted'
-          ? 'Looks like an artefact (machine note)'
+          ? 'Probably a camera flaw'
           : s === 'waiting'
-            ? 'Waiting for a look'
-            : (STAGE_LABEL[s] ?? s);
+            ? 'Nobody has checked it yet'
+            : s === 'new'
+              ? 'No verdict yet'
+              : s === 'known'
+                ? 'Already in a catalogue'
+                : (STAGE_LABEL[s] ?? s);
   const kindName = (k: KindSel) => (k === 'submitted' ? 'Found by people' : k === 'promising' ? 'Promising' : KIND_SHORT[k]!);
   // a first list that takes long says so (it took 18–35 s in the test of 20 Nov, with the same words from start to end)
   const firstWait = cards.loading && !h;

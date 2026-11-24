@@ -1455,6 +1455,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const strip =
     a.single && g ? (
       <div class="float toolstrip" role="group" aria-label="Picture tools" data-testid="tool-strip">
+        {tool && (
+          // what the tool waits for, beside it and whole (the status line cut it off)
+          <span class="tool-tip" role="status" data-testid="tool-tip">
+            {tool === 'mark' ? 'Click a place to mark it' : ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : ruler.length ? 'Now click the second place' : 'Click two places to measure'}
+          </span>
+        )}
         <button
           class={tool === 'mark' ? 'on' : ''}
           aria-pressed={tool === 'mark'}
@@ -1828,8 +1834,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     tapHere ? `It moves · tap it here in ${tapHere.passLabel}` : open && eff && (eff.id === open || marks.some((m) => m.id === eff.id && headOf(m, marks)?.id === open)) ? effectWord(eff) : '',
     a.square?.line ?? '',
     a.known ? knownStatus(known, counts, knownSilent ? knownRetry.nextIn : null) : '',
-    tool === 'mark' && !tapHere ? 'Mark: click a place' : '',
-    rulerStatus,
+    tool === 'ruler' && ruler.length < 2 ? '' : rulerStatus,
     marksSyncNote(),
   ]
     .filter(Boolean)

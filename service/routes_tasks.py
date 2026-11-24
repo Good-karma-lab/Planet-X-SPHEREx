@@ -191,6 +191,25 @@ def quarter_of_place(ra: float, dec: float) -> dict[str, Any] | None:
     return quarter_place(ce.id, quarter_of(ce, ra, dec))
 
 
+RA_BIN_DEG = 15.0
+
+
+def spread_ranks(cell_ids: list[str]) -> list[int]:
+    """For each square, how many squares of its 15° of RA come before it: sorted by it, the squares take turns around the sky (1,237 of
+    the 1,398 searched ones stand in one hour of RA, and everyone was given those)."""
+    g = _grid()
+    n: dict[int, int] = {}
+    out = []
+    for c in cell_ids:
+        try:
+            b = int(float(g.by_id(c).ra) // RA_BIN_DEG) if g is not None else 0
+        except (AttributeError, KeyError, ValueError):  # no grid module here, or a square it does not know
+            b = 0
+        out.append(n.get(b, 0))
+        n[b] = out[-1] + 1
+    return out
+
+
 def promising_quarters(st: Any) -> list[dict[str, Any]]:
     """The quarters of the squares where the machine's finds are most promising: for each quarter holding a lead of the moving kinds
     (movers, brown dwarfs, Planet X peaks, time-lapse tracks, pairs: Findings' Promising), the best of them; the most promising first.
@@ -626,9 +645,11 @@ def make_tasks_router(st: Any) -> APIRouter:
     def upcoming(acc: accounts.Accounts, limit: int = 200) -> list[tuple[str, str]]:
         """The quarters a newcomer would be given next, in order (the stock of ready quarters follows it)."""
         rows = searched_cells(acc) or []
-        viewed = quarters_viewed(acc, [r["cell_id"] for r in rows[:500]])
+        viewed = quarters_viewed(acc, [r["cell_id"] for r in rows])
+        turn = spread_ranks([r["cell_id"] for r in rows])
+        near = sorted(range(len(rows)), key=lambda i: (turn[i], i))[:500]
         order = sorted(
-            ((viewed.get(r["cell_id"], {}).get(q, 0), i, r["cell_id"], q) for i, r in enumerate(rows[:500]) for q in QUARTERS),
+            ((viewed.get(rows[i]["cell_id"], {}).get(q, 0), k, rows[i]["cell_id"], q) for k, i in enumerate(near) for q in QUARTERS),
             key=lambda t: (t[0], t[1], QUARTERS.index(t[3])),
         )
         # the promising quarters nobody has looked through first (they are given first: pick_cell), then the stock's order
@@ -640,10 +661,12 @@ def make_tasks_router(st: Any) -> APIRouter:
 
     st.upcoming_quarters = upcoming
 
-    def next_cell(acc: accounts.Accounts, user_id: str | None, cell_id: str | None, quarter: str | None = None) -> dict[str, Any] | None:
+    def next_cell(
+        acc: accounts.Accounts, user_id: str | None, cell_id: str | None, quarter: str | None = None, plain: bool = False
+    ) -> dict[str, Any] | None:
         """A quarter (10′) of a square, with the one after it built in the background (service/quarters.py)."""
         taken = quarters_looked(acc, user_id) if user_id else {}
-        t = pick_cell(acc, user_id, cell_id, quarter, taken)
+        t = pick_cell(acc, user_id, cell_id, quarter, taken, plain)
         if t is not None:
             prebuild_after(acc, t["cell_id"], t["quarter"], taken)
         return t
@@ -657,7 +680,12 @@ def make_tasks_router(st: Any) -> APIRouter:
             qs.prebuild(cell_id, cold)
 
     def pick_cell(
-        acc: accounts.Accounts, user_id: str | None, cell_id: str | None, quarter: str | None, taken: dict[str, set[str]]
+        acc: accounts.Accounts,
+        user_id: str | None,
+        cell_id: str | None,
+        quarter: str | None,
+        taken: dict[str, set[str]],
+        plain: bool = False,
     ) -> dict[str, Any] | None:
         """The next quarter of the square this user is looking through, while it has one they have not looked at; then the
         least-looked searched square and its least-looked quarter (ties NE, NW, SE, SW), a built one before a cold one. `cell_id`
@@ -724,10 +752,13 @@ def make_tasks_router(st: Any) -> APIRouter:
             # one of the most promising quarters not looked through yet: always the first gave everyone the same corner of the sky, three
             # times in a row (the human test of 24 Nov 2026), so a random one of the first few, and now and then a plain square
             p = RNG.choice(pq[:PROMISING_SPREAD])
-        if pq and RNG.random() >= PLAIN_SHARE:
+        if pq and not plain and RNG.random() >= PLAIN_SHARE:
             row = searched[p["cell_id"]]
             why = why_of(p)
             return {**row, "quarter": p["quarter"], "fov": QUARTER_FOV, **quarter_place(p["cell_id"], p["quarter"]), "why": why}
+        # the squares take turns around the sky, the first 500 of them looked at
+        turn = spread_ranks([r["cell_id"] for r in rows])
+        rows = [rows[i] for i in sorted(range(len(rows)), key=lambda i: (turn[i], i))]
         viewed = quarters_viewed(acc, [r["cell_id"] for r in rows[:500]])
         # the square whose least-looked open quarter has the fewest viewers; the grid's own order among equals
         best: tuple[int, int, dict[str, Any], str] | None = None
@@ -913,6 +944,7 @@ def make_tasks_router(st: Any) -> APIRouter:
         quarter: str | None = Query(None, pattern="^(NW|NE|SW|SE)$"),
         finding_id: str | None = Query(None, max_length=80),
         task_id: str | None = Query(None, max_length=40, pattern="^t_[0-9a-f]+$"),
+        plain: bool = Query(False, description="a square with no lead to judge first (the tab's last one had one)"),
         skip: str = Query("", max_length=4000, description="finds a guest's tab was already given, comma separated"),
     ) -> Any:
         acc = accounts.get(st)
@@ -937,7 +969,7 @@ def make_tasks_router(st: Any) -> APIRouter:
                     prebuild_after(acc, have["cell_id"], have["quarter"], quarters_looked(acc, uid))
                 return {"task": with_ask(have)}
         if kind == "cell":
-            ref = next_cell(acc, uid, cell_id, quarter)
+            ref = next_cell(acc, uid, cell_id, quarter, plain)
         elif kind == "finding":
             ref = next_finding(acc, uid, finding_id, had)
         elif kind in people.TASK_KINDS:
