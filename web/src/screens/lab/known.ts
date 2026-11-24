@@ -399,7 +399,7 @@ export interface KnownDrawEnv {
   seenIn?: (u: number, v: number) => [number, number] | null;
   /** a task's find not answered yet (CSS px on the picture): no ring and no name of a catalogue within 12″ of it, so its answer is
    *  not given away (a control object looks like any other) */
-  blindAt?: { x: number; y: number; r: number } | null;
+  blindAt?: { x: number; y: number; r: number }[] | null;
 }
 
 function text(ctx: CanvasRenderingContext2D, s: string, x: number, y: number, fill: string): void {
@@ -452,7 +452,7 @@ export function drawKnown(env: KnownDrawEnv, k: KnownState): KnownObject | null 
         const x = box.x + u * box.w;
         const y = box.y + v * box.h;
         if (!wall && hidden(x, y)) continue;
-        if (!wall && env.blindAt && Math.hypot(x - env.blindAt.x, y - env.blindAt.y) < env.blindAt.r) continue;
+        if (!wall && env.blindAt?.some((b) => Math.hypot(x - b.x, y - b.y) < b.r)) continue;
         // a known object: one quiet ring, just outside its star
         const r = wall ? 3 : Math.max(o.label ? 6 : 0, ringRadius(o.mag, pxPerArcsec));
         const path = o.label ? bold : thin;

@@ -1,5 +1,5 @@
 import { isSquareTask } from './lab/rules';
-import { LoadOverlay, loadStep } from './lab/loading';
+import { daysStep, LoadOverlay, loadStep } from './lab/loading';
 import { HereSquare, useSquareLook } from './lab/square';
 import { FindStatus, rateWord, useFindRecord } from './lab/passport';
 import { SearchMark, SearchRow, searchingLine, useRetry, type SearchInfo } from './lab/progress';
@@ -47,6 +47,9 @@ import {
 } from './search';
 import { useDistantPlan } from './search/distant';
 import { FPX_AUTO } from '../lib/flags';
+import { taskTrack as labTrack } from './lab/task';
+import { PeakSum } from './lab/taskviews';
+import { isBlindPlace, placeOnTrack } from './lab/trackplace';
 import { useAsteroidSearch } from './asteroids';
 import { useLabFlow, type LabFlow } from './lab/flow';
 import { CandList, unexplainedCount, useJplState, type FindRow } from './lab/candidates';
@@ -581,11 +584,13 @@ export function Lab({ route }: { route: Route }) {
       setObjNew(false);
     }
   }, [p['task']]);
+  const byHand = useRef(false);
   const setTab = (t: Tab) => {
     if (t === 'ctl') return;
     if (t === 'cand') return setPtab('task');
     if (t === 'obj' || t === 'spec') {
-      if (p['task'] && ptab !== 'obj') return setObjNew(true);
+      // an object a person clicked on the picture opens its tab; what a step or a search selects only says so with a dot
+      if (p['task'] && ptab !== 'obj' && !byHand.current) return setObjNew(true);
       return setPtab('obj');
     }
   };
@@ -640,6 +645,7 @@ export function Lab({ route }: { route: Route }) {
   const speed = [0.25, 0.5, 1, 2, 4].includes(Number(p['spd'])) ? Number(p['spd']) : 1;
   const setSpeed = (v: number) => set({ spd: v === 1 ? null : String(v) });
   const [filmNote, setFilmNote] = useState('');
+  const [filmFailed, setFilmFailed] = useState(false);
   const [filmData, setFilmData] = useState<Film | null>(null);
   const filmRef = useRef<Film | null>(null);
   filmRef.current = filmData;
@@ -649,9 +655,10 @@ export function Lab({ route }: { route: Route }) {
   const flowRef = useRef<LabFlow | null>(null);
   const layoutRef = useRef<{
     rects: { x: number; y: number; w: number; h: number }[];
-    inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number } } | null;
+    inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number; track?: 'on' | 'near' } } | null;
   }>({ rects: [], inset: null });
   const [visit, setVisit] = useState(0);
+  const [zoomWord, setZoomWord] = useState('');
   const [insetBox, setInsetBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const artMap = useRef(new Map<number, HTMLCanvasElement>());
   const motionCache = useRef<{ key: string; canvas: HTMLCanvasElement } | null>(null);
@@ -754,6 +761,13 @@ export function Lab({ route }: { route: Route }) {
       ? { ra: leadRec.ra, dec: leadRec.dec }
       : null;
   const findId = p['find'] ?? (p['task'] ? (p['finding'] ?? (leadAt ? leadId : '')) : '');
+  // where that find is: its place in the link, the lead's own, else the middle of the field the link opens
+  const findAt = ((): { ra: number; dec: number } | null => {
+    if (!findId) return null;
+    if (findId === leadId && leadAt) return leadAt;
+    const [fra, fdec] = [Number(p['find_ra']), Number(p['find_dec'])];
+    return p['find_ra'] != null && p['find_dec'] != null && Number.isFinite(fra) && Number.isFinite(fdec) ? { ra: fra, dec: fdec } : { ra, dec };
+  })();
   const findShown = useRef('');
   const selectFind = () => {
     const kind = findId.split(':')[0] ?? '';
@@ -770,10 +784,7 @@ export function Lab({ route }: { route: Route }) {
         peak: 'Find Planet X lead',
       }[kind] ?? 'Find';
     // the find's own place when the link gives it (the link then opens the field's own centre); else the link's place is the find's
-    const fra = Number(p['find_ra']);
-    const fdec = Number(p['find_dec']);
-    const own = p['find_ra'] != null && p['find_dec'] != null && Number.isFinite(fra) && Number.isFinite(fdec);
-    const at = findId === leadId && leadAt ? leadAt : own ? { ra: fra, dec: fdec } : { ra, dec };
+    const at = findAt ?? { ra, dec };
     // a film find is a moving body: no variable-star verdict for it
     setSel({
       ra: at.ra,
@@ -1100,22 +1111,26 @@ export function Lab({ route }: { route: Route }) {
       const { w, h } = r.begin();
       const out: typeof labels = [];
       const rects: { x: number; y: number; w: number; h: number }[] = [];
-      let inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number } } | null = null;
+      let inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number; track?: 'on' | 'near' } } | null = null;
       const F = filmRef.current;
       const days = st.film !== null;
       // the 2′ zoom: on the selected source, else the test target in the field (its place at 2025.9)
-      const zoomOn = (): { cx: number; cy: number; s: number } | null => {
+      const zoomOn = (frame: number | null): { cx: number; cy: number; s: number; track?: 'on' | 'near' } | null => {
         const m = st.meta;
         if (!m || st.view !== 'picture' || st.opts.reference) return null;
         const fovArc = m.grid.n * m.grid.step_arcsec;
         if (fovArc <= 150) return null;
-        const o = zoomTarget();
+        // a track's task: the zoom follows its place on the visit shown (its nearest visit's on the others), never the find's mean place
+        const tp = frame !== null && F ? placeOnTrack(labTrack.pts, F.meta.frames.map((f) => f.mjd), frame) : null;
+        const word = tp ? (tp.exact ? `visit ${tp.frame + 1}` : `near visit ${tp.frame >= 0 ? tp.frame + 1 : tp.point.i + 1}`) : '';
+        setZoomWord((x) => (x === word ? x : word));
+        const o: [number, number] | null = tp ? [tp.point.ra, tp.point.dec] : zoomTarget();
         if (!o) return null;
         const cosd = Math.cos((m.grid.dec0 * Math.PI) / 180);
         const cx = 0.5 - ((((o[0] - m.grid.ra0 + 540) % 360) - 180) * cosd * 3600) / fovArc;
         const cy = 0.5 - ((o[1] - m.grid.dec0) * 3600) / fovArc;
         if (cx < 0 || cy < 0 || cx > 1 || cy > 1) return null;
-        return { cx, cy, s: (aroundRef.current ? AROUND_ARCMIN * 60 : 120) / fovArc };
+        return { cx, cy, s: (aroundRef.current ? AROUND_ARCMIN * 60 : 120) / fovArc, ...(tp ? { track: tp.exact ? ('on' as const) : ('near' as const) } : {}) };
       };
       if (days) {
         if (F && r.filmVisits) {
@@ -1139,7 +1154,7 @@ export function Lab({ route }: { route: Route }) {
           const base: Panel = { x: 0, y: 0, w, h, stack: 'film', mode: 'layer', layer: 0, tint, noData: [0, 0, 0], time: 'pendulum' };
           r.panel(base, k, k2, t);
           rects.push({ x: 0, y: 0, w, h });
-          const z = zoomOn();
+          const z = zoomOn(t < 0.5 ? k : k2);
           if (z) {
             const S = insetSide(w, !!aroundRef.current);
             inset = { x: 10, y: 52, w: S, h: S, zoom: z };
@@ -1224,7 +1239,7 @@ export function Lab({ route }: { route: Route }) {
             ];
             if (stack === 'picture' && st.opts.mono) panels[0]!.stack = r.loaded('quick').length ? 'quick' : 'picture';
             if (!st.bands.length) panels = []; // no band chosen: nothing to draw (black)
-            const z = st.bands.length ? zoomOn() : null;
+            const z = st.bands.length ? zoomOn(null) : null;
             if (z) {
               const S = insetSide(w, !!aroundRef.current);
               inset = { x: 10, y: 52, w: S, h: S, zoom: z };
@@ -1627,7 +1642,7 @@ export function Lab({ route }: { route: Route }) {
             scale: wcss / F.meta.grid.n,
             k: shownVisit,
             rings: true,
-            trail: true,
+            trail: st.opts.trajectory,
             selected: trackSelRef.current,
             mjd: F.meta.frames.map((f) => f.mjd),
           },
@@ -1647,7 +1662,8 @@ export function Lab({ route }: { route: Route }) {
           ? (atEpoch(sl.ra, sl.dec, sl.pmra ?? 0, sl.pmdec ?? 0, year) as [number, number])
           : [sl.ra, sl.dec]
         : null;
-      if (sl && slAt) {
+      // a track's task has no still place: its ring is the one on its path (a still ring off the path read as "nothing is there")
+      if (sl && slAt && !(labTrack.pts.length >= 2 && sl.finding?.startsWith('film:'))) {
         const [sra, sdec] = slAt;
         // a task about this object: its own bright ring, never folded into a known star's thin one nearby
         const k = flowRef.current?.focus ? null : near(sra, sdec, 8);
@@ -1988,7 +2004,16 @@ export function Lab({ route }: { route: Route }) {
       }
       if (inset) {
         // the 2′ zoom: the selected object ringed, scaled with the zoom
-        const mk = all.find((k) => k.selected) ?? all.find((k) => k.kind === 'target' && !k.ghost);
+        if (inset.zoom.track === 'on' && st.opts.trajectory) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(inset.x + inset.w / 2, inset.y + inset.h / 2, inset.w * 0.14, 0, 2 * Math.PI);
+          ctx.lineWidth = 1.4;
+          ctx.strokeStyle = '#ffd08a';
+          ctx.stroke();
+          ctx.restore();
+        }
+        const mk = inset.zoom.track ? undefined : (all.find((k) => k.selected) ?? all.find((k) => k.kind === 'target' && !k.ghost));
         if (mk) {
           const [u, v] = uvOf(mk.ra, mk.dec);
           const x = inset.x + ((u - inset.zoom.cx) / inset.zoom.s + 0.5) * inset.w;
@@ -2139,6 +2164,7 @@ export function Lab({ route }: { route: Route }) {
     setFilmData(null);
     setFilmBodies(null);
     setFilmNote('');
+    setFilmFailed(false);
     if (!valid || film === null) return;
     let stop = false;
     const stopped = () => stop;
@@ -2148,6 +2174,7 @@ export function Lab({ route }: { route: Route }) {
         if (stop || !res) return;
         if (res.state === 'none') {
           setFilmNote(res.note);
+          setFilmFailed(true);
           return;
         }
         const f = res.film;
@@ -2164,7 +2191,9 @@ export function Lab({ route }: { route: Route }) {
         const b = await loadBodies(f, stopped);
         if (!stop && b) setFilmBodies(b);
       } catch (e) {
-        if (!stop) setFilmNote(`the visits could not be loaded: ${String(e)}`);
+        if (stop) return;
+        setFilmNote(`the visits could not be loaded: ${String(e)}`);
+        setFilmFailed(true);
       }
     })();
     return () => {
@@ -2629,6 +2658,8 @@ export function Lab({ route }: { route: Route }) {
     side,
     known: opts.known,
     people: opts.people,
+    paths: opts.trajectory,
+    findAt,
     blinkable: film === null && time === 'loop',
     sel,
     tracks: mv?.result?.tracks ?? [],
@@ -2853,6 +2884,14 @@ export function Lab({ route }: { route: Route }) {
     });
   };
   const pick = (e: MouseEvent) => {
+    byHand.current = true;
+    try {
+      pickAt(e);
+    } finally {
+      byHand.current = false;
+    }
+  };
+  const pickAt = (e: MouseEvent) => {
     const m = meta;
     if (m && film !== null) return pickBody(e);
     if (!m || film !== null) return;
@@ -3188,6 +3227,8 @@ export function Lab({ route }: { route: Route }) {
     : fieldLoading
       ? loadStep(phase || 'asking the sky service…', pictures.current.size, meta?.passes.length ?? 0)
       : null;
+  // Days has its own wait: the film of the pass; what the service says goes on the card
+  const daysLoad = film !== null && !filmData ? daysStep(filmNote, filmFailed) : null;
   // a cold field's first look (GET /api/v1/fields/quick: the all-sky cube cut to the field's own grid), asked once per field while it
   // loads; a 502 (the bucket did not answer) keeps the usual card
   const [quick, setQuick] = useState<string | null>(null);
@@ -3228,6 +3269,11 @@ export function Lab({ route }: { route: Route }) {
     setFrame(null);
     set({ film: passMjd ? passMjd.toFixed(1) : '0', view: null });
   };
+  /** Months, with a layer that belongs to the passes switched on */
+  const monthsWith = (on: Record<string, string>) => {
+    setFrame(null);
+    set({ film: null, ...on });
+  };
   const toMonths = () => {
     setFrame(null);
     set({ film: null });
@@ -3243,6 +3289,8 @@ export function Lab({ route }: { route: Route }) {
     whyShort = '',
     busy = false,
     search: SearchInfo | null = null,
+    /** what makes it available, when it is off only here (in Days): a small button by its reason */
+    go: (() => void) | null = null,
   ) => (
     <label class={`sw ${onChange ? '' : 'dis'}${busy ? ' busy' : ''}`} title={onChange ? title : `${title} (${why})`}>
       <input
@@ -3257,6 +3305,19 @@ export function Lab({ route }: { route: Route }) {
       <span class="swr">
         {search && <SearchMark s={search} />}
         {!onChange && whyShort && <em class="why">{whyShort}</em>}
+        {!onChange && go && (
+          <button
+            type="button"
+            class="lnk sw-go"
+            onClick={(e) => {
+              e.preventDefault();
+              go();
+            }}
+            data-testid={`${id}-go`}
+          >
+            Show in Months
+          </button>
+        )}
       </span>
     </label>
   );
@@ -3642,12 +3703,17 @@ export function Lab({ route }: { route: Route }) {
   ];
   // a find people set aside (two agreed it is an artefact) leaves the list, as it leaves Findings
   // a task's find before its answers: its own row in the list says nothing of what it is (a control object looks like any other)
-  const blindUv = flow.blind && sel ? uvNow(...((sel.pmra || sel.pmdec ? atEpoch(sel.ra, sel.dec, sel.pmra ?? 0, sel.pmdec ?? 0, yearNow) : [sel.ra, sel.dec]) as [number, number])) : null;
+  const blindPlace = (bra: number, bdec: number) => isBlindPlace(bra, bdec, findAt, labTrack.pts);
+  const selNow = sel ? ((sel.pmra || sel.pmdec ? atEpoch(sel.ra, sel.dec, sel.pmra ?? 0, sel.pmdec ?? 0, yearNow) : [sel.ra, sel.dec]) as [number, number]) : null;
+  /** the selected object is the find in question (its places, or its record): the one card that waits for the answers */
+  const objBlind = flow.blind && !!sel && (!!(sel.finding && sel.finding === findId) || blindPlace(sel.ra, sel.dec) || (!!selNow && blindPlace(...selNow)));
+  const blindUv = flow.blind && findAt ? uvNow(findAt.ra, findAt.dec) : null;
   const blindTol = meta ? 12 / (meta.grid.n * meta.grid.step_arcsec) : 0;
   const findRows = findRowsAll
     .filter((r) => r.ra == null || r.dec == null || !flow.asideAt(r.ra, r.dec))
     .map((r) =>
-      blindUv && r.uv && Math.abs(r.uv[0] - blindUv[0]) < blindTol && Math.abs(r.uv[1] - blindUv[1]) < blindTol
+      (blindUv && r.uv && Math.abs(r.uv[0] - blindUv[0]) < blindTol && Math.abs(r.uv[1] - blindUv[1]) < blindTol) ||
+      (flow.blind && r.ra != null && r.dec != null && blindPlace(r.ra, r.dec))
         ? { ...r, name: 'The object in question', line: 'what it is: after your answers', status: 'checking' as const }
         : r,
     );
@@ -3844,7 +3910,7 @@ export function Lab({ route }: { route: Route }) {
                   data-testid="quick-frame"
                 />
               )}
-              <LoadOverlay step={loadNow} field={`${ra},${dec},${fov}`} firstLook={!!quick && !!loadNow && view === 'picture'} />
+              <LoadOverlay step={loadNow ?? daysLoad} field={`${ra},${dec},${fov},${film === null ? 'm' : 'd'}`} firstLook={!!quick && !!loadNow && view === 'picture'} />
               {flow.floats}
               {labels.map((l) =>
                 l.empty ? (
@@ -3876,7 +3942,7 @@ export function Lab({ route }: { route: Route }) {
                   style={{ left: `${insetBox.x}px`, top: `${insetBox.y}px`, width: `${insetBox.w}px`, height: `${insetBox.h}px` }}
                   title="2′ around the selected object (the test target until you click a source), from the same frames as the picture"
                 >
-                  <span>{aroundOn ? `${AROUND_ARCMIN}′ around the find` : '2′ zoom'}</span>
+                  <span>{aroundOn ? `${AROUND_ARCMIN}′ around the find` : zoomWord ? `2′ · ${zoomWord}` : '2′ zoom'}</span>
                 </div>
               )}
               {aroundAsk && view === 'picture' && film === null && insetBox && !(archStep !== null && archStep < ARCHIVE.length) && (
@@ -3911,8 +3977,8 @@ export function Lab({ route }: { route: Route }) {
               {film === null && wallWait && (
                 <div class="vwait">loading the pictures of every {view === 'det' ? 'detector' : 'band'} for each pass…</div>
               )}
-              {film !== null && !filmData && <div class="vwait">{filmNote || 'asking for the visits of the pass…'}</div>}
               {distShow && dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
+              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && <PeakSum id={findId} />}
               <div
                 class="float ftitle"
                 data-testid="field-title"
@@ -4292,7 +4358,7 @@ export function Lab({ route }: { route: Route }) {
             peek=".taskpanel, .sqlook, .ptabs"
             under=".lab .tbar"
             room={sheetRoom}
-            need=".ptabs, .taskpanel .tp-ask, .taskpanel .tp-tree, .taskpanel .tp-btns, .taskpanel .tp-pics, .taskpanel .tp-need, .tp-stack .tp-head, .sqlook"
+            need=".ptabs, .taskpanel .tp-ask, .taskpanel .tp-hint, .taskpanel .tp-tree, .taskpanel .tp-btns, .taskpanel .tp-pics, .taskpanel .tp-need, .tp-stack .tp-head, .sqlook"
             label="Lab panel"
             resetKey={`${p['ra']},${p['dec']},${fov},${p['task'] ?? ''},${p['finding'] ?? ''}`}
           />
@@ -4817,7 +4883,7 @@ export function Lab({ route }: { route: Route }) {
                   {(sel || selAn !== null) && (
                     <div class="sel-head" data-testid="sel-head">
                       <b>
-                        {flow.blind
+                        {objBlind
                           ? 'The object in question'
                           : selAn !== null
                             ? `Anomaly ${selAn}`
@@ -4830,20 +4896,20 @@ export function Lab({ route }: { route: Route }) {
                       )}
                     </div>
                   )}
-                  {flow.blind && (
+                  {objBlind && (
                     // a task's find before its answers: nothing that would say what it is (a control object looks like any other)
                     <div class="obj-blind mono-s" data-testid="obj-blind">
                       Catalogues and its record · after your answers
                     </div>
                   )}
-                  {!flow.blind && sel && flow.hintAt(sel.ra, sel.dec) && (
+                  {!objBlind && sel && flow.hintAt(sel.ra, sel.dec) && (
                     <div class="obj-hint" data-testid="obj-hint" title="A ghost, a spike or the glow of a bright star, or the frame's edge, can look like a source">
                       {flow.hintAt(sel.ra, sel.dec)}
                     </div>
                   )}
                   {!flow.markOpen && flow.card}
-                  {!flow.blind && sel?.finding && <FindStatus id={sel.finding} />}
-                  <details class="obj-more" data-testid="obj-more" open style={flow.blind ? { display: 'none' } : undefined}>
+                  {!objBlind && sel?.finding && <FindStatus id={sel.finding} />}
+                  <details class="obj-more" data-testid="obj-more" open style={objBlind ? { display: 'none' } : undefined}>
                     <summary>More about it</summary>
                     {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (
                       <>
@@ -5062,27 +5128,25 @@ export function Lab({ route }: { route: Route }) {
                       'redChk',
                       'Red sources',
                       'Red sources: a ring and the name on every source that is bright at 3.8–5 µm and faint at 1.1–1.6 µm against the field’s own stars (the brown dwarf candidates are among them)',
-                      opts.red,
-                      (v) => set({ red: v ? '1' : null }),
-                      redv?.result
-                        ? 'the red-source search found none in this field'
-                        : 'the red-source search of this field has not finished yet',
-                      '',
+                      opts.red && film === null,
+                      film === null ? (v) => set({ red: v ? '1' : null }) : null,
+                      'their rings belong to the passes: Months only',
+                      'Months only',
                       false,
-                      searchOf('red sources'),
+                      film === null ? searchOf('red sources') : null,
+                      film === null ? null : () => monthsWith({ red: '1' }),
                     )}
                     {sw(
                       'anoChk',
                       'Anomalies',
                       'Anomaly rings: sources whose spectrum differs from an ordinary star of the field',
-                      opts.anomalies,
-                      (v) => set({ ano: v ? '1' : null }),
-                      an?.result
-                        ? 'the anomaly search found no anomaly in this field'
-                        : 'the anomaly search of this field has not finished yet',
-                      '',
+                      opts.anomalies && film === null,
+                      film === null ? (v) => set({ ano: v ? '1' : null }) : null,
+                      'their rings belong to the passes: Months only',
+                      'Months only',
                       false,
-                      searchOf('anomalies'),
+                      film === null ? searchOf('anomalies') : null,
+                      film === null ? null : () => monthsWith({ ano: '1' }),
                     )}
                     {sw(
                       'peopleChk',
@@ -5098,7 +5162,7 @@ export function Lab({ route }: { route: Route }) {
                     {sw(
                       'trailChk',
                       'Paths',
-                      'Trajectory: the path of the test target (or of a found mover) over the passes, a dot at each pass date',
+                      'Paths: the task’s track, the tracks the machine found, the path of the test target or a mover; off hides every one of them',
                       opts.trajectory,
                       (v) => set({ traj: v ? null : '0' }),
                     )}
@@ -5108,7 +5172,11 @@ export function Lab({ route }: { route: Route }) {
                     'Old surveys: the same field in DSS2 red (1985–1999), 2MASS Ks (1997–2001) and AllWISE W1 (2010), blinked before the SPHEREx passes',
                     opts.archive,
                     film !== null ? null : (v) => set({ arch: v ? '1' : null }),
+                    'they blink before the passes: Months only',
                     'Months only',
+                    false,
+                    null,
+                    film === null ? null : () => monthsWith({ arch: '1' }),
                   )}
               </div>
             </section>

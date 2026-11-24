@@ -85,7 +85,7 @@ export const SERIES: Record<string, SeriesStep[]> = {
     ]),
   ],
   peak: [
-    s_('left', 'Left: added along the orbit. Right: added as it is. Is there a dot in the ring on the left only?', 'sums', [
+    s_('left', 'It blinks: the visits added along the orbit, then one pass. Is there a dot in the ring in the sum only?', 'sums', [
       { id: 'yes', label: 'Yes', next: 'glow' },
       { id: 'no', label: 'No', result: 'no_peak' },
     ]),
@@ -440,7 +440,11 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     blind: !!task && focusKind(task.kind) && !done,
     addTap: (t) => setTaps((x) => [...x.filter((q) => (t.pass ?? t.frame) == null || (q.pass ?? q.frame) !== (t.pass ?? t.frame)), t]),
   };
-  if (!task) return view;
+  if (!task) {
+    // no task: no path of an earlier one (the square's own panel, which has no lead, leaves the task's alone)
+    if (!a.embedded) taskTrack.pts = [];
+    return view;
+  }
 
   async function close(result: string, answers?: string[]) {
     if (!task || busy) return;
@@ -586,6 +590,11 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         <div class="tp-ask" data-testid="task-ask">
           {step ? step.question : (body?.question ?? T.ask)}
         </div>
+      )}
+      {!done && step && seriesId === 'track' && path.length === 0 && (
+        <small class="tp-hint" data-testid="task-hint">
+          The dot is faint: “No” is a fine answer
+        </small>
       )}
       {!done && task.kind === 'cell' && (
         // what the rings of the picture are, at a glance: known (a catalogue has it), no catalogue match, a mark of mine

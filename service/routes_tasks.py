@@ -196,7 +196,7 @@ def promising_quarters(st: Any) -> list[dict[str, Any]]:
     if g is not None:
         best: dict[tuple[str, str], dict[str, Any]] = {}
         for f in finds:
-            if f.get("kind") not in PROMISING_KINDS or f.get("status") not in LEADS:
+            if f.get("kind") not in PROMISING_KINDS or f.get("status") not in LEADS or not people.askable(f):
                 continue
             ce = g.cell_at(float(f["ra"]), float(f["dec"]))
             q = quarter_of(ce, float(f["ra"]), float(f["dec"]))
@@ -701,12 +701,12 @@ def make_tasks_router(st: Any) -> APIRouter:
             return one
         seen = acc.db.task_refs(user_id, "finding") if user_id else set()
         checked = acc.db.check_counts()
-        leads = [r for r in rows if r.get("status") in LEADS and r.get("ask", True) and r["finding_id"] not in seen]
+        leads = [r for r in rows if r.get("status") in LEADS and r.get("ask", True) and r["finding_id"] not in seen and people.askable(r)]
 
         # a find people raised first, then the strong kinds before the many red sources and anomalies (finding_group), then the
         # least checked, then the most promising; stable: the page's order among the equal
-        def rank(r: dict[str, Any]) -> tuple[bool, Any, int]:
-            return ("raised" not in r, finding_group(r), checked.get(r["finding_id"], 0))
+        def rank(r: dict[str, Any]) -> tuple[bool, Any, bool, int]:
+            return ("raised" not in r, finding_group(r), r.get("visible") is not True, checked.get(r["finding_id"], 0))
 
         leads.sort(key=lambda r: (*rank(r), -int(r.get("promise") or 0)))
         if not leads:
@@ -747,7 +747,10 @@ def make_tasks_router(st: Any) -> APIRouter:
             if user_id
             else set()
         )
-        pool = [r for r in rows if r.get("kind") in kinds and r.get("stage") is None and r["finding_id"] not in seen | done]
+        pool = [
+            r for r in rows
+            if r.get("kind") in kinds and r.get("stage") is None and r["finding_id"] not in seen | done and people.askable(r)
+        ]  # fmt: skip
         return pool[0] if pool else None
 
     def with_ask(task: dict[str, Any] | None) -> dict[str, Any] | None:

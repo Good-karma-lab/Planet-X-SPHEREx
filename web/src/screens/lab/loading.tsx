@@ -38,6 +38,12 @@ export function loadStep(phase: string, pictures: number, passes: number): LoadS
   return { title: s.replace(/…$/, '') || 'Asking the sky service', detail: '', frac: null };
 }
 
+/** The wait of the Days scale as a step: the visits of the pass are being read (`note`: the service's line, '' before it says). */
+export function daysStep(note: string, failed: boolean): LoadStep {
+  const s = note.trim();
+  return { title: failed ? 'No visits to play' : 'Loading the visits', detail: s || 'asking for the visits of the pass…', frac: null, failed };
+}
+
 /** The steps of making a field, as the overlay lists them; a field the service already has only loads its pictures. */
 const STAGES = ['Finding the exposures', 'Reading the exposures', 'Stacking the passes', 'Comparing the passes', 'Drawing the first pass'];
 const LOAD_STAGES = ['Loading the pictures', 'Drawing the first pass'];
@@ -46,6 +52,7 @@ const LOAD_STAGES = ['Loading the pictures', 'Drawing the first pass'];
 export function stageOf(step: LoadStep): { list: string[]; at: number } {
   const t = step.title;
   if (/^Loading the pictures/.test(t)) return { list: LOAD_STAGES, at: 0 };
+  if (/^(Loading the visits|No visits)/.test(t)) return { list: [], at: -1 };
   if (/^Finding the exposures/.test(t)) return { list: STAGES, at: 0 };
   if (/^Loading the exposures/.test(t)) return { list: STAGES, at: 1 };
   if (/^(Stacking pass|Pass \d+ stacked)/.test(t)) return { list: STAGES, at: 2 };
@@ -158,9 +165,9 @@ export function LoadOverlay({ step, field, firstLook = false }: { step: LoadStep
   const leftWord = left == null ? '' : left < 45 ? 'under a minute left' : `about ${Math.max(1, Math.round(left / 30) / 2)} min left`;
   return (
     <div class={`loadov${fading ? ' fading' : ''}${shown.failed ? ' failed' : ''}${firstLook ? ' first' : ''}`} role="status" aria-live="polite" data-testid="load-block">
-      {/* the real sky is on the picture already (the all-sky map's first look): the card steps aside, the video gives way */}
+      {/* the real sky is on the picture already (the all-sky map's first look): the card steps aside, the video goes on in it, small */}
       {firstLook && <span class="lo-first">First look · SPHEREx all-sky map{shown.failed ? '' : ' · this field is being built'}</span>}
-      <div class="lo-media" hidden={firstLook}>
+      <div class="lo-media">
         {reduced ? (
           <img class="lo-video" src="/loading/telescope_poster.jpg" alt="" />
         ) : (

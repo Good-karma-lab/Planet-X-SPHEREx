@@ -1,5 +1,6 @@
 import { render } from 'preact';
 import { App } from './app';
+import { forgetReload, isChunkError, reloadOnce } from './lib/newbuild';
 import { handOver, listenTabs } from './lib/tabs';
 import './style.css';
 import './responsive.css';
@@ -11,33 +12,14 @@ import { loadManifest, tiles } from './lib/hips';
 // on one and found their place and marks on the other gone
 if (location.hostname === 'spherex.space') location.replace(`https://www.spherex.space${location.pathname}${location.search}${location.hash}`);
 
-// a tab opened before a deploy asks for the old build's lazy parts: if one cannot load, the page reloads once onto the new build
-const RELOADED = 'spherex-reloaded-for-new-build';
-const reloadOnce = () => {
-  try {
-    if (sessionStorage.getItem(RELOADED)) return;
-    sessionStorage.setItem(RELOADED, '1');
-  } catch {
-    /* no storage: reload anyway */
-  }
-  location.reload();
-};
+// a tab opened before a deploy whose old lazy parts are gone reloads once onto the new build (lib/newbuild.ts)
 window.addEventListener('vite:preloadError', (e) => {
-  e.preventDefault();
-  reloadOnce();
+  if (reloadOnce()) e.preventDefault();
 });
 window.addEventListener('unhandledrejection', (e) => {
-  const m = String((e.reason as Error | undefined)?.message ?? e.reason ?? '');
-  if (/dynamically imported module|Importing a module script failed|error loading dynamically imported/i.test(m)) reloadOnce();
+  if (isChunkError(e.reason)) reloadOnce();
 });
-// a page that stayed up is on the current build: a later deploy may reload it again
-setTimeout(() => {
-  try {
-    sessionStorage.removeItem(RELOADED);
-  } catch {
-    /* ignore */
-  }
-}, 15000);
+setTimeout(forgetReload, 15000);
 
 // the tile manifest (and with it the star map's full-sky base image) is asked for before anything else: the globe shows the base the moment it arrives, then refines
 void loadManifest();

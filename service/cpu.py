@@ -23,6 +23,8 @@ from concurrent.futures.process import BrokenProcessPool
 from contextvars import ContextVar
 from typing import Any
 
+from service.memwatch import trim
+
 # the job running in this task (the scheduler sets it); its priority is read at call time, so a person taking over a job counts at once
 JOB: ContextVar[Any] = ContextVar("sky_job", default=None)
 
@@ -172,6 +174,23 @@ def _renew(broken: Executor) -> None:
             proc.terminate()
 
 
+TRIM_EVERY_S = 180.0  # a worker hands its free pages back after a call, at most this often (about 0.1 s a gigabyte)
+_trimmed = 0.0
+
+
+def _in_worker[R](fn: Callable[..., R], *args: Any) -> R:
+    """The call as a worker makes it: its result, then what the calls before it left free inside glibc goes back to the kernel."""
+    global _trimmed
+    try:
+        return fn(*args)
+    finally:
+        now = time.monotonic()
+        if now - _trimmed >= TRIM_EVERY_S:
+            _trimmed = now
+            with contextlib.suppress(Exception):
+                trim()
+
+
 async def run[R](fn: Callable[..., R], *args: Any) -> R:
     if _pool is None or _gate is None:
         return fn(*args)
@@ -181,7 +200,7 @@ async def run[R](fn: Callable[..., R], *args: Any) -> R:
             used = _pool
             assert used is not None
             try:
-                return await asyncio.get_running_loop().run_in_executor(used, fn, *args)
+                return await asyncio.get_running_loop().run_in_executor(used, _in_worker, fn, *args)
             except BrokenProcessPool:
                 log.warning("worker pool broken during %s (attempt %d): a new pool is started", getattr(fn, "__name__", fn), attempt + 1)
                 _renew(used)

@@ -8,6 +8,14 @@ os.environ.setdefault("SKY_WARM", "0")  # the warm runner is tested on its own; 
 os.environ.setdefault("SKY_KNOWN_PREWARM", "0")  # a finished field does not ask the catalogues from a test
 
 
+@pytest.fixture(autouse=True)
+def _every_kind_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The tasks' tests walk every kind of find; the kinds switched off for now have their own test (which switches them off)."""
+    from service.accounts import people
+
+    monkeypatch.setattr(people, "KINDS_OFF", frozenset())
+
+
 def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
     if os.environ.get("SKY_NET") == "1":
         return

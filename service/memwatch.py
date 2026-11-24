@@ -1,6 +1,7 @@
 """A watch on the API process's memory, in the log after FIRST_S and then every EVERY_S: what the kernel counts, what glibc holds and
 how much of that is free inside it, what Python holds, the sizes of the collections that live as long as the process, and the garbage
-collector's pauses. Reads only, in its own thread."""
+collector's pauses. After each line but the first it hands the free pages inside glibc back to the kernel (malloc_trim). It runs in
+its own thread. The collector's threshold is raised with it (GC_THRESHOLD)."""
 
 from __future__ import annotations
 
@@ -15,6 +16,11 @@ from typing import Any
 
 EVERY_S = 600.0
 FIRST_S = 60.0  # the first line, soon after the start: what the rest is compared with
+
+# how many more objects than before the collector lets stand: Python's 700 promotes whatever the threads are in the middle of, and the
+# full collections that follow walk every layout kept (3.7 million objects, 1-2 s with all the threads standing, one a minute on prod).
+# Measured on E5 beside the service, 30 s of load: 18 full collections at 700, one at 20,000
+GC_THRESHOLD = (20_000, 10, 10)
 
 log = logging.getLogger("sky.mem")
 
@@ -55,6 +61,21 @@ def rss_anon_mb() -> int | None:
         return None
 
 
+def trim() -> str | None:
+    """Hands the free pages of all of glibc's arenas back to the kernel (the GIL is let go for the call, each arena is locked in turn)
+    and says how long it took and what RSS it left. None where there is no malloc_trim (the Mac). mallinfo2's `free` does not fall: it
+    counts the pages handed back too."""
+    try:
+        f = ctypes.CDLL(None).malloc_trim
+    except (AttributeError, OSError):
+        return None
+    f.argtypes = [ctypes.c_size_t]
+    a, t = rss_anon_mb(), time.perf_counter()
+    f(0)
+    ms = (time.perf_counter() - t) * 1000.0
+    return f"trim: rss_anon_mb {a} -> {rss_anon_mb()} ms {ms:.0f}"
+
+
 class MemWatch:
     def __init__(self, sizes: dict[str, Callable[[], int]]) -> None:
         self.sizes = sizes
@@ -87,10 +108,14 @@ class MemWatch:
     def _run(self) -> None:
         wait = FIRST_S
         while not self._stop.wait(wait):
-            wait = EVERY_S
             log.warning("%s", self.line())
+            if wait == EVERY_S and (said := trim()):
+                log.warning("%s", said)
+            wait = EVERY_S
 
     def start(self) -> None:
+        self._threshold = gc.get_threshold()
+        gc.set_threshold(*GC_THRESHOLD)
         gc.callbacks.append(self._on_gc)
         threading.Thread(target=self._run, name="memwatch", daemon=True).start()
 
@@ -98,3 +123,4 @@ class MemWatch:
         self._stop.set()
         if self._on_gc in gc.callbacks:
             gc.callbacks.remove(self._on_gc)
+            gc.set_threshold(*self._threshold)
