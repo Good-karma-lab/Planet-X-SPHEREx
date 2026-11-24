@@ -446,6 +446,7 @@ function useIdentNames(tracks: Track[]): (string | undefined)[] {
   return tracks.map((t) => identCache.get(`${t.ra_2025_9.toFixed(5)},${t.dec_2025_9.toFixed(5)}`) ?? undefined);
 }
 
+const GL_TRIES = 6;
 /** the address's words for how the picture looks (its switches), as against where it is and what it shows */
 const LOOKS = new Set(['known', 'movers', 'red', 'ano', 'people', 'traj', 'arch', 'others', 'blend', 'trim', 'lin', 'boost', 'sharp', 'sat', 'ref', 'morph', 'mot', 'rings', 'art', 'marker', 'bands', 'dets', 'spd']);
 
@@ -664,6 +665,9 @@ export function Lab({ route }: { route: Route }) {
     inset: { x: number; y: number; w: number; h: number; zoom: { cx: number; cy: number; s: number; track?: 'on' | 'near' } } | null;
   }>({ rects: [], inset: null });
   const [visit, setVisit] = useState(0);
+  // the picture's canvas, made anew when its context is lost (GL_TRIES times a page)
+  const [glTry, setGlTry] = useState(0);
+  const [glFailed, setGlFailed] = useState(false);
   const [zoomWord, setZoomWord] = useState('');
   const [insetBox, setInsetBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const artMap = useRef(new Map<number, HTMLCanvasElement>());
@@ -930,8 +934,32 @@ export function Lab({ route }: { route: Route }) {
   }, [valid]);
 
   useEffect(() => {
-    if (!valid || !canvas.current) return;
-    const r = new Renderer(canvas.current);
+    const cv = canvas.current;
+    if (!valid || !cv) return;
+    // the card may take the picture's context away (its driver restarted, the machine slept, too much was drawn): the picture is made
+    // anew on a fresh canvas, a few times; a Renderer on a lost context threw, and an exception here took the whole lab away
+    const anew = () => {
+      setGlTry((t) => {
+        if (t < GL_TRIES) return t + 1;
+        setGlFailed(true);
+        return t;
+      });
+    };
+    const lost = (e: Event) => {
+      e.preventDefault();
+      anew();
+    };
+    cv.addEventListener('webglcontextlost', lost);
+    let r: Renderer;
+    try {
+      r = new Renderer(cv);
+    } catch (e) {
+      console.warn('the picture could not be drawn', e);
+      cv.removeEventListener('webglcontextlost', lost);
+      const t = setTimeout(anew, 400);
+      return () => clearTimeout(t);
+    }
+    setGlFailed(false);
     setMeta(null);
     setShown(null);
     state.current.meta = null;
@@ -2149,8 +2177,11 @@ export function Lab({ route }: { route: Route }) {
       idle.stop();
       client.stop();
       clientRef.current = null;
+      rendRef.current = null;
+      cv.removeEventListener('webglcontextlost', lost);
+      r.dispose();
     };
-  }, [ra, dec, fov, valid]);
+  }, [ra, dec, fov, valid, glTry]);
 
   useEffect(() => {
     const c = clientRef.current;
@@ -2205,7 +2236,7 @@ export function Lab({ route }: { route: Route }) {
     return () => {
       stop = true;
     };
-  }, [ra, dec, fov, valid, film]);
+  }, [ra, dec, fov, valid, film, glTry]);
 
   // a search that failed is asked again by itself (lab/progress.tsx): these counters start its polling again
   const [moversTry, setMoversTry] = useState(0);
@@ -3898,7 +3929,13 @@ export function Lab({ route }: { route: Route }) {
                   }}
                 />
               )}
+              {glFailed && (
+                <div class="vwait" data-testid="gl-failed">
+                  This browser cannot draw the picture now (WebGL) · reload the page
+                </div>
+              )}
               <canvas
+                key={`gl${glTry}`}
                 ref={canvas}
                 class={`vid ${wallView ? 'wall' : ''}`}
                 role="img"

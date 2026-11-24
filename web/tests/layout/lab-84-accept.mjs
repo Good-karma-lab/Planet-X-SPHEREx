@@ -5,7 +5,7 @@ import { chromium } from '@playwright/test';
 const BASE = process.argv[2] ?? 'http://localhost:5190';
 const OUT = process.argv[3];
 const V = (await (await fetch(`${BASE}/api/v1/findings?ids=film:8ae52fb8ac8b`, { headers: { 'X-Sky-Check': '1' } })).json()).finds[0].data.visits;
-const step = (id, question, show) => ({ id, steps: [{ id: 'q', question, show, answers: [{ id: 'yes', label: 'Yes', result: 'a' }, { id: 'no', label: 'No', result: 'b' }] }] });
+const step = (id, question, show) => ({ id, steps: [{ id: id === 'track' ? 'steps' : 'q', question, show, answers: [{ id: 'yes', label: 'Yes', result: 'a' }, { id: 'no', label: 'No', result: 'b' }] }] });
 const TRACK = { id: 't_mock', kind: 'finding', finding_id: 'film:8ae52fb8ac8b', ra: 46.58709, dec: 12.79007, fov: 20, film: 61073.4, series: step('track', 'Does one dot step along the arrow?', 'blink'), pictures: V.map((v, i) => ({ i, ...v })) };
 const PEAK = { id: 't_mock', kind: 'finding', finding_id: 'peak:dd36a21a3e16', ra: 51.744073, dec: 12.764138, fov: 10, series: step('peak', 'It blinks', 'sums') };
 let bad = 0;
