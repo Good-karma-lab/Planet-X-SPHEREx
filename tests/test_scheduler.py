@@ -197,3 +197,47 @@ def test_a_reopened_product_gets_a_new_job_not_the_finished_one() -> None:
         await s.stop()
 
     asyncio.run(run())
+
+
+def test_a_left_job_that_has_not_started_is_dropped_and_one_still_watched_is_not() -> None:
+    import time
+
+    from service.jobs import scheduler as mod
+
+    async def run() -> None:
+        s = Scheduler(slots={"light": 1, "heavy": 0})
+        s.start()
+
+        async def fn(ctx: Any) -> dict[str, Any]:
+            return {}
+
+        # two more than the slots may run for people: the third stays queued
+        go = asyncio.Event()
+
+        async def hold(ctx: Any) -> dict[str, Any]:
+            await go.wait()
+            return {}
+
+        for k in ("a", "b"):
+            s.submit("field", k, {}, hold, Priority.P0, "heavy")
+        left = s.submit("field", "c", {}, fn, Priority.P0, "heavy")
+        seen = s.submit("field", "d", {}, fn, Priority.P0, "heavy")
+        await asyncio.sleep(0.1)
+        assert left.state == seen.state == "queued"
+        running = s.jobs[s.by_key["a"]]
+        for j in (left, seen, running):
+            assert s.leave(j.id)
+        assert s.poll(seen.id) is seen  # another page watches it
+        t = time.time() + mod.LEAVE_S + 1.0
+        real, mod.time.time = mod.time.time, lambda: t  # type: ignore[assignment]
+        try:
+            s._abandon_check()
+        finally:
+            mod.time.time = real  # type: ignore[assignment]
+        assert left.state == "cancelled" and seen.state == "queued" and not seen.abandoned
+        assert running.state == "running" and running.abandoned  # what runs goes on, behind the people's
+        assert not s.leave("nothing") and not s.leave(left.id)
+        go.set()
+        await s.stop()
+
+    asyncio.run(run())

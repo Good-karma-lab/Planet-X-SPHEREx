@@ -513,3 +513,11 @@
 .taskpanel .tp-guestline .tp-guest { all: unset; cursor: pointer; color: var(--accent-l); text-decoration: underline; }
 :root .lab .taskpanel .tp-guestline .tp-guest { min-height: 0; height: auto; padding: 0; }
 @media (max-width: 599.98px) and (min-height: 480px) { :root .lab .panel:not([data-detent='full']) .taskpanel .tv-fixed .tv-line { display: none; } .taskpanel .tp-guestline { margin: 0; line-height: 16px; } }
+.vsq .ps-pair.one { grid-template-columns: 1fr; width: min(100% - 24px, 560px); }
+.vsq .ps-pair figure { cursor: zoom-in; }
+.vsq .ps-pair.one figure { cursor: zoom-out; }
+.vsq .ps-pair figure[hidden] { display: none; }
+.tv .tv-line.wrap { white-space: normal; }
+.vsq .toolstrip .tool-tip { position: absolute; right: calc(100% + 8px); top: 2px; width: max-content; max-width: 220px; padding: 5px 9px; border-radius: 8px; background: rgba(6, 12, 16, 0.92); border: 1px solid var(--edge); font: 500 12px var(--font); color: var(--ink); pointer-events: none; }
+@media (max-width: 599.98px) and (min-height: 480px) { .vsq .toolstrip .tool-tip { right: 0; top: auto; bottom: calc(100% + 8px); } }
+@media (max-width: 599.98px) and (min-height: 480px) { .vsq .ps-pair.one { width: min(100% - 24px, 264px); margin-bottom: 64px; } }

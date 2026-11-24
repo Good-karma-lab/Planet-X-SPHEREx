@@ -351,6 +351,8 @@ export interface TaskArgs {
   ready?: boolean;
   /** the pictures a step shows in the panel itself are there (an anomaly's odd pictures, a find's two sums) */
   shown?: boolean;
+  /** those pictures cannot be made: an answer would be a guess, so only "Not sure" is taken */
+  noPictures?: boolean;
   /** a lead's questions inside a square's task: no "Next" of its own (the square's look follows), no second Mark button */
   embedded?: boolean;
   /** the service's words for the lead (why.text: "a Planet X peak · promise 86") */
@@ -717,7 +719,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               key={x.id}
               class={`btn sm tp-ans${k === 0 ? ' primary' : ''}${x.id === 'not_sure' ? ' quiet' : ''}`}
               // "missing in some" needs at least one picture tapped (the service refuses an empty list)
-              disabled={busy || (PANEL_SHOWS.has(step.show) ? a.shown === false : a.ready === false) || (!!step.tap && x.id === 'done' && missing.length === 0)}
+              disabled={busy || (PANEL_SHOWS.has(step.show) ? a.shown === false && !(a.noPictures && x.id === 'not_sure') : a.ready === false) || (!!step.tap && x.id === 'done' && missing.length === 0)}
               title={step.tap && x.id === 'done' && missing.length === 0 ? 'Tap at least one picture where it is missing' : undefined}
               onClick={() => answer(x)}
               data-testid={`task-answer-${x.id}`}

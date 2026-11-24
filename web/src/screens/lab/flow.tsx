@@ -1250,6 +1250,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   };
   // the panel's own pictures of the step (the two sums, the odd pictures) are on show
   const [panelShown, setPanelShown] = useState(false);
+  const [panelNone, setPanelNone] = useState(false); // they cannot be made: only "Not sure" can be said
   // what the lab shows with the task: for a series step its `show`, else the task's kind decides
   const view = (show: string | null, body: NextTask | null): ComponentChildren => {
     const kind = task?.kind;
@@ -1265,11 +1266,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           }
         />
       );
-    if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} onShown={setPanelShown} />;
+    if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} onShown={setPanelShown} onNone={setPanelNone} />;
     if (show === 'stamps') {
       const own = body?.anomaly;
       const src: Source | null = own ? { ra: own.ra, dec: own.dec, pmra: own.pmra ?? 0, pmdec: own.pmdec ?? 0 } : anomaly ? taskSrc : null;
-      return <StampsView src={src} drivers={own?.drivers ?? anomaly?.drivers ?? null} onShown={setPanelShown} />;
+      return <StampsView src={src} drivers={own?.drivers ?? anomaly?.drivers ?? null} onShown={setPanelShown} onNone={setPanelNone} />;
     }
     if (show === 'blink' || show === 'pictures')
       return (
@@ -1314,6 +1315,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     visitOf: a.visitOf,
     ready: a.ready,
     shown: panelShown,
+    noPictures: panelNone,
   });
   // a square given for a lead in it (`lead=`): the lead's own question series, first, above the square's look
   const leadParams = useMemo<Record<string, string>>(
@@ -1346,6 +1348,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     visitOf: a.visitOf,
     ready: a.ready,
     shown: panelShown,
+    noPictures: panelNone,
     embedded: true,
     ...(a.params['lead_text'] ? { leadText: a.params['lead_text'] } : {}),
   });
@@ -1455,6 +1458,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const strip =
     a.single && g ? (
       <div class="float toolstrip" role="group" aria-label="Picture tools" data-testid="tool-strip">
+        {tool && (
+          // what the tool waits for, beside it and whole (the status line cut it off)
+          <span class="tool-tip" role="status" data-testid="tool-tip">
+            {tool === 'mark' ? 'Click a place to mark it' : ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : ruler.length ? 'Now click the second place' : 'Click two places to measure'}
+          </span>
+        )}
         <button
           class={tool === 'mark' ? 'on' : ''}
           aria-pressed={tool === 'mark'}
@@ -1828,8 +1837,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     tapHere ? `It moves · tap it here in ${tapHere.passLabel}` : open && eff && (eff.id === open || marks.some((m) => m.id === eff.id && headOf(m, marks)?.id === open)) ? effectWord(eff) : '',
     a.square?.line ?? '',
     a.known ? knownStatus(known, counts, knownSilent ? knownRetry.nextIn : null) : '',
-    tool === 'mark' && !tapHere ? 'Mark: click a place' : '',
-    rulerStatus,
+    tool === 'ruler' && ruler.length < 2 ? '' : rulerStatus,
     marksSyncNote(),
   ]
     .filter(Boolean)

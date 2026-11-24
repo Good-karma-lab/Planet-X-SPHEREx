@@ -26,7 +26,10 @@ LIST_TTL_S = 30.0  # the store's fields are listed again after this
 STALE_TTL_S = 600.0  # a field's exposures are asked of the index again after this
 RETRY_S = 2 * 3600.0  # a build (or a spectrum) asked for is not asked for again for this long: one that fails must not stand in the way
 PINNED_FILE = "task_fields.json"  # what this module pinned (the fields others pinned are theirs)
-DISK_STOP_PCT = 72.0  # nothing is built ahead on a disk this full (the keeper cleans above 75)
+DISK_STOP_PCT = 77.0  # nothing is built ahead on a disk this full (the keeper cleans above 75, once an hour)
+FAST_PCT = 3.0  # nor, above FAST_FROM_PCT, while the disk grew by more than this in FAST_S: people's fields and the sweep fill it then
+FAST_FROM_PCT = 72.0
+FAST_S = 1800.0
 
 
 def _inside(ra: float, dec: float, p: dict[str, Any]) -> float:
@@ -42,6 +45,7 @@ class TaskFields:
         self._lock = threading.Lock()
         self._fields: list[dict[str, Any]] = []
         self._at = -1e9
+        self._used: list[tuple[float, float]] = []  # how full the disk was, over the last FAST_S
         self._tried: dict[str, float] = {}  # what was asked to be made, and when
         self._fresh: dict[str, tuple[float, bool]] = {}  # product key -> (asked at, built of today's exposures and not stripped)
 
@@ -139,7 +143,12 @@ class TaskFields:
             u = shutil.disk_usage(self.st.store.root)
         except (OSError, AttributeError):
             return False
-        return 100.0 * u.used / u.total < DISK_STOP_PCT
+        used = 100.0 * u.used / u.total
+        now = time.monotonic()
+        self._used = [(t, p) for t, p in self._used if now - t <= FAST_S] + [(now, used)]
+        if used >= FAST_FROM_PCT and used - min(p for _, p in self._used) > FAST_PCT:
+            return False
+        return used < DISK_STOP_PCT
 
     def spectrum_kept(self, anomaly: dict[str, Any]) -> bool:
         """The odd pictures of an anomaly are on disk: its spectrum is measured, its stamps kept."""

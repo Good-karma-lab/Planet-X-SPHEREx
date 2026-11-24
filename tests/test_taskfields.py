@@ -72,7 +72,7 @@ def test_what_is_built_ahead_is_the_quarter_once_and_nothing_twice(tf: TaskField
 
 
 def test_nothing_is_built_ahead_on_a_full_disk(tf: TaskFields, monkeypatch: pytest.MonkeyPatch) -> None:
-    for pct, ok in ((71.0, True), (72.0, False), (90.0, False)):
+    for pct, ok in ((71.0, True), (77.0, False), (90.0, False)):
         monkeypatch.setattr(taskfields.shutil, "disk_usage", lambda root, pct=pct: SimpleNamespace(total=100.0, used=pct, free=100.0 - pct))
         assert tf.room() is ok
 
@@ -122,3 +122,15 @@ def test_the_real_store_neither_strips_nor_loses_a_pinned_field(tmp_path: Path) 
     assert not s.is_pinned("k" * 24)
     s.pin("k" * 24)
     assert s.is_pinned("k" * 24) and s.strip("field", "k" * 24) == 0
+
+
+def test_nothing_is_built_ahead_while_people_fill_the_disk(tf: TaskFields, monkeypatch: pytest.MonkeyPatch) -> None:
+    now, used = [0.0], [71.0]
+    monkeypatch.setattr(taskfields.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(taskfields.shutil, "disk_usage", lambda root: SimpleNamespace(total=100.0, used=used[0], free=100.0 - used[0]))
+    got = []
+    for minute, pct in ((0, 66.0), (10, 69.0), (20, 71.0), (25, 72.5), (70, 73.0), (80, 74.0), (90, 76.9), (95, 77.0)):
+        now[0], used[0] = minute * 60.0, pct
+        got.append(tf.room())
+    # below 72 always; at 72.5 the disk grew by 6.5 in half an hour: no; 45 min later slowly again: yes; +3.9 again: no; 77: no
+    assert got == [True, True, True, False, True, True, False, False]

@@ -993,6 +993,13 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             raise HTTPException(404, "no such job (the service may have restarted: ask for the product again)")
         return j.view()
 
+    @app.post(f"{API_PREFIX}/jobs/{{job_id}}/leave", status_code=204)
+    def leave_job(job_id: str) -> Response:
+        """The page that watched a job leaves it (navigator.sendBeacon): see Scheduler.leave."""
+        if st.scheduler is not None:
+            st.scheduler.leave(job_id)
+        return Response(status_code=204)
+
     @app.get(f"{API_PREFIX}/fields/{{key}}/parts/{{name}}")
     def part(key: str, name: str) -> Response:
         if st.store is None or not key.isalnum() or not all(c.isalnum() or c in "_." for c in name):

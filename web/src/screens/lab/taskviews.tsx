@@ -50,7 +50,7 @@ function RawStamp({ stamp }: { stamp: Stamp }) {
 }
 
 /** An anomaly's odd pictures: the stamps (the file's own pixels around it) of the exposures of its odd bins. */
-export function StampsView({ src, drivers, onShown }: { src: Source | null; drivers: Anomaly['drivers'] | null; onShown?: (on: boolean) => void }) {
+export function StampsView({ src, drivers, onShown, onNone }: { src: Source | null; drivers: Anomaly['drivers'] | null; onShown?: (on: boolean) => void; onNone?: (none: boolean) => void }) {
   const own = useSpectrum(src);
   const ranges = drivers?.map((d) => ({ lo: d.lo, hi: d.hi })) ?? [];
   const { inside } = useMemo(() => pointsIn(own.points, ranges), [own.points, drivers]);
@@ -65,14 +65,18 @@ export function StampsView({ src, drivers, onShown }: { src: Source | null; driv
     .sort((a, b) => Math.abs((b.flux ?? 0) - med) - Math.abs((a.flux ?? 0) - med))
     .slice(0, MAX_STAMPS);
   useEffect(() => {
-    onShown?.(odd.length > 0 || absent);
-    return () => onShown?.(false);
+    onShown?.(odd.length > 0);
+    onNone?.(absent && !odd.length);
+    return () => {
+      onShown?.(false);
+      onNone?.(false);
+    };
   }, [odd.length > 0, absent]);
   const v = own.view;
   const line = odd.length
     ? `${odd.length} of its ${inside.length} odd pictures · it is in the middle of each`
     : absent
-      ? 'Its pictures are not kept'
+      ? 'Its pictures are not kept · “Not sure” is the answer here'
       : !drivers
         ? 'looking for it in this field…'
         : v?.state === 'running' && v.total
@@ -129,18 +133,39 @@ interface ClipInfo {
 
 /** "Is this a real object?": the finding's own clip from the service. For a track or a Planet X peak it blinks the picture added
  *  along the motion against the same exposures added without it: a real mover is there in the first and gone in the second. */
-export function FindingClip({ id, onShown }: { id: string | null; onShown?: (on: boolean) => void }) {
+export function FindingClip({ id, onShown, onNone }: { id: string | null; onShown?: (on: boolean) => void; onNone?: (none: boolean) => void }) {
   const info = useClip(id);
   const pair = pairOf(id, info);
-  const none = info?.state === 'none';
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [id]);
+  const none = info?.state === 'none' || broken;
+  // a find whose pictures are made now (minutes): said, with what to look at meanwhile
+  const [late, setLate] = useState(false);
+  useEffect(() => {
+    setLate(false);
+    const t = setTimeout(() => setLate(true), 12000);
+    return () => clearTimeout(t);
+  }, [id]);
   const [loaded, setLoaded] = useState(0);
   useEffect(() => setLoaded(0), [id]);
-  const on = none || (pair ? loaded >= 2 : loaded >= 1);
+  const on = !none && (pair ? loaded >= 2 : loaded >= 1);
+  useEffect(() => {
+    onNone?.(none);
+    return () => onNone?.(false);
+  }, [none]);
   useEffect(() => {
     onShown?.(on);
     return () => onShown?.(false);
   }, [on]);
-  const line = !id ? '' : none ? `No picture: ${info?.reason ?? 'it cannot be made'}` : on ? '' : 'getting the pictures…';
+  const line = !id
+    ? ''
+    : none
+      ? `These two pictures cannot be made here (${info?.reason ?? 'not kept'}) · “Not sure” is the answer here`
+      : on
+        ? ''
+        : late
+          ? 'Our server is making these two pictures (a few minutes) · the sky itself is on the picture'
+          : 'getting the pictures…';
   const up = () => setLoaded((n) => n + 1);
   return (
     <div class={`tv tv-clip${pair ? ' two' : ''}`} data-testid="task-clip">
@@ -148,7 +173,7 @@ export function FindingClip({ id, onShown }: { id: string | null; onShown?: (on:
         <div class="tv-pair">
           {pair.map((q) => (
             <figure key={q.url}>
-              <img src={q.url} alt={q.word} onLoad={up} />
+              <img src={q.url} alt={q.word} onLoad={up} onError={() => setBroken(true)} />
               <figcaption>{q.word}</figcaption>
             </figure>
           ))}
@@ -156,7 +181,7 @@ export function FindingClip({ id, onShown }: { id: string | null; onShown?: (on:
       ) : (
         <div class="tv-clipbox">{info?.state === 'ready' && info.url ? <img src={info.url} alt="The find, picture after picture" onLoad={up} /> : null}</div>
       )}
-      {line && <div class="tv-line">{line}</div>}
+      {line && <div class="tv-line wrap">{line}</div>}
     </div>
   );
 }
@@ -209,7 +234,12 @@ export function pairOf(id: string | null, info: ClipInfo | null): { url: string;
 export function PeakSum({ id, track = false, tool = false, loading = false }: { id: string; track?: boolean; tool?: boolean; loading?: boolean }) {
   const pair = pairOf(id, useClip(id));
   const [sky, setSky] = useState(false);
-  useEffect(() => setSky(false), [id]);
+  // a tap on one of the two makes it as large as the picture, another tap brings both back
+  const [big, setBig] = useState(-1);
+  useEffect(() => {
+    setSky(false);
+    setBig(-1);
+  }, [id]);
   // Mark or the ruler needs the sky itself
   useEffect(() => {
     if (tool) setSky(true);
@@ -220,9 +250,9 @@ export function PeakSum({ id, track = false, tool = false, loading = false }: { 
     // while the sums stand over the sky, a click is not a click on the sky under them
     <div class={`peaksum${sky ? ' sky' : ''}`} data-testid="peak-sum" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
       {!sky && (
-        <div class="ps-pair">
-          {pair.map((q) => (
-            <figure key={q.url}>
+        <div class={`ps-pair${big >= 0 ? ' one' : ''}`}>
+          {pair.map((q, k) => (
+            <figure key={q.url} hidden={big >= 0 && big !== k} onClick={() => setBig(big === k ? -1 : k)} title={big === k ? 'Both pictures' : 'Larger'} data-testid={`sum-${k}`}>
               <img src={q.url} alt={q.word} />
               <figcaption>{q.word}</figcaption>
             </figure>
