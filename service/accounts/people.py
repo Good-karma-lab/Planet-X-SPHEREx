@@ -321,6 +321,8 @@ def askable(row: dict[str, Any]) -> bool:
     one people raised is asked whatever its picture says."""
     if row.get("kind") in KINDS_OFF:
         return False
+    if row.get("pictures") is False:
+        return False  # its question is about two pictures that are not there: an answer would be a guess
     if row.get("kind") == "film":
         return track_seen(row)
     return row.get("visible") is not False or "raised" in row

@@ -59,8 +59,25 @@ export class FieldClient {
   constructor(private ev: FieldEvents) {}
 
   stop(): void {
-    this.stopped = true; // leaving does not cancel the job on the service: it keeps running at a lower priority
+    this.stopped = true;
+    this.leave();
+    if (typeof window !== 'undefined') window.removeEventListener('pagehide', this.leave);
   }
+
+  private job: string | null = null; // the job this page watches, until it is done
+  /** Says to the service that this page watches the job no more (a move to another field, the page closing): one that has not started
+   *  and that nobody else watches is dropped, one that runs goes on behind the people's. */
+  private leave = (): void => {
+    const id = this.job;
+    this.job = null;
+    if (!id) return;
+    try {
+      const url = `/api/v1/jobs/${id}/leave`;
+      if (!navigator.sendBeacon?.(url)) void fetch(url, { method: 'POST', keepalive: true }).catch(() => undefined);
+    } catch {
+      /* the service sees by itself that nobody polls, a little later */
+    }
+  };
 
   async open(ra: number, dec: number, fov: number): Promise<void> {
     this.asked = [ra, dec, fov];
@@ -97,7 +114,9 @@ export class FieldClient {
 
   private async follow(job: JobView): Promise<void> {
     let view = job;
+    if (typeof window !== 'undefined') window.addEventListener('pagehide', this.leave);
     while (!this.stopped) {
+      this.job = view.state === 'done' || view.state === 'error' || view.state === 'cancelled' ? null : view.id;
       this.ev.onPhase(view.state === 'error' ? `failed: ${view.error}` : plainPhase(view.phase));
       this.ready = view.parts;
       await this.fetchParts(this.ready);

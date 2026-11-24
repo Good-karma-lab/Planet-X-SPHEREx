@@ -386,6 +386,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
                 visits[x["id"]] = clips.visits_seen({**x, **full}) if full is not None else None
     tf = task_fields(st)
     ready: dict[str, bool] = {}
+    pictures: dict[str, bool] = {}
     if tf is not None:  # the few finds people are asked about: can the lab show what the question is about at once?
         from service.findings import find_row as one
 
@@ -396,6 +397,8 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
                     an = ((one(f.db, x["id"]) or {}).get("data") or {}).get("anomaly")
                     ok = bool(an) and tf.spectrum_kept(an)
                 ready[x["id"]] = ok
+                if x["kind"] == "peak" and clips is not None:  # the question is about its two pictures: without them it is not asked
+                    pictures[x["id"]] = len((clips.info(x["id"]) or {}).get("blink") or []) == 2
     listed = {x["id"] for x in body["finds"] if x["status"] not in HIDDEN}  # in the default list (status None), as its filter decides
     return [
         {
@@ -410,6 +413,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             "visible": x.get("visible"),
             "promise": x.get("promise") or 0,
             **({"ready": ready[x["id"]]} if x["id"] in ready else {}),
+            **({"pictures": pictures[x["id"]]} if x["id"] in pictures else {}),
             **({"visits_seen": visits[x["id"]]} if x["id"] in visits else {}),
             **({"ask": x["ask"]} if "ask" in x else {}),
             **({"echo": True} if x.get("echo") else {}),

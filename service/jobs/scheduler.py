@@ -68,6 +68,7 @@ class Job:
     result: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     abandoned: bool = False
+    left: bool = False  # its page said it is leaving (leave): nobody else may be watching
     created: float = field(default_factory=time.time)
     started: float | None = None
     finished: float | None = None
@@ -143,6 +144,9 @@ class Context:
         return await cpu.run(fn, *args)
 
 
+LEAVE_S = 5.0  # a left job waits this long for another page's poll (the pages poll every second or two)
+
+
 @dataclass
 class Scheduler:
     executor: Executor | None = None
@@ -194,6 +198,7 @@ class Scheduler:
                     j.priority = priority
                     j.abandoned = False
                 j.last_poll = time.time()
+                j.left = False
                 self._kick()
                 return j
         j = Job(id=f"j{next(self._ids)}", key=key, kind=kind, params=params, priority=priority, size=size, mem_mb=mem_mb)
@@ -217,11 +222,23 @@ class Scheduler:
         if j is None:
             return None
         j.last_poll = time.time()
+        j.left = False
         if j.abandoned and j.state in ("queued", "running", "paused"):
             j.abandoned = False
             j.priority = Priority.P0
             self._kick()
         return j
+
+    def leave(self, job_id: str) -> bool:
+        """The page that watched this job is leaving it. Another page may watch it too: its next poll (every second or two) takes this
+        back. Without one for LEAVE_S the job is abandoned, and one that has not started is cancelled (a person who opened twelve
+        fields one after another left a queue of them for everyone)."""
+        j = self.jobs.get(job_id)
+        if j is None or j.priority != Priority.P0 or j.state not in ("queued", "running", "paused"):
+            return False
+        j.left = True
+        j.last_poll = min(j.last_poll, time.time() - self.abandon_after_s + LEAVE_S)
+        return True
 
     def cancel(self, job_id: str) -> None:
         j = self.jobs.get(job_id)
@@ -249,6 +266,8 @@ class Scheduler:
         for j in self.jobs.values():
             if j.priority == Priority.P0 and j.state in ("queued", "running", "paused") and now - j.last_poll > self.abandon_after_s:
                 j.priority, j.abandoned = Priority.P1, True
+                if j.left and j.state == "queued":
+                    self.cancel(j.id)
         ab = sorted(
             (j for j in self.jobs.values() if j.abandoned and j.size == "heavy" and j.state in ("queued", "running", "paused")),
             key=lambda j: j.last_poll,

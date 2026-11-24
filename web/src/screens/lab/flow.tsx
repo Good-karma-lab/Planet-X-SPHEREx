@@ -1250,6 +1250,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   };
   // the panel's own pictures of the step (the two sums, the odd pictures) are on show
   const [panelShown, setPanelShown] = useState(false);
+  const [panelNone, setPanelNone] = useState(false); // they cannot be made: only "Not sure" can be said
   // what the lab shows with the task: for a series step its `show`, else the task's kind decides
   const view = (show: string | null, body: NextTask | null): ComponentChildren => {
     const kind = task?.kind;
@@ -1265,11 +1266,11 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           }
         />
       );
-    if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} onShown={setPanelShown} />;
+    if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} onShown={setPanelShown} onNone={setPanelNone} />;
     if (show === 'stamps') {
       const own = body?.anomaly;
       const src: Source | null = own ? { ra: own.ra, dec: own.dec, pmra: own.pmra ?? 0, pmdec: own.pmdec ?? 0 } : anomaly ? taskSrc : null;
-      return <StampsView src={src} drivers={own?.drivers ?? anomaly?.drivers ?? null} onShown={setPanelShown} />;
+      return <StampsView src={src} drivers={own?.drivers ?? anomaly?.drivers ?? null} onShown={setPanelShown} onNone={setPanelNone} />;
     }
     if (show === 'blink' || show === 'pictures')
       return (
@@ -1314,6 +1315,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     visitOf: a.visitOf,
     ready: a.ready,
     shown: panelShown,
+    noPictures: panelNone,
   });
   // a square given for a lead in it (`lead=`): the lead's own question series, first, above the square's look
   const leadParams = useMemo<Record<string, string>>(
@@ -1346,6 +1348,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     visitOf: a.visitOf,
     ready: a.ready,
     shown: panelShown,
+    noPictures: panelNone,
     embedded: true,
     ...(a.params['lead_text'] ? { leadText: a.params['lead_text'] } : {}),
   });

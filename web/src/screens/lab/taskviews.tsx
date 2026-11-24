@@ -50,7 +50,7 @@ function RawStamp({ stamp }: { stamp: Stamp }) {
 }
 
 /** An anomaly's odd pictures: the stamps (the file's own pixels around it) of the exposures of its odd bins. */
-export function StampsView({ src, drivers, onShown }: { src: Source | null; drivers: Anomaly['drivers'] | null; onShown?: (on: boolean) => void }) {
+export function StampsView({ src, drivers, onShown, onNone }: { src: Source | null; drivers: Anomaly['drivers'] | null; onShown?: (on: boolean) => void; onNone?: (none: boolean) => void }) {
   const own = useSpectrum(src);
   const ranges = drivers?.map((d) => ({ lo: d.lo, hi: d.hi })) ?? [];
   const { inside } = useMemo(() => pointsIn(own.points, ranges), [own.points, drivers]);
@@ -65,14 +65,18 @@ export function StampsView({ src, drivers, onShown }: { src: Source | null; driv
     .sort((a, b) => Math.abs((b.flux ?? 0) - med) - Math.abs((a.flux ?? 0) - med))
     .slice(0, MAX_STAMPS);
   useEffect(() => {
-    onShown?.(odd.length > 0 || absent);
-    return () => onShown?.(false);
+    onShown?.(odd.length > 0);
+    onNone?.(absent && !odd.length);
+    return () => {
+      onShown?.(false);
+      onNone?.(false);
+    };
   }, [odd.length > 0, absent]);
   const v = own.view;
   const line = odd.length
     ? `${odd.length} of its ${inside.length} odd pictures · it is in the middle of each`
     : absent
-      ? 'Its pictures are not kept'
+      ? 'Its pictures are not kept · “Not sure” is the answer here'
       : !drivers
         ? 'looking for it in this field…'
         : v?.state === 'running' && v.total
@@ -129,7 +133,7 @@ interface ClipInfo {
 
 /** "Is this a real object?": the finding's own clip from the service. For a track or a Planet X peak it blinks the picture added
  *  along the motion against the same exposures added without it: a real mover is there in the first and gone in the second. */
-export function FindingClip({ id, onShown }: { id: string | null; onShown?: (on: boolean) => void }) {
+export function FindingClip({ id, onShown, onNone }: { id: string | null; onShown?: (on: boolean) => void; onNone?: (none: boolean) => void }) {
   const info = useClip(id);
   const pair = pairOf(id, info);
   const [broken, setBroken] = useState(false);
@@ -144,7 +148,11 @@ export function FindingClip({ id, onShown }: { id: string | null; onShown?: (on:
   }, [id]);
   const [loaded, setLoaded] = useState(0);
   useEffect(() => setLoaded(0), [id]);
-  const on = none || (pair ? loaded >= 2 : loaded >= 1);
+  const on = !none && (pair ? loaded >= 2 : loaded >= 1);
+  useEffect(() => {
+    onNone?.(none);
+    return () => onNone?.(false);
+  }, [none]);
   useEffect(() => {
     onShown?.(on);
     return () => onShown?.(false);
@@ -152,11 +160,11 @@ export function FindingClip({ id, onShown }: { id: string | null; onShown?: (on:
   const line = !id
     ? ''
     : none
-      ? `These two pictures cannot be made here (${info?.reason ?? 'not kept'}) · judge it on the sky itself`
+      ? `These two pictures cannot be made here (${info?.reason ?? 'not kept'}) · “Not sure” is the answer here`
       : on
         ? ''
         : late
-          ? 'Our server is making these two pictures (a few minutes) · the sky itself is on the left'
+          ? 'Our server is making these two pictures (a few minutes) · the sky itself is on the picture'
           : 'getting the pictures…';
   const up = () => setLoaded((n) => n + 1);
   return (

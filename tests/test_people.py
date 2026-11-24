@@ -872,3 +872,9 @@ def test_a_track_is_asked_when_its_dot_is_seen_in_half_of_its_visits() -> None:
     assert [real.askable(r) for r, _ in seen] == [ok for _, ok in seen]
     assert not real.askable(row) and not real.askable({**row, "visible": False, "visits_seen": (4, 4)})
     assert real.askable({"kind": "peak", "visible": None}) and not real.askable({"kind": "peak", "visible": False})
+
+
+def test_a_peak_without_its_two_pictures_is_not_asked() -> None:
+    row = {"finding_id": "peak:1", "kind": "peak", "visible": True}
+    assert people.askable(row) and people.askable({**row, "pictures": True}) and not people.askable({**row, "pictures": False})
+    assert not people.askable({**row, "pictures": False, "raised": 1})
