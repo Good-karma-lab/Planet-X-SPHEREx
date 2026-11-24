@@ -161,6 +161,7 @@ def open_quarters(viewed: dict[str, int], taken: set[str]) -> list[str]:
 
 
 READY_SCAN = 40  # quarters looked at for a built one before a cold one is given
+PROMISING_AHEAD = 64  # the quarters of the best leads that the stock builds before any other (57 had a visible peak, 4 were built)
 SPREAD = 8  # people are given a random one of the first SPREAD quarters (built ones first), so not everyone gets the same square
 PROMISING_TTL_S = 60.0
 # a square task this old is not handed back, nor its square continued: the person moved on (it was given again 11 h later)
@@ -548,7 +549,7 @@ def make_tasks_router(st: Any) -> APIRouter:
     qs = Quarters(st, quarter_place)
     st.quarters = qs
 
-    def upcoming(acc: accounts.Accounts, limit: int = 120) -> list[tuple[str, str]]:
+    def upcoming(acc: accounts.Accounts, limit: int = 200) -> list[tuple[str, str]]:
         """The quarters a newcomer would be given next, in order (the stock of ready quarters follows it)."""
         rows = searched_cells(acc) or []
         viewed = quarters_viewed(acc, [r["cell_id"] for r in rows[:500]])
@@ -558,7 +559,7 @@ def make_tasks_router(st: Any) -> APIRouter:
         )
         # the promising quarters nobody has looked through first (they are given first: pick_cell), then the stock's order
         cells = {r["cell_id"] for r in rows}
-        first = [(p["cell_id"], p["quarter"]) for p in promising_quarters(st)[: 2 * SPREAD] if p["cell_id"] in cells]
+        first = [(p["cell_id"], p["quarter"]) for p in promising_quarters(st)[:PROMISING_AHEAD] if p["cell_id"] in cells]
         first = [cq for cq in first if not viewed.get(cq[0], {}).get(cq[1], 0)]
         rest = [(c, q) for _, _, c, q in order if (c, q) not in set(first)]
         return (first + rest)[:limit]
@@ -692,14 +693,14 @@ def make_tasks_router(st: Any) -> APIRouter:
         r = acc.db._conn().execute("SELECT 1 FROM acc_tasks WHERE user_id=? AND kind='cell' LIMIT 1", (user_id,)).fetchone()
         return r is None
 
-    def next_finding(acc: accounts.Accounts, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
+    def next_finding(acc: accounts.Accounts, user_id: str | None, finding_id: str | None, had: set[str]) -> dict[str, Any] | None:
         rows = findings()
         if finding_id is not None:
             one = next((r for r in rows if r["finding_id"] == finding_id), None)
             if one is None:
                 raise HTTPException(404, "no such finding")
             return one
-        seen = acc.db.task_refs(user_id, "finding") if user_id else set()
+        seen = acc.db.task_refs(user_id, "finding") if user_id else had
         checked = acc.db.check_counts()
         leads = [r for r in rows if r.get("status") in LEADS and r.get("ask", True) and r["finding_id"] not in seen and people.askable(r)]
 
@@ -716,7 +717,9 @@ def make_tasks_router(st: Any) -> APIRouter:
         top = [r for r in leads[:FINDING_SPREAD] if rank(r) == rank(leads[0])]
         return RNG.choice(top)
 
-    def next_judged(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
+    def next_judged(
+        acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None, had: set[str]
+    ) -> dict[str, Any] | None:
         """A question series (spec §5e): moves (tracks, slow movers, Planet X peaks), red, anomaly."""
         rows = findings()
         if finding_id is not None:
@@ -724,10 +727,12 @@ def make_tasks_router(st: Any) -> APIRouter:
             if one is None:
                 raise HTTPException(404, "no such finding")
             return one
-        seen = acc.db.task_refs(user_id, kind) if user_id else set()
+        seen = acc.db.task_refs(user_id, kind) if user_id else had
         return people.get(st, acc.db).pick(kind, rows, user_id, seen, controls=lambda: control_rows(st))
 
-    def next_other(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None) -> dict[str, Any] | None:
+    def next_other(
+        acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None, had: set[str]
+    ) -> dict[str, Any] | None:
         """find_again, recentre, bad_picture, second_look."""
         p = people.get(st, acc.db)
         if kind == "bad_picture":
@@ -740,7 +745,7 @@ def make_tasks_router(st: Any) -> APIRouter:
             if one is None:
                 raise HTTPException(404, "no such finding")
             return one
-        seen = acc.db.task_refs(user_id, kind) if user_id else set()
+        seen = acc.db.task_refs(user_id, kind) if user_id else had
         kinds = people.FIND_AGAIN_KINDS if kind == "find_again" else people.RECENTRE_KINDS
         done = (
             {r[0] for r in acc.db._conn().execute("SELECT DISTINCT finding_id FROM acc_taps WHERE kind=? AND user_id=?", (kind, user_id))}
@@ -817,10 +822,12 @@ def make_tasks_router(st: Any) -> APIRouter:
         cell_id: str | None = Query(None, max_length=80),
         quarter: str | None = Query(None, pattern="^(NW|NE|SW|SE)$"),
         finding_id: str | None = Query(None, max_length=80),
+        skip: str = Query("", max_length=4000, description="finds a guest's tab was already given, comma separated"),
     ) -> Any:
         acc = accounts.get(st)
         u = acc.current_user(request)
         uid = u["id"] if u else None
+        had = set() if uid else {x for x in skip.split(",") if x}
         if finding_id is not None and kind != "cell":
             from service.findings import id_of
 
@@ -837,11 +844,11 @@ def make_tasks_router(st: Any) -> APIRouter:
         if kind == "cell":
             ref = next_cell(acc, uid, cell_id, quarter)
         elif kind == "finding":
-            ref = next_finding(acc, uid, finding_id)
+            ref = next_finding(acc, uid, finding_id, had)
         elif kind in people.TASK_KINDS:
-            ref = next_other(acc, kind, uid, finding_id)
+            ref = next_other(acc, kind, uid, finding_id, had)
         else:
-            ref = next_judged(acc, kind, uid, finding_id)
+            ref = next_judged(acc, kind, uid, finding_id, had)
         if ref is None:
             return {"task": None}
         task = with_ask(acc.db.add_task(uid, kind, ref))

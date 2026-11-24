@@ -233,6 +233,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             {
                 "layouts": lambda: len(own.files._layouts),
                 "wcs": lambda: len(own.files._wcs),
+                "worker_trims": lambda: cpu.trims,
                 "jobs": lambda: len(own.scheduler.jobs),
                 "fns": lambda: len(own.scheduler._fns),
                 "kept_rows": lambda: len(own.findings.db._kept_rows),

@@ -76,3 +76,17 @@ describe('one "Check this finding" is one task', () => {
     expect(made).toEqual(['t_1']);
   });
 });
+
+describe('a tab does not ask for a find it was given', () => {
+  it('names the finds it had when it asks for any find, never for a square or one find', async () => {
+    const asked: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => (asked.push(String(u)), service(String(u).replace(/kind=red(?=&|$)/, "kind=red&finding_id=red:aa")))));
+    await labTakeTask('red');
+    await labTakeTask('red');
+    await labTakeTask('cell');
+    await labTakeTask('finding', 'red:bb');
+    const skips = asked.map((u) => new URLSearchParams(u.split('?')[1]).get('skip'));
+    expect(skips[1]).toContain('red:aa');
+    expect(skips.slice(2)).toEqual([null, null]);
+  });
+});

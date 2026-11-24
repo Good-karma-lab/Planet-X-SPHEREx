@@ -5,7 +5,7 @@
 import type { ComponentChildren } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { Mark } from '../../lib/marks';
-import { handedTask, handTask, leadParams, type Task } from '../../lib/account';
+import { handedTask, handTask, skipGiven, leadParams, type Task } from '../../lib/account';
 import { clearDo, pendingDo, useSignIn } from './signin';
 
 export type TaskKind = 'cell' | 'finding' | 'moves' | 'red' | 'anomaly' | 'find_again' | 'recentre' | 'bad_picture' | 'second_look';
@@ -252,6 +252,7 @@ export async function takeTask(kind: Takeable, ref?: string | null): Promise<Nex
   try {
     const q = new URLSearchParams({ kind });
     if (ref) q.set(kind === 'cell' ? 'cell_id' : 'finding_id', ref);
+    else skipGiven(q);
     const r = await fetch(`/api/tasks/next?${q.toString()}`);
     if (!r.ok) return 'failed';
     const t = ((await r.json()) as { task: NextTask | null }).task;
@@ -578,7 +579,11 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               Next: {T.title.toLowerCase()}
             </button>
           ) : (
-            <div class="mono-s">{done.none}</div>
+            <>
+              <div class="mono-s">{done.none}</div>
+              {/* nothing of this kind is left: a square always is */}
+              {task.kind !== 'cell' && <GiveSquareButton />}
+            </>
           )}
           {/* the way to report what the machine missed stays after the answers too */}
           <button class="mini tp-missed" style={a.embedded ? { display: 'none' } : undefined} onClick={a.markMissed} title="Put a mark on something that moves or looks odd and has no ring · mark it, say what it is, the checks run" data-testid="task-missed">
@@ -773,8 +778,8 @@ export const EXAMPLE_WORD: Record<string, string> = {
   dusty_star: 'A dusty star: a smooth rise to the red',
 };
 
-/** No task open: the one way to start one from the lab ("Give me a square": the next quarter of a square to look through). */
-export function GiveSquare() {
+/** The button alone: the next quarter of a square to look through, taken when clicked. */
+export function GiveSquareButton() {
   const [line, setLine] = useState('');
   const go = async () => {
     setLine('asking…');
@@ -784,11 +789,20 @@ export function GiveSquare() {
     else setLine(t === 'failed' ? 'Tasks did not answer' : 'No square is waiting for a look');
   };
   return (
-    <section class="psec give-square" data-testid="give-square">
+    <>
       <button class="btn primary" onClick={() => void go()} data-testid="give-square-button">
         Give me a square
       </button>
       {line && <span class="cb-status">{line}</span>}
+    </>
+  );
+}
+
+/** No task open: the one way to start one from the lab ("Give me a square": the next quarter of a square to look through). */
+export function GiveSquare() {
+  return (
+    <section class="psec give-square" data-testid="give-square">
+      <GiveSquareButton />
     </section>
   );
 }
