@@ -294,10 +294,17 @@ def picture_list(find: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [{"i": i, "mjd": v.get("mjd"), "ra": v.get("ra"), "dec": v.get("dec")} for i, v in enumerate(visits) if isinstance(v, dict)]
 
 
+# kinds people are not asked about for now. Time-lapse tracks until after the launch (24 Nov 2026): a track "seen" in its added picture
+# showed nothing in three of its five visits (film:8ae52fb8ac8b), and only 3 of 27 were seen at all. They stay in Findings
+KINDS_OFF: frozenset[str] = frozenset({"film"})
+
+
 def askable(row: dict[str, Any]) -> bool:
     """Whether a person is asked about a find: not one whose own picture was measured and shows nothing in the ring (24 of 27 track
     leads and 295 of 356 peaks on 24 Nov 2026: an empty ring cannot be judged). A find whose picture is not measured yet may be asked;
     one people raised is asked whatever its picture says."""
+    if row.get("kind") in KINDS_OFF:
+        return False
     return row.get("visible") is not False or "raised" in row
 
 
@@ -371,7 +378,8 @@ class People:
                 done_n += len(got)
         if user_id and done_n % CONTROL_EVERY == CONTROL_EVERY - 1:
             extra = [r for r in (controls() if controls else []) if series_of(r.get("kind")) and (kinds is None or r.get("kind") in kinds)]
-            cands = [r for r in pool + extra if r["finding_id"] not in mine and self.expected(str(series_of(r.get("kind"))), r) is not None]
+            everyone = [r for r in pool + extra if r.get("kind") not in KINDS_OFF]  # nor a control: it would be the only one of its kind
+            cands = [r for r in everyone if r["finding_id"] not in mine and self.expected(str(series_of(r.get("kind"))), r) is not None]
             if cands:
                 return cands[0]
         settled: set[str] = set()

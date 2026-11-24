@@ -847,3 +847,13 @@ def test_a_find_whose_picture_shows_nothing_is_not_asked_and_the_seen_ones_come_
     assert pp.pick("moves", rows[:2], None, set())["finding_id"] == "film:unmeasured"  # type: ignore[index]
     assert pp.pick("moves", rows[:1], None, set()) is None
     assert pp.pick("moves", [{**rows[0], "raised": 1}], None, set()) is not None  # people saw it: asked whatever the picture says
+
+
+def test_a_kind_switched_off_is_asked_of_nobody_not_even_as_a_control(pp: People, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(people, "KINDS_OFF", frozenset({"film"}))
+    monkeypatch.setattr(people, "CONTROL_EVERY", 1)  # every task a control
+    u = _users(pp, 1)[0]
+    rows = [{**FINDS[0], "visible": True, "raised": 1}, {**FINDS[6], "visible": True}]
+    assert pp.pick("moves", rows, u, set(), controls=lambda: [FINDS[6]]) is None
+    assert pp.pick("moves", rows, None, set()) is None
+    assert pp.pick("moves", [*rows, FINDS[3]], None, set())["finding_id"] == "peak:1"  # type: ignore[index]

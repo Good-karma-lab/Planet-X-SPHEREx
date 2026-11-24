@@ -108,6 +108,15 @@ try {
     await ev(() => (location.hash = '#/me'));
     await p.waitForTimeout(1200);
     check(size, 'A4 and the others open', (await p.getByTestId('screen-failed').count()) === 0);
+    crash = false; // back on the screen that failed: it is made anew (its module is asked for again only by a reload, so the one that threw throws again)
+    await ev(() => (location.hash = '#/method'));
+    await p.waitForTimeout(1200);
+    const again = await p.getByTestId('screen-failed').count();
+    await ev(() => (location.hash = '#/index'));
+    await p.waitForTimeout(800);
+    await p.reload();
+    await p.waitForTimeout(1500);
+    check(size, 'A4 a failed screen is tried anew on return, and a reload heals it', again === 1 && (await p.getByTestId('screen-failed').count()) === 0);
     check(size, 'no uncaught errors', errs.every((e) => e === 'Error: a test'), errs.slice(0, 2).join(' | '));
     await ctx.close();
   }
