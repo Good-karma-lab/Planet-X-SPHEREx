@@ -320,13 +320,18 @@ def task_fields(st: Any) -> Any:
     return tf
 
 
+def finds_asked(st: Any) -> list[dict[str, Any]]:
+    """The finds people may be asked about whose tasks open on a built field, ready or not. A database read: call it in a thread."""
+    from service.accounts import people
+
+    return [r for r in (all_rows(st) or []) if "ready" in r and r.get("_listed") and people.askable(r)]
+
+
 def finds_to_ready(st: Any) -> list[dict[str, Any]]:
     """The finds people may be asked about that the lab cannot show at once, in the order they are asked about: peaks, then red sources
     and anomalies, the ones seen in their own pictures first. A database read: call it in a thread."""
-    from service.accounts import people
-
     rank = {"peak": 0, "red": 1, "anomaly": 2}
-    got = [r for r in (all_rows(st) or []) if r.get("ready") is False and r.get("_listed") and people.askable(r)]
+    got = [r for r in finds_asked(st) if r["ready"] is False]
     return sorted(got, key=lambda r: (r.get("visible") is not True, rank.get(str(r.get("kind")), 9), -int(r.get("promise") or 0)))
 
 

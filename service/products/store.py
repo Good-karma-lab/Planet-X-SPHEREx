@@ -105,6 +105,11 @@ class Store:
         b = self.read_part(kind, key, "meta.json")
         return jsonsafe.loads(b) if b is not None else None  # a meta written before may carry NaN
 
+    def is_pinned(self, key: str) -> bool:
+        with self._lock:
+            row = self._db.execute("SELECT pinned FROM products WHERE key = ?", (key,)).fetchone()
+        return bool(row and row[0])
+
     def pin(self, key: str, pinned: bool = True) -> None:
         with self._lock:
             self._db.execute("UPDATE products SET pinned = ? WHERE key = ?", (int(pinned), key))

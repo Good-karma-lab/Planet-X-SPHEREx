@@ -89,3 +89,36 @@ def test_an_anomaly_is_ready_when_its_stamps_are_kept(tf: TaskFields, tmp_path: 
     assert not tf.spectrum_kept(a)
     (sp.dir / f"{key}.stamps.json").write_text("{}")
     assert tf.spectrum_kept(a)
+
+
+def test_a_field_that_fails_does_not_stand_in_the_way(tf: TaskFields) -> None:
+    names = ["a", "b"]
+    assert [tf.first_untried(names, now=t) for t in (0.0, 60.0, 120.0)] == [0, 1, None]
+    assert tf.first_untried(["a", "b", "c"], now=180.0) == 2
+    assert tf.first_untried(names, now=taskfields.RETRY_S + 1.0) == 0  # two hours on it is tried again
+
+
+def test_the_fields_tasks_open_on_are_pinned_and_let_go_of(tf: TaskFields) -> None:
+    store = tf.st.store
+    pins: dict[str, bool] = {}
+    store.is_pinned = lambda k: pins.get(k, False)
+    store.pin = lambda k, on=True: pins.__setitem__(k, on)
+    key = {p["fov"]: next(r["key"] for r in store.rows if r["params"] == p) for p in (F10, F20)}
+    finds = [{"ra": 50.0, "dec": 10.0}, {"ra": 50.0, "dec": 10.0 + 4.5 / 60}, {"ra": 80.0, "dec": 0.0}]
+    assert tf.pin(finds) == (2, 0) and pins == {key[10.0]: True, key[20.0]: True}
+    assert tf.pin(finds) == (0, 0)
+    assert tf.pin(finds[:1]) == (0, 1) and pins == {key[10.0]: True, key[20.0]: False}
+    # a field somebody else pinned (the warm set's) is never this module's to let go of
+    pins[key[20.0]] = True
+    assert tf.pin(finds) == (0, 0) and tf.pin(finds[:1]) == (0, 0) and pins[key[20.0]] is True
+
+
+def test_the_real_store_neither_strips_nor_loses_a_pinned_field(tmp_path: Path) -> None:
+    from service.products.store import Store
+
+    s = Store(tmp_path)
+    s.begin("field", "k" * 24, {"ra": 1.0, "dec": 2.0, "fov": 10.0})
+    s.complete("k" * 24)
+    assert not s.is_pinned("k" * 24)
+    s.pin("k" * 24)
+    assert s.is_pinned("k" * 24) and s.strip("field", "k" * 24) == 0

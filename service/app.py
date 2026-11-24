@@ -435,21 +435,28 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
 
         tf = await asyncio.to_thread(routes_tasks.task_fields, st)
         sch = st.scheduler
-        if tf is None or sch is None or sch.person_waiting() or qs.building() or not tf.room() or (rss_anon_mb() or 0) > 12_000:
+        if tf is None or sch is None:
+            return
+        asked = await asyncio.to_thread(routes_tasks.finds_asked, st)
+        if asked:  # an empty list is a list not read yet, never a reason to let go of every field
+            await asyncio.to_thread(tf.pin, asked)
+        if sch.person_waiting() or qs.building() or not tf.room() or (rss_anon_mb() or 0) > 12_000:
             return
         finds = await asyncio.to_thread(routes_tasks.finds_to_ready, st)
         todo = await asyncio.to_thread(tf.wanted, finds, routes_tasks.quarter_of_place)
         said: dict[str, Any] = {"fields_left": len(todo), "finds_left": len(finds), "at": time.time()}
-        if todo:
-            submit_field(todo[0], Priority.P2)
-            said["last"] = todo[0]
+        said["asked"] = len(asked)
+        at = tf.first_untried([json.dumps(p, sort_keys=True) for p in todo])
+        if at is not None:
+            submit_field(todo[at], Priority.P2)
+            said["last"] = todo[at]
         elif st.spectra is not None and not any(r.state == "running" for r in st.spectra.runs.values()):
             for r in finds:
                 if r.get("kind") != "anomaly":
                     continue
                 row = await asyncio.to_thread(routes_tasks.find_row, st, r["finding_id"])
                 an = ((row or {}).get("data") or {}).get("anomaly")
-                if an and not tf.spectrum_kept(an):
+                if an and not tf.spectrum_kept(an) and tf.first_untried([f"spectrum {r['finding_id']}"]) is not None:
                     st.spectra.start(taskfields.anomaly_params(an))
                     said["spectrum"] = r["finding_id"]
                     break

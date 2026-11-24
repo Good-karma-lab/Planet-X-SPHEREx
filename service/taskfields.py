@@ -8,6 +8,7 @@ one at a time, while the disk has room."""
 
 from __future__ import annotations
 
+import json
 import math
 import shutil
 import threading
@@ -16,12 +17,15 @@ from collections.abc import Iterable
 from typing import Any
 
 from service.products.store import product_key
+from service.storage import atomic_write_bytes
 from service.workers import fieldjob
 
 MARGIN_ARCMIN = 0.7  # the place is at least this far inside the field
 MAX_FOV = 20.0  # on a wider field a find is a speck
 LIST_TTL_S = 30.0  # the store's fields are listed again after this
 STALE_TTL_S = 600.0  # a field's exposures are asked of the index again after this
+RETRY_S = 2 * 3600.0  # a build (or a spectrum) asked for is not asked for again for this long: one that fails must not stand in the way
+PINNED_FILE = "task_fields.json"  # what this module pinned (the fields others pinned are theirs)
 DISK_STOP_PCT = 72.0  # nothing is built ahead on a disk this full (the keeper cleans above 75)
 
 
@@ -38,6 +42,7 @@ class TaskFields:
         self._lock = threading.Lock()
         self._fields: list[dict[str, Any]] = []
         self._at = -1e9
+        self._tried: dict[str, float] = {}  # what was asked to be made, and when
         self._fresh: dict[str, tuple[float, bool]] = {}  # product key -> (asked at, built of today's exposures and not stripped)
 
     def _listing(self) -> list[dict[str, Any]]:
@@ -67,14 +72,49 @@ class TaskFields:
 
     def place(self, ra: float, dec: float) -> dict[str, Any] | None:
         """The smallest built field that holds a place (10′ before 20′; under 5′ the sky around is lost), or None."""
+        f = self._best(ra, dec)
+        return None if f is None else {k: float(f[k]) for k in ("ra", "dec", "fov")}
+
+    def _best(self, ra: float, dec: float) -> dict[str, Any] | None:
         if getattr(self.st, "store", None) is None or getattr(self.st, "index", None) is None:
             return None
         near = [(f, _inside(ra, dec, f)) for f in self._listing()]
         good = [x for x in near if x[1] >= MARGIN_ARCMIN]
         for f, _ in sorted(good, key=lambda x: (float(x[0]["fov"]) < 10.0, float(x[0]["fov"]), -x[1])):
             if self._usable(f):
-                return {k: float(f[k]) for k in ("ra", "dec", "fov")}
+                return f
         return None
+
+    def first_untried(self, names: list[str], now: float | None = None) -> int | None:
+        """The place in the list of the first thing not asked for in the last RETRY_S, marked as asked for now; None when all were."""
+        t = time.monotonic() if now is None else now
+        for i, n in enumerate(names):
+            if t - self._tried.get(n, -1e9) >= RETRY_S:
+                self._tried[n] = t
+                return i
+        return None
+
+    def pin(self, finds: Iterable[dict[str, Any]]) -> tuple[int, int]:
+        """Keeps the fields the finds' tasks open on (neither the sweep strips a pinned field nor the disk keeper deletes one), and lets
+        go of those this module pinned that no task opens on any more. (pinned now, let go of)"""
+        store = self.st.store
+        path = store.root / PINNED_FILE
+        try:
+            mine = {str(k) for k in json.loads(path.read_text())}
+        except (OSError, ValueError):
+            mine = set()
+        want = {f["key"] for r in finds if (f := self._best(float(r["ra"]), float(r["dec"]))) is not None}
+        new = {k for k in want - mine if not store.is_pinned(k)}
+        gone = mine - want
+        if not new and not gone:
+            return 0, 0
+        # the list is written first: a pin it does not know would stay for ever
+        atomic_write_bytes(path, json.dumps(sorted((mine | new) - gone)).encode())
+        for k in new:
+            store.pin(k)
+        for k in gone:
+            store.pin(k, False)
+        return len(new), len(gone)
 
     def wanted(self, finds: Iterable[dict[str, Any]], quarter_at: Any = None) -> list[dict[str, Any]]:
         """The fields to build, in the finds' order: the quarter of the find's square when it holds the find, else 10′ on the find."""
