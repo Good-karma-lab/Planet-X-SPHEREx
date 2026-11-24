@@ -174,9 +174,13 @@ export function FindingClip({ id }: { id: string | null }) {
 
 /** A Planet X peak on the picture: it stands only in the visits added along its orbit, never on one picture, so the sum (the find's
  *  own clip) is what the picture opens with; one button gives the sky back. Nothing where the sum is not kept. */
-export function PeakSum({ id, track = false }: { id: string; track?: boolean }) {
+export function PeakSum({ id, track = false, tool = false }: { id: string; track?: boolean; tool?: boolean }) {
   const [clip, setClip] = useState<{ url: string; sum: boolean } | null>(null);
   const [sky, setSky] = useState(false);
+  // Mark or the ruler needs the sky itself
+  useEffect(() => {
+    if (tool) setSky(true);
+  }, [tool]);
   useEffect(() => {
     setClip(null);
     setSky(false);

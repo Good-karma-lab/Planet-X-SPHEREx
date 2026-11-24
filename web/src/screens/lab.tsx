@@ -4021,8 +4021,8 @@ export function Lab({ route }: { route: Route }) {
                 <div class="vwait">loading the pictures of every {view === 'det' ? 'detector' : 'band'} for each pass…</div>
               )}
               {distShow && dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
-              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && <PeakSum id={findId} />}
-              {flow.trackSum && findId.startsWith('film:') && view === 'picture' && <PeakSum id={findId} track />}
+              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && <PeakSum id={findId} tool={!!flow.tool} />}
+              {flow.trackSum && findId.startsWith('film:') && film !== null && view === 'picture' && <PeakSum id={findId} track tool={!!flow.tool} />}
               <div
                 class="float ftitle"
                 data-testid="field-title"

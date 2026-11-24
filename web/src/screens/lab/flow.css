@@ -492,3 +492,5 @@
 .vsq .peaksum .ps-bar .btn { min-height: 44px; white-space: nowrap; }
 @media (max-width: 599.98px) and (min-height: 480px) { .vsq .peaksum .ps-bar { bottom: 52px; } }
 .vsq .zoombox span { white-space: nowrap; }
+/* the picture's own tools stand over a sum: they lead back to the sky */
+.vsq .toolstrip, .vsq .factions { z-index: 8; }
