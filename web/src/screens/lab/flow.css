@@ -490,7 +490,7 @@
 .vsq .peaksum img { width: min(100%, 640px); height: min(100%, 640px); object-fit: contain; }
 .vsq .peaksum .ps-bar { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: max-content; max-width: calc(100% - 24px); padding: 6px 8px 6px 14px; border-radius: 12px; background: rgba(6, 12, 16, 0.86); border: 1px solid var(--edge); font-size: 12.5px; text-align: center; pointer-events: auto; }
 .vsq .peaksum .ps-bar .btn { min-height: 44px; white-space: nowrap; }
-@media (max-width: 599.98px) and (min-height: 480px) { .vsq .peaksum .ps-bar { bottom: 52px; } }
+@media (max-width: 599.98px) and (min-height: 480px) { .vsq .peaksum.sky .ps-bar { bottom: 112px; } .vsq .peaksum:not(.sky) .ps-bar { top: 56px; bottom: auto; } }
 .vsq .zoombox span { white-space: nowrap; }
 /* the picture's own tools stand over a sum: they lead back to the sky */
-.vsq .toolstrip, .vsq .factions { z-index: 8; }
+.vsq .float.toolstrip, .vsq .float.factions { z-index: 8; }
