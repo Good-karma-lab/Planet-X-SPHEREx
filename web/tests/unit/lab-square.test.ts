@@ -37,7 +37,7 @@ describe('a grid square and its quarters', () => {
 
 describe('the progress of a field being made', () => {
   it('says what the service does, with numbers and a bar where it gives them', () => {
-    expect(loadStep('reading the exposures: 157 of 581, 404 MB downloaded', 0, 0)).toEqual({ title: 'Loading the exposures', detail: '157 of 581 exposures · 404 MB', frac: 157 / 581 });
+    expect(loadStep('reading the exposures: 157 of 581, 404 MB downloaded', 0, 0)).toEqual({ title: 'Loading the exposures', detail: '157 of 581 exposures · our server has read 404 MB of NASA’s archive', frac: 157 / 581 });
     expect(loadStep('pass 1 of 3: D4 stacked (5 of 18 detector stacks)', 0, 0)).toEqual({ title: 'Stacking pass 1 of 3', detail: '5 of 18 detector stacks', frac: 5 / 18 });
     expect(loadStep('Request queued · 2 ahead', 0, 0)).toMatchObject({ title: 'Request queued', detail: '2 ahead', frac: null });
     expect(loadStep('loading the seasons…', 1, 3)).toMatchObject({ title: 'Loading the pictures', detail: '1 of 3 passes' });

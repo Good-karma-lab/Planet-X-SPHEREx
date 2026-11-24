@@ -606,6 +606,17 @@ const SKELETONS = 6;
 const PROMISING = ['mover', 'browndwarf', 'peak', 'film', 'pair'];
 
 /** The cards of one filter, a page at a time: the next page is asked for when the end of the list comes on screen. */
+const FILTER_KEY = 'spherex-findings-filter';
+function keptFilter(): { kind?: KindSel; stage?: StageSel } {
+  try {
+    const k = JSON.parse(sessionStorage.getItem(FILTER_KEY) ?? '{}') as { kind?: KindSel; stage?: StageSel };
+    // what needs an account is not opened for whoever signs out meanwhile
+    return k.stage === 'mine' ? { kind: k.kind } : k;
+  } catch {
+    return {};
+  }
+}
+
 function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolean) {
   const [state, setState] = useState<{
     key: string;
@@ -763,8 +774,16 @@ export function FindingsView({
     window.addEventListener('keydown', k);
     return () => window.removeEventListener('keydown', k);
   }, [sheet]);
-  const [kind, setKind] = useState<KindSel>('promising');
-  const [stage, setStage] = useState<StageSel>('any');
+  // the filters stay while the tab is open: Back from the lab finds the list as it was left
+  const [kind, setKind] = useState<KindSel>(() => keptFilter().kind ?? 'promising');
+  const [stage, setStage] = useState<StageSel>(() => keptFilter().stage ?? 'any');
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(FILTER_KEY, JSON.stringify({ kind, stage }));
+    } catch {
+      /* no storage: the list opens on Promising */
+    }
+  }, [kind, stage]);
   // the findings the signed-in user closed a task on (the accounts of the service): "Viewed by me"
   const { user } = useUser();
   const [mine, setMine] = useState<string[]>([]);

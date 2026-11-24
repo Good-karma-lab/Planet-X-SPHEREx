@@ -88,8 +88,14 @@ try {
     await p.goto(BASE + '/#/lab?ra=51.74407&dec=12.76414&fov=10&task=finding&kind=finding&finding=peak:dd36a21a3e16&find=peak:dd36a21a3e16');
     await p.reload();
     await p.waitForTimeout(16000);
-    check(size, 'A3 the sum stands on the picture', (await p.locator('[data-testid=peak-sum] img').count()) === 1);
+    check(size, 'A3 the sum stands on the picture', (await p.locator('[data-testid=peak-sum] img').count()) >= 1);
     await shot('peak');
+    await p.getByTestId('tool-mark').click({ timeout: 3000 }).catch(() => {});
+    await p.waitForTimeout(500);
+    check(size, 'A3 Mark stands over the sum and leads to the sky', (await p.locator('[data-testid=peak-sum] img').count()) === 0);
+    await p.keyboard.press('Escape');
+    await p.getByTestId('peak-sum-button').click();
+    await p.waitForTimeout(500);
     await p.getByTestId('peak-sum-button').click();
     await p.waitForTimeout(800);
     check(size, 'A3 one button gives the sky back', (await p.locator('[data-testid=peak-sum] img').count()) === 0);

@@ -490,7 +490,26 @@
 .vsq .peaksum img { width: min(100%, 640px); height: min(100%, 640px); object-fit: contain; }
 .vsq .peaksum .ps-bar { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; width: max-content; max-width: calc(100% - 24px); padding: 6px 8px 6px 14px; border-radius: 12px; background: rgba(6, 12, 16, 0.86); border: 1px solid var(--edge); font-size: 12.5px; text-align: center; pointer-events: auto; }
 .vsq .peaksum .ps-bar .btn { min-height: 44px; white-space: nowrap; }
-@media (max-width: 599.98px) and (min-height: 480px) { .vsq .peaksum .ps-bar { bottom: 52px; } }
+@media (max-width: 599.98px) and (min-height: 480px) { .vsq .peaksum.sky .ps-bar { bottom: 112px; } .vsq .peaksum:not(.sky) .ps-bar { top: auto; bottom: 10px; left: 10px; transform: none; max-width: calc(100% - 140px); flex-direction: column; align-items: stretch; gap: 4px; padding: 6px 8px; } .vsq .ps-pair { margin-bottom: 90px; } }
 .vsq .zoombox span { white-space: nowrap; }
 /* the picture's own tools stand over a sum: they lead back to the sky */
-.vsq .toolstrip, .vsq .factions { z-index: 8; }
+.vsq .float.toolstrip, .vsq .float.factions { z-index: 8; }
+/* a question's two pictures, side by side */
+.taskpanel .tv-pair, .vsq .ps-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.taskpanel .tv-pair figure, .vsq .ps-pair figure { margin: 0; min-width: 0; }
+.taskpanel .tv-pair img, .vsq .ps-pair img { display: block; width: 100%; aspect-ratio: 1; border-radius: 8px; background: #0a131b; }
+.taskpanel .tv-pair figcaption, .vsq .ps-pair figcaption { margin-top: 4px; font: 600 11.5px var(--font); color: var(--ink); text-align: center; }
+.vsq .ps-pair { width: min(100% - 24px, 860px); margin-bottom: 40px; }
+.taskpanel .tp-guestline { font: 500 11.5px var(--font); color: var(--muted); margin: 2px 0 4px; }
+.lab button, .lab summary, .vsq, .tbar { -webkit-user-select: none; user-select: none; }
+/* the clip's own small print (its S/N line) is cut off: the words are under the picture */
+.taskpanel .tv-pair figure, .vsq .ps-pair figure { display: flex; flex-direction: column; }
+.taskpanel .tv-pair img, .vsq .ps-pair img { clip-path: inset(0 0 14.5% 0); margin-bottom: -14.5%; }
+/* the sheet at rest shows the subject of the question: an anomaly's odd pictures in one row */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .lab .panel[data-detent='peek'] .taskpanel .tv-fixed, :root .lab .panel:not([data-detent]) .taskpanel .tv-fixed { min-height: 0; }
+  :root .lab .panel[data-detent='peek'] .taskpanel .tv-stamps, :root .lab .panel:not([data-detent]) .taskpanel .tv-stamps { grid-template-columns: repeat(6, 1fr); gap: 4px; }
+}
+.taskpanel .tp-guestline .tp-guest { all: unset; cursor: pointer; color: var(--accent-l); text-decoration: underline; }
+:root .lab .taskpanel .tp-guestline .tp-guest { min-height: 0; height: auto; padding: 0; }
+@media (max-width: 599.98px) and (min-height: 480px) { :root .lab .panel:not([data-detent='full']) .taskpanel .tv-fixed .tv-line { display: none; } .taskpanel .tp-guestline { margin: 0; line-height: 16px; } }

@@ -369,9 +369,14 @@ export function PlanetXPage() {
           <h1>Planet X</h1>
           <div class="px3-st" data-testid="px-stats">
             <span>
-              {leads == null ? 'loading the leads…' : <b>{nLeads}</b>} {leads == null ? '' : nLeads === 1 ? 'lead' : 'leads'} in{' '}
-              <b>{searched == null ? '…' : mine.length}</b>{' '}
-              <span title="Fields of any size where Find Planet X ran (most other searched fields are the time-lapse search only)">fields searched for Planet X</span>
+              {leads == null || searched == null ? (
+                'loading what was searched…'
+              ) : (
+                <>
+                  <b>{nLeads}</b> {nLeads === 1 ? 'spot' : 'spots'} to check in <b>{mine.length}</b>{' '}
+                  <span title="Fields of any size where Find Planet X ran (most other searched fields are the time-lapse search only)">fields searched for Planet X</span>
+                </>
+              )}
             </span>
             <span>
               <b>0</b> confirmed
@@ -559,8 +564,8 @@ export function PlanetXPage() {
           {tab === 'searched' && (
             <div data-testid="px-searched">
               <div class="px3-auto">
-                <b>Nothing to set.</b> Find Planet X runs by itself on every field opened in the Lab and on the fields we search: both
-                distance ranges (30–300 and 250–2000 au) and both light choices, every time.
+                <b>It runs by itself</b> on every field opened in the Lab and on the fields we search, from 30 to 2000 times the Earth’s
+                distance from the Sun.
               </div>
               {searched == null && <p class="px3-note">Loading the searched fields…</p>}
               {mine.map((f) => (

@@ -25,7 +25,7 @@ Source: [challenge page](https://www.spaceappschallenge.org/2026/challenges/plan
 
 We read the task as a test of one thing: a person who knows nothing about the field must be able to open a place and see an object that nobody pointed out. If the program can also find such objects, that is a bonus. Four promises follow from this and every step on this page serves one of them.
 
-- **Anyone, quickly.** A first-time visitor sees a moving picture within seconds, without choosing settings and without reading.
+- **Anyone, quickly.** A first-time visitor sees a moving picture of a ready field within seconds, without choosing settings and without reading; a place nobody has opened is built first, which takes minutes.
 - **Change is seen by eye.** The background stands still, so the only thing that changes is what really changed. This is the reason for every cleaning step: a cosmic-ray hit, a streak or a halo spike that blinks would be a false discovery for the viewer.
 - **Every time scale has a moving picture.** Years, days and the faintest bodies each have their own view (see What we do and why).
 - **The program helps, honestly.** A track is drawn only when a search found it, it carries its evidence, and it is called a lead, never a discovery.

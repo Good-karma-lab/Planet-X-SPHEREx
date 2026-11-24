@@ -21,7 +21,7 @@ export interface Hint {
 }
 
 export const HINTS: Hint[] = [
-  { id: 'square', screen: 'explore', at: '[data-testid=give-square]', title: 'Give me a square', text: 'A piece of sky nobody has looked through yet.' },
+  { id: 'square', screen: 'explore', at: '[data-testid=give-square]', title: 'Give me a square', text: 'A piece of sky the machine has searched and people have not looked through yet.' },
   { id: 'play', screen: 'lab', at: '[data-testid=picture]', title: 'Watch it play', text: 'The passes take turns. Find a dot that steps while the stars stay.', task: 'cell' },
   { id: 'mark', screen: 'lab', at: '[data-testid=task-missed]', title: 'It moves and has no ring?', text: 'Mark it here, then click it on the picture.', task: 'cell', around: '.lab .panel' },
   { id: 'answer', screen: 'lab', at: '[data-testid=task-panel] .tp-btns', title: 'Then answer', text: 'Nothing here, or Done, with marks. After a minute and every pass.', task: 'cell', around: '.lab .panel' },

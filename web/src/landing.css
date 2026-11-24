@@ -358,3 +358,7 @@
 }
 /* a trust line that wraps (a phone) keeps its dot beside its first line */
 .lp-trust li::before { flex: none; align-self: flex-start; margin-top: 8px; }
+
+.lp .lp-task { display: inline-flex; flex-direction: column; gap: 6px; max-width: 320px; }
+.lp .lp-task small { font-size: 12.5px; line-height: 1.4; color: var(--lp-muted, rgba(230, 240, 243, 0.72)); }
+.lp .lp-cta { align-items: flex-start; }

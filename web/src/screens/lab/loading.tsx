@@ -18,7 +18,7 @@ export function loadStep(phase: string, pictures: number, passes: number): LoadS
   const s = phase.trim();
   let m = s.match(/^reading the exposures: (\d+) of (\d+), (\d+) MB downloaded/);
   // the megabytes only once there are some (a cached exposure costs none: "0 MB" read as stuck)
-  if (m) return { title: 'Loading the exposures', detail: `${m[1]} of ${m[2]} exposures${Number(m[3]) > 0 ? ` · ${m[3]} MB` : ''}`, frac: Number(m[1]) / Math.max(1, Number(m[2])) };
+  if (m) return { title: 'Loading the exposures', detail: `${m[1]} of ${m[2]} exposures${Number(m[3]) > 0 ? ` · our server has read ${m[3]} MB of NASA’s archive` : ''}`, frac: Number(m[1]) / Math.max(1, Number(m[2])) };
   m = s.match(/^pass (\d+) of (\d+): D\d stacked \((\d+) of (\d+) detector stacks\)/);
   if (m) return { title: `Stacking pass ${m[1]} of ${m[2]}`, detail: `${m[3]} of ${m[4]} detector stacks`, frac: Number(m[3]) / Math.max(1, Number(m[4])) };
   m = s.match(/^quick picture of pass (\d+) of (\d+)/);
