@@ -512,7 +512,7 @@ export function Cabinet({ route }: { route: Route }) {
   const run = (job: Promise<unknown>) => void job.then(reload, (e: Error) => setStatus(e.message));
   const take = (kind: 'cell' | 'finding') =>
     void nextTask(kind).then(
-      (t) => (t ? (location.hash = taskHash(t)) : setStatus(kind === 'cell' ? 'No searched square is waiting for a look' : 'No finding is waiting for a check')),
+      (t) => (t ? (location.hash = taskHash(t)) : setStatus(kind === 'cell' ? 'No searched square is waiting for a look' : 'No finding is left to check: take a square')),
       (e: Error) => setStatus(e.message),
     );
   const findingOf = (inv: Investigation) => mine?.findings.find((f) => f.finding_id === inv.submitted) ?? null;

@@ -52,6 +52,9 @@ def test_a_worker_trims_after_a_call_at_most_so_often_and_never_spoils_it(monkey
 
     monkeypatch.setattr(cpu, "trim", trim_fails)
     monkeypatch.setattr(cpu, "_trimmed", -1e9)
-    assert [cpu._in_worker(divmod, 7, 2) for _ in range(3)] == [(3, 1)] * 3 and len(n) == 1
+    assert [cpu._in_worker(divmod, 7, 2) for _ in range(3)] == [((3, 1), False)] * 3 and len(n) == 1
+    monkeypatch.setattr(cpu, "trim", lambda: "trim: done")
+    monkeypatch.setattr(cpu, "_trimmed", -1e9)
+    assert [cpu._in_worker(divmod, 7, 2)[1] for _ in range(2)] == [True, False]
     with pytest.raises(ZeroDivisionError):
         cpu._in_worker(divmod, 1, 0)

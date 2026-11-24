@@ -238,6 +238,7 @@ async function syncMarks(): Promise<void> {
 export async function nextTask(kind: 'cell' | 'finding', ref?: string): Promise<Task | null> {
   const q = new URLSearchParams({ kind });
   if (ref) q.set(kind === 'cell' ? 'cell_id' : 'finding_id', ref);
+  else skipGiven(q);
   const t = (await api<{ task: Task | null }>(`/api/tasks/next?${q}`)).task;
   if (t) handTask(t);
   return t;
@@ -245,6 +246,13 @@ export async function nextTask(kind: 'cell' | 'finding', ref?: string): Promise<
 
 // A task taken here and opened in the lab by its id is handed over as it is: the lab does not ask the service for another one (one
 // "Check this finding" is one task). Kept in memory and, for a reload of the same tab, in sessionStorage (the last HANDED_KEEP).
+// The finds this tab was given, so that a guest (whose tasks are nobody's) is not handed the same one again; a person's are the
+// service's to know, and it does not read this.
+const given: string[] = [];
+export function skipGiven(q: URLSearchParams): void {
+  if (q.get('kind') !== 'cell' && given.length) q.set('skip', given.slice(-60).join(','));
+}
+
 const HANDED_KEY = 'sky-handed-tasks';
 const HANDED_KEEP = 20;
 const handed = new Map<string, Task>();
@@ -260,6 +268,7 @@ function handedStore(): Record<string, Task> {
 
 /** Keep a task taken from the service for the lab that opens it next. */
 export function handTask(t: Task): void {
+  if (t.finding_id && t.kind !== 'cell' && !given.includes(t.finding_id)) given.push(t.finding_id);
   handed.delete(t.id);
   handed.set(t.id, t);
   while (handed.size > HANDED_KEEP) handed.delete(handed.keys().next().value as string);

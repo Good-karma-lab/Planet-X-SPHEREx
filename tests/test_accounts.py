@@ -862,3 +862,19 @@ def test_smtp_sender_upgrades_to_tls_logs_in_and_sends(
     assert c.post("/api/auth/email", json={"email": "ann@example.org"}).json() == {"sent": True, "minutes": 15}
     monkeypatch.setenv("SKY_RESEND_API_KEY", "re_x")
     assert type(sender_from_env()).__name__ == "ResendSender"
+
+
+def test_a_guest_is_not_handed_the_finds_the_tab_had_and_the_end_is_said(site: tuple[FastAPI, _State, _Mail]) -> None:
+    app, st, mail = site
+    row = {"field_key": "k", "ra": 1.0, "dec": 2.0, "status": "unexplained", "stage": None, "kind": "red", "visible": True, "promise": 15}
+    st.task_findings = lambda: [{**row, "finding_id": f"red:{i}"} for i in range(3)]  # type: ignore[attr-defined]
+    for kind in ("finding", "red"):
+        guest, had = _client(app), []
+        for _ in range(3):
+            t = guest.get("/api/tasks/next", params={"kind": kind, "skip": ",".join(had)}).json()["task"]
+            had.append(t["finding_id"])
+        assert sorted(had) == ["red:0", "red:1", "red:2"]
+        assert guest.get("/api/tasks/next", params={"kind": kind, "skip": ",".join(had)}).json()["task"] is None
+    # a person's own finds are the service's to know: what the page says is not read
+    c = _sign_in(app, mail)
+    assert c.get("/api/tasks/next", params={"kind": "finding", "skip": "red:0,red:1,red:2"}).json()["task"] is not None

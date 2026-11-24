@@ -178,20 +178,24 @@ TRIM_EVERY_S = 180.0  # a worker hands its free pages back after a call, at most
 _trimmed = 0.0
 
 
-def _in_worker[R](fn: Callable[..., R], *args: Any) -> R:
-    """The call as a worker makes it: its result, then what the calls before it left free inside glibc goes back to the kernel."""
+trims = 0  # how many calls handed a worker's free pages back (the memory line says it)
+
+
+def _in_worker[R](fn: Callable[..., R], *args: Any) -> tuple[R, bool]:
+    """The call as a worker makes it: its result, and whether what the calls before it left free inside glibc went back to the kernel."""
     global _trimmed
-    try:
-        return fn(*args)
-    finally:
-        now = time.monotonic()
-        if now - _trimmed >= TRIM_EVERY_S:
-            _trimmed = now
-            with contextlib.suppress(Exception):
-                trim()
+    out = fn(*args)
+    now = time.monotonic()
+    if now - _trimmed < TRIM_EVERY_S:
+        return out, False
+    _trimmed = now
+    with contextlib.suppress(Exception):
+        return out, trim() is not None
+    return out, False
 
 
 async def run[R](fn: Callable[..., R], *args: Any) -> R:
+    global trims
     if _pool is None or _gate is None:
         return fn(*args)
     low = await _gate.acquire(priority())
@@ -200,7 +204,9 @@ async def run[R](fn: Callable[..., R], *args: Any) -> R:
             used = _pool
             assert used is not None
             try:
-                return await asyncio.get_running_loop().run_in_executor(used, _in_worker, fn, *args)
+                out, trimmed = await asyncio.get_running_loop().run_in_executor(used, _in_worker, fn, *args)
+                trims += int(trimmed)
+                return out
             except BrokenProcessPool:
                 log.warning("worker pool broken during %s (attempt %d): a new pool is started", getattr(fn, "__name__", fn), attempt + 1)
                 _renew(used)
