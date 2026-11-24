@@ -38,6 +38,7 @@ import { findPeaks, type Peak } from './detect';
 import { rulerOf, rulerWord, type RulerPoint } from './ruler';
 import { awardLine, focusKind, taskOfParams, taskTrack, useLabTask, type NextTask } from './task';
 import { FindingClip, MoverView, StampsView } from './taskviews';
+import { isBlindPlace } from './trackplace';
 import type { Anomaly, Source } from '../spectrum';
 import { FIELD_ASKING, followFieldKnown, heldAt, KNOWN_SOURCES, placeAt, withFindJpl, withFindKnown, withFindStatus, type FieldKnown, type Held } from './known';
 import { atEpoch, SURVEY_EPOCH } from '../../lib/sky';
@@ -119,6 +120,10 @@ export interface FlowArgs {
   visitOf: (mjd: number) => number | null;
   /** how many visits the pass on show has in Days (0 in Months) */
   nVisits: number;
+  /** the paths are drawn (the View tab's Paths): the task's, the people's, the machine's */
+  paths: boolean;
+  /** where the find of the task (or of the link) is; null without one */
+  findAt: { ra: number; dec: number } | null;
   /** stops the time-lapse on the frame on show (Mark needs a still picture to click on) */
   pause: () => void;
   /** the field's passes (or the visits of the pass, in Days) are on the picture: a question can be answered by looking */
@@ -509,11 +514,17 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       return byPass.size ? [k, byPass.size] : null;
     };
     // a task's find not answered yet: nothing of the catalogues at its place (its answer may be known: a control object)
+    // (the find's own places, whatever is selected now: another object's card must not uncover the find's ring)
     const bs = taskRef.current.blind ? argsRef.current.sel : null;
-    const bp = bs ? (bs.pmra || bs.pmdec ? atEpoch(bs.ra, bs.dec, bs.pmra ?? 0, bs.pmdec ?? 0, env.year) : [bs.ra, bs.dec]) : null;
-    const bt = bp ? uv(bp[0]!, bp[1]!) : null;
+    const bp = bs?.finding ? (bs.pmra || bs.pmdec ? atEpoch(bs.ra, bs.dec, bs.pmra ?? 0, bs.pmdec ?? 0, env.year) : [bs.ra, bs.dec]) : null;
     const box0 = rects[0];
-    const blindAt = bt && box0 ? { x: box0.x + bt[0] * box0.w, y: box0.y + bt[1] * box0.h, r: Math.max(14, (12 * box0.w) / env.fovArc) } : null;
+    const blindAt =
+      taskRef.current.blind && box0
+        ? [...(bp ? [bp] : []), ...(argsRef.current.findAt ? [[argsRef.current.findAt.ra, argsRef.current.findAt.dec]] : []), ...taskTrack.pts.map((q) => [q.ra, q.dec])].map((q) => {
+            const [u, v] = uv(q[0]!, q[1]!);
+            return { x: box0.x + u * box0.w, y: box0.y + v * box0.h, r: Math.max(14, (12 * box0.w) / env.fovArc) };
+          })
+        : null;
     drawKnown({ ...env, seenIn, blindAt, pointer: ptr.current, match: match && noRings ? { ...match, noMatch: [] } : match }, knDraw);
     const z = env.zoom;
     if (z && !wall) {
@@ -549,10 +560,13 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // a track's task: its path through the visits, the direction, a dot per visit (red when tapped as missing), the ring on the visit
     // shown, so that "does one dot step along the arrow?" has the arrow and the dot on the picture
     const tt = taskTrack.pts;
-    if (tt.length >= 2 && !wall) {
+    if (tt.length >= 2 && !wall && argsRef.current.paths) {
       const yr = (m: number) => 2000 + (m - 51544.5) / 365.25;
       let near = 0;
       tt.forEach((q, k) => Math.abs(yr(q.mjd) - env.year) < Math.abs(yr(tt[near]!.mjd) - env.year) && (near = k));
+      // the frame on show is one of the track's own visits: the same number on the time line, never a neighbour a few hours away
+      const shownVisit = argsRef.current.visitOf((env.year - 2000) * 365.25 + 51544.5);
+      const onVisit = shownVisit != null && argsRef.current.visitOf(tt[near]!.mjd) === shownVisit;
       ctx.save();
       for (const box of rects) {
         ctx.save();
@@ -589,7 +603,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ctx.font = '600 11px ui-monospace, SFMono-Regular, Menlo, monospace';
         xy.forEach(([x, y], k) => {
           const miss = taskTrack.missing.includes(tt[k]!.i);
-          const cur = k === near && Math.abs(yr(tt[k]!.mjd) - env.year) < 0.25 / 365.25;
+          const cur = k === near && onVisit;
           ctx.beginPath();
           ctx.arc(x, y, cur ? 3.4 : 3, 0, 2 * Math.PI);
           ctx.lineWidth = 2;
@@ -660,8 +674,6 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           }
         }
         const [rx, ry] = xy[near]!;
-        // the ring only when the picture shows one of the track's own visits (within a few hours)
-        const onVisit = Math.abs(yr(tt[near]!.mjd) - env.year) < 0.25 / 365.25;
         if (onVisit) {
         ctx.beginPath();
         ctx.arc(rx, ry, 13, 0, 2 * Math.PI);
@@ -713,7 +725,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     }
     // the people's corrected path of this track: violet, dashed, beside the machine's
     const pt = ptRef.current;
-    if (pt?.visits && pt.visits.length >= 2 && !wall) {
+    if (pt?.visits && pt.visits.length >= 2 && !wall && argsRef.current.paths) {
       ctx.save();
       for (const box of rects) {
         ctx.save();
@@ -1491,7 +1503,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   // "Check and submit" exist only here: with nothing selected there is nothing to note or submit.
   const matchAt = (ra: number, dec: number): string => {
     // a task's find not answered yet: the catalogues' word waits for the answers (a control object looks like any other)
-    if (!cur && taskView.blind) return 'after your answers';
+    if (!cur && blindAny && isBlindPlace(ra, dec, a.findAt, taskTrack.pts)) return 'after your answers';
     const w = a.epochNow != null ? catalogueAt(known, ra, dec, a.epochNow).word : 'asking the catalogues…';
     // a find: JPL's answer is the find's own (asked for every visit of its track), never the picture's lookup, which may still be
     // waiting: "JPL did not answer" beside an UNEXPLAINED badge read as a contradiction

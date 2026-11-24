@@ -60,7 +60,7 @@ def test_the_series_are_the_spec_wording_and_never_ask_what_the_machine_knows() 
     assert first["slow"]["question"] == "Does the dot in the ring shift while the stars stay put?"
     assert steps_of("slow")[1]["question"] == "Is it one dot, or two touching?"
     assert steps_of("slow")[2]["question"] == "Old pictures (WISE 2010, 2MASS 2000): is there a dot along the arrow, further back?"
-    assert first["peak"]["question"].startswith("Left: added along the orbit. Right: added as it is.")
+    assert first["peak"]["question"].startswith("It blinks: the visits added along the orbit, then one pass.")
     assert steps_of("peak")[1]["question"] == "Is it inside a bright star's glow or on its spike?"
     assert [s["question"] for s in steps_of("red")] == [
         "A sharp dot, or a fuzzy patch?",
@@ -834,3 +834,16 @@ def test_a_red_source_the_catalogues_answer_is_not_handed_out_and_a_known_peak_i
     peak = {"finding_id": "peak:eris", "kind": "peak", "status": "known", "stage": "known"}
     assert pp.expected("peak", peak) == frozenset({"candidate"})  # a known body found blind: the dot is there
     assert pp.expected("peak", {**peak, "echo": True}) is None  # one pass of a body and noise: nobody knows what a person sees
+
+
+def test_a_find_whose_picture_shows_nothing_is_not_asked_and_the_seen_ones_come_first(pp: People) -> None:
+    row = {"kind": "film", "status": "unexplained", "stage": None, "ra": 1.0, "dec": 2.0}
+    rows = [
+        {**row, "finding_id": "film:empty", "visible": False},
+        {**row, "finding_id": "film:unmeasured", "visible": None},
+        {**row, "finding_id": "film:seen", "visible": True},
+    ]
+    assert pp.pick("moves", rows, None, set())["finding_id"] == "film:seen"  # type: ignore[index]
+    assert pp.pick("moves", rows[:2], None, set())["finding_id"] == "film:unmeasured"  # type: ignore[index]
+    assert pp.pick("moves", rows[:1], None, set()) is None
+    assert pp.pick("moves", [{**rows[0], "raised": 1}], None, set()) is not None  # people saw it: asked whatever the picture says

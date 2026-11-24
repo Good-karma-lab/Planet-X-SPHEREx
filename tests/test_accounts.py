@@ -320,7 +320,7 @@ def test_finding_tasks_give_the_strong_kinds_before_the_many_red_sources(
         t = c.get("/api/tasks/next", params={"kind": "finding"}).json()["task"]
         got.append(t["finding_id"])
         c.post(f"/api/me/tasks/{t['id']}/done", json={"result": "moves", "mark_ids": []})
-    assert got == ["film:1", "anomaly:hi", "red:unseen"]  # then the many: the high-promise one first among the equal
+    assert got == ["film:1", "anomaly:hi", "red:0"]  # then the many: the ones seen in their own pictures before those not measured
 
 
 def test_a_machine_finding_submitted_by_two_people_is_in_both_their_findings(site: tuple[FastAPI, _State, _Mail]) -> None:

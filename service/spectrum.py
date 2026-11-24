@@ -41,7 +41,9 @@ IN_FLIGHT = 48
 HALF = photometry.HALF
 RAW = 7  # the window of file pixels kept for the page: 15 × 15 around the source pixel
 SATURATED_SHARE = 0.5  # more than this share of saturated cores: "no SPHEREx spectrum"
-KEEP_RUNS = 200
+# the spectra kept in memory, the latest used; a finished one left out is read from disk again (30 ms). One with its stamps is 170,000
+# blocks, so the 200 kept before were 34 million
+KEEP_RUNS = 40
 
 
 def _arr(a: np.ndarray) -> list[list[float | None]]:

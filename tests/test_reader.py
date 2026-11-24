@@ -161,3 +161,30 @@ def test_threads_that_keep_and_take_layouts_never_meet_one_that_left(tmp_path: P
     for t in ts:
         t.join()
     assert not wrong and len(fr._layouts) == 5
+
+
+def test_the_wcs_kept_have_a_ceiling_and_the_one_used_stays(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+    from typing import Any
+
+    from service.reader import files
+
+    monkeypatch.setattr(files, "WCS_KEEP", 3)
+    built: list[str] = []
+
+    def celestial(h: str) -> str:
+        built.append(h)
+        return f"wcs of {h}"
+
+    monkeypatch.setattr(files.spxwcs, "celestial", celestial)
+    fr = FileReader(None, tmp_path)  # type: ignore[arg-type]
+
+    def wcs(k: str) -> Any:
+        return fr.wcs_of(k, SimpleNamespace(image_header=k))  # type: ignore[arg-type]
+
+    for k in ("a", "b", "c"):
+        wcs(k)
+    assert wcs("a") == "wcs of a" and built == ["a", "b", "c"]
+    wcs("d")
+    assert list(fr._wcs) == ["c", "a", "d"]  # b, the least lately used, left; the others stayed
+    assert wcs("b") == "wcs of b" and built[-1] == "b"

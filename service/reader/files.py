@@ -31,6 +31,7 @@ BAND_ROWS = 64
 # (73,000 on prod, 20 GB), and the garbage collector walks them all (6,000: 0.6 s on the Mac, with the API's threads standing). A square
 # reads up to 1,100 exposures; one that left is read from disk again (12 ms, in a thread)
 LAYOUTS_KEEP = 2000
+WCS_KEEP = 2000  # as many as the layouts: emptied all at once at 6,000, the next square built its thousand anew (11 ms each)
 HEADER_PROBE = 32768  # first read at each header: enough for every header seen so far (IMAGE ~26 kB, PSF 43 kB needs two)
 Plane = Literal["image", "flags", "variance", "zodi"]
 
@@ -42,22 +43,33 @@ class FileReader:
     _layouts: OrderedDict[str, Layout] = field(default_factory=OrderedDict)
     _layouts_lock: threading.Lock = field(default_factory=threading.Lock)
     _locks: dict[str, asyncio.Lock] = field(default_factory=dict)
-    _wcs: dict[str, Any] = field(default_factory=dict)
+    _wcs: OrderedDict[str, Any] = field(default_factory=OrderedDict)
+    _wcs_lock: threading.Lock = field(default_factory=threading.Lock)
 
     def wcs_of(self, key: str, lay: Layout) -> Any:
         """The celestial WCS of a file, built once (building it from the header costs milliseconds, and searches ask for the same
         file again and again)."""
-        w = self._wcs.get(key)
+        w = self._kept_wcs(key)
         if w is None:
-            if len(self._wcs) > 6000:
-                self._wcs.clear()
-            w = self._wcs[key] = spxwcs.celestial(lay.image_header)
+            w = spxwcs.celestial(lay.image_header)
+            with self._wcs_lock:
+                self._wcs[key] = w
+                self._wcs.move_to_end(key)
+                while len(self._wcs) > WCS_KEEP:
+                    self._wcs.popitem(last=False)
         return w
+
+    def _kept_wcs(self, key: str) -> Any:
+        with self._wcs_lock:
+            w = self._wcs.get(key)
+            if w is not None:
+                self._wcs.move_to_end(key)
+            return w
 
     async def wcs(self, key: str, lay: Layout) -> Any:
         """wcs_of, built in a thread the first time: astropy reads the header's SIP terms for up to a second, which must never hold the
         event loop (every answer, /health too, would wait)."""
-        w = self._wcs.get(key)
+        w = self._kept_wcs(key)
         return w if w is not None else await asyncio.to_thread(self.wcs_of, key, lay)
 
     # ---- layout -------------------------------------------------------------------------------------------------------------

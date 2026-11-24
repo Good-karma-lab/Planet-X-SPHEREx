@@ -84,7 +84,7 @@ SERIES: dict[str, tuple[dict[str, Any], ...]] = {
             {"id": "no", "label": "No", "result": "moves"})},
     ),
     "peak": (  # a Planet X peak; two sums side by side
-        {"id": "left", "question": "Left: added along the orbit. Right: added as it is. Is there a dot in the ring on the left only?", "show": "sums", "answers": (
+        {"id": "left", "question": "It blinks: the visits added along the orbit, then one pass. Is there a dot in the ring in the sum only?", "show": "sums", "answers": (
             {"id": "yes", "label": "Yes", "next": "glow"},
             {"id": "no", "label": "No", "result": "no_peak"})},
         {"id": "glow", "question": "Is it inside a bright star's glow or on its spike?", "show": "picture", "answers": (
@@ -294,6 +294,13 @@ def picture_list(find: dict[str, Any] | None) -> list[dict[str, Any]]:
     return [{"i": i, "mjd": v.get("mjd"), "ra": v.get("ra"), "dec": v.get("dec")} for i, v in enumerate(visits) if isinstance(v, dict)]
 
 
+def askable(row: dict[str, Any]) -> bool:
+    """Whether a person is asked about a find: not one whose own picture was measured and shows nothing in the ring (24 of 27 track
+    leads and 295 of 356 peaks on 24 Nov 2026: an empty ring cannot be judged). A find whose picture is not measured yet may be asked;
+    one people raised is asked whatever its picture says."""
+    return row.get("visible") is not False or "raised" in row
+
+
 class People:
     def __init__(self, score: Score) -> None:
         self.score = score
@@ -374,9 +381,14 @@ class People:
         open_ = [
             r
             for r in pool
-            if r.get("stage") is None and r.get("ask", True) and r["finding_id"] not in mine and r["finding_id"] not in settled
+            if r.get("stage") is None
+            and r.get("ask", True)
+            and r["finding_id"] not in mine
+            and r["finding_id"] not in settled
+            and askable(r)
         ]
-        open_.sort(key=lambda r: -counts.get(r["finding_id"], 0))  # stable: the Findings page's order among equals
+        # the ones seen in their own pictures first; stable: the Findings page's order among equals
+        open_.sort(key=lambda r: (-counts.get(r["finding_id"], 0), r.get("visible") is not True))
         return open_[0] if open_ else None
 
     # ------------------------------------------------------------------------------------------------------------- answers

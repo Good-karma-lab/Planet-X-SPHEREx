@@ -15,6 +15,7 @@ import { Leaders } from './screens/cabinet/Score';
 import { ProfilePage, StoryPage } from './screens/cabinet/Share'; // flow-accounts: #/u/<slug> and #/findings/<id>/story
 import { useUnread } from './lib/account';
 import { MoreTab } from './ui/BottomNav';
+import { ErrorBoundary } from './ui/ErrorBoundary';
 
 const NAV: { screen: Screen; name: string; icon: string; tip: string }[] = [
   { screen: 'globe', name: 'Globe', icon: 'globe', tip: 'The sky: globe and catalogue' },
@@ -62,7 +63,12 @@ export function App() {
     }, 0);
     return () => clearTimeout(t);
   }, [route.screen]);
-  if (route.screen === 'landing') return <Landing />;
+  if (route.screen === 'landing')
+    return (
+      <ErrorBoundary key="landing" name="landing">
+        <Landing />
+      </ErrorBoundary>
+    );
   return (
     <div class="app">
       <nav class="rail">
@@ -98,6 +104,8 @@ export function App() {
         </div>
       </nav>
       <main data-screen={route.screen}>
+        {/* one per screen: a screen that failed is left by the rail, and comes back whole */}
+        <ErrorBoundary key={route.screen} name={route.screen}>
         {route.screen === 'lab' ? (
           <Lab route={route} />
         ) : route.screen === 'globe' ? (
@@ -123,6 +131,7 @@ export function App() {
         ) : (
           <InfoPage screen={route.screen} health={health} />
         )}
+        </ErrorBoundary>
       </main>
     </div>
   );
