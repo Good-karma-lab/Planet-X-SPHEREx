@@ -126,6 +126,8 @@ export class FieldClient {
         this.ev.onPhase('');
         return;
       }
+      // dropped while this page still watches (a tab asleep whose other page left): asked for again, never an error
+      if (view.state === 'cancelled' && !this.stopped) return this.open(...this.asked);
       if (view.state === 'error' || view.state === 'cancelled') return this.ev.onError(view.error ?? view.state);
       await new Promise((res) => setTimeout(res, POLL_MS));
       const r = await retrying(
