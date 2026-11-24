@@ -43,6 +43,7 @@ from service.known import Known
 from service.lightcurves import neowise as lc_neowise
 from service.lightcurves import ztf as lc_ztf
 from service.loopwatch import LoopWatch
+from service.memwatch import MemWatch
 from service.movers import Movers
 from service.pairs import Pairs
 from service.products.store import Store, product_key
@@ -140,6 +141,7 @@ class State:
         self.warm_findings_task: asyncio.Task[None] | None = None
         self.fpx_known: FpxIdentifier | None = None
         self.loopwatch: LoopWatch | None = None
+        self.memwatch: MemWatch | None = None
         self.grid: GridDB | None = None
         self.loop: asyncio.AbstractEventLoop | None = None
         self.known_warmed: set[str] = set()
@@ -226,6 +228,21 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.scheduler.start()
         st.loopwatch = LoopWatch()
         st.loopwatch.start()
+        own: Any = st
+        st.memwatch = MemWatch(
+            {
+                "layouts": lambda: len(own.files._layouts),
+                "wcs": lambda: len(own.files._wcs),
+                "jobs": lambda: len(own.scheduler.jobs),
+                "fns": lambda: len(own.scheduler._fns),
+                "kept_rows": lambda: len(own.findings.db._kept_rows),
+                "anomaly_runs": lambda: len(own.anomalies.runs),
+                "mover_runs": lambda: len(own.movers.runs),
+                "spectrum_runs": lambda: len(own.spectra.runs),
+                "quarters_seen": lambda: len(own.quarters._seen),
+            }
+        )
+        st.memwatch.start()
         st.searched = Searched(st.store, cfg.store_dir, st.scheduler, st.movers, st.pairs, st.dwarfs)
         st.searched.prime()
         if not STANDBY:
@@ -310,6 +327,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             await st.fpx_known.stop()
         if st.loopwatch is not None:
             st.loopwatch.stop()
+        if st.memwatch is not None:
+            st.memwatch.stop()
         await st.scheduler.stop()
         await st.s3.close()
         await st.hips.close()

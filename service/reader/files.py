@@ -27,9 +27,10 @@ from service.reader.s3 import S3, ReadError
 from service.storage import digest, load_npz, save_npz, sharded
 
 BAND_ROWS = 64
-# the layouts kept in memory, the latest used: 270 KB each, and without a limit every exposure ever read stayed (73,000 on prod, 20 GB).
-# A square reads up to 1,100 exposures, six squares in a row 4,900; one that left is read from disk again (12 ms, in a thread)
-LAYOUTS_KEEP = 6000
+# the layouts kept in memory, the latest used: 264 KB and 1,100 objects each, so without a limit every exposure ever read stayed
+# (73,000 on prod, 20 GB), and the garbage collector walks them all (6,000: 0.6 s on the Mac, with the API's threads standing). A square
+# reads up to 1,100 exposures; one that left is read from disk again (12 ms, in a thread)
+LAYOUTS_KEEP = 2000
 HEADER_PROBE = 32768  # first read at each header: enough for every header seen so far (IMAGE ~26 kB, PSF 43 kB needs two)
 Plane = Literal["image", "flags", "variance", "zodi"]
 
