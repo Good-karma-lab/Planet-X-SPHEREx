@@ -908,3 +908,23 @@ def test_what_the_lab_shows_at_once_is_asked_about_first(site: tuple[FastAPI, _S
         got = _client(app).get("/api/tasks/next", params={"kind": kind}).json()["task"]["finding_id"]
         assert got == "peak:warm"
         assert _client(app).get("/api/tasks/next", params={"kind": kind, "skip": "peak:warm"}).json()["task"]["finding_id"] == "peak:cold"
+
+
+def test_the_finds_visibility_is_read_from_the_first_list_after_a_start(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The clips were made at the first look at a clip: the first list of tasks after a start knew no find's visibility."""
+    from types import SimpleNamespace
+
+    from service import findings, routes_clips, routes_tasks
+
+    asked: dict[str, Any] = {}
+
+    def query(db: Any, *a: Any, **kw: Any) -> dict[str, Any]:
+        asked.update(kw)
+        return {"finds": []}
+
+    clips = SimpleNamespace(seen=lambda f: (False, 0.0))
+    monkeypatch.setattr(findings, "query", query)
+    monkeypatch.setattr(routes_clips, "clips_of", lambda st: clips)
+    st = SimpleNamespace(findings=SimpleNamespace(db=None))  # nothing has made st.clips yet
+    assert routes_tasks.lead_findings(st, "any") == []
+    assert asked["seen"] is clips.seen
