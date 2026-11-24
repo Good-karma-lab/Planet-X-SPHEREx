@@ -441,3 +441,21 @@ def test_a_field_the_sweep_stripped_is_not_a_source(tmp_path: Path) -> None:
     store.write_meta("field", "w" * 24, {**meta, "stripped": True})
     clips._fields = (0.0, [])
     assert clips.sources() == [] and clips.source_for(_mover()) is None
+
+
+def test_a_dot_is_seen_in_a_visit_and_a_star_that_stays_is_not_one() -> None:
+    import numpy as np
+
+    from service.clips import dot_in_visit
+
+    rng = np.random.default_rng(3)
+    sky = np.clip(np.round(rng.normal(30, 1.5, (6, 80, 80))), 1, 255).astype(np.uint8)
+    sky[:, 20:22, 20:22] = 90  # a star: in every visit
+    sky[2, 50:52, 40:42] = 70  # the dot: in visit 2 only
+    assert dot_in_visit(sky, 2, 40.5, 50.5)
+    assert not dot_in_visit(sky, 3, 40.5, 50.5)  # the same place in another visit
+    assert not dot_in_visit(sky, 2, 20.5, 20.5)  # the still star
+    assert not dot_in_visit(sky, 2, 60.0, 60.0)  # empty sky
+    sky[2, 40:62, 30:52] = 0
+    assert not dot_in_visit(sky, 2, 40.5, 50.5)  # no data there
+    assert not dot_in_visit(sky, 2, 500.0, 500.0)

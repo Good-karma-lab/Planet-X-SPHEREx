@@ -53,10 +53,11 @@ def _score(pp: People, uid: str) -> tuple[int, float | None]:
 
 def test_the_series_are_the_spec_wording_and_never_ask_what_the_machine_knows() -> None:
     first = {s: steps_of(s)[0] for s in people.SERIES}
-    assert first["track"]["question"] == "Does one dot step along the arrow?"
-    assert [a["label"] for a in first["track"]["answers"]] == ["Yes, in every picture", "Only in some", "No", "Not sure"]
-    assert steps_of("track")[1]["question"] == "Tap the pictures where it is missing." and steps_of("track")[1]["tap"] is True
-    assert [a["label"] for a in steps_of("track")[2]["answers"]] == ["Dot", "Streak", "Not sure"]
+    assert first["track"]["question"].startswith("It blinks: the visits added along the motion")
+    assert steps_of("track")[1]["question"] == "Does one dot step along the arrow?"
+    assert [a["label"] for a in steps_of("track")[1]["answers"]] == ["Yes, in every picture", "Only in some", "No", "Not sure"]
+    assert steps_of("track")[2]["question"] == "Tap the pictures where it is missing." and steps_of("track")[2]["tap"] is True
+    assert [a["label"] for a in steps_of("track")[3]["answers"]] == ["Dot", "Streak", "Not sure"]
     assert first["slow"]["question"] == "Does the dot in the ring shift while the stars stay put?"
     assert steps_of("slow")[1]["question"] == "Is it one dot, or two touching?"
     assert steps_of("slow")[2]["question"] == "Old pictures (WISE 2010, 2MASS 2000): is there a dot along the arrow, further back?"
@@ -257,7 +258,7 @@ def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any]) ->
     t = ann.get("/api/tasks/next", params={"kind": "moves", "finding_id": "film:2"}).json()["task"]
     # the page's slug names the same find (track-2 is film:2) and gives the same open task
     assert ann.get("/api/tasks/next", params={"kind": "moves", "finding_id": "track-2"}).json()["task"]["finding_id"] == "film:2"
-    assert t["series"]["id"] == "track" and [s["id"] for s in t["series"]["steps"]] == ["steps", "missing", "shape"]
+    assert t["series"]["id"] == "track" and [s["id"] for s in t["series"]["steps"]] == ["sum", "steps", "missing", "shape"]
     assert [p["i"] for p in t["pictures"]] == [0, 1, 2, 3, 4] and t["pictures"][2]["mjd"] == 61102.0
     assert "question" not in t and "answers" not in t and "tree" not in t  # no one-click classes any more
     out = ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["some", "done", "dot"], "pictures": [3]}).json()
@@ -297,7 +298,7 @@ def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any]) ->
     counts = ann.get("/api/people/counts").json()
     glow = next(r for r in counts["rules"] if r["said"] == "glow")
     assert (glow["times"], glow["answers"], glow["share"], glow["settled"]) == (3, 3, 1.0, 1)
-    assert counts["series"]["track"]["steps"]["steps"] == {"some": 3} and counts["series"]["track"]["results"] == {"partial": 3}
+    assert counts["series"]["track"]["steps"]["steps"] == {"some": 3} and counts["series"]["track"]["steps"]["sum"] == {"yes": 3} and counts["series"]["track"]["results"] == {"partial": 3}
 
 
 def test_find_again_recentre_bad_picture_second_look(site: tuple[FastAPI, Any]) -> None:
@@ -857,3 +858,17 @@ def test_a_kind_switched_off_is_asked_of_nobody_not_even_as_a_control(pp: People
     assert pp.pick("moves", rows, u, set(), controls=lambda: [FINDS[6]]) is None
     assert pp.pick("moves", rows, None, set()) is None
     assert pp.pick("moves", [*rows, FINDS[3]], None, set())["finding_id"] == "peak:1"  # type: ignore[index]
+
+
+def test_a_track_is_asked_when_its_dot_is_seen_in_half_of_its_visits() -> None:
+    import importlib.util
+
+    spec = importlib.util.find_spec("service.accounts.people")
+    assert spec is not None and spec.loader is not None
+    real = importlib.util.module_from_spec(spec)  # the rule itself (the fixture of the other tests stands it aside)
+    spec.loader.exec_module(real)
+    row = {"finding_id": "film:1", "kind": "film", "visible": True}
+    seen = [({**row, "visits_seen": v}, ok) for v, ok in (((4, 4), True), ((2, 4), True), ((1, 4), False), ((0, 5), False), ((0, 0), False), (None, False))]
+    assert [real.askable(r) for r, _ in seen] == [ok for _, ok in seen]
+    assert not real.askable(row) and not real.askable({**row, "visible": False, "visits_seen": (4, 4)})
+    assert real.askable({"kind": "peak", "visible": None}) and not real.askable({"kind": "peak", "visible": False})

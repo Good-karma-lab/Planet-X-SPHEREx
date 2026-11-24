@@ -314,6 +314,7 @@ export interface Panel {
 export class Renderer {
   private gl: WebGL2RenderingContext;
   private prog: WebGLProgram;
+  private buf: WebGLBuffer | null = null;
   private stacks = new Map<StackName, Stack>();
   private sat: WebGLTexture | null = null;
   private satLoaded = new Set<number>();
@@ -339,7 +340,7 @@ export class Renderer {
     if (!gl) throw new Error('WebGL2 is not available in this browser');
     this.gl = gl;
     this.prog = this.program(VS, FS);
-    const buf = gl.createBuffer();
+    const buf = (this.buf = gl.createBuffer());
     gl.bindBuffer(gl.ARRAY_BUFFER, buf);
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
     const loc = gl.getAttribLocation(this.prog, 'p');
@@ -379,6 +380,19 @@ export class Renderer {
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     return t;
+  }
+
+  /** The field is left: everything this renderer holds in the card's memory is released. A renderer is made per field on one context,
+   *  and nothing released its textures (hundreds of MB each) until the context was lost. */
+  dispose(): void {
+    const gl = this.gl;
+    for (const s of this.stacks.values()) gl.deleteTexture(s.tex);
+    this.stacks.clear();
+    for (const t of [this.sat, this.diff, this.film?.tex ?? null, this.filmSat]) if (t) gl.deleteTexture(t);
+    this.sat = this.diff = this.filmSat = null;
+    this.film = null;
+    if (this.buf) gl.deleteBuffer(this.buf);
+    gl.deleteProgram(this.prog);
   }
 
   /** A new field: n×n, `passes` passes. Everything of the previous field is released. */

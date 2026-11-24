@@ -174,9 +174,13 @@ export function FindingClip({ id }: { id: string | null }) {
 
 /** A Planet X peak on the picture: it stands only in the visits added along its orbit, never on one picture, so the sum (the find's
  *  own clip) is what the picture opens with; one button gives the sky back. Nothing where the sum is not kept. */
-export function PeakSum({ id }: { id: string }) {
+export function PeakSum({ id, track = false, tool = false }: { id: string; track?: boolean; tool?: boolean }) {
   const [clip, setClip] = useState<{ url: string; sum: boolean } | null>(null);
   const [sky, setSky] = useState(false);
+  // Mark or the ruler needs the sky itself
+  useEffect(() => {
+    if (tool) setSky(true);
+  }, [tool]);
   useEffect(() => {
     setClip(null);
     setSky(false);
@@ -184,7 +188,7 @@ export function PeakSum({ id }: { id: string }) {
     void fetch(`/api/findings/${encodeURIComponent(id)}/clip`, { cache: 'no-store' })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { url?: string; state?: string; blink?: string[] | null } | null) => {
-        if (!stop && d?.state === 'ready' && d.url) setClip({ url: d.url, sum: !!d.blink?.length });
+        if (!stop && d?.state === 'ready' && d.url) setClip({ url: d.url, sum: track || !!d.blink?.length });
       })
       .catch(() => {});
     return () => {
@@ -195,11 +199,11 @@ export function PeakSum({ id }: { id: string }) {
   return (
     // while the sum stands over the sky, a click is not a click on the sky under it
     <div class={`peaksum${sky ? ' sky' : ''}`} data-testid="peak-sum" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-      {!sky && <img src={clip.url} alt="The visits added along the orbit, then one pass: 3′ around the peak" />}
+      {!sky && <img src={clip.url} alt={track ? 'The visits added along the motion, then added without it' : 'The visits added along the orbit, then one pass: 3′ around the peak'} />}
       <div class="ps-bar">
-        <span>A single picture does not show the peak</span>
+        <span>{track ? 'A single visit may not show the dot' : 'A single picture does not show the peak'}</span>
         <button class="btn primary" onClick={() => setSky(!sky)} data-testid="peak-sum-button">
-          {sky ? 'See the peak' : 'Show the sky'}
+          {sky ? (track ? 'See the sums' : 'See the peak') : track ? 'Show the visits' : 'Show the sky'}
         </button>
       </div>
     </div>

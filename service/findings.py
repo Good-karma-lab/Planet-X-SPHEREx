@@ -2083,6 +2083,15 @@ def read_base(db: FindingsDB) -> list[Any]:
     return out
 
 
+#: the page's order of the statuses
+STATUS_RANK = {
+    s: i
+    for i, s in enumerate(
+        ("unexplained", "unchecked", "known", "residual", "galaxy", "below", "halo", "set_aside", "blend", "unverified", "chain", "weak")
+    )
+}
+
+
 class Snapshot:
     """Every find judged once (what the catalogues, JPL and people say of it), as the lists are made from it: `items` are the few fields
     the filters, the counts and the order read; `judge(n)` makes find n whole again."""
@@ -2091,10 +2100,24 @@ class Snapshot:
         self.packed, self._judge = packed, judge
         self.items: list[dict[str, Any]] = []
         self._groups: list[tuple[dict[str, Any], int]] | None = None
+        self._ordered: list[dict[str, Any]] | None = None
         self.pending = self.unavailable = self.missing_decisive = 0
 
     def judge(self, n: int, whole: bool = True) -> dict[str, Any]:
         return self._judge(self.packed[n], whole)
+
+    def ordered(self) -> list[dict[str, Any]]:
+        """The finds in the page's order (a status the order does not know goes last, never a KeyError)."""
+        if self._ordered is None:
+            self._ordered = sorted(
+                self.items,
+                key=lambda f: (
+                    STATUS_RANK.get(f["status"], 99),
+                    KINDS.index(f["kind"]) if f["kind"] in KINDS else 99,
+                    -(f["score"] or f["snr"] or 0.0),
+                ),
+            )
+        return self._ordered
 
     def groups(self, *, with_place: bool = False, only: frozenset[str] | None = None) -> list[tuple[dict[str, Any], int]]:
         """[(what the filters and the counts read of a find, how many finds have it)], in the order first met. Kept for the plain case."""
@@ -2255,7 +2278,6 @@ def query(
     `snap`: a snapshot of the finds already judged (the list of the page is made from one that is kept); without it one is made."""
     if snap is None:
         snap = snapshot(db, flow=flow, only=only, seen=seen, aside=aside, raised=raised, tracks=tracks, names=names)
-    items = snap.items
     pending, unavailable, missing_decisive = snap.pending, snap.unavailable, snap.missing_decisive
     counts: dict[str, dict[str, int]] = {
         k: {
@@ -2333,7 +2355,7 @@ def query(
             stage_view[f["stage"]] = stage_view.get(f["stage"], 0) + n
     sel = [
         f
-        for f in items
+        for f in snap.ordered()  # the page's order, sorted once per snapshot: forty lists sorted 14,000 finds forty times
         if (not kind or f["kind"] == kind)
         and (
             True  # "any": every find, the hidden ones too (the question series' control objects; not a status of the page)
@@ -2367,24 +2389,6 @@ def query(
         sel = [f for f in sel if f["visible"] is not False]
     elif visibility == "unseen":
         sel = [f for f in sel if f["visible"] is False]
-    rank = {
-        "unexplained": 0,
-        "unchecked": 1,
-        "known": 2,
-        "residual": 3,
-        "galaxy": 4,
-        "below": 5,
-        "halo": 6,
-        "set_aside": 7,
-        "blend": 8,
-        "unverified": 9,
-        "chain": 10,
-        "weak": 11,
-    }
-    # a status this list does not know goes last, never a KeyError (a blend broke every list it was in)
-    sel.sort(
-        key=lambda f: (rank.get(f["status"], 99), KINDS.index(f["kind"]) if f["kind"] in KINDS else 99, -(f["score"] or f["snr"] or 0.0))
-    )
     if sort == "promise":
         # a find that can have no clip (a track whose visits are not kept, a place no field covers) goes below every find that can;
         # within equal promise the finds whose clip is ready come first: the first screen shows pictures, not empty cards

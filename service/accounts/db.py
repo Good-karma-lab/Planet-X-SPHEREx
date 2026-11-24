@@ -356,6 +356,11 @@ class AccountsDB:
         col = "cell_id" if kind == "cell" else "finding_id"
         return {r[0] for r in self._conn().execute(f"SELECT {col} FROM acc_tasks WHERE user_id=? AND kind=?", (user_id, kind)) if r[0]}
 
+    def guest_task(self, task_id: str) -> dict[str, Any] | None:
+        """An open task nobody owns, by its id."""
+        r = self._conn().execute("SELECT * FROM acc_tasks WHERE id=? AND user_id IS NULL AND state='open'", (task_id,)).fetchone()
+        return None if r is None else self._task(r)
+
     def add_task(self, user_id: str | None, kind: str, ref: dict[str, Any]) -> dict[str, Any]:
         """A new open task; the user's own open task for the same square or finding is returned instead of a second one."""
         c = self._conn()

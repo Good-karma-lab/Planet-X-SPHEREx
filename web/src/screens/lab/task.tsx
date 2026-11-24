@@ -59,6 +59,10 @@ const s_ = (id: string, question: string, show: string, answers: SeriesStep['ans
  *  for a task whose body the lab does not have. The service turns the path into the result; the lab only walks the steps. */
 export const SERIES: Record<string, SeriesStep[]> = {
   track: [
+    s_('sum', 'It blinks: the visits added along the motion, then added without it. Is there a dot in the ring in the first only?', 'sums', [
+      { id: 'yes', label: 'Yes', next: 'steps' },
+      { id: 'no', label: 'No', result: 'no_dot' },
+    ]),
     s_('steps', 'Does one dot step along the arrow?', 'blink', [
       { id: 'every', label: 'Yes, in every picture', next: 'shape' },
       { id: 'some', label: 'Only in some', next: 'missing' },
@@ -248,11 +252,12 @@ export interface NextTask {
   predicted?: { mjd?: number | null; path?: [number, number][] | null; ra?: number | null; dec?: number | null } | null;
 }
 
-export async function takeTask(kind: Takeable, ref?: string | null): Promise<NextTask | null | 'failed'> {
+export async function takeTask(kind: Takeable, ref?: string | null, id?: string | null): Promise<NextTask | null | 'failed'> {
   try {
     const q = new URLSearchParams({ kind });
     if (ref) q.set(kind === 'cell' ? 'cell_id' : 'finding_id', ref);
     else skipGiven(q);
+    if (id && ref) q.set('task_id', id); // a guest's own task again (the service gives it to nobody else's account)
     const r = await fetch(`/api/tasks/next?${q.toString()}`);
     if (!r.ok) return 'failed';
     const t = ((await r.json()) as { task: NextTask | null }).task;
@@ -282,7 +287,7 @@ export async function taskBody(task: LabTask, exposure: string | null): Promise<
       return null;
     }
   }
-  const t = await takeTask(task.kind as Takeable, ref);
+  const t = await takeTask(task.kind as Takeable, ref, task.id);
   if (t === 'failed' || !t) return { line: t === 'failed' ? 'Tasks did not answer' : 'No task here' };
   return { body: t };
 }
@@ -596,7 +601,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           {step ? step.question : (body?.question ?? T.ask)}
         </div>
       )}
-      {!done && step && seriesId === 'track' && path.length === 0 && (
+      {!done && step?.id === 'steps' && seriesId === 'track' && (
         <small class="tp-hint" data-testid="task-hint">
           The dot is faint: “No” is a fine answer
         </small>
@@ -666,7 +671,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               ? [
                   `Question ${path.length + 1} · up to ${steps.length}`,
                   // short enough for the one line of the panel (it never wraps, so nothing below it jumps)
-                  a.ready === false
+                  a.ready === false && step.show !== 'sums'
                     ? step.show === 'blink' || step.show === 'pictures'
                       ? 'loading the visits…'
                       : 'loading the pictures…'
@@ -698,7 +703,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               key={x.id}
               class={`btn sm tp-ans${k === 0 ? ' primary' : ''}${x.id === 'not_sure' ? ' quiet' : ''}`}
               // "missing in some" needs at least one picture tapped (the service refuses an empty list)
-              disabled={busy || a.ready === false || (!!step.tap && x.id === 'done' && missing.length === 0)}
+              disabled={busy || (a.ready === false && step.show !== 'sums') || (!!step.tap && x.id === 'done' && missing.length === 0)}
               title={step.tap && x.id === 'done' && missing.length === 0 ? 'Tap at least one picture where it is missing' : undefined}
               onClick={() => answer(x)}
               data-testid={`task-answer-${x.id}`}

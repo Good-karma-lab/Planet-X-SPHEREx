@@ -878,3 +878,19 @@ def test_a_guest_is_not_handed_the_finds_the_tab_had_and_the_end_is_said(site: t
     # a person's own finds are the service's to know: what the page says is not read
     c = _sign_in(app, mail)
     assert c.get("/api/tasks/next", params={"kind": "finding", "skip": "red:0,red:1,red:2"}).json()["task"] is not None
+
+
+def test_a_guests_link_to_a_task_is_that_task_and_never_another_persons(site: tuple[FastAPI, _State, _Mail]) -> None:
+    app, st, mail = site
+    row = {"field_key": "k", "ra": 1.0, "dec": 2.0, "status": "unexplained", "stage": None, "kind": "red", "visible": True}
+    st.task_findings = lambda: [{**row, "finding_id": "red:a"}, {**row, "finding_id": "red:b"}]  # type: ignore[attr-defined]
+    guest = _client(app)
+    ask = {"kind": "red", "finding_id": "red:a"}
+    t = guest.get("/api/tasks/next", params=ask).json()["task"]
+    assert guest.get("/api/tasks/next", params={**ask, "task_id": t["id"]}).json()["task"]["id"] == t["id"]
+    assert guest.get("/api/tasks/next", params={**ask, "finding_id": "red:b", "task_id": t["id"]}).json()["task"]["id"] != t["id"]
+    ann = _sign_in(app, mail)
+    mine = ann.get("/api/tasks/next", params=ask).json()["task"]
+    assert mine["id"] != t["id"]  # a person's task is their own
+    assert guest.get("/api/tasks/next", params={**ask, "task_id": mine["id"]}).json()["task"]["id"] != mine["id"]
+    assert guest.get("/api/tasks/next", params={**ask, "task_id": "no"}).status_code == 422
