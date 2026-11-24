@@ -50,10 +50,10 @@ function RawStamp({ stamp }: { stamp: Stamp }) {
 }
 
 /** An anomaly's odd pictures: the stamps (the file's own pixels around it) of the exposures of its odd bins. */
-export function StampsView({ src, anomaly }: { src: Source | null; anomaly: Anomaly | null }) {
+export function StampsView({ src, drivers, onShown }: { src: Source | null; drivers: Anomaly['drivers'] | null; onShown?: (on: boolean) => void }) {
   const own = useSpectrum(src);
-  const ranges = anomaly?.drivers.map((d) => ({ lo: d.lo, hi: d.hi })) ?? [];
-  const { inside } = useMemo(() => pointsIn(own.points, ranges), [own.points, anomaly?.n]);
+  const ranges = drivers?.map((d) => ({ lo: d.lo, hi: d.hi })) ?? [];
+  const { inside } = useMemo(() => pointsIn(own.points, ranges), [own.points, drivers]);
   const { stamps, absent } = useStamps(src, own.view?.state === 'running');
   // the odd pictures: the points of the odd bins farthest from the spectrum's median
   const med = useMemo(() => {
@@ -64,15 +64,20 @@ export function StampsView({ src, anomaly }: { src: Source | null; anomaly: Anom
     .filter((p) => stamps.get(p.i)?.raw)
     .sort((a, b) => Math.abs((b.flux ?? 0) - med) - Math.abs((a.flux ?? 0) - med))
     .slice(0, MAX_STAMPS);
-  const line = !anomaly
-    ? 'No anomaly of the search at this place'
-    : odd.length
-      ? `${odd.length} of ${inside.length} odd pictures`
-      : absent
-        ? 'No pictures of these exposures'
-        : own.view?.state === 'done' || inside.length
-          ? 'asking for the pictures…'
-          : 'measuring its spectrum…';
+  useEffect(() => {
+    onShown?.(odd.length > 0 || absent);
+    return () => onShown?.(false);
+  }, [odd.length > 0, absent]);
+  const v = own.view;
+  const line = odd.length
+    ? `${odd.length} of its ${inside.length} odd pictures · it is in the middle of each`
+    : absent
+      ? 'Its pictures are not kept'
+      : !drivers
+        ? 'looking for it in this field…'
+        : v?.state === 'running' && v.total
+          ? `getting its pictures: ${v.measured} of ${v.total}…`
+          : 'getting its pictures…';
   return (
     <div class="tv tv-fixed" data-testid="task-stamps">
       <div class="tv-stamps">
@@ -118,12 +123,46 @@ interface ClipInfo {
   url?: string;
   state?: string;
   reason?: string;
+  blink?: string[] | null;
   shows?: { frames?: { label?: string; sn?: number }[]; visits_added?: number } | null;
 }
 
 /** "Is this a real object?": the finding's own clip from the service. For a track or a Planet X peak it blinks the picture added
  *  along the motion against the same exposures added without it: a real mover is there in the first and gone in the second. */
-export function FindingClip({ id }: { id: string | null }) {
+export function FindingClip({ id, onShown }: { id: string | null; onShown?: (on: boolean) => void }) {
+  const info = useClip(id);
+  const pair = pairOf(id, info);
+  const none = info?.state === 'none';
+  const [loaded, setLoaded] = useState(0);
+  useEffect(() => setLoaded(0), [id]);
+  const on = none || (pair ? loaded >= 2 : loaded >= 1);
+  useEffect(() => {
+    onShown?.(on);
+    return () => onShown?.(false);
+  }, [on]);
+  const line = !id ? '' : none ? `No picture: ${info?.reason ?? 'it cannot be made'}` : on ? '' : 'getting the pictures…';
+  const up = () => setLoaded((n) => n + 1);
+  return (
+    <div class={`tv tv-clip${pair ? ' two' : ''}`} data-testid="task-clip">
+      {pair ? (
+        <div class="tv-pair">
+          {pair.map((q) => (
+            <figure key={q.url}>
+              <img src={q.url} alt={q.word} onLoad={up} />
+              <figcaption>{q.word}</figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : (
+        <div class="tv-clipbox">{info?.state === 'ready' && info.url ? <img src={info.url} alt="The find, picture after picture" onLoad={up} /> : null}</div>
+      )}
+      {line && <div class="tv-line">{line}</div>}
+    </div>
+  );
+}
+
+/** The clip of a find as the service says it, asked until it is made. */
+function useClip(id: string | null): ClipInfo | null {
   const [info, setInfo] = useState<ClipInfo | null>(null);
   useEffect(() => {
     setInfo(null);
@@ -150,60 +189,50 @@ export function FindingClip({ id }: { id: string | null }) {
       stop = true;
     };
   }, [id]);
-  const frames = info?.shows?.frames ?? [];
-  const line = !id
-    ? ''
-    : !info
-      ? 'Clip: asking…'
-      : info.state === 'ready'
-        ? frames.length
-          ? frames.map((f) => `${f.label ?? ''}${f.sn != null ? ` S/N ${f.sn.toFixed(1)}` : ''}`).join(' · ')
-          : 'Clip of the finding'
-        : info.state === 'none'
-          ? `No clip: ${info.reason ?? 'it cannot be made'}`
-          : 'Clip: being made…';
-  return (
-    <div class="tv tv-clip" data-testid="task-clip">
-      <div class="tv-clipbox">{info?.state === 'ready' && info.url ? <img src={info.url} alt="Clip of the finding" /> : null}</div>
-      <div class="tv-line" title={line}>
-        {line}
-      </div>
-    </div>
-  );
+  return info;
+}
+
+/** The two still pictures of a peak's or a track's clip, side by side: a moving pair of pictures was judged as one (24 Nov 2026). */
+export function pairOf(id: string | null, info: ClipInfo | null): { url: string; word: string }[] | null {
+  if (!id || info?.state !== 'ready' || !info.url) return null;
+  const track = id.startsWith('film:');
+  if (!track && !(id.startsWith('peak:') && info.blink?.length === 2)) return null;
+  const at = (k: number) => `${info.url}${info.url!.includes('?') ? '&' : '?'}frame=${k}`;
+  return [
+    { url: at(0), word: 'Added up along its path' },
+    { url: at(1), word: track ? 'Added up in place' : 'One picture' },
+  ];
 }
 
 /** A Planet X peak on the picture: it stands only in the visits added along its orbit, never on one picture, so the sum (the find's
  *  own clip) is what the picture opens with; one button gives the sky back. Nothing where the sum is not kept. */
-export function PeakSum({ id, track = false, tool = false }: { id: string; track?: boolean; tool?: boolean }) {
-  const [clip, setClip] = useState<{ url: string; sum: boolean } | null>(null);
+export function PeakSum({ id, track = false, tool = false, loading = false }: { id: string; track?: boolean; tool?: boolean; loading?: boolean }) {
+  const pair = pairOf(id, useClip(id));
   const [sky, setSky] = useState(false);
+  useEffect(() => setSky(false), [id]);
   // Mark or the ruler needs the sky itself
   useEffect(() => {
     if (tool) setSky(true);
   }, [tool]);
-  useEffect(() => {
-    setClip(null);
-    setSky(false);
-    let stop = false;
-    void fetch(`/api/findings/${encodeURIComponent(id)}/clip`, { cache: 'no-store' })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d: { url?: string; state?: string; blink?: string[] | null } | null) => {
-        if (!stop && d?.state === 'ready' && d.url) setClip({ url: d.url, sum: track || !!d.blink?.length });
-      })
-      .catch(() => {});
-    return () => {
-      stop = true;
-    };
-  }, [id]);
-  if (!clip?.sum) return null;
+  // the sky is asked for and still on its way: the loading card alone (one card over the picture, never two)
+  if (!pair || (sky && loading)) return null;
   return (
-    // while the sum stands over the sky, a click is not a click on the sky under it
+    // while the sums stand over the sky, a click is not a click on the sky under them
     <div class={`peaksum${sky ? ' sky' : ''}`} data-testid="peak-sum" onClick={(e) => e.stopPropagation()} onPointerDown={(e) => e.stopPropagation()}>
-      {!sky && <img src={clip.url} alt={track ? 'The visits added along the motion, then added without it' : 'The visits added along the orbit, then one pass: 3′ around the peak'} />}
+      {!sky && (
+        <div class="ps-pair">
+          {pair.map((q) => (
+            <figure key={q.url}>
+              <img src={q.url} alt={q.word} />
+              <figcaption>{q.word}</figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
       <div class="ps-bar">
-        <span>{track ? 'A single visit may not show the dot' : 'A single picture does not show the peak'}</span>
+        <span>{sky ? 'This is the sky itself' : loading ? 'The sky itself is still loading' : 'The same place, two ways'}</span>
         <button class="btn primary" onClick={() => setSky(!sky)} data-testid="peak-sum-button">
-          {sky ? (track ? 'See the sums' : 'See the peak') : track ? 'Show the visits' : 'Show the sky'}
+          {sky ? 'Back to the two pictures' : track ? 'Show the visits' : 'Show the sky'}
         </button>
       </div>
     </div>

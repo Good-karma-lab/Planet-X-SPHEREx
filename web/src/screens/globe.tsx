@@ -2032,9 +2032,9 @@ const WHY_WORD: Record<string, string> = {
   track: 'Something moving',
   browndwarf: 'A possible brown dwarf',
   brown_dwarf: 'A possible brown dwarf',
-  peak: 'A possible distant body (Planet X search)',
-  film: 'Something moving within one pass',
-  pair: 'A source that changes between passes',
+  peak: 'A possible distant planet to check',
+  film: 'Something moving within days',
+  pair: 'A source that changes between seasons',
   red: 'An unusually red source',
   anomaly: 'An unusual spectrum',
 };

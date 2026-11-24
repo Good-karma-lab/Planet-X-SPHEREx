@@ -358,3 +358,10 @@ div.rv-clip { display: grid; place-items: center; text-align: center; padding: 1
   .rv-checks li { grid-template-columns: minmax(0, 1fr); gap: 0; }
 }
 .rv-given { color: #9fe6c4; }
+
+/* a guest's cabinet: what an account is for, beside the card */
+.cb-guest { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 32px; }
+.cb-guest .cb-why { max-width: 400px; font-size: 14px; line-height: 1.5; color: var(--ink); }
+.cb-guest .cb-why h2 { margin: 0 0 10px; font-size: 18px; }
+.cb-guest .cb-why ul { margin: 0 0 10px; padding-left: 18px; display: flex; flex-direction: column; gap: 8px; }
+.cb-guest .cb-why p { margin: 0 0 8px; color: var(--muted); font-size: 13px; }

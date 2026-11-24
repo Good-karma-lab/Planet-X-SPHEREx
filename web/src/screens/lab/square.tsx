@@ -265,7 +265,7 @@ export function useSquareLook(a: SquareArgs): SquareLook {
  *  then the square's next quarter). Another square is offered only once this one is looked through. */
 const hereCache = new Map<string, { cell: GridCell; quarter: Quarter } | 'none'>();
 
-export function HereSquare({ ra, dec, open }: { ra: number; dec: number; open: (params: Record<string, string>) => void }) {
+export function HereSquare({ ra, dec, fov, open }: { ra: number; dec: number; fov: number; open: (params: Record<string, string>) => void }) {
   // the answer is kept for the place: coming back to the Task tab shows it at once (no row appearing late, no jump)
   const hk = `${ra.toFixed(4)},${dec.toFixed(4)}`;
   const [here, setHereRaw] = useState<{ cell: GridCell; quarter: Quarter } | null | 'none'>(() => hereCache.get(hk) ?? null);
@@ -311,7 +311,10 @@ export function HereSquare({ ra, dec, open }: { ra: number; dec: number; open: (
       const t = r.ok ? ((await r.json()) as { task: { id: string; ra: number | null; dec: number | null; cell_id: string | null; quarter: string | null } | null }).task : null;
       if (!t || t.ra == null || t.dec == null) return setLine(r.ok ? 'No square is waiting for a look' : 'Tasks did not answer');
       handTask(t as unknown as Task); // the lab opens it by its id: this task, not a second one
-      open({ ra: t.ra.toFixed(5), dec: t.dec.toFixed(5), fov: '10', task: t.id, kind: 'cell', ...(t.cell_id ? { cell: t.cell_id } : {}), ...(t.quarter ? { quarter: t.quarter } : {}) });
+      // the field on show stays when it is this quarter's size and near its middle: moving it by an arcminute built it all again
+      const off = Math.hypot(wrap(t.ra - ra) * Math.cos((dec * Math.PI) / 180), t.dec - dec) * 60;
+      const keep = fov === 10 && off <= 2.5;
+      open({ ra: (keep ? ra : t.ra).toFixed(5), dec: (keep ? dec : t.dec).toFixed(5), fov: '10', task: t.id, kind: 'cell', ...(t.cell_id ? { cell: t.cell_id } : {}), ...(t.quarter ? { quarter: t.quarter } : {}) });
     } catch {
       setLine('Tasks did not answer');
     }

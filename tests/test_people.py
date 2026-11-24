@@ -53,25 +53,25 @@ def _score(pp: People, uid: str) -> tuple[int, float | None]:
 
 def test_the_series_are_the_spec_wording_and_never_ask_what_the_machine_knows() -> None:
     first = {s: steps_of(s)[0] for s in people.SERIES}
-    assert first["track"]["question"].startswith("It blinks: the visits added along the motion")
-    assert steps_of("track")[1]["question"] == "Does one dot step along the arrow?"
+    assert first["track"]["question"].startswith("Left: the pictures added up along its path.")
+    assert steps_of("track")[1]["question"] == "Does one faint dot move along the arrow?"
     assert [a["label"] for a in steps_of("track")[1]["answers"]] == ["Yes, in every picture", "Only in some", "No", "Not sure"]
     assert steps_of("track")[2]["question"] == "Tap the pictures where it is missing." and steps_of("track")[2]["tap"] is True
     assert [a["label"] for a in steps_of("track")[3]["answers"]] == ["Dot", "Streak", "Not sure"]
-    assert first["slow"]["question"] == "Does the dot in the ring shift while the stars stay put?"
+    assert first["slow"]["question"] == "Does the dot in the ring move while the stars stay still?"
     assert steps_of("slow")[1]["question"] == "Is it one dot, or two touching?"
     assert steps_of("slow")[2]["question"] == "Old pictures (WISE 2010, 2MASS 2000): is there a dot along the arrow, further back?"
-    assert first["peak"]["question"].startswith("It blinks: the visits added along the orbit, then one pass.")
-    assert steps_of("peak")[1]["question"] == "Is it inside a bright star's glow or on its spike?"
+    assert first["peak"]["question"].startswith("Left: all the pictures added up along its possible path.")
+    assert steps_of("peak")[1]["question"] == "Is it inside a bright star's glow, or on one of its rays?"
     assert [s["question"] for s in steps_of("red")] == [
         "A sharp dot, or a fuzzy patch?",
         "Is it there every time?",
-        "Is it on a bright star's glow, a spike, or the picture edge?",
+        "Is it on a bright star's glow or ray, or at the picture's edge?",
         "Old picture next to new: has it moved?",
     ]
     assert [s["question"] for s in steps_of("anomaly")] == [
-        "In the odd pictures, does a neighbour star touch it?",
-        "Do the odd pictures look broken (a streak, cut off, glare)?",
+        "Is another star touching the one in the middle?",
+        "Do these pictures look damaged (a streak, cut off, glare)?",
     ]
     every = [a["label"] for s in people.SERIES for step in steps_of(s) for a in step["answers"]] + [
         s["question"] for x in people.SERIES for s in steps_of(x)

@@ -1248,6 +1248,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       { ra: t.ra[i1]!, dec: t.dec[i1]!, epoch: yr(t.mjd[i1]!), pass: t.passes[i1]! },
     ]);
   };
+  // the panel's own pictures of the step (the two sums, the odd pictures) are on show
+  const [panelShown, setPanelShown] = useState(false);
   // what the lab shows with the task: for a series step its `show`, else the task's kind decides
   const view = (show: string | null, body: NextTask | null): ComponentChildren => {
     const kind = task?.kind;
@@ -1263,8 +1265,12 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           }
         />
       );
-    if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={task?.finding_id ?? null} />;
-    if (show === 'stamps') return <StampsView src={taskSrc} anomaly={anomaly} />;
+    if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} onShown={setPanelShown} />;
+    if (show === 'stamps') {
+      const own = body?.anomaly;
+      const src: Source | null = own ? { ra: own.ra, dec: own.dec, pmra: own.pmra ?? 0, pmdec: own.pmdec ?? 0 } : anomaly ? taskSrc : null;
+      return <StampsView src={src} drivers={own?.drivers ?? anomaly?.drivers ?? null} onShown={setPanelShown} />;
+    }
     if (show === 'blink' || show === 'pictures')
       return (
         <div class="tv-line">
@@ -1307,6 +1313,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     showPicture: (mjd) => a.showVisit(mjd),
     visitOf: a.visitOf,
     ready: a.ready,
+    shown: panelShown,
   });
   // a square given for a lead in it (`lead=`): the lead's own question series, first, above the square's look
   const leadParams = useMemo<Record<string, string>>(
@@ -1338,6 +1345,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     showPicture: (mjd) => a.showVisit(mjd),
     visitOf: a.visitOf,
     ready: a.ready,
+    shown: panelShown,
     embedded: true,
     ...(a.params['lead_text'] ? { leadText: a.params['lead_text'] } : {}),
   });
@@ -1351,7 +1359,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const leadBody = leadView.body;
   useEffect(() => {
     const p = a.params;
-    if (leadOpen && leadBody?.ra != null && leadBody.dec != null && p['q_ra'] == null) {
+    // (only a track needs its own field: any other lead stands in the quarter that is on show, and moving off it built another field)
+    if (leadOpen && leadBody?.ra != null && leadBody.dec != null && leadBody.finding_id?.startsWith('film:') && p['q_ra'] == null) {
       const fov = leadBody.fov && leadBody.fov > 0 ? leadBody.fov : 10;
       a.open({ ...p, ra: leadBody.ra.toFixed(5), dec: leadBody.dec.toFixed(5), fov: String(fov), q_ra: p['ra'] ?? '', q_dec: p['dec'] ?? '', q_fov: p['fov'] ?? '10' });
     } else if (!leadOpen && leadView.kind && p['q_ra'] != null) {
@@ -1440,7 +1449,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
 
   const pick = (t: FlowTool) => {
     setTool((c) => (c === t ? null : t));
-    if (t !== 'ruler') setRuler([]);
+    if (t !== 'ruler' || tool === 'ruler') setRuler([]);
   };
   // Mark and Ruler are modes of the picture: a small strip on its edge
   const strip =
@@ -1801,9 +1810,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const rulerStatus =
     tool === 'ruler' && ruler.length < 2
       ? ruler.length
-        ? 'Ruler: second point'
-        : 'Ruler: first point'
-      : ruler.length === 2
+        ? 'Ruler: click the second place'
+        : 'Ruler: click the first place'
+      : tool === 'ruler' && ruler.length === 2
         ? `Ruler: ${rulerWord(rulerOf(ruler[0]!, ruler[1]!))}`
         : '';
   const eff = lastMarkEffect();

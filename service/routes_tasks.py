@@ -275,7 +275,7 @@ def cell_field_key(acc: accounts.Accounts, cell_id: str) -> str | None:
     return None if r is None else r["field_key"]
 
 
-KIND_WORD = {"film": "a time-lapse track", "peak": "a Planet X peak", "mover": "a mover", "browndwarf": "a brown-dwarf candidate",
+KIND_WORD = {"film": "something that moves", "peak": "a possible distant planet", "mover": "a star that moves", "browndwarf": "a possible brown dwarf",
              "pair": "a changing pair"}  # fmt: skip
 
 
@@ -292,7 +292,7 @@ def why_of(p: dict[str, Any]) -> dict[str, Any]:
         "promise": p["promise"],
         "ra": round(float(p["ra"]), 6) if p.get("ra") is not None else None,
         "dec": round(float(p["dec"]), 6) if p.get("dec") is not None else None,
-        "text": f"{KIND_WORD.get(kind, 'a find')} · promise {p['promise']}",
+        "text": f"{KIND_WORD.get(kind, 'a find')} · worth a look: {p['promise']} of 100",
         "ask": {"kind": "moves" if series in ("track", "slow", "peak") else series, "finding_id": p["finding_id"], "series": series}
         if series
         else None,

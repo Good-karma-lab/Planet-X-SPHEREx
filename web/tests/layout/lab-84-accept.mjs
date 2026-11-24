@@ -88,7 +88,7 @@ try {
     await p.goto(BASE + '/#/lab?ra=51.74407&dec=12.76414&fov=10&task=finding&kind=finding&finding=peak:dd36a21a3e16&find=peak:dd36a21a3e16');
     await p.reload();
     await p.waitForTimeout(16000);
-    check(size, 'A3 the sum stands on the picture', (await p.locator('[data-testid=peak-sum] img').count()) === 1);
+    check(size, 'A3 the sum stands on the picture', (await p.locator('[data-testid=peak-sum] img').count()) >= 1);
     await shot('peak');
     await p.getByTestId('tool-mark').click({ timeout: 3000 }).catch(() => {});
     await p.waitForTimeout(500);

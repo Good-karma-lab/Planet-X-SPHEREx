@@ -59,11 +59,11 @@ const s_ = (id: string, question: string, show: string, answers: SeriesStep['ans
  *  for a task whose body the lab does not have. The service turns the path into the result; the lab only walks the steps. */
 export const SERIES: Record<string, SeriesStep[]> = {
   track: [
-    s_('sum', 'It blinks: the visits added along the motion, then added without it. Is there a dot in the ring in the first only?', 'sums', [
+    s_('sum', 'Left: the pictures added up along its path. Right: added up in place. Is there a bright dot in the ring on the left only?', 'sums', [
       { id: 'yes', label: 'Yes', next: 'steps' },
       { id: 'no', label: 'No', result: 'no_dot' },
     ]),
-    s_('steps', 'Does one dot step along the arrow?', 'blink', [
+    s_('steps', 'Does one faint dot move along the arrow?', 'blink', [
       { id: 'every', label: 'Yes, in every picture', next: 'shape' },
       { id: 'some', label: 'Only in some', next: 'missing' },
       { id: 'no', label: 'No', result: 'no_dot' },
@@ -75,7 +75,7 @@ export const SERIES: Record<string, SeriesStep[]> = {
     ]),
   ],
   slow: [
-    s_('shift', 'Does the dot in the ring shift while the stars stay put?', 'blink2', [
+    s_('shift', 'Does the dot in the ring move while the stars stay still?', 'blink2', [
       { id: 'yes', label: 'Yes', next: 'blend' },
       { id: 'no', label: 'No', result: 'still' },
     ]),
@@ -89,11 +89,11 @@ export const SERIES: Record<string, SeriesStep[]> = {
     ]),
   ],
   peak: [
-    s_('left', 'It blinks: the visits added along the orbit, then one pass. Is there a dot in the ring in the sum only?', 'sums', [
+    s_('left', 'Left: all the pictures added up along its possible path. Right: one picture. Is there a bright dot in the ring on the left only?', 'sums', [
       { id: 'yes', label: 'Yes', next: 'glow' },
       { id: 'no', label: 'No', result: 'no_peak' },
     ]),
-    s_('glow', 'Is it inside a bright star’s glow or on its spike?', 'picture', [
+    s_('glow', 'Is it inside a bright star’s glow, or on one of its rays?', 'picture', [
       { id: 'yes', label: 'Yes', result: 'glow' },
       { id: 'no', label: 'No', result: 'candidate' },
     ]),
@@ -107,7 +107,7 @@ export const SERIES: Record<string, SeriesStep[]> = {
       { id: 'yes', label: 'Yes', next: 'glow' },
       { id: 'no', label: 'No', result: 'artefact' },
     ]),
-    s_('glow', 'Is it on a bright star’s glow, a spike, or the picture edge?', 'picture', [
+    s_('glow', 'Is it on a bright star’s glow or ray, or at the picture’s edge?', 'picture', [
       { id: 'yes', label: 'Yes', result: 'artefact' },
       { id: 'no', label: 'No', next: 'moved' },
     ]),
@@ -117,11 +117,11 @@ export const SERIES: Record<string, SeriesStep[]> = {
     ]),
   ],
   anomaly: [
-    s_('neighbour', 'In the odd pictures, does a neighbour star touch it?', 'stamps', [
+    s_('neighbour', 'Is another star touching the one in the middle?', 'stamps', [
       { id: 'yes', label: 'Yes', result: 'neighbour' },
       { id: 'no', label: 'No', next: 'broken' },
     ]),
-    s_('broken', 'Do the odd pictures look broken (a streak, cut off, glare)?', 'stamps', [
+    s_('broken', 'Do these pictures look damaged (a streak, cut off, glare)?', 'stamps', [
       { id: 'yes', label: 'Yes', result: 'broken' },
       { id: 'no', label: 'No', result: 'real' },
     ]),
@@ -155,6 +155,9 @@ export function stepAt(series: SeriesStep[], path: string[]): SeriesStep | null 
  *  The task writes it as it renders, the lab's overlay (flow.tsx) draws it: the path with its arrow, a dot per visit, the ring on
  *  the visit shown. Empty when the task is not about a track. */
 export const taskTrack: { pts: { i: number; mjd: number; ra: number; dec: number }[]; missing: number[] } = { pts: [], missing: [] };
+
+/** the steps whose subject is in the panel, not on the lab's picture */
+const PANEL_SHOWS = new Set(['sums', 'stamps']);
 
 export const focusKind = (k: TaskKind): boolean => k !== 'cell' && k !== 'bad_picture';
 
@@ -245,6 +248,11 @@ export interface NextTask {
   /** the other kinds: their question and answers */
   question?: string | null;
   answers?: { id: string; label: string }[] | null;
+  /** where the find itself stands in the field the task opens on */
+  find_ra?: number | null;
+  find_dec?: number | null;
+  /** an anomaly's own record: its place and its odd wavelengths (its odd pictures need no search of the field) */
+  anomaly?: { n: number; ra: number; dec: number; pmra?: number | null; pmdec?: number | null; drivers: { lo: number; hi: number; z: number; share: number }[] } | null;
   /** bad_picture: the exposure in question, and a picture of it when the service gives one */
   exposure?: string | null;
   cutout?: string | null;
@@ -308,6 +316,7 @@ export function taskParams(t: NextTask): Record<string, string> | null {
     ...(t.kind === 'cell' && t.why ? leadParams(t.why) : {}),
     // the find is the lab's selected object (`find`): the one thing the task rings brightly (an exposure is no find)
     ...(t.finding_id && t.kind !== 'bad_picture' ? { finding: t.finding_id, find: t.finding_id } : {}),
+    ...(t.find_ra != null && t.find_dec != null ? { find_ra: t.find_ra.toFixed(6), find_dec: t.find_dec.toFixed(6) } : {}),
     ...(t.finding_id && t.kind === 'bad_picture' ? { exposure: t.finding_id } : {}),
     // a track opens straight in Days on its search's own film
     ...(t.film != null && t.finding_id?.startsWith('film:') ? { film: String(t.film) } : {}),
@@ -340,6 +349,8 @@ export interface TaskArgs {
   visitOf?: (mjd: number) => number | null;
   /** the picture is drawn: until then a question is shown but not answered (nobody can answer it honestly yet) */
   ready?: boolean;
+  /** the pictures a step shows in the panel itself are there (an anomaly's odd pictures, a find's two sums) */
+  shown?: boolean;
   /** a lead's questions inside a square's task: no "Next" of its own (the square's look follows), no second Mark button */
   embedded?: boolean;
   /** the service's words for the lead (why.text: "a Planet X peak · promise 86") */
@@ -545,8 +556,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     <div class={`taskpanel k-${task.kind}${a.embedded ? ' lead' : ''}`} data-testid="task-panel">
       {si.popup}
       <div class="tp-head">
-        <b>{a.embedded ? 'Lead' : 'Task'}</b>
-        <span>{a.embedded ? (a.leadText ?? 'first, then the quarter') : T.title}</span>
+        <b>{a.embedded ? 'First' : 'Task'}</b>
+        <span>{a.embedded ? (a.leadText ?? 'one question, then the square') : T.title}</span>
         {focusKind(task.kind) && (
           <label class="tp-others" title="Show the other rings and names of the field as usual (in a task only the object in question is bright)">
             <input type="checkbox" checked={a.others} onChange={(e) => a.setOthers((e.target as HTMLInputElement).checked)} data-testid="task-others" />
@@ -671,7 +682,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               ? [
                   `Question ${path.length + 1} · up to ${steps.length}`,
                   // short enough for the one line of the panel (it never wraps, so nothing below it jumps)
-                  a.ready === false && step.show !== 'sums'
+                  (PANEL_SHOWS.has(step.show) ? a.shown === false : a.ready === false)
                     ? step.show === 'blink' || step.show === 'pictures'
                       ? 'loading the visits…'
                       : 'loading the pictures…'
@@ -684,13 +695,16 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               : tapping
                 ? `${taps.length} tapped`
                 : '')}
-        {/* a guest learns before answering that an answer needs a name (the answer clicked is still given after the sign-in) */}
-        {!line && task.kind !== 'cell' && step && !si.signedIn && (
-          <button class="lnk tp-guest" onClick={() => si.ask('answer', '')} data-testid="task-guest">
-            sign in to answer
-          </button>
-        )}
       </div>
+      {/* a guest learns before answering what an answer needs and what comes of it (the answer clicked is still given after the sign-in) */}
+      {!done && !line && task.kind !== 'cell' && step && !si.signedIn && path.length === 0 && (
+        <div class="tp-guestline" data-testid="task-guest-line">
+          Your answer is kept and counts with a free{' '}
+          <button class="tp-guest" onClick={() => si.ask('answer', '')} data-testid="task-guest">
+            sign-in
+          </button>
+        </div>
+      )}
       {done ? null : step ? (
         <div
           class="tp-tree"
@@ -703,7 +717,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               key={x.id}
               class={`btn sm tp-ans${k === 0 ? ' primary' : ''}${x.id === 'not_sure' ? ' quiet' : ''}`}
               // "missing in some" needs at least one picture tapped (the service refuses an empty list)
-              disabled={busy || (a.ready === false && step.show !== 'sums') || (!!step.tap && x.id === 'done' && missing.length === 0)}
+              disabled={busy || (PANEL_SHOWS.has(step.show) ? a.shown === false : a.ready === false) || (!!step.tap && x.id === 'done' && missing.length === 0)}
               title={step.tap && x.id === 'done' && missing.length === 0 ? 'Tap at least one picture where it is missing' : undefined}
               onClick={() => answer(x)}
               data-testid={`task-answer-${x.id}`}

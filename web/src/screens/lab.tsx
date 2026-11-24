@@ -668,6 +668,21 @@ export function Lab({ route }: { route: Route }) {
   // the picture's canvas, made anew when its context is lost (GL_TRIES times a page)
   const [glTry, setGlTry] = useState(0);
   const [glFailed, setGlFailed] = useState(false);
+  // the bar's menu closes on Esc and on a click elsewhere, as any menu
+  const actsRef = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    const shut = (e: Event) => {
+      const d = actsRef.current;
+      if (!d?.open) return;
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !d.contains(e.target as Node)) d.open = false;
+    };
+    window.addEventListener('keydown', shut);
+    window.addEventListener('pointerdown', shut, true);
+    return () => {
+      window.removeEventListener('keydown', shut);
+      window.removeEventListener('pointerdown', shut, true);
+    };
+  }, []);
   const [zoomWord, setZoomWord] = useState('');
   const [insetBox, setInsetBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const artMap = useRef(new Map<number, HTMLCanvasElement>());
@@ -3753,7 +3768,9 @@ export function Lab({ route }: { route: Route }) {
       (flow.blind && r.ra != null && r.dec != null && blindPlace(r.ra, r.dec))
         ? { ...r, name: 'The object in question', line: 'what it is: after your answers', status: 'checking' as const }
         : r,
-    );
+    )
+    // two searches that found the same object are one row of it
+    .filter((r, i, all) => r.name !== 'The object in question' || all.findIndex((q) => q.name === r.name) === i);
   const foundCount = unexplainedCount(findRows);
   const unexplainedOf = (g: 'red' | 'anomaly') => findRows.filter((r) => r.group === g && r.status === 'unexplained').length;
   const redChecking = (redv?.result?.red ?? []).some((x) => identOf(x.ra, x.dec) === undefined && !identSilent.has(`${x.ra.toFixed(5)},${x.dec.toFixed(5)}`));
@@ -4021,8 +4038,8 @@ export function Lab({ route }: { route: Route }) {
                 <div class="vwait">loading the pictures of every {view === 'det' ? 'detector' : 'band'} for each pass…</div>
               )}
               {distShow && dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
-              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && <PeakSum id={findId} tool={!!flow.tool} />}
-              {flow.trackSum && findId.startsWith('film:') && film !== null && view === 'picture' && <PeakSum id={findId} track tool={!!flow.tool} />}
+              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && <PeakSum id={findId} tool={!!flow.tool} loading={!!loadNow} />}
+              {flow.trackSum && findId.startsWith('film:') && film !== null && view === 'picture' && <PeakSum id={findId} track tool={!!flow.tool} loading={!!(loadNow ?? daysLoad)} />}
               <div
                 class="float ftitle"
                 data-testid="field-title"
@@ -4302,7 +4319,7 @@ export function Lab({ route }: { route: Route }) {
                 <option value={String(v)}>{`${v}×`}</option>
               ))}
             </select>
-            <details class="acts" data-testid="bar-more">
+            <details class="acts" data-testid="bar-more" ref={actsRef}>
               <summary class="mini" title="Link, export, video" aria-label="More: link, export, video">
                 <span aria-hidden="true">⋯</span>
                 {(copied || exportNote || recording) && <span class="t">{copied || exportNote || 'Recording…'}</span>}
@@ -4341,13 +4358,12 @@ export function Lab({ route }: { route: Route }) {
                     setCopied(t);
                     setTimeout(() => setCopied(''), 2000);
                   };
+                  // a browser that keeps the clipboard to itself: the link in a box, ready to be copied by hand
+                  const byHand = () => void prompt('Copy this link', location.href);
                   try {
-                    navigator.clipboard.writeText(location.href).then(
-                      () => done('Copied'),
-                      () => done('Copy blocked'),
-                    );
+                    navigator.clipboard.writeText(location.href).then(() => done('Copied'), byHand);
                   } catch {
-                    done('Copy blocked');
+                    byHand();
                   }
                 }}
                 title="Copy a link to this exact view"
@@ -4388,7 +4404,7 @@ export function Lab({ route }: { route: Route }) {
                 aria-label="Download video"
               >
                 <span dangerouslySetInnerHTML={{ __html: icon('download-simple', 14) }} style={{ display: 'contents' }} />
-                <span class="al">Video (WebM)</span>
+                <span class="al">{film !== null ? 'Video · Months only' : !passes.length ? 'Video · when the field is loaded' : 'Video (WebM)'}</span>
               </button>
               </span>
             </details>
@@ -4401,7 +4417,7 @@ export function Lab({ route }: { route: Route }) {
             peek=".taskpanel, .sqlook, .ptabs"
             under=".lab .tbar"
             room={sheetRoom}
-            need=".ptabs, .taskpanel .tp-ask, .taskpanel .tp-hint, .taskpanel .tp-tree, .taskpanel .tp-btns, .taskpanel .tp-pics, .taskpanel .tp-need, .tp-stack .tp-head, .sqlook"
+            need=".ptabs, .taskpanel .tp-ask, .taskpanel .tp-hint, .taskpanel .tp-guestline, .taskpanel .tv-fixed, .taskpanel .tp-tree, .taskpanel .tp-btns, .taskpanel .tp-pics, .taskpanel .tp-need, .tp-stack .tp-head, .sqlook"
             label="Lab panel"
             resetKey={`${p['ra']},${p['dec']},${fov},${p['task'] ?? ''},${p['finding'] ?? ''}`}
           />
@@ -4431,7 +4447,7 @@ export function Lab({ route }: { route: Route }) {
             </div>
           )}
           <div class="pbody pcol" ref={colRef}>
-            {ptab === 'task' && !inTask && !square.cell && <HereSquare ra={ra} dec={dec} open={(q) => (location.hash = formatHash({ screen: 'lab', params: q }))} />}
+            {ptab === 'task' && !inTask && !square.cell && <HereSquare ra={ra} dec={dec} fov={fov} open={(q) => (location.hash = formatHash({ screen: 'lab', params: q }))} />}
             {ptab === 'task' && flow.markOpen && (
               <section class="psec" id="sec-mark" data-testid="sec-mark">
                 <div class="psh">Mark</div>

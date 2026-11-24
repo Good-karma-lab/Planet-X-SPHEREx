@@ -3,9 +3,27 @@
 // drawn from inside the sphere with a stereographic camera that turns as the page scrolls. Nothing is drawn or modelled on it.
 // Pictures on the page are real SPHEREx frames and DSS plates (web/public/landing/). Styles: ../landing.css (classes lp-).
 import { visibleInterval } from '../lib/idle';
-import { useUser, type User } from '../lib/account';
+import { nextTask, taskHash, useUser, type User } from '../lib/account';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import '../landing.css';
+
+/** "Take a first task": one question about a real picture, opened at once (the service gives what it can show); the globe when there is none. */
+function FirstTask() {
+  const [busy, setBusy] = useState(false);
+  const go = async () => {
+    setBusy(true);
+    const t = await nextTask('finding').catch(() => null);
+    location.hash = t ? taskHash(t) : START;
+  };
+  return (
+    <span class="lp-task">
+      <button class="lp-btn lp-btn-ghost lp-btn-lg" onClick={() => void go()} disabled={busy} data-testid="landing-task">
+        {busy ? 'Opening…' : 'Take a first task'}
+      </button>
+      <small>One question about a real picture, about a minute. A free sign-in keeps your answer; it counts when others agree.</small>
+    </span>
+  );
+}
 
 /** The app's main page (the globe). Links that do not open one object go here. */
 const APP = '#/explore';
@@ -530,6 +548,7 @@ export function Landing() {
                   </svg>
                   Start searching
                 </a>
+                <FirstTask />
               </div>
               <ul class="lp-trust">
                 <li>1.6 million real SPHEREx exposures</li>
@@ -732,13 +751,13 @@ export function Landing() {
                   class="lp-pic lp-hop"
                   style={{ backgroundImage: `url(${IMG}asteroid_9078_orwell_visits.jpg)` }}
                   role="img"
-                  aria-label="Five visits on one day, centred on the asteroid 9078 Orwell: the masked background stars slide past it"
+                  aria-label="Five visits on one day, centred on a main-belt asteroid: the masked background stars slide past it"
                 >
                   <span class="lp-badge">5 visits · one day</span>
                 </div>
                 <div class="lp-body">
                   <span class="lp-kind">Also: asteroids</span>
-                  <h3>9078 Orwell</h3>
+                  <h3>A main-belt asteroid</h3>
                   <p>A known asteroid, caught in five SPHEREx visits on one day. The stars stand still; the asteroid hops.</p>
                   <span class="lp-go">Open the globe →</span>
                 </div>

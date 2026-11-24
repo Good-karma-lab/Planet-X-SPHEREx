@@ -30,7 +30,7 @@ describe('the searches on the status line', () => {
 describe('the steps of a field being made', () => {
   it('lists where the field is, the reading of the exposures with their count', () => {
     const s = loadStep('reading the exposures: 157 of 581, 404 MB downloaded', 0, 0);
-    expect(s.detail).toBe('157 of 581 exposures · 404 MB');
+    expect(s.detail).toBe('157 of 581 exposures · our server has read 404 MB of NASA’s archive');
     expect(stageOf(s).at).toBe(1);
     expect(stageOf(loadStep('pass 2 of 3: D4 stacked (9 of 18 detector stacks)', 0, 0)).at).toBe(2);
     expect(stageOf(loadStep('loading the seasons…', 1, 3)).list[0]).toBe('Loading the pictures');

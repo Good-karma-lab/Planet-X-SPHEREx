@@ -254,9 +254,9 @@ export function barText(bar: Record<string, unknown> | null): string {
   if (bar['kind'] === 'sweep') {
     const parts = [];
     // plain words: σ is the noise of the picture; ″ an arcsecond
-    if (bar['mover_sigma'] != null) parts.push(`moving dots ${Number(bar['mover_sigma'])}× brighter than the noise`);
+    if (bar['mover_sigma'] != null) parts.push('moving dots that stand out clearly');
     if (bar['mover_shift_arcsec'] != null) parts.push(`moved ${Number(bar['mover_shift_arcsec'])}″ or more`);
-    if (bar['passes'] != null) parts.push(`${Number(bar['passes'])} passes`);
+    if (bar['passes'] != null) parts.push(`in ${Number(bar['passes'])} seasons of pictures`);
     return parts.join(' · ');
   }
   if (bar['kind'] === 'import') {

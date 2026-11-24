@@ -136,7 +136,23 @@ function useMine(user: User | null, view: string, inv: string): { mine: Mine | n
 function SignIn({ expired }: { expired: string | undefined }) {
   const error = expired === 'expired' ? 'This link was already used or has expired · send a new one' : expired === 'google' ? 'Google sign-in did not finish · try again' : '';
   return (
-    <div class="sx-page">
+    <div class="sx-page cb-guest">
+      <div class="cb-why" data-testid="cabinet-why">
+        <h2>What a free account keeps</h2>
+        <ul>
+          <li>
+            <b>Your answers.</b> You say whether a dot is there; when three people agree, the find moves up or is set aside, and you get points.
+          </li>
+          <li>
+            <b>Your marks.</b> You mark something that moves; the service asks JPL and the catalogues what it is and tells you here.
+          </li>
+          <li>
+            <b>Your name on a find.</b> A find you checked or submitted shows it.
+          </li>
+        </ul>
+        <p>For example: “Is there a bright dot in the ring on the left only?” → No → Recorded · 1 of 3 people answered · +10 points if yours matches theirs.</p>
+        <p>An answer you picked before signing in is kept and given when you come back.</p>
+      </div>
       <SignInCard
         // coming from the lab: the link brings the person back to that very place (field, task, pass), not to the Cabinet
         next={lastLab() || '#/me'}

@@ -62,10 +62,10 @@ REPORTS_HIDE = 3  # a comment reported by this many distinct people is hidden
 #: and the tapped picture indexes come in the done body (`pictures`). "Not sure" is added to every step.
 SERIES: dict[str, tuple[dict[str, Any], ...]] = {
     "track": (  # moves within one pass; the Blink of its two sums (no single visit shows a faint body), then its visits
-        {"id": "sum", "question": "It blinks: the visits added along the motion, then added without it. Is there a dot in the ring in the first only?", "show": "sums", "answers": (
+        {"id": "sum", "question": "Left: the pictures added up along its path. Right: added up in place. Is there a bright dot in the ring on the left only?", "show": "sums", "answers": (
             {"id": "yes", "label": "Yes", "next": "steps"},
             {"id": "no", "label": "No", "result": "no_dot"})},
-        {"id": "steps", "question": "Does one dot step along the arrow?", "show": "blink", "answers": (
+        {"id": "steps", "question": "Does one faint dot move along the arrow?", "show": "blink", "answers": (
             {"id": "every", "label": "Yes, in every picture", "next": "shape"},
             {"id": "some", "label": "Only in some", "next": "missing"},
             {"id": "no", "label": "No", "result": "no_dot"})},
@@ -76,7 +76,7 @@ SERIES: dict[str, tuple[dict[str, Any], ...]] = {
             {"id": "streak", "label": "Streak", "result": "streak"})},
     ),
     "slow": (  # a slow mover or a brown-dwarf candidate; the Blink of two passes
-        {"id": "shift", "question": "Does the dot in the ring shift while the stars stay put?", "show": "blink2", "answers": (
+        {"id": "shift", "question": "Does the dot in the ring move while the stars stay still?", "show": "blink2", "answers": (
             {"id": "yes", "label": "Yes", "next": "blend"},
             {"id": "no", "label": "No", "result": "still"})},
         {"id": "blend", "question": "Is it one dot, or two touching?", "show": "blink2", "answers": (
@@ -87,10 +87,10 @@ SERIES: dict[str, tuple[dict[str, Any], ...]] = {
             {"id": "no", "label": "No", "result": "moves"})},
     ),
     "peak": (  # a Planet X peak; two sums side by side
-        {"id": "left", "question": "It blinks: the visits added along the orbit, then one pass. Is there a dot in the ring in the sum only?", "show": "sums", "answers": (
+        {"id": "left", "question": "Left: all the pictures added up along its possible path. Right: one picture. Is there a bright dot in the ring on the left only?", "show": "sums", "answers": (
             {"id": "yes", "label": "Yes", "next": "glow"},
             {"id": "no", "label": "No", "result": "no_peak"})},
-        {"id": "glow", "question": "Is it inside a bright star's glow or on its spike?", "show": "picture", "answers": (
+        {"id": "glow", "question": "Is it inside a bright star's glow, or on one of its rays?", "show": "picture", "answers": (
             {"id": "yes", "label": "Yes", "result": "glow"},
             {"id": "no", "label": "No", "result": "candidate"})},
     ),
@@ -101,7 +101,7 @@ SERIES: dict[str, tuple[dict[str, Any], ...]] = {
         {"id": "every", "question": "Is it there every time?", "show": "passes", "answers": (
             {"id": "yes", "label": "Yes", "next": "glow"},
             {"id": "no", "label": "No", "result": "artefact"})},
-        {"id": "glow", "question": "Is it on a bright star's glow, a spike, or the picture edge?", "show": "picture", "answers": (
+        {"id": "glow", "question": "Is it on a bright star's glow or ray, or at the picture's edge?", "show": "picture", "answers": (
             {"id": "yes", "label": "Yes", "result": "artefact"},
             {"id": "no", "label": "No", "next": "moved"})},
         {"id": "moved", "question": "Old picture next to new: has it moved?", "show": "old_new", "answers": (
@@ -109,10 +109,10 @@ SERIES: dict[str, tuple[dict[str, Any], ...]] = {
             {"id": "no", "label": "No", "result": "still"})},
     ),
     "anomaly": (  # the stamps of the odd exposures
-        {"id": "neighbour", "question": "In the odd pictures, does a neighbour star touch it?", "show": "stamps", "answers": (
+        {"id": "neighbour", "question": "Is another star touching the one in the middle?", "show": "stamps", "answers": (
             {"id": "yes", "label": "Yes", "result": "neighbour"},
             {"id": "no", "label": "No", "next": "broken"})},
-        {"id": "broken", "question": "Do the odd pictures look broken (a streak, cut off, glare)?", "show": "stamps", "answers": (
+        {"id": "broken", "question": "Do these pictures look damaged (a streak, cut off, glare)?", "show": "stamps", "answers": (
             {"id": "yes", "label": "Yes", "result": "broken"},
             {"id": "no", "label": "No", "result": "real"})},
     ),

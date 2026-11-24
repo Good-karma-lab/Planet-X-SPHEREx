@@ -60,6 +60,9 @@ export interface Task {
   why?: { finding_id?: string; kind?: string; promise?: number; ra?: number; dec?: number; text?: string; ask?: { kind?: string; finding_id?: string; series?: string } } | null;
   /** a time-lapse track's task: the date of the film its search ran on (MJD); the lab plays that film, the one warmed ahead */
   film?: number | null;
+  /** where the find itself stands in the field the task opens on (a built one that holds it) */
+  find_ra?: number | null;
+  find_dec?: number | null;
   state: 'open' | 'done';
   result: string | null;
   mark_ids: string[];
@@ -325,6 +328,10 @@ export function taskHash(t: Task, film?: number | null): string {
   // a square given for a lead in it: the lab selects that find and asks its questions before the quarter's look
   if (t.kind === 'cell' && t.why) for (const [k, v] of Object.entries(leadParams(t.why))) q.set(k, v);
   if (t.kind === 'finding' && t.finding_id) q.set('finding', t.finding_id);
+  if (t.find_ra != null && t.find_dec != null) {
+    q.set('find_ra', t.find_ra.toFixed(6));
+    q.set('find_dec', t.find_dec.toFixed(6));
+  }
   const f = t.film ?? film;
   if (t.kind === 'finding' && t.finding_id?.startsWith('film:') && f != null && Number.isFinite(f)) q.set('film', String(f));
   return `#/lab?${q}`;
