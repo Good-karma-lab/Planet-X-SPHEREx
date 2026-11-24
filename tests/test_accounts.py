@@ -925,6 +925,6 @@ def test_the_finds_visibility_is_read_from_the_first_list_after_a_start(monkeypa
     clips = SimpleNamespace(seen=lambda f: (False, 0.0))
     monkeypatch.setattr(findings, "query", query)
     monkeypatch.setattr(routes_clips, "clips_of", lambda st: clips)
-    st = SimpleNamespace(findings=SimpleNamespace(db=None))  # nothing has made st.clips yet
+    st = SimpleNamespace(findings=SimpleNamespace(db=None), store=object(), index=None)  # nothing has made st.clips yet
     assert routes_tasks.lead_findings(st, "any") == []
     assert asked["seen"] is clips.seen

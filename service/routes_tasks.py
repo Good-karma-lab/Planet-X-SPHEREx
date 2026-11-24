@@ -371,8 +371,8 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
     try:  # made here when nobody asked for a clip yet: without them, for minutes after a start, no find was known to be invisible and
         from service.routes_clips import clips_of  # the tasks handed out any of them (24 Nov 2026: 447 finds instead of 116)
 
-        clips = clips_of(st)
-    except HTTPException:  # no store here (a test, a node)
+        clips = clips_of(st) if getattr(st, "store", None) is not None else getattr(st, "clips", None)
+    except HTTPException:  # no store here (a node)
         clips = None
     idn = getattr(st, "fpx_known", None)  # a Planet X peak JPL names (or a known body's echo) is known here too: no lead
     body = query(
