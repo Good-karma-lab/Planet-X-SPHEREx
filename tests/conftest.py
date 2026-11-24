@@ -14,6 +14,8 @@ def _every_kind_is_asked(monkeypatch: pytest.MonkeyPatch) -> None:
     from service.accounts import people
 
     monkeypatch.setattr(people, "KINDS_OFF", frozenset())
+    monkeypatch.setattr("service.routes_tasks.PROMISING_SPREAD", 1)  # the order itself
+    monkeypatch.setattr("service.routes_tasks.PLAIN_SHARE", 0.0)
     monkeypatch.setattr(people, "track_seen", lambda row: row.get("visible") is not False or "raised" in row)
 
 

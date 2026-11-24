@@ -14,7 +14,7 @@ import asyncio
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 
 from service.clips import VERSION, ClipPending, Clips, ClipUnavailable, clips_dir
 from service.findings import find_row, id_of
@@ -24,6 +24,21 @@ from service.products.store import Store, product_key
 from service.workers import fieldjob
 
 PLACE_SIZES = (96, 170, 320)
+
+
+def one_frame(path: Any, frame: int) -> bytes | None:
+    """One frame of a clip as a still picture (a question shows a clip's two pictures side by side)."""
+    import io
+
+    from PIL import Image
+
+    with Image.open(path) as im:
+        if frame >= getattr(im, "n_frames", 1):
+            return None
+        im.seek(frame)
+        buf = io.BytesIO()
+        im.convert("RGB").save(buf, "WEBP", quality=90)
+    return buf.getvalue()
 
 
 def clips_of(st: Any) -> Clips:
@@ -71,7 +86,7 @@ def make_clips_router(st: Any) -> APIRouter:
             raise HTTPException(404, "no such finding")
         return row
 
-    async def clip(find_id: str) -> Any:
+    async def clip(find_id: str, frame: int | None = Query(None, ge=0, le=8, description="one still frame of the clip")) -> Any:
         find_id = id_of(find_id)  # its slug too (track-…)
         clips = clips_of(st)
         find = await asyncio.to_thread(the_find, find_id)
@@ -81,7 +96,13 @@ def make_clips_router(st: Any) -> APIRouter:
             return JSONResponse({"state": "building"}, 202, headers={"Retry-After": "5", "Cache-Control": "no-store"})
         except ClipUnavailable as e:
             return JSONResponse({"state": "none", "reason": str(e)}, 404, headers={"Cache-Control": "no-store"})
-        return FileResponse(path, media_type="image/webp", headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        head = {"Cache-Control": "public, max-age=31536000, immutable"}
+        if frame is not None:
+            data = await asyncio.to_thread(one_frame, path, frame)
+            if data is None:
+                raise HTTPException(404, "the clip has no such frame")
+            return Response(data, media_type="image/webp", headers=head)
+        return FileResponse(path, media_type="image/webp", headers=head)
 
     async def still(find_id: str) -> Any:
         """One still frame of the finding's place, for a card whose clip is not made yet: 200 image/webp or 404 {state, reason}."""

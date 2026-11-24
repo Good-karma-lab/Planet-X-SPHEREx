@@ -161,6 +161,8 @@ def open_quarters(viewed: dict[str, int], taken: set[str]) -> list[str]:
 
 
 READY_SCAN = 40  # quarters looked at for a built one before a cold one is given
+PROMISING_SPREAD = 12  # a promising quarter is a random one of the first this many that are built
+PLAIN_SHARE = 0.25  # and this share of the squares is a plain one, with no lead to judge first
 PROMISING_AHEAD = 64  # the quarters of the best leads that the stock builds before any other (57 had a visible peak, 4 were built)
 SPREAD = 8  # people are given a random one of the first SPREAD quarters (built ones first), so not everyone gets the same square
 PROMISING_TTL_S = 60.0
@@ -178,6 +180,15 @@ def quarter_of(ce: Any, ra: float, dec: float) -> str:
     if r < ce.ra0 - 180.0:
         r += 360.0
     return ("N" if dec >= dm else "S") + ("E" if r >= rm else "W")
+
+
+def quarter_of_place(ra: float, dec: float) -> dict[str, Any] | None:
+    """The centre of the quarter of the grid a place falls in, None without the grid."""
+    g = _grid()
+    if g is None:
+        return None
+    ce = g.cell_at(ra % 360.0, dec)
+    return quarter_place(ce.id, quarter_of(ce, ra, dec))
 
 
 def promising_quarters(st: Any) -> list[dict[str, Any]]:
@@ -288,6 +299,32 @@ def why_of(p: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+#: the kinds whose task opens on a built field that holds the find (a mover's or a track's needs its own field's search)
+PLACED_KINDS = frozenset({"peak", "red", "anomaly"})
+
+
+def task_fields(st: Any) -> Any:
+    """The service's TaskFields (made at the first use), None where there is no store or index (a test, a node)."""
+    if getattr(st, "store", None) is None or getattr(st, "index", None) is None:
+        return None
+    tf = getattr(st, "task_fields", None)
+    if tf is None:
+        from service.taskfields import TaskFields
+
+        tf = st.task_fields = TaskFields(st)
+    return tf
+
+
+def finds_to_ready(st: Any) -> list[dict[str, Any]]:
+    """The finds people may be asked about that the lab cannot show at once, in the order they are asked about: peaks, then red sources
+    and anomalies, the ones seen in their own pictures first. A database read: call it in a thread."""
+    from service.accounts import people
+
+    rank = {"peak": 0, "red": 1, "anomaly": 2}
+    got = [r for r in (all_rows(st) or []) if r.get("ready") is False and r.get("_listed") and people.askable(r)]
+    return sorted(got, key=lambda r: (r.get("visible") is not True, rank.get(str(r.get("kind")), 9), -int(r.get("promise") or 0)))
+
+
 def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | None:
     """The machine findings in the order of the Findings page (`status` "any": the hidden ones too). None when the findings
     database is not loaded."""
@@ -318,6 +355,18 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             if x["kind"] == "film" and x["status"] in LEADS and x.get("visible") is True:
                 full = one(f.db, x["id"])
                 visits[x["id"]] = clips.visits_seen({**x, **full}) if full is not None else None
+    tf = task_fields(st)
+    ready: dict[str, bool] = {}
+    if tf is not None:  # the few finds people are asked about: can the lab show what the question is about at once?
+        from service.findings import find_row as one
+
+        for x in body["finds"]:
+            if x["kind"] in PLACED_KINDS and x["status"] in LEADS and x.get("ask", True) and x.get("visible") is not False:
+                ok = tf.place(float(x["ra"]), float(x["dec"])) is not None
+                if ok and x["kind"] == "anomaly":
+                    an = ((one(f.db, x["id"]) or {}).get("data") or {}).get("anomaly")
+                    ok = bool(an) and tf.spectrum_kept(an)
+                ready[x["id"]] = ok
     listed = {x["id"] for x in body["finds"] if x["status"] not in HIDDEN}  # in the default list (status None), as its filter decides
     return [
         {
@@ -331,6 +380,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             "stage": x["status"] if x["status"] in ("chain", "weak") else STAGE_OF_STATUS.get(x["status"]),
             "visible": x.get("visible"),
             "promise": x.get("promise") or 0,
+            **({"ready": ready[x["id"]]} if x["id"] in ready else {}),
             **({"visits_seen": visits[x["id"]]} if x["id"] in visits else {}),
             **({"ask": x["ask"]} if "ask" in x else {}),
             **({"echo": True} if x.get("echo") else {}),
@@ -661,9 +711,10 @@ def make_tasks_router(st: Any) -> APIRouter:
         # come in as they are made; until then the stock's own built quarters are given
         pq = [p for p in pq[:READY_SCAN] if qs.ready(p["cell_id"], p["quarter"])]
         if pq:
-            # the most promising quarter not looked through yet (the user: "Give me a square" gives the top find's quarter, not a random
-            # one of the first few)
-            p = pq[0]
+            # one of the most promising quarters not looked through yet: always the first gave everyone the same corner of the sky, three
+            # times in a row (the human test of 24 Nov 2026), so a random one of the first few, and now and then a plain square
+            p = RNG.choice(pq[:PROMISING_SPREAD])
+        if pq and RNG.random() >= PLAIN_SHARE:
             row = searched[p["cell_id"]]
             why = why_of(p)
             return {**row, "quarter": p["quarter"], "fov": QUARTER_FOV, **quarter_place(p["cell_id"], p["quarter"]), "why": why}
@@ -720,8 +771,9 @@ def make_tasks_router(st: Any) -> APIRouter:
 
         # a find people raised first, then the strong kinds before the many red sources and anomalies (finding_group), then the
         # least checked, then the most promising; stable: the page's order among the equal
-        def rank(r: dict[str, Any]) -> tuple[bool, Any, bool, int]:
-            return ("raised" not in r, finding_group(r), r.get("visible") is not True, checked.get(r["finding_id"], 0))
+        def rank(r: dict[str, Any]) -> tuple[bool, bool, Any, bool, int]:
+            seen_first = r.get("visible") is not True
+            return (r.get("ready") is False, "raised" not in r, finding_group(r), seen_first, checked.get(r["finding_id"], 0))
 
         leads.sort(key=lambda r: (*rank(r), -int(r.get("promise") or 0)))
         if not leads:
@@ -742,7 +794,12 @@ def make_tasks_router(st: Any) -> APIRouter:
                 raise HTTPException(404, "no such finding")
             return one
         seen = acc.db.task_refs(user_id, kind) if user_id else had
-        return people.get(st, acc.db).pick(kind, rows, user_id, seen, controls=lambda: control_rows(st))
+        tf = task_fields(st)
+
+        def shows(r: dict[str, Any]) -> bool:  # a control the lab can show at once
+            return tf is None or r.get("kind") not in PLACED_KINDS or tf.place(float(r["ra"]), float(r["dec"])) is not None
+
+        return people.get(st, acc.db).pick(kind, rows, user_id, seen, controls=lambda: control_rows(st), shows=shows)
 
     def next_other(
         acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None, had: set[str]
@@ -792,6 +849,15 @@ def make_tasks_router(st: Any) -> APIRouter:
                 task["ra"], task["dec"], task["fov"] = place
             elif str(task["finding_id"]).startswith("film:") and fp.get("ra") is not None and fp.get("dec") is not None:
                 task["ra"], task["dec"] = float(fp["ra"]), float(fp["dec"])
+            tf = task_fields(st)
+            if tf is not None and row is not None and row.get("kind") in PLACED_KINDS and row.get("ra") is not None:
+                at = tf.place(float(row["ra"]), float(row["dec"]))
+                if at is not None:  # a built field that holds it: the picture is there at once, the find at its own place in it
+                    task.update(ra=at["ra"], dec=at["dec"], fov=at["fov"])
+                    task["find_ra"], task["find_dec"] = float(row["ra"]), float(row["dec"])
+            an = ((row or {}).get("data") or {}).get("anomaly")
+            if an and row is not None and row.get("kind") == "anomaly":  # its odd pictures, whatever the field's own search says
+                task["anomaly"] = {k: an.get(k) for k in ("n", "ra", "dec", "pmra", "pmdec", "drivers")}
             series = people.series_of(str(task["finding_id"]).split(":")[0])
             if series is not None:
                 task["series"] = {"id": series, "steps": people.steps_of(series)}

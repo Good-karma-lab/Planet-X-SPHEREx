@@ -894,3 +894,17 @@ def test_a_guests_link_to_a_task_is_that_task_and_never_another_persons(site: tu
     assert mine["id"] != t["id"]  # a person's task is their own
     assert guest.get("/api/tasks/next", params={**ask, "task_id": mine["id"]}).json()["task"]["id"] != mine["id"]
     assert guest.get("/api/tasks/next", params={**ask, "task_id": "no"}).status_code == 422
+
+
+def test_what_the_lab_shows_at_once_is_asked_about_first(site: tuple[FastAPI, _State, _Mail], monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import routes_tasks
+
+    monkeypatch.setattr(routes_tasks, "FINDING_SPREAD", 1)
+    app, st, _mail = site
+    row = {"field_key": "k", "ra": 1.0, "dec": 2.0, "status": "unexplained", "stage": None, "kind": "peak", "visible": True, "promise": 50}
+    rows = [{**row, "finding_id": "peak:cold", "ready": False, "promise": 99}, {**row, "finding_id": "peak:warm", "ready": True}]
+    st.task_findings = lambda: rows  # type: ignore[attr-defined]
+    for kind in ("finding", "moves"):
+        got = _client(app).get("/api/tasks/next", params={"kind": kind}).json()["task"]["finding_id"]
+        assert got == "peak:warm"
+        assert _client(app).get("/api/tasks/next", params={"kind": kind, "skip": "peak:warm"}).json()["task"]["finding_id"] == "peak:cold"

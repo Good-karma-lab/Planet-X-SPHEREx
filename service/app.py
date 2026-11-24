@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__, cpu, exposure_flags, jsonsafe, machine, people_queue, quarters, sweep_runner
+from service import __version__, cpu, exposure_flags, jsonsafe, machine, people_queue, quarters, sweep_runner, taskfields
 from service import grid as grid_mod
 from service.accounts import get as accounts_get
 from service.accounts import register_accounts
@@ -116,6 +116,8 @@ class State:
         self.machine: Any = None  # service.machine.Limits: the limits this machine got
         self.submit_field: Any = None
         self.quarter_stock: dict[str, Any] = {}
+        self.task_stock: dict[str, Any] = {}  # what is made ready for the finding tasks (service/taskfields.py)
+        self.task_fields: Any = None
         # people's queue for the brown-dwarf search (service/people_queue.py) and its last step for /health
         self.bd_queue: Any = None
         self.sweep: Any = None  # the background sweep of the grid (service/sweep_runner.py)
@@ -425,6 +427,34 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         for c, q in ahead:
             qs.ready(c, q)
 
+    async def task_stock_step(qs: Any) -> None:
+        """What people are asked about, made ready: one field or one anomaly's spectrum at a time (service/taskfields.py), while nobody
+        waits, the disk has room and the process is not large."""
+        from service import routes_tasks
+        from service.memwatch import rss_anon_mb
+
+        tf = await asyncio.to_thread(routes_tasks.task_fields, st)
+        sch = st.scheduler
+        if tf is None or sch is None or sch.person_waiting() or qs.building() or not tf.room() or (rss_anon_mb() or 0) > 12_000:
+            return
+        finds = await asyncio.to_thread(routes_tasks.finds_to_ready, st)
+        todo = await asyncio.to_thread(tf.wanted, finds, routes_tasks.quarter_of_place)
+        said: dict[str, Any] = {"fields_left": len(todo), "finds_left": len(finds), "at": time.time()}
+        if todo:
+            submit_field(todo[0], Priority.P2)
+            said["last"] = todo[0]
+        elif st.spectra is not None and not any(r.state == "running" for r in st.spectra.runs.values()):
+            for r in finds:
+                if r.get("kind") != "anomaly":
+                    continue
+                row = await asyncio.to_thread(routes_tasks.find_row, st, r["finding_id"])
+                an = ((row or {}).get("data") or {}).get("anomaly")
+                if an and not tf.spectrum_kept(an):
+                    st.spectra.start(taskfields.anomaly_params(an))
+                    said["spectrum"] = r["finding_id"]
+                    break
+        st.task_stock = said
+
     async def quarter_stock_loop() -> None:
         """Keeps a few quarters ready for the people who will take a square next (service/quarters.py), one build at a time."""
         await asyncio.sleep(30.0)
@@ -440,6 +470,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                     started = qs.stock_step(order)  # on the loop: the scheduler is not thread-safe
                     if started:
                         st.quarter_stock = {"last": started, "at": time.time()}
+                    else:
+                        await task_stock_step(qs)
             except Exception as e:  # said in /health; the next round tries again
                 st.quarter_stock = {"error": f"{type(e).__name__}: {e}"[:200], "at": time.time()}
             await asyncio.sleep(60.0)
@@ -826,6 +858,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             "index": index_health(),
             "jobs": st.scheduler.snapshot() if st.scheduler else None,
             "warm": {**st.warm.snapshot(), "searches": st.warm_searches} if st.warm else None,
+            "task_stock": st.task_stock or None,
             "quarter_stock": {"target": quarters.STOCK, **st.quarter_stock} if st.quarters is not None else None,
             "bd_queue": {"done": len(st.bd_queue.done), **st.bd_queue_last} if st.bd_queue is not None else None,
             "sweep": st.sweep.snapshot() if st.sweep is not None else None,

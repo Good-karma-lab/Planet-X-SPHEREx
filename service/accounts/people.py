@@ -379,6 +379,7 @@ class People:
         user_id: str | None,
         seen: set[str],
         controls: Callable[[], list[dict[str, Any]]] | None = None,
+        shows: Callable[[dict[str, Any]], bool] | None = None,
     ) -> dict[str, Any] | None:
         """The next find to ask about in a series task. `task_kind` is moves (tracks, slow movers, peaks), red, anomaly or finding
         (any). An unexplained find nobody settled, one already answered by others first (it is the nearest to a result); every
@@ -400,6 +401,8 @@ class People:
                 r for r in pool + extra if r.get("kind") not in KINDS_OFF and (r.get("kind") != "film" or askable(r))
             ]  # nor a control of them: it would be the only one of its kind
             cands = [r for r in everyone if r["finding_id"] not in mine and self.expected(str(series_of(r.get("kind"))), r) is not None]
+            if shows is not None:  # a control the lab can show at once (any, where none can)
+                cands = [r for r in cands[:200] if shows(r)][:1] or cands
             if cands:
                 return cands[0]
         settled: set[str] = set()
@@ -415,8 +418,8 @@ class People:
             and r["finding_id"] not in settled
             and askable(r)
         ]
-        # the ones seen in their own pictures first; stable: the Findings page's order among equals
-        open_.sort(key=lambda r: (-counts.get(r["finding_id"], 0), r.get("visible") is not True))
+        # what the lab shows at once, then the nearest to a result, then the ones seen in their own pictures; stable: the Findings page's order among equals
+        open_.sort(key=lambda r: (r.get("ready") is False, -counts.get(r["finding_id"], 0), r.get("visible") is not True))
         return open_[0] if open_ else None
 
     # ------------------------------------------------------------------------------------------------------------- answers
