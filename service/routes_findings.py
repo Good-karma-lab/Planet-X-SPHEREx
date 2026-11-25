@@ -79,7 +79,7 @@ def warm_keys() -> list[dict[str, Any]]:
         {**card, "kinds": ",".join(("mover", "browndwarf", "peak", "film", "pair"))},
         {"status": "all", "visibility": "seen", "lite": True, "limit": 1, "faint": "hide"},
         *({**card, "kind": k} for k in KINDS),
-        {"status": "all", "kind": "peak", "limit": 2000},
+        {"status": "all", "kind": "peak", "limit": 2000, "faint": "hide"},
     ]
 
 

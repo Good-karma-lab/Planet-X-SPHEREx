@@ -819,6 +819,7 @@ def said_real(st: Any) -> frozenset[str]:
         st,
         "SELECT finding_id FROM acc_series_answers WHERE result IN ('candidate', 'moves', 'moves_old', 'partial', 'real')",
         "SELECT finding_id FROM acc_answers WHERE answer IN ('moves', 'real')",
+        # find_again "seen": the person found the dot again in another pass (seen twice: what a real body does)
         "SELECT finding_id FROM acc_task_answers WHERE answer IN ('moves', 'real', 'seen')",
         "SELECT finding_id FROM acc_tasks WHERE finding_id IS NOT NULL AND result IN ('moves', 'candidate', 'real')",
         "SELECT find_id FROM finding_views WHERE result IN ('moves', 'candidate', 'real')",
