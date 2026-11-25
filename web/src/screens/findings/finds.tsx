@@ -591,6 +591,8 @@ interface CardReply {
   promising: number;
   promising_kinds: string[];
   noted: number;
+  /** the faint Planet X peaks under the request's other filters, shown or hidden */
+  faint?: number;
   visibility: {
     by_kind: Record<string, { visible: number; not_visible: number; not_measured: number }>;
     in_view: { visible: number; not_visible: number; not_measured: number };
@@ -617,7 +619,7 @@ function keptFilter(): { kind?: KindSel; stage?: StageSel } {
   }
 }
 
-function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolean) {
+function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolean, faint: boolean) {
   const [state, setState] = useState<{
     key: string;
     head: CardReply | null;
@@ -628,7 +630,7 @@ function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolea
     /** the cards on screen are of the previous filter: the new one is on its way */
     stale: boolean;
   }>({ key: '', head: null, finds: [], done: false, loading: false, failed: false, stale: false });
-  const key = `${kind}|${stage}|${stage === 'mine' ? mine.length : 0}|${unseen}`;
+  const key = `${kind}|${stage}|${stage === 'mine' ? mine.length : 0}|${unseen}|${faint}`;
   const busy = useRef(false);
   const load = (reset: boolean) => {
     if (busy.current && !reset) return;
@@ -656,6 +658,7 @@ function useCards(kind: KindSel, stage: StageSel, mine: string[], unseen: boolea
     kindQuery(q, kind);
     // the list shows the finds whose object the eye can see in the ring; the rest are behind "Not visible in the picture"
     if (stage !== 'mine') q.set('visibility', unseen ? 'unseen' : 'seen');
+    if (stage !== 'mine' && !faint) q.set('faint', 'hide');
     stageQuery(q, stage, mine);
     setState((s) =>
       reset ? { ...s, key, done: false, loading: true, failed: false, stale: s.finds.length > 0 } : { ...s, loading: true },
@@ -709,14 +712,15 @@ function stageQuery(q: URLSearchParams, stage: StageSel, mine: string[]) {
 }
 /** The kind chips' numbers under the active status and visibility: GET /api/v1/findings' counts_view, one small reply. The last
  *  numbers stay while the next are on their way. */
-function useKindCounts(stage: StageSel, mine: string[], unseen: boolean): Record<string, number> | null {
+function useKindCounts(stage: StageSel, mine: string[], unseen: boolean, faint: boolean): Record<string, number> | null {
   const [c, setC] = useState<Record<string, number> | null>(null);
-  const dep = `${stage}|${stage === 'mine' ? mine.join(',') : ''}|${unseen}`;
+  const dep = `${stage}|${stage === 'mine' ? mine.join(',') : ''}|${unseen}|${faint}`;
   useEffect(() => {
     let stop = false;
     const q = new URLSearchParams({ lite: '1', status: 'all', limit: '1' });
     stageQuery(q, stage, mine);
     if (stage !== 'mine') q.set('visibility', unseen ? 'unseen' : 'seen');
+    if (stage !== 'mine' && !faint) q.set('faint', 'hide');
     void fetch(`/api/v1/findings?${q}`)
       .then((r) => (r.ok ? (r.json() as Promise<{ counts_view?: Record<string, number> }>) : null))
       .then((d) => d?.counts_view && !stop && setC(d.counts_view))
@@ -798,7 +802,8 @@ export function FindingsView({
     };
   }, [user?.id]);
   const [unseen, setUnseen] = useState(false);
-  const cards = useCards(kind, stage, mine, unseen);
+  const [faint, setFaint] = useState(false);
+  const cards = useCards(kind, stage, mine, unseen, faint);
   const peopleSaid = usePeople(cards.finds.map((f) => f.id));
   const sel = useFind(leadId);
   // findings submitted by people: the button is there only when the service has accounts and somebody has submitted one
@@ -823,7 +828,7 @@ export function FindingsView({
   const atlas = leadId === ATLAS_LEAD.id;
   // every number on a chip is what that chip gives under the other filters: one reply's counts_view has it for every kind (the
   // service counts under the status, stage and visibility asked, the kinds left out)
-  const byKind = useKindCounts(stage, mine, unseen);
+  const byKind = useKindCounts(stage, mine, unseen, faint);
   const cnt = (k: KindSel) =>
     k === 'submitted' || !byKind ? null : k === 'promising' ? PROMISING.reduce((n, x) => n + (byKind[x] ?? 0), 0) : (byKind[k] ?? 0);
   const kinds: [KindSel, string][] = [
@@ -877,6 +882,7 @@ export function FindingsView({
   const active: { label: string; clear?: () => void }[] = [
     { label: kindName(kind), clear: kind !== 'promising' ? () => setKind('promising') : undefined },
     ...(kind === 'submitted' ? [] : [{ label: stageName(stage), clear: stage !== 'any' ? () => setStage('any') : undefined }]),
+    ...(viewOn && faint ? [{ label: 'faint peaks too', clear: () => setFaint(false) }] : []),
     ...(viewOn ? [{ label: unseen ? 'not visible' : 'visible', clear: unseen ? () => setUnseen(false) : undefined }] : []),
   ];
   // an empty list: the filters to loosen, with what each would give
@@ -990,6 +996,17 @@ export function FindingsView({
             <button class={unseen ? 'on' : ''} aria-pressed={unseen} onClick={() => setUnseen(true)}>
               Not visible in the picture <span>{h?.visibility.in_view.not_visible ?? NONE}</span>
             </button>
+            {(faint || (h?.faint ?? 0) > 0) && (
+              <button
+                class={faint ? 'on' : ''}
+                aria-pressed={faint}
+                data-testid="faint-toggle"
+                title="Planet X peaks under 6 sigma in the pictures: most are noise. They stay out of the list until you ask for them."
+                onClick={() => setFaint(!faint)}
+              >
+                Faint peaks: {faint ? 'shown' : 'hidden'} <span>{h?.faint ?? NONE}</span>
+              </button>
+            )}
           </div>
         )}
         <p class="hint leadcount">

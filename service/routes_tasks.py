@@ -378,6 +378,12 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
         aside, raised = field_people.set_aside(st), people.raised(st)
     except Exception:
         aside, raised = {}, {}
+    try:  # a faint peak is not handed out, but for one in ten and those people were given or answered already
+        from service.accounts import people
+
+        real, started = people.said_real(st), people.started(st)
+    except Exception:
+        real, started = frozenset(), frozenset()
     try:  # made here when nobody asked for a clip yet: without them, for minutes after a start, no find was known to be invisible and
         from service.routes_clips import clips_of  # the tasks handed out any of them (24 Nov 2026: 447 finds instead of 116)
 
@@ -387,9 +393,9 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
     idn = getattr(st, "fpx_known", None)  # a Planet X peak JPL names (or a known body's echo) is known here too: no lead
     body = query(
         f.db, None, status, None, 100000, 0, aside=aside, raised=raised, seen=getattr(clips, "seen", None),
-        names=idn.verdict_on if idn is not None else None, slim=True,
+        names=idn.verdict_on if idn is not None else None, slim=True, real=real,
     )  # fmt: skip
-    from service.findings import HIDDEN
+    from service.findings import HIDDEN, faint_sample
 
     visits: dict[str, tuple[int, int] | None] = {}
     if clips is not None and hasattr(clips, "visits_seen"):  # the tracks that may be asked about: how many of their own visits show the dot
@@ -432,6 +438,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             **({"visits_seen": visits[x["id"]]} if x["id"] in visits else {}),
             **({"ask": x["ask"]} if "ask" in x else {}),
             **({"echo": True} if x.get("echo") else {}),
+            **({"faint": True} if x.get("faint") and x["id"] not in started and not faint_sample(x["id"]) else {}),
             **({"raised": x["people_raised"]} if "people_raised" in x else {}),
             **({"_listed": x["id"] in listed} if status == "any" else {}),
         }

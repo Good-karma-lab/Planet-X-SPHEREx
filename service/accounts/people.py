@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -323,6 +324,8 @@ def askable(row: dict[str, Any]) -> bool:
         return False
     if row.get("pictures") is False:
         return False  # its question is about two pictures that are not there: an answer would be a guess
+    if row.get("faint") and "raised" not in row:
+        return False  # a faint Planet X peak (findings.faint_peak): most are noise
     if row.get("kind") == "film":
         return track_seen(row)
     return row.get("visible", True) is True or "raised" in row
@@ -795,6 +798,43 @@ def dropped(st: Any) -> dict[str, str]:
 def raised(st: Any) -> dict[str, str]:
     """Find id → why people raised it up the queue (moves_old: old pictures confirm the motion; candidate: a Planet X dot)."""
     return {k: v["reason"] for k, v in _action(st, "raise").items()}
+
+
+def _ids(st: Any, *sql: str) -> frozenset[str]:
+    """The finding ids these reads give together; a table nobody has written to yet (made at its first use) gives none."""
+    c = _db(st)._conn()
+    out: set[str] = set()
+    for q in sql:
+        try:
+            out.update(str(r[0]) for r in c.execute(q))
+        except sqlite3.OperationalError as e:
+            if "no such table" not in str(e):
+                raise
+    return frozenset(out)
+
+
+def said_real(st: Any) -> frozenset[str]:
+    """The finds at least one person said are real: a dot on the orbit's sum, "it moves", a submission."""
+    return _ids(
+        st,
+        "SELECT finding_id FROM acc_series_answers WHERE result IN ('candidate', 'moves', 'moves_old', 'partial', 'real')",
+        "SELECT finding_id FROM acc_answers WHERE answer IN ('moves', 'real')",
+        "SELECT finding_id FROM acc_task_answers WHERE answer IN ('moves', 'real', 'seen')",
+        "SELECT finding_id FROM acc_tasks WHERE finding_id IS NOT NULL AND result IN ('moves', 'candidate', 'real')",
+        "SELECT find_id FROM finding_views WHERE result IN ('moves', 'candidate', 'real')",
+        "SELECT finding_id FROM acc_submissions",
+    )
+
+
+def started(st: Any) -> frozenset[str]:
+    """The finds a person was given (and did not give back), or answered about."""
+    return _ids(
+        st,
+        "SELECT finding_id FROM acc_tasks WHERE finding_id IS NOT NULL AND state IN ('open', 'done')",
+        "SELECT finding_id FROM acc_series_answers",
+        "SELECT finding_id FROM acc_answers",
+        "SELECT finding_id FROM acc_task_answers",
+    )
 
 
 def taps(st: Any, finding_id: str, kind: str) -> list[dict[str, Any]]:
