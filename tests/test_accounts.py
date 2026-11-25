@@ -928,3 +928,91 @@ def test_the_finds_visibility_is_read_from_the_first_list_after_a_start(monkeypa
     st = SimpleNamespace(findings=SimpleNamespace(db=None), store=object(), index=None)  # nothing has made st.clips yet
     assert routes_tasks.lead_findings(st, "any") == []
     assert asked["seen"] is clips.seen
+
+
+def test_the_next_find_to_check_is_of_another_kind(site: tuple[FastAPI, _State, _Mail], monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import routes_tasks
+
+    monkeypatch.setattr(routes_tasks, "FINDING_SPREAD", 1)
+    app, st, mail = site
+    row = {"field_key": "k", "ra": 1.0, "dec": 2.0, "status": "unexplained", "stage": None, "visible": True, "promise": 50}
+    ids = ("peak:1", "peak:2", "peak:3", "red:1", "red:2", "anomaly:1")
+    st.task_findings = lambda: [{**row, "finding_id": i, "kind": i.split(":")[0]} for i in ids]  # type: ignore[attr-defined]
+    guest: list[str] = []
+    for _ in ids:
+        t = _client(app).get("/api/tasks/next", params={"kind": "finding", "skip": ",".join(guest)}).json()["task"]
+        guest.append(t["finding_id"])
+    assert sorted(guest) == sorted(ids)
+    kinds = [g.split(":")[0] for g in guest]
+    assert len(set(kinds[:3])) == 3 and all(kinds[i] != kinds[i + 1] for i in range(4))  # the last two may be of one
+    c = _sign_in(app, mail)
+    had = []
+    for _ in range(3):
+        t = c.get("/api/tasks/next", params={"kind": "finding"}).json()["task"]
+        again = c.get("/api/tasks/next", params={"kind": "finding"}).json()["task"]
+        assert again["id"] == t["id"]  # an open one is handed back
+        assert c.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["not_sure"], "pictures": []}).status_code == 200
+        had.append(t["finding_id"].split(":")[0])
+    assert len(set(had)) == 3
+    # an open one of the kind just answered waits for its turn
+    t = c.get("/api/tasks/next", params={"kind": "finding", "finding_id": "peak:2"}).json()["task"]
+    c.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["not_sure"], "pictures": []})
+    waits = c.get("/api/tasks/next", params={"kind": "finding", "finding_id": "peak:3"}).json()["task"]
+    got = c.get("/api/tasks/next", params={"kind": "finding"}).json()["task"]
+    assert got["id"] != waits["id"] and got["finding_id"] == "red:2"
+
+
+def test_a_square_is_continued_with_its_lead_and_given_back_with_it(site: tuple[FastAPI, _State, _Mail]) -> None:
+    from service import accounts, grid
+    from service.routes_tasks import quarter_of
+
+    app, st, mail = site
+    ra, dec = 51.7441, 12.7641
+    ce = grid.cell_at(ra, dec)
+    q = quarter_of(ce, ra, dec)
+    row = {"field_key": "k", "ra": ra, "dec": dec, "status": "unexplained", "stage": None, "visible": True, "promise": 50}
+    rows = [{**row, "finding_id": "peak:1", "kind": "peak"}, {**row, "finding_id": "red:1", "kind": "red"}]
+    st.task_findings = lambda: rows  # type: ignore[attr-defined]
+    c, other = _sign_in(app, mail), _sign_in(app, mail, "bob@example.org")
+    db = accounts.get(st).db
+
+    def mine() -> dict[str, Any]:
+        return {t["id"]: t for t in c.get("/api/me/tasks").json()["tasks"]}
+
+    cell = c.get("/api/tasks/next", params={"kind": "cell", "cell_id": ce.id, "quarter": q}).json()["task"]
+    assert "why" not in mine()[cell["id"]]  # given with no lead
+    lead = c.get("/api/tasks/next", params={"kind": "moves", "finding_id": "peak:1"}).json()["task"]
+    own = c.get("/api/tasks/next", params={"kind": "finding", "finding_id": "red:1"}).json()["task"]
+    why = mine()[cell["id"]]["why"]
+    assert why["ask"] == {"kind": "moves", "finding_id": "peak:1", "series": "peak"} and why["promise"] == 50
+    assert c.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]["why"]["finding_id"] == "peak:1"
+    rows[0]["status"] = "known"
+    assert "why" not in mine()[cell["id"]]  # settled meanwhile
+    rows[0]["status"] = "unexplained"
+    # nobody else gives it back; its person does, with the lead's questions, and "check a finding" stays
+    assert other.post(f"/api/me/tasks/{cell['id']}/leave").status_code == 404
+    assert _client(app).post(f"/api/me/tasks/{cell['id']}/leave").status_code == 401
+    assert c.post(f"/api/me/tasks/{cell['id']}/leave").json()["task"]["state"] == "left"
+    assert {k: v["state"] for k, v in mine().items()} == {cell["id"]: "left", lead["id"]: "left", own["id"]: "open"}
+    assert db.quarters_taken_since(0.0) == set()  # free for others at once
+    assert c.get("/api/tasks/next", params={"kind": "moves", "finding_id": "red:1"}).status_code == 200
+    # a square closed with the lead's questions unanswered closes them too; an answered task is never changed
+    two = c.get("/api/tasks/next", params={"kind": "cell", "cell_id": ce.id, "quarter": q}).json()["task"]
+    assert two["id"] != cell["id"]
+    lead2 = c.get("/api/tasks/next", params={"kind": "moves", "finding_id": "peak:1"}).json()["task"]
+    assert c.post(f"/api/me/tasks/{two['id']}/done", json={"result": "nothing"}).status_code == 200
+    assert mine()[lead2["id"]]["state"] == "left" and mine()[two["id"]]["state"] == "done"
+    assert c.post(f"/api/me/tasks/{two['id']}/leave").json()["task"]["state"] == "done"
+
+
+def test_finds_nobody_measured_wait_for_their_picture(monkeypatch: pytest.MonkeyPatch) -> None:
+    from types import SimpleNamespace
+
+    from service import routes_tasks
+
+    rows = [{"finding_id": "red:a", "kind": "red", "ready": True, "_listed": True, "visible": v, **more}
+            for v, more in ((None, {}), (True, {}), (False, {}), (None, {"raised": 1}), (None, {"_listed": False}))]  # fmt: skip
+    monkeypatch.setattr(routes_tasks, "all_rows", lambda st: rows)
+    assert routes_tasks.finds_to_measure(SimpleNamespace(clips=object())) == [rows[0]]
+    assert routes_tasks.finds_to_measure(SimpleNamespace(clips=None)) == []
+    assert routes_tasks.finds_asked(SimpleNamespace()) == [rows[1], rows[3]]

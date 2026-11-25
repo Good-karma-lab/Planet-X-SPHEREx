@@ -344,9 +344,10 @@ class AccountsDB:
         return out
 
     def quarters_taken_since(self, since: float) -> set[tuple[str, str]]:
-        """{(square, quarter)} anybody (a guest too) took a task for since `since` (epoch seconds)."""
+        """{(square, quarter)} anybody (a guest too) took a task for since `since` (epoch seconds) and did not give back."""
         rows = self._conn().execute(
-            "SELECT cell_id, quarter FROM acc_tasks WHERE kind='cell' AND cell_id IS NOT NULL AND quarter IS NOT NULL AND created>=?",
+            "SELECT cell_id, quarter FROM acc_tasks WHERE kind='cell' AND cell_id IS NOT NULL AND quarter IS NOT NULL AND created>=?"
+            " AND state!='left'",
             (since,),
         )
         return {(r["cell_id"], r["quarter"]) for r in rows}
@@ -398,6 +399,34 @@ class AccountsDB:
             (result, json.dumps(mark_ids), time.time(), task_id),
         )
         return self._task(c.execute("SELECT * FROM acc_tasks WHERE id=?", (task_id,)).fetchone())
+
+    def leave_tasks(self, user_id: str, task_ids: list[str]) -> int:
+        """The user's open tasks given back without an answer: they are asked of nobody again and count nothing. How many there were."""
+        c = self._conn()
+        n = 0
+        for t in task_ids:
+            n += c.execute(
+                "UPDATE acc_tasks SET state='left', done_at=? WHERE id=? AND user_id=? AND state='open'", (time.time(), t, user_id)
+            ).rowcount
+        return n
+
+    def open_lead_tasks(self, user_id: str) -> list[dict[str, Any]]:
+        """The user's open question tasks that a square brought with it (a lead's questions; not the ones of "check a finding")."""
+        rows = self._conn().execute(
+            "SELECT * FROM acc_tasks WHERE user_id=? AND state='open' AND kind IN ('moves','red','anomaly') AND finding_id IS NOT NULL"
+            " ORDER BY created DESC",
+            (user_id,),
+        )
+        return [self._task(r) for r in rows]
+
+    def last_answered(self, user_id: str, since: float, n: int = 2) -> list[str]:
+        """The finds of the user's last `n` answered question tasks, the newest first."""
+        rows = self._conn().execute(
+            "SELECT finding_id FROM acc_tasks WHERE user_id=? AND state='done' AND done_at>=? AND finding_id IS NOT NULL"
+            " AND kind IN ('finding','moves','red','anomaly') ORDER BY done_at DESC LIMIT ?",
+            (user_id, since, n),
+        )
+        return [str(r[0]) for r in rows]
 
     def claim_task(self, task_id: str, user_id: str) -> None:
         """A task taken as a guest becomes the user's when they sign in and close it."""

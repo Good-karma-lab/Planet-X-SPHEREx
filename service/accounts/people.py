@@ -316,16 +316,16 @@ def track_seen(row: dict[str, Any]) -> bool:
 
 
 def askable(row: dict[str, Any]) -> bool:
-    """Whether a person is asked about a find: not one whose own picture was measured and shows nothing in the ring (24 of 27 track
-    leads and 295 of 356 peaks on 24 Nov 2026: an empty ring cannot be judged). A find whose picture is not measured yet may be asked;
-    one people raised is asked whatever its picture says."""
+    """Whether a person is asked about a find: one seen in its own picture (24 of 27 track leads and 295 of 356 peaks showed nothing in
+    the ring on 24 Nov 2026: an empty ring cannot be judged). One whose picture is not measured yet waits for it (finds_to_measure); one
+    people raised is asked whatever its picture says."""
     if row.get("kind") in KINDS_OFF:
         return False
     if row.get("pictures") is False:
         return False  # its question is about two pictures that are not there: an answer would be a guess
     if row.get("kind") == "film":
         return track_seen(row)
-    return row.get("visible") is not False or "raised" in row
+    return row.get("visible", True) is True or "raised" in row
 
 
 class People:

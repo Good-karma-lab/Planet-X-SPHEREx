@@ -104,8 +104,8 @@ export function App() {
         </div>
       </nav>
       <main data-screen={route.screen}>
-        {/* one per screen: a screen that failed is left by the rail, and comes back whole */}
-        <ErrorBoundary key={route.screen} name={route.screen}>
+        {/* one per screen: a screen that failed is left by the rail, and comes back whole; another field in the lab is another try */}
+        <ErrorBoundary key={route.screen} name={route.screen} at={JSON.stringify(route.params)}>
         {route.screen === 'lab' ? (
           <Lab route={route} />
         ) : route.screen === 'globe' ? (

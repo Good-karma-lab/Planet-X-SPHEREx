@@ -252,7 +252,7 @@ function lastSquare(mine: Pick<Mine, 'tasks' | 'history'>): Task | undefined {
 }
 
 /** Name, level and points, and the one next thing to do. */
-function Hero({ mine, take }: { mine: Mine; take: (k: 'cell' | 'finding') => void }) {
+function Hero({ mine, take, leave }: { mine: Mine; take: (k: 'cell' | 'finding') => void; leave: (id: string) => void }) {
   const s = mine.score;
   const cur = s ? ([...s.levels].reverse().find((l) => s.points >= l.at) ?? s.levels[0]!) : null;
   const toNext = s && cur && s.next_level_at != null ? (s.points - cur.at) / (s.next_level_at - cur.at) : 1;
@@ -317,6 +317,11 @@ function Hero({ mine, take }: { mine: Mine; take: (k: 'cell' | 'finding') => voi
         ) : (
           <button class="btn" onClick={() => take('finding')} data-testid="next-check">
             Check a finding
+          </button>
+        )}
+        {openCell && (
+          <button class="cb-link" onClick={() => leave(openCell.id)} title="Give this quarter back without an answer" data-testid="next-leave">
+            Give the square back
           </button>
         )}
       </div>
@@ -411,7 +416,7 @@ function HistoryItem({ h }: { h: HistoryRow }) {
 }
 
 function WorkPanel({ mine, work, run }: { mine: Mine; work: Work; run: (p: Promise<unknown>) => void }) {
-  const squares = mine.tasks.filter((t) => t.kind === 'cell');
+  const squares = mine.tasks.filter((t) => t.kind === 'cell' && t.state !== 'left');
   const count: Record<Work, number> = { squares: squares.length, marks: mine.marks.length, findings: mine.findings.length, history: mine.history.length };
   const set = (w: Work) => (location.hash = w === 'squares' ? '#/me' : `#/me?work=${w}`);
   return (
@@ -579,7 +584,7 @@ export function Cabinet({ route }: { route: Route }) {
           </div>
         ) : (
           <>
-            <Hero mine={mine} take={take} />
+            <Hero mine={mine} take={take} leave={(id) => run(api(`/api/me/tasks/${encodeURIComponent(id)}/leave`, { method: 'POST' }))} />
             {mine.score && <BadgeStrip score={mine.score} />}
             <div class="cb-cols">
               <section class="card glass cb-invs" data-testid="panel-investigations">
