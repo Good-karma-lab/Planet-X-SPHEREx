@@ -24,6 +24,8 @@ GC_THRESHOLD = (20_000, 10, 10)
 
 log = logging.getLogger("sky.mem")
 
+last_full: tuple[float, float] = (0.0, 0.0)  # the last full collection: when it ended (time.monotonic) and how long it took, s
+
 
 class _Mallinfo2(ctypes.Structure):
     _fields_ = [
@@ -90,6 +92,8 @@ class MemWatch:
         else:
             d = time.perf_counter() - self._t0
             self.full, self.full_s, self.full_max = self.full + 1, self.full_s + d, max(self.full_max, d)
+            global last_full
+            last_full = (time.monotonic(), d)
 
     def line(self) -> str:
         got: dict[str, Any] = {}

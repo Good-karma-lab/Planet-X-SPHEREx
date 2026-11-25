@@ -10,6 +10,8 @@ import threading
 import time
 import traceback
 
+from service import memwatch
+
 STALL_S = 1.0
 TICK_S = 0.2
 
@@ -31,7 +33,8 @@ class LoopWatch:
     def _watch(self, loop_thread: int) -> None:
         reported = False
         while not self._stop.wait(TICK_S):
-            late = time.monotonic() - self.last
+            now, since = time.monotonic(), self.last
+            late = now - since
             if late < STALL_S:
                 reported = False
                 continue
@@ -55,7 +58,13 @@ class LoopWatch:
                     continue  # an idle pool thread
                 tag = "event loop" if ident == loop_thread else names.get(ident, str(ident))
                 parts.append(f"-- {tag}:\n" + "".join(traceback.format_list(inner)))
-            log.warning("event loop held for %.1f s; the threads running Python:\n%s", late, "\n".join(parts))
+            log.warning("event loop held for %.1f s%s; the threads running Python:\n%s", late, self._collected(since), "\n".join(parts))
+
+    @staticmethod
+    def _collected(since: float) -> str:
+        """The full collection that ended within the stall, if one did: every thread stood for it, and the stacks say nothing of it."""
+        end, took = memwatch.last_full
+        return f" (a full collection stopped every thread for {took:.1f} s of it)" if end > since else ""
 
     def start(self) -> None:
         self._task = asyncio.get_running_loop().create_task(self._tick())

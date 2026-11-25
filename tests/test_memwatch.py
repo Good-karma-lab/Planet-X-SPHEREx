@@ -58,3 +58,19 @@ def test_a_worker_trims_after_a_call_at_most_so_often_and_never_spoils_it(monkey
     assert [cpu._in_worker(divmod, 7, 2)[1] for _ in range(2)] == [True, False]
     with pytest.raises(ZeroDivisionError):
         cpu._in_worker(divmod, 1, 0)
+
+
+def test_a_stall_names_the_full_collection_within_it() -> None:
+    import time
+
+    from service.loopwatch import LoopWatch
+
+    before = time.monotonic()
+    w = MemWatch({})
+    w.start()
+    try:
+        gc.collect()
+    finally:
+        w.stop()
+    assert "a full collection stopped every thread" in LoopWatch._collected(before)
+    assert LoopWatch._collected(time.monotonic()) == ""

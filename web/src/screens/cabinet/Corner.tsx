@@ -1,7 +1,7 @@
 // The cabinet's corner: the notifications bell with its count and the menu under the person's name (name, public page, leaderboard,
 // data, sign out, delete). Both open a small glass panel and close on a click outside or Escape.
 
-import { useEffect, useRef, useState } from 'preact/hooks';
+import { useEffect, useLayoutEffect, useRef, useState } from 'preact/hooks';
 import type { ComponentChildren } from 'preact';
 import { api, loadUser, renameUser, signOut, type User } from '../../lib/account';
 
@@ -26,7 +26,8 @@ const ago = (iso: string) => {
 /** A button with a panel under it; `open` can be set from the address (#/me?tab=notifications). */
 function Pop({ open, setOpen, button, children, cls }: { open: boolean; setOpen: (v: boolean) => void; button: ComponentChildren; children: ComponentChildren; cls: string }) {
   const box = useRef<HTMLDivElement>(null);
-  useEffect(() => {
+  // at once, not after the next frame: an Escape within 0.1 s of the opening was lost and the panel stayed over the page
+  useLayoutEffect(() => {
     if (!open) return;
     const out = (e: Event) => box.current && !box.current.contains(e.target as Node) && setOpen(false);
     const esc = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
