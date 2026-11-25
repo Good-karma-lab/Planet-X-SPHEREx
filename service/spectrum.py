@@ -41,8 +41,8 @@ IN_FLIGHT = 48
 HALF = photometry.HALF
 RAW = 7  # the window of file pixels kept for the page: 15 × 15 around the source pixel
 SATURATED_SHARE = 0.5  # more than this share of saturated cores: "no SPHEREx spectrum"
-# the spectra kept in memory, the latest used; a finished one left out is read from disk again (30 ms). One with its stamps is 170,000
-# blocks, so the 200 kept before were 34 million
+# the spectra kept in memory, the latest used; a finished one left out is read from disk again. Kept without its stamps: those of a place
+# with many visits are 1.2 million objects, and 16 spectra of 25 Nov made every full collection stop the process for 3 s instead of 1.7
 KEEP_RUNS = 40
 
 
@@ -76,7 +76,8 @@ class Run:
     params: dict[str, Any]
     total: int = 0
     points: list[dict[str, Any]] = field(default_factory=list)
-    stamps: dict[int, dict[str, Any]] = field(default_factory=dict)
+    stamps: dict[int, dict[str, Any]] = field(default_factory=dict)  # while it is measured; afterwards they are read from stamps_path
+    stamps_path: Path | None = None
     catalogue: dict[str, Any] | None = None
     state: str = "running"  # running | done | failed
     error: str = ""
@@ -86,10 +87,14 @@ class Run:
     def stamps_view(self, since: int = 0) -> dict[str, Any]:
         """The pixels of every exposure from index `since` on: status 0 nothing read, 1 file pixels only, 2 fitted (with the 7 × 7 data,
         model = flux × PSF + sky, residual and the pixels used)."""
-        rows = [{"i": k, **self.stamps[k]} for k in sorted(self.stamps) if k >= since]
+        state = self.state  # before the stamps: "done" is never said with fewer of them than there are
+        got = dict(self.stamps)  # (a copy: the measurement adds to it while a thread reads)
+        if not got and self.stamps_path is not None and self.stamps_path.is_file():
+            got = {int(k): v for k, v in json.loads(self.stamps_path.read_text()).items()}
+        rows = [{"i": k, **got[k]} for k in sorted(got) if k >= since]
         return {
             "key": self.key,
-            "state": self.state,
+            "state": state,
             "total": self.total,
             "since": since,
             "raw_half": RAW,
@@ -144,7 +149,7 @@ class Spectra:
             run = Run(key, params, total=d["total"], points=d["points"], state="done")
             sp = self.dir / f"{key}.stamps.json"
             if sp.is_file():
-                run.stamps = {int(k): v for k, v in json.loads(sp.read_text()).items()}
+                run.stamps_path = sp
             self._keep(run)
             return run
         return None
@@ -183,7 +188,9 @@ class Spectra:
             tmp.replace(self.dir / f"{run.key}.json")
             tmp = self.dir / f"{run.key}.stamps.part"
             tmp.write_text(jsonsafe.dumps({str(k): v for k, v in run.stamps.items()}, separators=(",", ":")))
-            tmp.replace(self.dir / f"{run.key}.stamps.json")
+            run.stamps_path = self.dir / f"{run.key}.stamps.json"
+            tmp.replace(run.stamps_path)
+            run.stamps = {}
         except Exception as e:  # the place could not be measured: say so; the next request starts again
             run.state, run.error = "failed", str(e)[:300]
             self.runs.pop(run.key, None)
