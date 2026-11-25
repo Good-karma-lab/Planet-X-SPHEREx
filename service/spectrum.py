@@ -15,6 +15,7 @@ import json
 import math
 import time
 from collections import OrderedDict
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,17 @@ def _arr(a: np.ndarray) -> list[list[float | None]]:
     return [[None if not np.isfinite(v) else round(float(v), 4) for v in row] for row in a]
 
 
+def _entries(text: str) -> Iterator[tuple[str, str]]:
+    """The members of a JSON object written by `Spectra._write` (or by one json.dumps without spaces), each with its value's own text."""
+    read = json.JSONDecoder().raw_decode
+    at = 1
+    while at < len(text) and text[at] != "}":
+        key, at = read(text, at + (text[at] == ","))
+        _, end = read(text, at + 1)  # (past the colon)
+        yield key, text[at + 1 : end]
+        at = end
+
+
 def place_at(params: dict[str, Any], mjd: float) -> tuple[float, float]:
     """The object's position at a time: the J2000 place moved by its proper motion (mas/yr; zero for a fixed place)."""
     ra, dec = float(params["ra"]), float(params["dec"])
@@ -84,23 +96,20 @@ class Run:
     started: float = field(default_factory=time.monotonic)
     task: asyncio.Task[None] | None = None
 
-    def stamps_view(self, since: int = 0) -> dict[str, Any]:
-        """The pixels of every exposure from index `since` on: status 0 nothing read, 1 file pixels only, 2 fitted (with the 7 × 7 data,
-        model = flux × PSF + sky, residual and the pixels used)."""
+    def stamps_json(self, since: int = 0) -> str:
+        """The pixels of every exposure from index `since` on, as JSON: status 0 nothing read, 1 file pixels only, 2 fitted (with the
+        7 × 7 data, model = flux × PSF + sky, residual and the pixels used). Called in a thread; one exposure at a time, since a whole
+        spectrum read or written by one call of json (7 MB) holds the GIL, and so the event loop, all the while."""
         state = self.state  # before the stamps: "done" is never said with fewer of them than there are
         got = dict(self.stamps)  # (a copy: the measurement adds to it while a thread reads)
+        rows: list[tuple[int, str]]
         if not got and self.stamps_path is not None and self.stamps_path.is_file():
-            got = {int(k): v for k, v in json.loads(self.stamps_path.read_text()).items()}
-        rows = [{"i": k, **got[k]} for k in sorted(got) if k >= since]
-        return {
-            "key": self.key,
-            "state": state,
-            "total": self.total,
-            "since": since,
-            "raw_half": RAW,
-            "fit_half": HALF,
-            "stamps": rows,
-        }
+            rows = [(int(k), v) for k, v in _entries(self.stamps_path.read_text())]
+        else:
+            rows = [(k, jsonsafe.dumps(v, separators=(",", ":"))) for k, v in got.items() if k >= since]
+        head = {"key": self.key, "state": state, "total": self.total, "since": since, "raw_half": RAW, "fit_half": HALF}
+        body = ",".join(f'{{"i":{k},{v[1:]}' for k, v in sorted(rows) if k >= since)
+        return jsonsafe.dumps(head, separators=(",", ":"))[:-1] + f',"stamps":[{body}]}}'
 
     def view(self, since: int = 0) -> dict[str, Any]:
         sat = sum(1 for p in self.points if p["why"] == "saturated core")
@@ -173,27 +182,35 @@ class Spectra:
             exps = await asyncio.to_thread(self.index.overlapping, float(run.params["ra"]), float(run.params["dec"]), RADIUS_DEG)
             run.total = len(exps)
             await asyncio.gather(*(self._one(run, i, e) for i, e in enumerate(exps)))
-            ok = [p for p in run.points if p["ok"]]
-            if ok:
-                lam = np.array([p["lam"] for p in ok])
-                flux = np.array([p["flux"] for p in ok])
-                for p, bad in zip(ok, photometry.neighbour_outliers(lam, flux), strict=True):
-                    if bad:
-                        p["ok"], p["why"] = False, "deviates from its neighbours"
-            run.points.sort(key=lambda p: p["i"])
-            run.state = "done"
-            self.dir.mkdir(parents=True, exist_ok=True)
-            tmp = self.dir / f"{run.key}.part"
-            tmp.write_text(jsonsafe.dumps({"params": run.params, "total": run.total, "points": run.points}, separators=(",", ":")))
-            tmp.replace(self.dir / f"{run.key}.json")
-            tmp = self.dir / f"{run.key}.stamps.part"
-            tmp.write_text(jsonsafe.dumps({str(k): v for k, v in run.stamps.items()}, separators=(",", ":")))
-            run.stamps_path = self.dir / f"{run.key}.stamps.json"
-            tmp.replace(run.stamps_path)
-            run.stamps = {}
+            run.points, run.stamps_path = await asyncio.to_thread(self._write, run)
+            run.state, run.stamps = "done", {}
         except Exception as e:  # the place could not be measured: say so; the next request starts again
             run.state, run.error = "failed", str(e)[:300]
             self.runs.pop(run.key, None)
+
+    def _write(self, run: Run) -> tuple[list[dict[str, Any]], Path]:
+        """The finished spectrum on disk: its points in order, the outliers among their neighbours said, and where its stamps are. In a
+        thread; `run` itself is left as it is (it still answers the page from memory). The stamps are written first: the spectrum's own
+        file says that it is measured."""
+        points = [dict(p) for p in sorted(run.points, key=lambda p: p["i"])]
+        ok = [p for p in points if p["ok"]]
+        if ok:
+            lam = np.array([p["lam"] for p in ok])
+            flux = np.array([p["flux"] for p in ok])
+            for p, bad in zip(ok, photometry.neighbour_outliers(lam, flux), strict=True):
+                if bad:
+                    p["ok"], p["why"] = False, "deviates from its neighbours"
+        self.dir.mkdir(parents=True, exist_ok=True)
+        stamps = self.dir / f"{run.key}.stamps.json"
+        tmp = self.dir / f"{run.key}.stamps.part"
+        # exposure by exposure (see stamps_json)
+        tmp.write_text("{" + ",".join(f'"{k}":{jsonsafe.dumps(v, separators=(",", ":"))}' for k, v in run.stamps.items()) + "}")
+        tmp.replace(stamps)
+        tmp = self.dir / f"{run.key}.part"
+        head = jsonsafe.dumps({"params": run.params, "total": run.total}, separators=(",", ":"))[:-1]
+        tmp.write_text(head + ',"points":[' + ",".join(jsonsafe.dumps(p, separators=(",", ":")) for p in points) + "]}")
+        tmp.replace(self.dir / f"{run.key}.json")
+        return points, stamps
 
     async def _one(self, run: Run, i: int, e: Exposure) -> None:
         async with self.sem:

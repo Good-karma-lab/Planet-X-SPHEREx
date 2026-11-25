@@ -43,6 +43,7 @@ def test_a_run_kept_without_exposure_keys_is_measured_again(tmp_path: Path) -> N
 def test_a_finished_run_keeps_no_stamps_and_reads_them_when_asked(tmp_path: Path) -> None:
     """The stamps of a place with many visits are a million objects: they stay on disk, whether the spectrum was just measured or read."""
     import asyncio
+    import json
     from types import SimpleNamespace
 
     from service.spectrum import Spectra
@@ -52,7 +53,7 @@ def test_a_finished_run_keeps_no_stamps_and_reads_them_when_asked(tmp_path: Path
     held: list[int] = []
 
     async def measure(params: dict[str, float], e: SimpleNamespace) -> dict[str, object]:
-        held.append(len(sp.runs[sp.key_of(params)].stamps_view()["stamps"]))
+        held.append(len(json.loads(sp.runs[sp.key_of(params)].stamps_json())["stamps"]))
         return {"ok": False, "why": "x", "_stamp": {"status": 1, "raw": [[float(e.mjd0), None]]}}
 
     sp.measure = measure  # type: ignore[assignment,method-assign]
@@ -69,7 +70,49 @@ def test_a_finished_run_keeps_no_stamps_and_reads_them_when_asked(tmp_path: Path
     assert run is not None and run.state == "done" and not run.stamps
     assert held == [0, 1, 2]  # while it is measured the page gets what there is
     want = [{"i": i, "status": 1, "raw": [[61000.0 + i, None]]} for i in range(3)]
-    assert run.stamps_view()["stamps"] == want and run.stamps_view(2)["stamps"] == want[2:]
+    assert json.loads(run.stamps_json())["stamps"] == want and json.loads(run.stamps_json(2))["stamps"] == want[2:]
     assert not run.stamps
     again = Spectra(None, None, None, tmp_path).get(params)  # type: ignore[arg-type]
-    assert again is not None and not again.stamps and again.stamps_view()["stamps"] == want
+    assert again is not None and not again.stamps and json.loads(again.stamps_json())["stamps"] == want
+
+
+def test_the_spectrum_is_done_only_once_its_stamps_are_kept_and_fails_when_they_cannot_be(tmp_path: Path) -> None:
+    import asyncio
+    import threading
+    from types import SimpleNamespace
+
+    from service.spectrum import Spectra
+
+    exps = [SimpleNamespace(key=f"k{i}", mjd0=61000.0 + i, det=1, release="qr2") for i in (0, 1)]
+    params = spectrum_params(10.0, 20.0)
+
+    def made(fails: bool) -> tuple[Spectra, list[str]]:
+        sp = Spectra(SimpleNamespace(overlapping=lambda *a: exps), None, None, tmp_path / str(fails))  # type: ignore[arg-type]
+        seen: list[str] = []
+        write = sp._write
+
+        async def measure(params: dict[str, float], e: SimpleNamespace) -> dict[str, object]:
+            return {"ok": False, "why": "x", "_stamp": {"status": 0}}
+
+        def slow(run: object) -> object:
+            assert threading.current_thread() is not threading.main_thread()  # never on the event loop
+            seen.append(sp.runs[sp.key_of(params)].state)
+            if fails:
+                raise OSError("no space left")
+            return write(run)  # type: ignore[arg-type]
+
+        sp.measure, sp._write = measure, slow  # type: ignore[assignment,method-assign]
+
+        async def go() -> None:
+            run = sp.start(params)
+            assert run.task is not None
+            await run.task
+            seen.append(run.state)
+
+        asyncio.run(go())
+        return sp, seen
+
+    sp, seen = made(False)
+    assert seen == ["running", "done"] and sp.get(params) is not None
+    sp, seen = made(True)
+    assert seen == ["running", "failed"] and sp.get(params) is None  # the next request measures it again

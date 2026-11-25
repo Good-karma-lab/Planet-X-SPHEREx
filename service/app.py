@@ -1195,9 +1195,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         run = st.spectra.get(spectrum_params(ra, dec, pmra, pmdec, epoch))
         if run is None:
             raise HTTPException(404, "no such spectrum: ask for /api/v1/spectrum first")
-        # read, and written as JSON, in a thread: 7 MB for a place with many visits
-        body = await asyncio.to_thread(lambda: jsonsafe.dumps(run.stamps_view(since), separators=(",", ":")))
-        return Response(body, media_type="application/json")
+        return Response(await asyncio.to_thread(run.stamps_json, since), media_type="application/json")  # 7 MB for a place with many visits
 
     @app.get(f"{API_PREFIX}/fields/quick")
     async def field_quick(
