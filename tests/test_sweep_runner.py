@@ -31,6 +31,12 @@ class _Sch:
         return self.active
 
 
+@pytest.fixture(autouse=True)
+def _a_disk_with_room(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Not this machine's own disk (a Mac 82 % full paused every sweep here)."""
+    monkeypatch.setattr(sweep_runner, "disk_used_pct", lambda path: 50.0)
+
+
 def make(
     tmp_path: Path, passes: int = 3, fail: bool = False, ids: list[str] | None = None
 ) -> tuple[sweep_runner.SweepRunner, Any, list[Any]]:
