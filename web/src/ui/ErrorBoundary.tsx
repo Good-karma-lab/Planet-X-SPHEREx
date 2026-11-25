@@ -3,13 +3,18 @@
 import { Component, type ComponentChildren } from 'preact';
 import { isChunkError, reloadOnce } from '../lib/newbuild';
 
-export class ErrorBoundary extends Component<{ name: string; children: ComponentChildren }, { failed: boolean }> {
+export class ErrorBoundary extends Component<{ name: string; at?: string; children: ComponentChildren }, { failed: boolean }> {
   override state = { failed: false };
 
   override componentDidCatch(e: unknown): void {
     console.error(`the ${this.props.name} screen failed`, e);
     if (isChunkError(e) && reloadOnce()) return;
     this.setState({ failed: true });
+  }
+
+  /** another place of the same screen (`at`: its address) is another try */
+  override componentDidUpdate(before: { at?: string }): void {
+    if (this.state.failed && before.at !== this.props.at) this.setState({ failed: false });
   }
 
   override render() {

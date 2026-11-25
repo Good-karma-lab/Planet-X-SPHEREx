@@ -110,6 +110,33 @@ try {
       await shot('cell');
     }
   }
+  if (want('give')) {
+    const states = () => sql(`select state from acc_tasks where user_id='${uid}' and kind='cell' order by created`);
+    await p.goto(BASE + '/#/me');
+    await p.waitForTimeout(2500);
+    await p.getByTestId('next-square').click();
+    await p.getByTestId('task-give-back').waitFor({ timeout: 60000 });
+    const before = states().split('\n').length;
+    const h0 = await p.evaluate(() => location.hash);
+    await shot('give');
+    await p.getByTestId('task-give-back').click();
+    await p.waitForFunction((h) => location.hash !== h, h0, { timeout: 20000 }).catch(() => {});
+    const after = states().split('\n');
+    check('give: the quarter is given back, another one opens', after.includes('left') && after.at(-1) === 'open' && after.length === before + 1 && (await p.evaluate(() => location.hash)) !== h0, after);
+    await p.goto(BASE + '/#/me');
+    await p.waitForTimeout(2500);
+    await shot('give-cabinet');
+    await p.getByTestId('next-leave').click();
+    await p.waitForTimeout(2000);
+    check('give: from the Cabinet too, and none is open then', !states().split('\n').includes('open') && (await p.getByTestId('next-leave').count()) === 0 && !/Continue/.test(await p.getByTestId('next-square').textContent()), states());
+    await p.setViewportSize({ width: 375, height: 812 });
+    await p.getByTestId('next-square').click();
+    await p.getByTestId('task-ask').first().waitFor({ timeout: 60000 }).catch(() => {});
+    await p.waitForTimeout(3000);
+    await shot('give-phone');
+    check('give: the phone keeps no sideways scroll', await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    await p.setViewportSize({ width: 1440, height: 900 });
+  }
   if (want('mark')) {
     await p.goto(BASE + '/#/lab?ra=269.44629&dec=4.76792&fov=10');
     await p.waitForFunction(() => /^[A-Z][a-z]{2} ’\d\d/.test(document.querySelector('[data-testid=lab-status]')?.innerText ?? ''), null, { timeout: 240000 });
@@ -122,6 +149,7 @@ try {
     await p.mouse.click(bx.x + bx.width * 0.3, bx.y + bx.height * 0.6);
     await p.getByTestId('flow-card').waitFor({ timeout: 5000 });
     await p.waitForTimeout(2500);
+    check('mark: one mark, and the tool is off', (await p.getByTestId('tool-mark').getAttribute('aria-pressed')) === 'false');
     check('mark: kept in the account', sql(`select count(*) from acc_marks where user_id='${uid}'`) === '1');
     await shot('mark');
     const del = p.getByTestId('flow-card').getByRole('button', { name: /delete|remove/i });

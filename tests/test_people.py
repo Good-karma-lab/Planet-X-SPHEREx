@@ -298,7 +298,11 @@ def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any]) ->
     counts = ann.get("/api/people/counts").json()
     glow = next(r for r in counts["rules"] if r["said"] == "glow")
     assert (glow["times"], glow["answers"], glow["share"], glow["settled"]) == (3, 3, 1.0, 1)
-    assert counts["series"]["track"]["steps"]["steps"] == {"some": 3} and counts["series"]["track"]["steps"]["sum"] == {"yes": 3} and counts["series"]["track"]["results"] == {"partial": 3}
+    assert (
+        counts["series"]["track"]["steps"]["steps"] == {"some": 3}
+        and counts["series"]["track"]["steps"]["sum"] == {"yes": 3}
+        and counts["series"]["track"]["results"] == {"partial": 3}
+    )
 
 
 def test_find_again_recentre_bad_picture_second_look(site: tuple[FastAPI, Any]) -> None:
@@ -868,10 +872,15 @@ def test_a_track_is_asked_when_its_dot_is_seen_in_half_of_its_visits() -> None:
     real = importlib.util.module_from_spec(spec)  # the rule itself (the fixture of the other tests stands it aside)
     spec.loader.exec_module(real)
     row = {"finding_id": "film:1", "kind": "film", "visible": True}
-    seen = [({**row, "visits_seen": v}, ok) for v, ok in (((4, 4), True), ((2, 4), True), ((1, 4), False), ((0, 5), False), ((0, 0), False), (None, False))]
+    seen = [
+        ({**row, "visits_seen": v}, ok)
+        for v, ok in (((4, 4), True), ((2, 4), True), ((1, 4), False), ((0, 5), False), ((0, 0), False), (None, False))
+    ]
     assert [real.askable(r) for r, _ in seen] == [ok for _, ok in seen]
     assert not real.askable(row) and not real.askable({**row, "visible": False, "visits_seen": (4, 4)})
-    assert real.askable({"kind": "peak", "visible": None}) and not real.askable({"kind": "peak", "visible": False})
+    assert real.askable({"kind": "peak", "visible": True}) and not real.askable({"kind": "peak", "visible": False})
+    # not measured yet: waits for its picture (38 of the 120 finds asked about on 25 Nov 2026); raised by people: asked
+    assert not real.askable({"kind": "red", "visible": None}) and real.askable({"kind": "red", "visible": None, "raised": 1})
 
 
 def test_a_peak_without_its_two_pictures_is_not_asked() -> None:

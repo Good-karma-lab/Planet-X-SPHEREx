@@ -1033,6 +1033,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         a.setTab('cand');
         return true;
       }
+      setTool(null); // one mark a press of the tool: a stray click after it put another one
       setOpen(m.id);
       a.setTab('cand'); // its card, in the Task tab
       return true;

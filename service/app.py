@@ -30,10 +30,11 @@ from service.anomalies import Anomalies
 from service.bodies import KnownBodies
 from service.browndwarfs import BrownDwarfs
 from service.catalogue_check import check as catalogue_check
+from service.clips import ClipPending, ClipUnavailable
 from service.config import Config, load
 from service.context import CatalogueContext
 from service.coverage import coverage_payload, index_key
-from service.findings import Findings
+from service.findings import Findings, find_row
 from service.fpx_known import FpxIdentifier
 from service.grid import GridDB, import_searched
 from service.jobs import scheduler as sched_mod
@@ -56,7 +57,7 @@ from service.reader.s3 import S3
 from service.red import find_red_async
 from service.routes_brightness import make_brightness_router
 from service.routes_checks import checks_of, make_checks_router
-from service.routes_clips import make_clips_router
+from service.routes_clips import clips_of, make_clips_router
 from service.routes_dwarfs import make_dwarfs_router
 from service.routes_export import make_export_router
 from service.routes_extras import register as register_extras
@@ -427,6 +428,19 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         for c, q in ahead:
             qs.ready(c, q)
 
+    async def measure_one(unseen: list[dict[str, Any]], tf: Any) -> bool:
+        """The clip of one find nobody has measured yet (a 5′ field of its own where no field holds the clip's window): whether the find
+        is seen in it decides if people are asked."""
+        i = tf.first_untried([f"clip {r['finding_id']}" for r in unseen])
+        row = await asyncio.to_thread(find_row, st.findings.db, unseen[i]["finding_id"]) if i is not None and st.findings else None
+        if row is None:
+            return False
+        try:
+            await clips_of(st).get(row, wait=True)
+        except (ClipUnavailable, ClipPending):  # tried again after taskfields.RETRY_S
+            return False
+        return True
+
     async def task_stock_step(qs: Any) -> None:
         """What people are asked about, made ready: one field or one anomaly's spectrum at a time (service/taskfields.py), while nobody
         waits, the disk has room and the process is not large."""
@@ -438,14 +452,15 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         if tf is None or sch is None:
             return
         asked = await asyncio.to_thread(routes_tasks.finds_asked, st)
+        unseen = await asyncio.to_thread(routes_tasks.finds_to_measure, st)
         if asked:  # an empty list is a list not read yet, never a reason to let go of every field
-            await asyncio.to_thread(tf.pin, asked)
+            await asyncio.to_thread(tf.pin, [*asked, *unseen])  # (the ones being measured are asked about soon)
         if sch.person_waiting() or qs.building() or not tf.room() or (rss_anon_mb() or 0) > 12_000:
             return
         finds = await asyncio.to_thread(routes_tasks.finds_to_ready, st)
         todo = await asyncio.to_thread(tf.wanted, finds, routes_tasks.quarter_of_place)
         said: dict[str, Any] = {"fields_left": len(todo), "finds_left": len(finds), "at": time.time()}
-        said["asked"] = len(asked)
+        said["asked"], said["to_measure"] = len(asked), len(unseen)
         at = tf.first_untried([json.dumps(p, sort_keys=True) for p in todo])
         if at is not None:
             submit_field(todo[at], Priority.P2)
@@ -460,6 +475,8 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
                     st.spectra.start(taskfields.anomaly_params(an))
                     said["spectrum"] = r["finding_id"]
                     break
+        if at is None and unseen and await measure_one(unseen, tf):
+            said["measured"] = True
         st.task_stock = said
 
     async def quarter_stock_loop() -> None:

@@ -63,7 +63,8 @@ export interface Task {
   /** where the find itself stands in the field the task opens on (a built one that holds it) */
   find_ra?: number | null;
   find_dec?: number | null;
-  state: 'open' | 'done';
+  /** left: given back without an answer */
+  state: 'open' | 'done' | 'left';
   result: string | null;
   mark_ids: string[];
   created: string;
@@ -330,7 +331,7 @@ export function taskHash(t: Task, film?: number | null): string {
   if (t.kind === 'cell' && t.quarter) q.set('quarter', t.quarter);
   // a square given for a lead in it: the lab selects that find and asks its questions before the quarter's look
   if (t.kind === 'cell' && t.why) for (const [k, v] of Object.entries(leadParams(t.why))) q.set(k, v);
-  if (t.kind === 'finding' && t.finding_id) q.set('finding', t.finding_id);
+  if (['finding', 'moves', 'red', 'anomaly'].includes(t.kind) && t.finding_id) q.set('finding', t.finding_id);
   if (t.find_ra != null && t.find_dec != null) {
     q.set('find_ra', t.find_ra.toFixed(6));
     q.set('find_dec', t.find_dec.toFixed(6));

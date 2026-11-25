@@ -390,7 +390,23 @@ def make_me_router(st: Any) -> APIRouter:
     @router.get("/api/me/tasks")
     def tasks(request: Request) -> Any:
         acc, u = me(request)
-        return {"tasks": acc.db.tasks(u["id"])}
+        from service.routes_tasks import with_lead
+
+        return {"tasks": with_lead(st, acc, u["id"], acc.db.tasks(u["id"]))}
+
+    @router.post("/api/me/tasks/{task_id}/leave")
+    def leave_task(task_id: str, request: Request) -> Any:
+        """An open task given back without an answer (a square's with the open questions of its lead). Nothing is counted."""
+        from service.routes_tasks import leads_of_quarter
+
+        acc, u = me(request)
+        found = acc.db.task(task_id)
+        if found is None or found[1] != u["id"]:
+            raise HTTPException(404, "no such task")
+        task = found[0]
+        leads = leads_of_quarter(acc.db.open_lead_tasks(u["id"]), task["cell_id"], task["quarter"]) if task["state"] == "open" else []
+        acc.db.leave_tasks(u["id"], [task_id, *(t["id"] for t in leads)])
+        return {"task": acc.db.task(task_id)[0]}  # type: ignore[index]
 
     def series_done(acc: accounts.Accounts, u: dict[str, Any], task_id: str, task: dict[str, Any], series: str, body: DoneIn) -> Any:
         if task["state"] == "done":
@@ -538,6 +554,11 @@ def make_me_router(st: Any) -> APIRouter:
             points = sc.answered(u["id"], task["finding_id"], body.result)
         else:
             look = body.model_dump(include={"seconds", "passes_shown", "passes_total", "local_hour"})
+            from service.routes_tasks import leads_of_quarter
+
+            # a lead's questions left unanswered go with the square they came with
+            left = leads_of_quarter(acc.db.open_lead_tasks(u["id"]), task["cell_id"], task["quarter"])
+            acc.db.leave_tasks(u["id"], [t["id"] for t in left])
             marks = [m for m in acc.db.marks(u["id"]) if m["id"] in set(body.mark_ids)]
             points = sc.square_done(u["id"], task, look, marks)
         return {"task": task, "points": points, "achievements": sc.award(u["id"])}

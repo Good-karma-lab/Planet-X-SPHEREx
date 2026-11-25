@@ -241,3 +241,40 @@ def test_a_left_job_that_has_not_started_is_dropped_and_one_still_watched_is_not
         await s.stop()
 
     asyncio.run(run())
+
+
+def test_a_stranger_who_leaves_for_others_takes_nothing_from_a_page_that_watches() -> None:
+    async def run() -> None:
+        s = Scheduler(slots={"light": 1, "heavy": 0})
+        s.start()
+        go = asyncio.Event()
+
+        async def hold(ctx: Context) -> dict[str, Any]:
+            await go.wait()
+            return {}
+
+        for k in ("a", "b"):
+            s.submit("field", k, {}, hold, Priority.P0, "heavy")
+        j = s.submit("field", "c", {}, hold, Priority.P0, "heavy")
+        background = s.submit("field", "d", {}, hold, Priority.P2, "heavy")
+        now = [1000.0]
+        real, sch.time.time = sch.time.time, lambda: now[0]  # type: ignore[assignment]
+        try:
+            for x in s.jobs.values():
+                x.last_poll = now[0]
+            for step in range(60):  # a minute and a half of forged leaves, ten for every poll of the page
+                for _ in range(10):
+                    s.leave(j.id)
+                    s.leave(background.id)
+                now[0] += 1.5
+                s._abandon_check()
+                assert j.state == "queued" and not j.abandoned, step
+                s.poll(j.id)
+                assert not j.left
+        finally:
+            sch.time.time = real  # type: ignore[assignment]
+        assert background.state == "queued" and not background.left  # nobody leaves the machine's own work
+        go.set()
+        await s.stop()
+
+    asyncio.run(run())

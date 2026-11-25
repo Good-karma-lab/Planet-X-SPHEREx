@@ -531,7 +531,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
             return [st?.question ?? '', st?.answers.find((q) => q.id === x)?.label ?? x];
           })
         : [[body?.question ?? T.ask, body?.answers?.find((q) => q.id === result)?.label ?? T.answers.find(([q]) => q === result)?.[1] ?? result]];
-    const next = await takeTask(task.kind as Takeable);
+    // (a lead's questions have no "Next": one asked for here was a task nobody opened)
+    const next = a.embedded ? null : await takeTask(task.kind as Takeable);
     setBusy(false);
     setLine('');
     const to = next && next !== 'failed' && next.id !== id ? taskParams(next) : null;
@@ -543,6 +544,19 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       next: to,
       none: next === 'failed' ? 'Tasks did not answer' : 'No more tasks of this kind',
     });
+  }
+  /** a quarter given back without an answer, and another one taken */
+  async function giveBack() {
+    if (busy) return;
+    setBusy(true);
+    setLine('asking…');
+    const back = !id || !si.signedIn || (await post(`/api/me/tasks/${encodeURIComponent(id)}/leave`, {})).ok;
+    const next = back ? await takeTask('cell') : 'failed';
+    setBusy(false);
+    const to = next && next !== 'failed' && next.id !== id ? taskParams(next) : null;
+    if (!to) return setLine(next === 'failed' ? 'Tasks did not answer' : 'No other quarter is waiting for a look');
+    setLine('');
+    a.open(to);
   }
   const n = a.marksHere.length;
   const T = TASKS[task.kind];
@@ -560,6 +574,11 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       <div class="tp-head">
         <b>{a.embedded ? 'First' : 'Task'}</b>
         <span>{a.embedded ? (a.leadText ?? 'one question, then the square') : T.title}</span>
+        {task.kind === 'cell' && !done && (
+          <button class="mini tp-give" disabled={busy} onClick={() => void giveBack()} title="Give this quarter back without an answer and take another one" data-testid="task-give-back">
+            Another quarter
+          </button>
+        )}
         {focusKind(task.kind) && (
           <label class="tp-others" title="Show the other rings and names of the field as usual (in a task only the object in question is bright)">
             <input type="checkbox" checked={a.others} onChange={(e) => a.setOthers((e.target as HTMLInputElement).checked)} data-testid="task-others" />
@@ -682,7 +701,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
             ? [`${n} mark${n === 1 ? '' : 's'}`, a.square?.why ?? ''].filter(Boolean).join(' · ')
             : step && steps
               ? [
-                  `Question ${path.length + 1} · up to ${steps.length}`,
+                  `Question ${path.length + 1}`,
                   // short enough for the one line of the panel (it never wraps, so nothing below it jumps)
                   (PANEL_SHOWS.has(step.show) ? a.shown === false : a.ready === false)
                     ? step.show === 'blink' || step.show === 'pictures'

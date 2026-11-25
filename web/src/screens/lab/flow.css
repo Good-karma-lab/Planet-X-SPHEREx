@@ -30,6 +30,7 @@
    `:root .vsq .fmark` (which shows it at the bottom right). */
 .vsq button.touch-only { display: none; }
 .taskpanel .tp-others { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--muted); cursor: pointer; }
+.taskpanel .tp-give { margin-left: auto; align-self: center; white-space: nowrap; }
 .taskpanel .tp-others input { accent-color: var(--accent-l); }
 .taskpanel .tp-btns .btn.quiet { opacity: 0.8; }
 .taskpanel .tp-btns.n5 .btn, .taskpanel .tp-btns.n4 .btn { flex: 1 1 40%; }

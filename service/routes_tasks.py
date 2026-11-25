@@ -3,6 +3,7 @@
   GET /api/tasks/next?kind=cell|finding|moves|red|anomaly[&cell_id=|&finding_id=]
                                      → {task:{id, kind, cell_id|finding_id, field_key, ra, dec[, question, answers, tree]}|null}
                                        (red and anomaly carry `tree`: steps of plain questions; the done body sends `path`)
+  POST /api/me/tasks/{id}/leave (routes_me) gives an open one back
   GET /api/tasks/results?ids=a,b     → what people said about red sources and anomalies (service/accounts/agreement.py)
   GET /api/tasks/brown-dwarf-queue   → red sources people call cold brown dwarfs, for the brown-dwarf search
 
@@ -346,6 +347,15 @@ def finds_asked(st: Any) -> list[dict[str, Any]]:
     return [r for r in (all_rows(st) or []) if "ready" in r and r.get("_listed") and people.askable(r)]
 
 
+def finds_to_measure(st: Any) -> list[dict[str, Any]]:
+    """The finds that would be asked about, but nobody has measured whether they are seen in their own pictures (a place too near a
+    field's edge for its clip). Empty where no clips are made. A database read: call it in a thread."""
+    if getattr(st, "clips", None) is None:
+        return []
+    return [r for r in (all_rows(st) or []) if "ready" in r and r.get("_listed") and r.get("visible") is None and "raised" not in r
+            and r.get("pictures") is not False]  # fmt: skip
+
+
 def finds_to_ready(st: Any) -> list[dict[str, Any]]:
     """The finds people may be asked about that the lab cannot show at once, in the order they are asked about: peaks, then red sources
     and anomalies, the ones seen in their own pictures first. A database read: call it in a thread."""
@@ -368,7 +378,12 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
         aside, raised = field_people.set_aside(st), people.raised(st)
     except Exception:
         aside, raised = {}, {}
-    clips = getattr(st, "clips", None)
+    try:  # made here when nobody asked for a clip yet: without them, for minutes after a start, no find was known to be invisible and
+        from service.routes_clips import clips_of  # the tasks handed out any of them (24 Nov 2026: 447 finds instead of 116)
+
+        clips = clips_of(st) if getattr(st, "store", None) is not None else getattr(st, "clips", None)
+    except HTTPException:  # no store here (a node)
+        clips = None
     idn = getattr(st, "fpx_known", None)  # a Planet X peak JPL names (or a known body's echo) is known here too: no lead
     body = query(
         f.db, None, status, None, 100000, 0, aside=aside, raised=raised, seen=getattr(clips, "seen", None),
@@ -637,6 +652,52 @@ ASK = {
 }  # fmt: skip
 
 
+def leads_of_quarter(tasks: list[dict[str, Any]], cell_id: str | None, quarter: str | None) -> list[dict[str, Any]]:
+    """Those of a person's open lead tasks (accounts open_lead_tasks) whose find stands in a quarter of a square."""
+    g = _grid()
+    if g is None or not cell_id or not quarter:
+        return []
+    out = []
+    for t in tasks:
+        if t.get("ra") is None or t.get("dec") is None:
+            continue
+        ce = g.cell_at(float(t["ra"]) % 360.0, float(t["dec"]))
+        if ce.id == cell_id and quarter_of(ce, float(t["ra"]), float(t["dec"])) == quarter:
+            out.append(t)
+    return out
+
+
+def with_lead(st: Any, acc: accounts.Accounts, user_id: str, tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The person's tasks, an open square's with the lead it was given for while the lead's questions are not answered (`why`):
+    "Continue" opened the square without them, and the lead's task stayed open for ever (25 Nov 2026)."""
+    leads = acc.db.open_lead_tasks(user_id)
+    cells = [t for t in tasks if t["kind"] == "cell" and t["state"] == "open" and not t.get("stale") and t.get("quarter")]
+    if not leads or not cells:
+        return tasks
+    try:
+        rows = {r["finding_id"]: r for r in find_rows(st)}
+    except HTTPException:
+        return tasks
+    for t in cells:
+        for lead in leads_of_quarter(leads, t["cell_id"], t["quarter"]):
+            r = rows.get(lead["finding_id"])
+            if r is not None and r.get("status") in LEADS and people.askable(r):
+                t["why"] = why_of({**r, "promise": int(r.get("promise") or 0)})
+                break
+    return tasks
+
+
+def other_kinds(rows: list[dict[str, Any]], recent: list[str]) -> list[dict[str, Any]]:
+    """The finds of another kind than the last ones asked about (the newest first in `recent`): not of the last two, else not of the
+    last, else any. A person was asked about tracks only, one after another (25 Nov 2026)."""
+    kinds = [str(f).split(":")[0] for f in recent[:2]]
+    for n in range(len(kinds), 0, -1):
+        got = [r for r in rows if str(r["finding_id"]).split(":")[0] not in kinds[:n]]
+        if got:
+            return got
+    return rows
+
+
 def make_tasks_router(st: Any) -> APIRouter:
     router = APIRouter()
 
@@ -714,8 +775,9 @@ def make_tasks_router(st: Any) -> APIRouter:
                 acc.db._conn()
                 .execute(
                     "SELECT cell_id FROM acc_tasks WHERE user_id=? AND kind='cell' AND quarter IS NOT NULL AND created>=?"
-                    " ORDER BY created DESC LIMIT 1",
-                    (user_id, time.time() - OPEN_TASK_KEEP_S),
+                    " AND cell_id NOT IN (SELECT cell_id FROM acc_tasks WHERE user_id=? AND kind='cell' AND state='left' AND"
+                    " cell_id IS NOT NULL AND created>=?) ORDER BY created DESC LIMIT 1",
+                    (user_id, time.time() - OPEN_TASK_KEEP_S, user_id, time.time() - OPEN_TASK_KEEP_S),
                 )
                 .fetchone()
             )
@@ -803,7 +865,9 @@ def make_tasks_router(st: Any) -> APIRouter:
         r = acc.db._conn().execute("SELECT 1 FROM acc_tasks WHERE user_id=? AND kind='cell' LIMIT 1", (user_id,)).fetchone()
         return r is None
 
-    def next_finding(acc: accounts.Accounts, user_id: str | None, finding_id: str | None, had: set[str]) -> dict[str, Any] | None:
+    def next_finding(
+        acc: accounts.Accounts, user_id: str | None, finding_id: str | None, had: set[str], recent: list[str]
+    ) -> dict[str, Any] | None:
         rows = findings()
         if finding_id is not None:
             one = next((r for r in rows if r["finding_id"] == finding_id), None)
@@ -813,6 +877,8 @@ def make_tasks_router(st: Any) -> APIRouter:
         seen = acc.db.task_refs(user_id, "finding") if user_id else had
         checked = acc.db.check_counts()
         leads = [r for r in rows if r.get("status") in LEADS and r.get("ask", True) and r["finding_id"] not in seen and people.askable(r)]
+
+        leads = other_kinds(leads, recent)  # the kinds take turns
 
         # a find people raised first, then the strong kinds before the many red sources and anomalies (finding_group), then the
         # least checked, then the most promising; stable: the page's order among the equal
@@ -828,9 +894,7 @@ def make_tasks_router(st: Any) -> APIRouter:
         top = [r for r in leads[:FINDING_SPREAD] if rank(r) == rank(leads[0])]
         return RNG.choice(top)
 
-    def next_judged(
-        acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None, had: set[str]
-    ) -> dict[str, Any] | None:
+    def next_judged(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None, had: set[str]) -> dict[str, Any] | None:
         """A question series (spec §5e): moves (tracks, slow movers, Planet X peaks), red, anomaly."""
         rows = findings()
         if finding_id is not None:
@@ -846,9 +910,7 @@ def make_tasks_router(st: Any) -> APIRouter:
 
         return people.get(st, acc.db).pick(kind, rows, user_id, seen, controls=lambda: control_rows(st), shows=shows)
 
-    def next_other(
-        acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None, had: set[str]
-    ) -> dict[str, Any] | None:
+    def next_other(acc: accounts.Accounts, kind: str, user_id: str | None, finding_id: str | None, had: set[str]) -> dict[str, Any] | None:
         """find_again, recentre, bad_picture, second_look."""
         p = people.get(st, acc.db)
         if kind == "bad_picture":
@@ -958,7 +1020,10 @@ def make_tasks_router(st: Any) -> APIRouter:
             mine = acc.db.guest_task(task_id)
             if mine is not None and mine["kind"] == kind and asked_of(mine, kind) == (cell_id if kind == "cell" else finding_id):
                 return {"task": with_ask(mine)}
-        had = set() if uid else {x for x in skip.split(",") if x}
+        given = [x for x in skip.split(",") if x]
+        had = set() if uid else set(given)
+        # the finds of the last questions, the newest first: the next one is of another kind
+        recent = acc.db.last_answered(uid, time.time() - OPEN_TASK_KEEP_S) if uid else given[::-1][:2]
         if finding_id is not None and kind != "cell":
             from service.findings import id_of
 
@@ -968,14 +1033,20 @@ def make_tasks_router(st: Any) -> APIRouter:
             raise HTTPException(422, "this is not an id")
         if asked is None and uid is not None and not (kind == "cell" and quarter):
             have = acc.db.open_task(uid, kind, OPEN_TASK_KEEP_S if kind == "cell" else None)
+            if have is not None and kind == "finding" and recent and str(have["finding_id"]).split(":")[0] == recent[0].split(":")[0]:
+                other = next_finding(acc, uid, None, had, recent)  # one of the kind just answered waits for its turn
+                if other is not None and str(other["finding_id"]).split(":")[0] != recent[0].split(":")[0]:
+                    have = None
             if have is not None:
+                if kind == "cell":
+                    have = with_lead(st, acc, uid, [have])[0]
                 if kind == "cell" and have.get("cell_id") and have.get("quarter"):
                     prebuild_after(acc, have["cell_id"], have["quarter"], quarters_looked(acc, uid))
                 return {"task": with_ask(have)}
         if kind == "cell":
             ref = next_cell(acc, uid, cell_id, quarter, plain)
         elif kind == "finding":
-            ref = next_finding(acc, uid, finding_id, had)
+            ref = next_finding(acc, uid, finding_id, had, recent)
         elif kind in people.TASK_KINDS:
             ref = next_other(acc, kind, uid, finding_id, had)
         else:
