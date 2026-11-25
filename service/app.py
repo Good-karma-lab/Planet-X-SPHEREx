@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.staticfiles import StaticFiles
 
 from indexer.store import Index
-from service import __version__, cpu, exposure_flags, jsonsafe, machine, people_queue, quarters, sweep_runner, taskfields
+from service import __version__, cpu, exposure_flags, jsonsafe, machine, people_queue, quarters, shadow, sweep_runner, taskfields
 from service import grid as grid_mod
 from service.accounts import get as accounts_get
 from service.accounts import register_accounts
@@ -143,6 +143,7 @@ class State:
         self.findings: Findings | None = None
         self.warm_findings_task: asyncio.Task[None] | None = None
         self.fpx_known: FpxIdentifier | None = None
+        self.shadow: shadow.Shadow | None = None
         self.loopwatch: LoopWatch | None = None
         self.memwatch: MemWatch | None = None
         self.grid: GridDB | None = None
@@ -260,6 +261,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         st.fpx_known = FpxIdentifier(st.store, cfg.store_dir / "fpx_known")
         if not (STANDBY or FINDINGS_READONLY):  # one process asks JPL (the standby only reads the kept answers): two would double the rate
             st.fpx_known.start()
+            st.shadow = shadow.start(st, cfg.store_dir)  # off unless SKY_SHADOW=1: verdicts nobody is shown (service/shadow.py)
         checks_of(st).resume()  # check jobs a restart interrupted run again at once, not on the first request
         # the list of finds the tasks are drawn from, read once now: the first person's task does not wait for it
         asyncio.get_running_loop().run_in_executor(None, prime_find_rows, st)
@@ -333,6 +335,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
             st.loopwatch.stop()
         if st.memwatch is not None:
             st.memwatch.stop()
+        await shadow.stop(st.shadow)
         await st.scheduler.stop()
         await st.s3.close()
         await st.hips.close()
