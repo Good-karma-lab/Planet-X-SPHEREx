@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import numpy as np
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -459,3 +460,31 @@ def test_a_dot_is_seen_in_a_visit_and_a_star_that_stays_is_not_one() -> None:
     sky[2, 40:62, 30:52] = 0
     assert not dot_in_visit(sky, 2, 40.5, 50.5)  # no data there
     assert not dot_in_visit(sky, 2, 500.0, 500.0)
+
+
+def test_a_check_never_builds_and_the_fields_are_listed_off_the_event_loop(tmp_path: Path, monkeypatch: Any) -> None:
+    import asyncio
+    import threading
+
+    import service.clips as clips_mod
+
+    built: list[Any] = []
+
+    async def build(own: Any, params: dict[str, Any]) -> str | None:
+        built.append(params)
+        return None
+
+    c = clips_mod.Clips(Store(tmp_path / "store"), tmp_path / "clips", build)
+    real, where = c._list_fields, []
+    monkeypatch.setattr(c, "_list_fields", lambda: (where.append(threading.current_thread() is threading.main_thread()), real())[1])
+    find = {"id": "red:x", "kind": "red", "ra": 10.0, "dec": 5.0, "data": {}}
+
+    async def both() -> None:
+        with pytest.raises(clips_mod.ClipPending):
+            await c.get(find, build=False)
+        assert not built and not c.building and "red:x" not in c.failed
+        with pytest.raises(clips_mod.ClipUnavailable):
+            await c.get(find, wait=True)
+
+    asyncio.run(both())
+    assert len(built) == 1 and where[0] is False

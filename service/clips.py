@@ -1156,16 +1156,19 @@ class Clips:
 
     # -- making
 
-    async def get(self, find: dict[str, Any], wait: bool = False) -> Path:
-        """The clip's file, rendered now if its frames are at hand. Raises ClipPending while its field is being built (unless `wait`), and
-        ClipUnavailable when nothing covers the place."""
+    async def get(self, find: dict[str, Any], wait: bool = False, build: bool = True) -> Path:
+        """The clip's file, rendered now if its frames are at hand. Raises ClipPending while its field is being built (unless `wait`; or
+        not started: without `build`), and ClipUnavailable when nothing covers the place."""
         fid = str(find["id"])
         p = self.path(fid)
         if p.is_file():
             return p
         if find.get("kind") == "film":
             return await self._get_film(find, p)
+        await asyncio.to_thread(self.sources)  # every field's meta is read: on the event loop it held it 1-2 s (25 Nov 2026)
         src = self.source_for(find)
+        if self.wants_own(find, src) and not build and fid not in self.failed:
+            raise ClipPending("its field is not built")
         if self.wants_own(find, src) and self.build is not None and fid not in self.failed:
             task = self.building.get(fid)
             if task is None:

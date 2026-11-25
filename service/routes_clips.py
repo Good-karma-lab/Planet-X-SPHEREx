@@ -1,7 +1,8 @@
 """`GET /api/findings/{id}/clip.webp`: the looping time-lapse clip of a finding (service.clips), rendered once and kept.
 
     200 image/webp     the clip (immutable: the address carries the clip version)
-    202 {state}        its field is being built; ask again (Retry-After)
+    202 {state}        its field is being built; ask again (Retry-After). This read starts the build of a 5′ field when none holds the
+                       place (a person opened the card), but never for a check of ours (X-Sky-Check: 1)
     404 {state, reason} no clip can be made (no SPHEREx field covers the place) or no such finding
 
 `GET /api/findings/{id}/clip` says the same as JSON, with what the clip shows (field, window, the dates of its frames).
@@ -13,7 +14,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 
 from service.clips import VERSION, ClipPending, Clips, ClipUnavailable, clips_dir
@@ -86,12 +87,14 @@ def make_clips_router(st: Any) -> APIRouter:
             raise HTTPException(404, "no such finding")
         return row
 
-    async def clip(find_id: str, frame: int | None = Query(None, ge=0, le=8, description="one still frame of the clip")) -> Any:
+    async def clip(
+        request: Request, find_id: str, frame: int | None = Query(None, ge=0, le=8, description="one still frame of the clip")
+    ) -> Any:
         find_id = id_of(find_id)  # its slug too (track-…)
         clips = clips_of(st)
         find = await asyncio.to_thread(the_find, find_id)
         try:
-            path = await clips.get(find)
+            path = await clips.get(find, build=request.headers.get("x-sky-check") != "1")
         except ClipPending:
             return JSONResponse({"state": "building"}, 202, headers={"Retry-After": "5", "Cache-Control": "no-store"})
         except ClipUnavailable as e:
