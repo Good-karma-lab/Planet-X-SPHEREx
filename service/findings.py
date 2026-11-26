@@ -18,6 +18,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import logging
 import marshal
 import math
 import re
@@ -136,7 +137,9 @@ HALO_MAG = 10.0
 WING_K = 10.0
 WING_MIN_ARCSEC = 25.0
 WING_MAX_ARCSEC = 60.0
-WING_PAUSE_S = 2.0  # between two questions to IRSA
+WING_PAUSE_S = 0.5  # between two questions of one asker
+WING_AT_ONCE = 4  # askers at a time: IRSA's sync TAP takes 5-20 s a question (26 Nov: 88 peaks in 25 min, one at a time)
+WING_LOG_S = 600.0  # how often the loop says how far it is
 WING_RETRY_S = 3600.0  # an unanswered one is asked again after this
 WING_FIRST_S = 60.0  # the first question after a start: the start itself is busy enough
 GALAXY_TYPES = frozenset(
@@ -1470,6 +1473,7 @@ class Findings:
             f"CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {cone:.6f})) = 1 AND k_m <= {WING_K}"
         )
         rows: list[dict[str, Any]] = []
+        via = "irsa"
         try:
             body = await self.catalogue._tap("irsa", IRSA_TAP, adql)
             head, *lines = [ln for ln in body.splitlines() if ln.strip()]
@@ -1482,6 +1486,7 @@ class Findings:
                     {"name": f"2MASS J{v['designation'].strip()}", "ra": float(v["ra"]), "dec": float(v["dec"]), "k": float(v["k_m"])}
                 )
         except (httpx.HTTPError, BreakerOpenError, ValueError, KeyError):
+            via = "allwise"
             got = await cpu.run(allwise_cone, ra, dec, WING_MAX_ARCSEC + 1.0)
             rows = [
                 {
@@ -1498,26 +1503,44 @@ class Findings:
             sep = sep_arcsec(r["ra"], r["dec"], ra, dec)
             if WING_MIN_ARCSEC <= sep <= WING_MAX_ARCSEC and (best is None or r["k"] < best["k"]):
                 best = {"state": "ok", "name": r["name"], "sep": round(sep, 1), "k": round(r["k"], 2)}
-        return best or {"state": "none"}
+        return {**(best or {"state": "none"}), "via": via}
 
     async def wing_loop(self) -> None:
-        """Every far-search peak asked once whether a bright 2MASS star stands near it (bright_ir_star), one at a time, the strongest
-        first; the answer is kept (FindingsDB.wings) and never asked again."""
+        """Every far-search peak asked once whether a bright 2MASS star stands near it (bright_ir_star), WING_AT_ONCE at a time, the
+        strongest first; the answer is kept (FindingsDB.wings) and never asked again. Every WING_LOG_S the log says how far it is."""
         cpu.JOB.set(_Maintenance())
         await asyncio.sleep(WING_FIRST_S)
+        said = {"asked": 0, "ok": 0, "none": 0, "failed": 0, "allwise": 0}
+        last = time.monotonic()
+        gate = asyncio.Semaphore(WING_AT_ONCE)
+
+        async def one(row: sqlite3.Row) -> None:
+            async with gate:
+                try:
+                    h = await self.bright_ir_star(float(row["ra"]), float(row["dec"]))
+                except Exception:  # neither IRSA nor the copy answered: asked again later
+                    h = {"state": "unavailable"}
+                said["asked"] += 1
+                said["failed" if h["state"] == "unavailable" else h["state"]] += 1
+                said["allwise"] += 1 if h.get("via") == "allwise" else 0
+                await asyncio.to_thread(self._put_wing, row["id"], h)
+                await asyncio.sleep(WING_PAUSE_S)
+
         while True:
             try:
                 todo = await asyncio.to_thread(self._wings_to_ask)
+                if todo:
+                    await asyncio.gather(*(one(r) for r in todo))
+                if time.monotonic() - last >= WING_LOG_S or not todo:
+                    left = len(await asyncio.to_thread(self._wings_to_ask))
+                    if said["asked"] or left:
+                        log.warning(
+                            "wings: asked %d (ok %d, none %d, failed %d, via AllWISE %d), left %d",
+                            said["asked"], said["ok"], said["none"], said["failed"], said["allwise"], left,
+                        )  # fmt: skip
+                    last = time.monotonic()
                 if not todo:
                     await asyncio.sleep(300)
-                    continue
-                for row in todo:
-                    try:
-                        h = await self.bright_ir_star(float(row["ra"]), float(row["dec"]))
-                    except Exception:  # neither IRSA nor the copy answered: asked again later
-                        h = {"state": "unavailable"}
-                    await asyncio.to_thread(self._put_wing, row["id"], h)
-                    await asyncio.sleep(WING_PAUSE_S)
             except asyncio.CancelledError:
                 raise
             except Exception:
@@ -2146,6 +2169,8 @@ SLIM_KEYS = (
 
 # the page asks for many clips and the list at once, each in its own thread: one connection is read by one thread at a time
 _READ = threading.Lock()
+
+log = logging.getLogger("sky.findings")
 
 
 def find_row(db: FindingsDB, find_id: str) -> dict[str, Any] | None:

@@ -1533,7 +1533,7 @@ def test_the_bright_star_is_asked_of_irsa_and_else_of_the_allwise_copy(monkeypat
     f = Findings.__new__(Findings)
     f.catalogue = SimpleNamespace(_tap=tap)
     got = asyncio.run(f.bright_ir_star(51.744073, 12.764138))
-    assert got["state"] == "ok" and got["k"] == 8.13 and 40 < got["sep"] < 42
+    assert got["state"] == "ok" and got["k"] == 8.13 and 40 < got["sep"] < 42 and got["via"] == "irsa"
 
     async def down(which: str, url: str, adql: str) -> str:
         raise httpx.ConnectError("IRSA down")
@@ -1547,6 +1547,47 @@ def test_the_bright_star_is_asked_of_irsa_and_else_of_the_allwise_copy(monkeypat
         context, "allwise_cone", lambda ra, dec, r: [{"ra": 51.7550, "dec": 12.7641, "k_m_2mass": 7.5, "designation": "J1"}]
     )
     got = asyncio.run(f.bright_ir_star(51.744073, 12.764138))
-    assert got["state"] == "ok" and got["k"] == 7.5
+    assert got["state"] == "ok" and got["k"] == 7.5 and got["via"] == "allwise"
     monkeypatch.setattr(context, "allwise_cone", lambda ra, dec, r: [{"ra": 51.7441, "dec": 12.7641, "k_m_2mass": 7.5}])  # 0″: no wing
-    assert asyncio.run(f.bright_ir_star(51.744073, 12.764138)) == {"state": "none"}
+    assert asyncio.run(f.bright_ir_star(51.744073, 12.764138)) == {"state": "none", "via": "allwise"}
+
+
+def test_the_wing_loop_asks_several_at_once_and_says_how_far_it_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from service import findings as fmod
+    from service.findings import Findings
+
+    monkeypatch.setattr(fmod, "WING_FIRST_S", 0.0)
+    monkeypatch.setattr(fmod, "WING_PAUSE_S", 0.0)
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds([{**_peak(f"p{i}", 8.0), "sigma": None, "rate_err": None, "versions": {}} for i in range(9)])
+    at_once = {"now": 0, "most": 0}
+
+    async def star(ra: float, dec: float) -> dict[str, Any]:
+        at_once["now"] += 1
+        at_once["most"] = max(at_once["most"], at_once["now"])
+        await asyncio.sleep(0.02)
+        at_once["now"] -= 1
+        if ra < 13:
+            raise httpx.ConnectError("down")
+        return {"state": "ok", "name": "s", "sep": 40.0, "k": 8.0, "via": "allwise"}
+
+    f = Findings.__new__(Findings)
+    f.db = db
+    f.bright_ir_star = star  # type: ignore[method-assign]
+
+    async def run() -> None:
+        t = asyncio.create_task(f.wing_loop())
+        for _ in range(200):
+            await asyncio.sleep(0.02)
+            if "left" in caplog.text:
+                break
+        t.cancel()
+
+    with caplog.at_level("WARNING", logger="sky.findings"):
+        asyncio.run(run())
+    assert 1 < at_once["most"] <= fmod.WING_AT_ONCE
+    assert "wings: asked 9 (ok " in caplog.text and "failed " in caplog.text and "via AllWISE" in caplog.text
+    states = dict(db.db.execute("SELECT state, count(*) FROM wings GROUP BY state").fetchall())
+    assert sum(states.values()) == 9 and states.get("unavailable", 0) >= 1
