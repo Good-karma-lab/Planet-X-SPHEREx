@@ -35,7 +35,7 @@ test('1. a guest signs in by the e-mail link (dev mode)', async () => {
   await page.getByRole('button', { name: 'Continue with e-mail' }).click();
   await expect(page.getByTestId('signin-status')).toContainText('We sent a link to');
   await page.getByTestId('dev-link').click();
-  await expect(page.getByTestId('who-name')).toHaveText(email.split('@')[0]!);
+  await expect(page.getByTestId('who-name')).toHaveText(/^Volunteer \d{4}$/); // never the start of the address (27 Nov 2026, С3)
   await shot('1-signed-in');
 });
 
