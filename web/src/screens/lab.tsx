@@ -3402,6 +3402,14 @@ export function Lab({ route }: { route: Route }) {
     </div>
   );
   const mvr = mv?.result;
+  /** what our passes of this field say of the motion at a source (the field's mover search, as How it moves says it): "moves", "none" once
+   * the search is done with no track there, null while it runs or for a body moving within one pass */
+  const ourMotionAt = (x: { ra: number; dec: number; pmra?: number | null; pmdec?: number | null; finding?: string | null; moving?: unknown }) => {
+    if (x.finding?.startsWith('film:') || x.moving) return null;
+    const [r0, d0] = x.pmra || x.pmdec ? atEpoch(x.ra, x.dec, x.pmra ?? 0, x.pmdec ?? 0, 2025.9) : [x.ra, x.dec];
+    const t = (mvr?.tracks ?? []).find((y) => Math.hypot((y.ra_2025_9 - r0) * Math.cos((d0 * Math.PI) / 180), y.dec_2025_9 - d0) * 3600 < 8);
+    return t ? ('moves' as const) : mv?.state === 'done' ? ('none' as const) : null;
+  };
   const pairs = ((mv as unknown as { pairs?: Pair[] } | null)?.pairs ?? []) as Pair[];
   const pairMjds = (mv as unknown as { mjd?: number[] } | null)?.mjd ?? passes.map((q) => q.mjd_mid);
   const anFrac = an?.state === 'done' ? 1 : an?.state === 'running' ? (an.total ? an.done / an.total : null) : 0;
@@ -4967,7 +4975,7 @@ export function Lab({ route }: { route: Route }) {
                     </div>
                   )}
                   {!flow.markOpen && flow.card}
-                  {!objBlind && sel?.finding && <FindStatus id={sel.finding} />}
+                  {!objBlind && sel?.finding && <FindStatus id={sel.finding} ourMotion={ourMotionAt(sel)} />}
                   <details class="obj-more" data-testid="obj-more" open style={objBlind ? { display: 'none' } : undefined}>
                     <summary>More about it</summary>
                     {selAn !== null && an?.result && an.result.anomalies.find((a) => a.n === selAn) ? (

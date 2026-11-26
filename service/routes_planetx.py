@@ -159,7 +159,9 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             async def fn(ctx: Any) -> dict[str, Any]:
                 return await distantjob.run_distant(ctx, index, files, store, wl, ps, params)
 
-            job = st.scheduler.submit(distantjob.KIND, key, params, fn, Priority.P2 if bg else Priority.P0, "heavy", 2500)
+            job = st.scheduler.submit(
+                distantjob.KIND, key, params, fn, Priority.P2 if bg else Priority.P0, "heavy", 2500, followed=bool(bg)
+            )
         return job_reply(key, job, estimates.get(key))
 
     @r.get(f"{prefix}/deep")
@@ -236,7 +238,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             if background and (request.client is None or request.client.host not in ("127.0.0.1", "::1")):
                 raise HTTPException(403, "background searches are started from the machine itself")
             job_priority = Priority.P3 if background else Priority.P2 if bg else Priority.P0
-            job = st.scheduler.submit(deepjob.KIND, key, params, fn, job_priority, "heavy", 4000)
+            job = st.scheduler.submit(deepjob.KIND, key, params, fn, job_priority, "heavy", 4000, followed=bool(bg) and not background)
         return job_reply(key, job, estimates.get(key))
 
     @r.get(f"{prefix}/distant/{{key}}/bin")

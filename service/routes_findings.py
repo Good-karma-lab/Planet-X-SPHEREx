@@ -73,9 +73,11 @@ PAGE_SIZE = 48  # the Findings page's (web/src/screens/findings/finds.tsx)
 
 
 def warm_keys() -> list[dict[str, Any]]:
-    """The lists the pages ask for as they open: Findings' Promising and its kinds, the kind chips' numbers, Planet X's peaks."""
+    """The lists the pages ask for as they open: Findings' Promising and its kinds, the kind chips' numbers, Planet X's peaks, and the
+    plain list (no filter: what an outside reader asks first; 26 Nov it took 5 s after a start, 33 s at the deploy's own check)."""
     card = {"status": "all", "sort": "promise", "visibility": "seen", "lite": True, "limit": PAGE_SIZE, "faint": "hide"}
     return [
+        {},
         {**card, "kinds": ",".join(("mover", "browndwarf", "peak", "film", "pair"))},
         {"status": "all", "visibility": "seen", "lite": True, "limit": 1, "faint": "hide"},
         *({**card, "kind": k} for k in KINDS),

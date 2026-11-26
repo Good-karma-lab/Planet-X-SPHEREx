@@ -45,17 +45,26 @@ export function useFindRecord(id: string): FindRecord | null | 'failed' {
 export const rateWord = (f: { kind: string; rate?: number | null }) =>
   f.rate != null && f.rate > 0 ? `${f.rate.toFixed(f.rate >= 10 ? 1 : 2)}″/${f.kind === 'film' ? 'h' : 'yr'}` : '';
 
-/** A find's record in Findings: its status and stage, its numbers, the verdict and the note. */
-export function FindStatus({ id }: { id: string }) {
+/** a find whose own search measured a motion between passes, which our passes of the open field may not show (26 Nov: a brown dwarf at
+ * 9.9″/yr in its 20′ search, "no motion between our passes" in the 5′ field: one card said both) */
+export const unconfirmedMotion = (f: { kind: string; rate?: number | null }, ourMotion: 'moves' | 'none' | null | undefined) =>
+  ourMotion === 'none' && f.kind !== 'film' && f.rate != null && f.rate > 0;
+
+/** A find's record in Findings: its status and stage, its numbers, the verdict and the note. `ourMotion`: what the open field's own
+ * mover search says at it ("none": no motion between our passes), so a speed it does not confirm is said to be unconfirmed. */
+export function FindStatus({ id, ourMotion }: { id: string; ourMotion?: 'moves' | 'none' | null }) {
   const f = useFindRecord(id);
   if (f === null) return <div class="obj-find mono-s">In Findings: asking…</div>;
   if (f === 'failed') return <div class="obj-find mono-s">In Findings: no answer</div>;
+  const unsure = unconfirmedMotion(f, ourMotion);
   // each number with its meaning on hover (the words stay short on the card)
   const nums: [string, string][] = (
     [
       [f.snr != null ? `signal ${f.snr.toFixed(1)}× noise` : '', 'Signal to noise: how far it stands above the noise of the picture'],
       [f.score != null ? `score ${f.score.toFixed(1)}` : '', "The search's own measure of how strong the find is"],
-      [rateWord(f), 'How fast it moves on the sky'],
+      unsure
+        ? [`${rateWord(f)}, not confirmed`, 'The search that found it measured this speed on its own path; our passes of this field show no motion here']
+        : [rateWord(f), 'How fast it moves on the sky'],
       [f.promise != null ? `promise ${f.promise}` : '', 'What to look at first, 0 to 100: strength, checks passed, nothing known there'],
       [f.viewers ? `${f.viewers} looked` : '', 'People who looked at it'],
     ] as [string, string][]
@@ -82,6 +91,11 @@ export function FindStatus({ id }: { id: string }) {
               {t}
             </span>
           ))}
+        </div>
+      )}
+      {unsure && (
+        <div class="obj-findtext" data-testid="find-no-motion">
+          Our passes of this field show no motion here: the speed its search measured is not confirmed.
         </div>
       )}
       {f.verdict && <div class="obj-findtext">{f.verdict}</div>}

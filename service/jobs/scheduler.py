@@ -69,6 +69,7 @@ class Job:
     error: str | None = None
     abandoned: bool = False
     left: bool = False  # its page said it is leaving (leave): nobody else may be watching
+    followed: bool = False  # a background run asked again and again by whoever started it (a page's automatic search, the sweep)
     created: float = field(default_factory=time.time)
     started: float | None = None
     finished: float | None = None
@@ -145,6 +146,9 @@ class Context:
 
 
 LEAVE_S = 5.0  # a left job waits this long for another page's poll (the pages poll every second or two)
+# a followed background run nobody asked about this long is cancelled: its page left (26 Nov: a guest's Lab started a 2.5 GB Planet X
+# search per field opened and it ran to its end, minutes, after they went to About). The pages and the sweep ask every 5 s
+UNFOLLOWED_S = 90.0
 
 
 @dataclass
@@ -189,7 +193,19 @@ class Scheduler:
         return any(j.priority <= Priority.P1 and j.state in ("queued", "running") for j in self.jobs.values())
 
     # ---- submit and poll --------------------------------------------------------------------------------------------------------
-    def submit(self, kind: str, key: str, params: dict[str, Any], fn: JobFn, priority: Priority, size: Size, mem_mb: int = 500) -> Job:
+    def submit(
+        self,
+        kind: str,
+        key: str,
+        params: dict[str, Any],
+        fn: JobFn,
+        priority: Priority,
+        size: Size,
+        mem_mb: int = 500,
+        followed: bool = False,
+    ) -> Job:
+        """`followed`: a background run whose caller asks about it again and again (poll): cancelled once nobody asked for UNFOLLOWED_S.
+        A run of the warm set or the night scans, which nobody asks about, is not."""
         jid = self.by_key.get(key)
         if jid is not None:
             j = self.jobs[jid]
@@ -197,11 +213,13 @@ class Scheduler:
                 if priority < j.priority:  # a person takes over a background job
                     j.priority = priority
                     j.abandoned = False
+                if not followed:  # someone who will not ask again needs it to its end
+                    j.followed = False
                 j.last_poll = time.time()
                 j.left = False
                 self._kick()
                 return j
-        j = Job(id=f"j{next(self._ids)}", key=key, kind=kind, params=params, priority=priority, size=size, mem_mb=mem_mb)
+        j = Job(id=f"j{next(self._ids)}", key=key, kind=kind, params=params, priority=priority, size=size, mem_mb=mem_mb, followed=followed)
         self.jobs[j.id] = j
         self.by_key[key] = j.id
         self._fns[j.id] = fn
@@ -263,6 +281,9 @@ class Scheduler:
 
     def _abandon_check(self) -> None:
         now = time.time()
+        for j in list(self.jobs.values()):
+            if j.followed and j.priority >= Priority.P2 and j.state in ("queued", "running", "paused") and now - j.last_poll > UNFOLLOWED_S:
+                self.cancel(j.id)
         for j in self.jobs.values():
             if j.priority == Priority.P0 and j.state in ("queued", "running", "paused") and now - j.last_poll > self.abandon_after_s:
                 j.priority, j.abandoned = Priority.P1, True

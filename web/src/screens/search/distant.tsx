@@ -125,12 +125,16 @@ export function useDistant(aim: DistantAim, restore?: DistantSliders | null) {
   const closedByUser = useRef(false);
   const keep = useRef(restore);
   keep.current = restore;
-  // a new field or aim: the old result no longer belongs to the picture
+  // a new field or aim: the old result no longer belongs to the picture; leaving the page (or the field) stops asking about it, so the
+  // service drops a background search nobody follows (26 Nov: it was asked every 5 s from About and the Cabinet until it ended)
   useEffect(() => {
     tok.current++;
     closedByUser.current = false;
     setDs({ state: 'idle' });
     setKeys({});
+    return () => {
+      tok.current++;
+    };
   }, [aim.ra, aim.dec, aim.fov]);
   /** `bg`: an automatic run of the page, which gives way to every person's job (the service's bg=1) */
   const start = async (pass: number | null, bg = false) => {

@@ -66,6 +66,9 @@ export function LinkPanel({ keys, onPick }: { keys: string[]; onPick?: (e: LinkE
   useEffect(() => {
     tok.current++;
     setA({ state: 'idle' });
+    return () => {
+      tok.current++; // leaving the page stops asking (useDistant)
+    };
   }, [sig]);
   if (has !== true || keys.length < 2) return null;
   const run = async () => {

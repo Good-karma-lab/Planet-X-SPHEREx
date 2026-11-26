@@ -132,3 +132,10 @@ def test_the_first_lists_are_kept_for_the_next_start_and_a_stale_one_is_handed_o
             warm.cancel()
 
     asyncio.run(run())
+
+
+def test_the_plain_list_is_among_the_warm_ones() -> None:
+    """26 Nov: the first /api/v1/findings with no filter after a start took 5.3 s (33 s at the deploy's own check)."""
+    from service.routes_findings import warm_keys
+
+    assert {} in warm_keys()

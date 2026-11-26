@@ -84,7 +84,7 @@ export function cardTitle(f: CardFind): string {
     case 'film':
       return `${nm || 'Moves within one pass'} · ${(f.rate ?? 0).toFixed(1)}″/h`;
     case 'peak':
-      return `Planet X peak · signal ${(f.snr ?? f.score ?? 0).toFixed(1)}× the noise`;
+      return `Planet X peak · search signal ${(f.snr ?? f.score ?? 0).toFixed(1)}× the noise`;
     case 'red':
       return `${nm || 'Red source'} · colour ${(f.score ?? 0).toFixed(1)}`;
     case 'anomaly':
