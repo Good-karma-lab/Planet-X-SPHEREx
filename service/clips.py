@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import io
 import json
+import logging
 import math
 import os
 import threading
@@ -374,7 +375,54 @@ def _window(a: NDArray[Any], x0: int, y0: int, w: int, fill: float) -> NDArray[A
     return out
 
 
+log = logging.getLogger("sky.clips")
 _LOOKS: OrderedDict[tuple[str, int], PassLook] = OrderedDict()
+
+
+PASSES_PAUSE_S = 0.2  # between two finds measured in the background
+PICS_KEEP = 8  # the pass pictures kept decoded for passes_seen (a 20′ field's: ~4 MB each)
+_PICS: OrderedDict[tuple[str, int], dict[str, Any]] = OrderedDict()
+
+
+def passes_seen(find: dict[str, Any], src: Source, window_arcmin: float = WINDOW_ARCMIN) -> tuple[int, int]:
+    """(in how many of the field's passes that cover the place the object is seen in its ring, how many cover it), measured as render
+    measures its ring (stands_out on the pass picture, is_visible). A red source seen in one pass of three is no galaxy: a galaxy does
+    not leave between passes (the exploratory report of 27 Nov 2026, С1: red:a028ded953e8, red:de3ffd943342)."""
+    grid = src.grid
+    passes = sorted(src.meta.get("passes") or [], key=lambda p: p["index"])
+    if not passes:
+        return 0, 0
+    mid = float(np.mean([p["mjd_mid"] for p in passes]))
+    cra, cdec = place_at(find, mid)
+    cx, cy = (float(v) for v in grid.sky_to_grid(cra, cdec))
+    w = round(window_arcmin * 60.0 / grid.step_arcsec)
+    x0, y0 = round(cx - w / 2.0), round(cy - w / 2.0)
+    ring_r = max(1.5, MEASURE_ARCSEC / grid.step_arcsec)
+    seen = total = 0
+    for p in passes:
+        memo = (src.key, int(p["index"]))
+        arr = _PICS.get(memo)
+        if arr is None:
+            raw = src.store.read_part(FIELD, src.key, f"picture_p{p['index']}.sxp")
+            if raw is None:
+                continue
+            arr = _PICS[memo] = decode(raw)[1]
+            while len(_PICS) > PICS_KEEP:
+                _PICS.popitem(last=False)
+        _PICS.move_to_end(memo)
+        rgb = _window(arr["rgb"].astype(np.float32), x0, y0, w, np.nan)
+        sat = _window(arr["sat"], x0, y0, w, 0) if "sat" in arr else np.zeros(rgb.shape[1:], np.uint8)
+        if not np.isfinite(rgb[1]).any() and not sat.any():
+            continue  # this pass did not cover the place
+        ra, dec = place_at(find, float(p["mjd_mid"]))
+        rx, ry = (float(v) - o for v, o in zip(grid.sky_to_grid(ra, dec), (x0, y0), strict=True))
+        if not (-0.5 <= rx <= w - 0.5 and -0.5 <= ry <= w - 0.5) or not np.isfinite(rgb).any():
+            continue
+        white = np.nanmean(rgb, axis=0)
+        sn, beat, nctl, _ = stands_out(np.where((sat > 127) & ~np.isfinite(white), np.nanmax(white), white), rx, ry, ring_r)
+        total += 1
+        seen += int(is_visible(sn, beat, nctl))
+    return seen, total
 
 
 def render(
@@ -989,6 +1037,10 @@ class Clips:
         )
         self._seen: dict[str, tuple[bool | None, float | None]] = {}
         self._visits_seen: dict[str, tuple[int, int]] = {}
+        self._passes_seen: dict[str, tuple[int, int]] = {}
+        self._passes_queue: dict[str, dict[str, Any]] = {}  # finds to measure (passes_seen), by id; one thread drains it
+        self._passes_lock = threading.Lock()
+        self._passes_busy = False
         self._visits: tuple[float, list[tuple[str, dict[str, Any], dict[str, Any]]]] = (0.0, [])
         self.pre: dict[str, Any] = {"running": False, "rounds": 0, "made": 0, "left": None, "now": None}
         self._pre_task: asyncio.Task[None] | None = None
@@ -1122,6 +1174,60 @@ class Clips:
         if self.rank(find) == 2:
             return False, None
         return None, None
+
+    def passes_seen(self, find: dict[str, Any]) -> tuple[int, int] | None:
+        """(in how many passes of the best finished field the object is seen, how many cover it); None while no finished field holds
+        it. Measured once per find and kept in memory: nothing is written."""
+        fid = str(find["id"])
+        if fid in self._passes_seen:
+            return self._passes_seen[fid]
+        src = self.source_for(find)
+        if src is None:
+            return None
+        self._passes_seen[fid] = passes_seen(find, src)
+        return self._passes_seen[fid]
+
+    def passes_known(self, find: dict[str, Any]) -> tuple[int, int] | None:
+        """passes_seen if measured already; else None, and the find is measured in the background (one thread, one find at a time,
+        the finds of one field together): the task lists never wait for it."""
+        fid = str(find["id"])
+        if fid in self._passes_seen:
+            return self._passes_seen[fid]
+        with self._passes_lock:
+            self._passes_queue.setdefault(fid, find)
+            if self._passes_busy:
+                return None
+            self._passes_busy = True
+        threading.Thread(target=self._drain_passes, name="passes-seen", daemon=True).start()
+        return None
+
+    def _drain_passes(self) -> None:
+        try:
+            while True:
+                with self._passes_lock:
+                    if not self._passes_queue:
+                        self._passes_busy = False
+                        done = list(self._passes_seen.values())
+                        log.info(
+                            "passes seen: measured %d, in 2 passes or more %d, in fewer %d, no field %d", len(done),
+                            sum(1 for v in done if v[0] >= 2), sum(1 for v in done if v[1] and v[0] < 2), sum(1 for v in done if not v[1]),
+                        )  # fmt: skip
+                        return
+                    # the finds of one field one after another: its pictures are read once (_PICS)
+                    fid = min(self._passes_queue, key=lambda k: (str((self._passes_queue[k].get("data") or {}).get("field")), k))
+                    find = self._passes_queue.pop(fid)
+                try:
+                    got = self.passes_seen(find)
+                except Exception:
+                    log.exception("passes_seen %s", fid)
+                    got = None
+                if got is None:
+                    self._passes_seen.setdefault(fid, (0, 0))  # no finished field holds it: not measured, not asked again
+                time.sleep(PASSES_PAUSE_S)
+        except BaseException:
+            with self._passes_lock:
+                self._passes_busy = False
+            raise
 
     def visits_seen(self, find: dict[str, Any]) -> tuple[int, int] | None:
         """(in how many of a track's own visits its dot is seen on the ordinary picture, how many visits it has); None while its visits

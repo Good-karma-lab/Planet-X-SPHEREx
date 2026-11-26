@@ -324,6 +324,13 @@ def _ends(answer: dict[str, Any]) -> dict[str, Any]:
     return {**{k: v for k, v in answer.items() if k != "next"}, "result": SUM_ONLY}
 
 
+PASSES_MIN = 2  # a red source is asked about when it is seen in at least this many passes (Clips.passes_seen)
+
+
+def seen_twice(got: tuple[int, int] | None) -> bool:
+    return got is not None and got[0] >= PASSES_MIN
+
+
 def visits_show(got: tuple[int, int] | None) -> bool:
     """Whether a track's own visits show its dot well enough to ask about them: in VISITS_SHARE of them (Clips.visits_seen)."""
     return got is not None and got[1] > 0 and got[0] >= VISITS_SHARE * got[1]
@@ -347,6 +354,8 @@ def askable(row: dict[str, Any]) -> bool:
         return False  # a faint Planet X peak (findings.faint_peak): most are noise
     if row.get("kind") == "film":
         return track_seen(row)
+    if row.get("kind") == "red" and "passes_seen" in row and not seen_twice(row["passes_seen"]):
+        return False  # seen in one pass only (no galaxy leaves between passes), or not measured yet (С1, 27 Nov 2026)
     if row.get("kind") == "anomaly" and row.get("star_shown") is False:
         return False  # its odd pictures are noise: nobody can say whether a star touches the one in the middle (С2, 27 Nov 2026)
     return row.get("visible", True) is True or "raised" in row

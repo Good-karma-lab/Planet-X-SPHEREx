@@ -1268,6 +1268,10 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         />
       );
     if (show === 'sums' || (!show && (kind === 'finding' || kind === 'second_look'))) return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} onShown={setPanelShown} onNone={setPanelNone} />;
+    // a red source: its own pass after pass, ringed, in the task panel over the sky (the sky is not made smaller); before, only the
+    // two example pictures stood there and the object was in the field's small 2′ inset (27 Nov 2026, С1)
+    if (show === 'picture' && (body?.finding_id ?? task?.finding_id ?? '').startsWith('red:'))
+      return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} />;
     if (show === 'stamps') {
       const own = body?.anomaly;
       const src: Source | null = own ? { ra: own.ra, dec: own.dec, pmra: own.pmra ?? 0, pmdec: own.pmdec ?? 0 } : anomaly ? taskSrc : null;

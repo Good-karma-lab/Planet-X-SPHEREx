@@ -911,3 +911,12 @@ def test_a_peak_without_its_two_pictures_is_not_asked() -> None:
     row = {"finding_id": "peak:1", "kind": "peak", "visible": True}
     assert people.askable(row) and people.askable({**row, "pictures": True}) and not people.askable({**row, "pictures": False})
     assert not people.askable({**row, "pictures": False, "raised": 1})
+
+
+def test_a_red_source_is_asked_about_when_seen_in_two_passes() -> None:
+    # 27 Nov 2026 (exploratory report, С1): seen in one pass of three, "a fuzzy patch" made it a galaxy; a galaxy does not leave
+    red = {"kind": "red", "visible": True}
+    assert people.askable(red)  # not measured here (no clips): as before
+    assert not people.askable({**red, "passes_seen": None})  # measured in the background, not yet
+    assert not people.askable({**red, "passes_seen": (1, 3)}) and not people.askable({**red, "passes_seen": (0, 0)})
+    assert people.askable({**red, "passes_seen": (2, 3)}) and people.askable({**red, "passes_seen": (4, 4)})
