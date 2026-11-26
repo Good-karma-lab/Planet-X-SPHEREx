@@ -16,5 +16,11 @@ class Config:
     serve_web: bool = field(default_factory=lambda: os.environ.get("SKY_SERVE_WEB", "1") == "1")
 
 
+def hide_faint_peaks() -> bool:
+    """Whether the faint Planet X peaks stand behind their own filter (service/findings.faint_peak): SKY_HIDE_FAINT_PEAKS=0 turns it off.
+    Read at every judging: nothing of it is kept in the database."""
+    return os.environ.get("SKY_HIDE_FAINT_PEAKS", "1") == "1"
+
+
 def load() -> Config:
     return Config()

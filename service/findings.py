@@ -24,7 +24,7 @@ import re
 import sqlite3
 import threading
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Collection, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +32,7 @@ import httpx
 
 from service import cpu, people_tracks
 from service.bodies import SB_IDENT, _iso, _sexa_dec, _sexa_ra
+from service.config import hide_faint_peaks
 from service.products.store import Store
 from service.products.versions import VERSIONS
 from service.storage import atomic_write_bytes
@@ -2000,7 +2001,7 @@ LITE_KEYS = (
 
 SLIM_KEYS = (
     "id", "kind", "place", "ra", "dec", "scans", "snr", "score", "status", "stage", "promise", "viewers", "note", "visible", "people_raised",
-    "ask", "echo",
+    "ask", "echo", "faint",
 )  # fmt: skip
 
 
@@ -2092,6 +2093,30 @@ STATUS_RANK = {
 }
 
 
+FAINT_PHOT_SN = 6.0
+FAINT_SHARE = 10  # one faint peak in so many is asked about all the same, by its id: what people say of them measures the rule
+
+
+def faint_peak(kind: str, data: Mapping[str, Any]) -> bool:
+    """A peak of the far search on detectors 1-3 whose photometry is under 6 sigma: most of those are noise (the rule of 25 Nov 2026,
+    measured for this search alone: a near peak, one of detector 4, a deep sum and a peak without the number are never faint)."""
+    p = data.get("peak") or {}
+    sn, far = p.get("phot_sn"), (p.get("knob") or {}).get("d") or [0.0]
+    return (
+        kind == "peak"
+        and data.get("search") == "distant"
+        and set(p.get("bydet") or {}) == {"1", "2", "3"}
+        and far[0] is not None
+        and far[0] >= 200.0
+        and sn is not None
+        and sn < FAINT_PHOT_SN
+    )
+
+
+def faint_sample(find_id: str) -> bool:
+    return int.from_bytes(hashlib.sha1(find_id.encode()).digest()[:4], "big") % FAINT_SHARE == 0
+
+
 class Snapshot:
     """Every find judged once (what the catalogues, JPL and people say of it), as the lists are made from it: `items` are the few fields
     the filters, the counts and the order read; `judge(n)` makes find n whole again."""
@@ -2127,11 +2152,11 @@ class Snapshot:
         for f in self.items:
             k = (
                 f["kind"], f["status"], f["place"] if with_place else None, f["stage"], f["viewers"] == 0 and f["stage"] == "new",
-                f["note"] is not None, f["visible"], only is not None and f["id"] in only,
+                f["note"] is not None, f["visible"], only is not None and f["id"] in only, f["faint"],
             )  # fmt: skip
             tally[k] = tally.get(k, 0) + 1
         got = [
-            (dict(zip(("kind", "status", "place", "stage", "waiting", "noted", "visible", "asked"), k, strict=True)), n)
+            (dict(zip(("kind", "status", "place", "stage", "waiting", "noted", "visible", "asked", "faint"), k, strict=True)), n)
             for k, n in tally.items()
         ]
         if not with_place and only is None:
@@ -2149,12 +2174,14 @@ def snapshot(
     raised: Mapping[str, str] | None = None,
     tracks: Mapping[str, dict[str, Any]] | None = None,
     names: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
+    real: Collection[str] = (),
 ) -> Snapshot:
     """The finds judged: the work every list shares, whatever its filters (see `query` for what each argument says)."""
     with _READ:
         views = flow.views() if flow is not None else {}
         packed = read_some(db, sorted(only)) if only is not None else read_base(db)
     order = {c: i for i, c in enumerate([*list(CATALOGUES), "sbident"])}
+    hide_faint = hide_faint_peaks()
 
     def judge(blob: Any, whole: bool) -> dict[str, Any]:
         """One find as the page says it, from its own packed copy (a caller's change stays its own)."""
@@ -2204,6 +2231,14 @@ def snapshot(
         if raised and f["id"] in raised and st in ("unexplained", "unchecked"):
             f["people_raised"] = raised[f["id"]]  # moves_old: the old pictures confirm the motion; candidate: a Planet X dot
         f["idents"] = ids_
+        # behind its own filter, unless a person said it is real (or people raised it); what a catalogue or JPL named is not faint
+        f["faint"] = (
+            hide_faint
+            and st in ("unexplained", "unchecked")
+            and "people_raised" not in f
+            and f["id"] not in real
+            and faint_peak(f["kind"], f["data"])
+        )
         if f["kind"] in ("red", "anomaly"):
             f["catalogue_class"] = catalogue_class(f, ids_)
             f["ask"] = ask_people(f, ids_)
@@ -2266,6 +2301,8 @@ def query(
     names: Callable[[dict[str, Any]], dict[str, Any] | None] | None = None,
     slim: bool = False,
     snap: Snapshot | None = None,
+    real: Collection[str] = (),
+    faint: str | None = None,
 ) -> dict[str, Any]:
     """The finds with what the catalogues said. `aside`: the machine finds people set aside as artefacts ({id: {look, agree, total}},
     service/accounts/field_people.set_aside): their status is `set_aside`, kept out of the leads and the default list like a halo.
@@ -2275,9 +2312,10 @@ def query(
     the old one). Every find also carries the flow fields (flow_fields).
     `names`: what JPL said of a Planet X peak (FpxIdentifier.verdict_on): a known body (or its echo) is `known`, a residual is `residual`,
     before every filter and count. `slim`: the finds are only what the lists of tasks need (SLIM_KEYS), never read again in full.
+    `real`: the finds a person said are real (never faint). `faint`="hide": without the faint peaks (faint_peak); else they are in.
     `snap`: a snapshot of the finds already judged (the list of the page is made from one that is kept); without it one is made."""
     if snap is None:
-        snap = snapshot(db, flow=flow, only=only, seen=seen, aside=aside, raised=raised, tracks=tracks, names=names)
+        snap = snapshot(db, flow=flow, only=only, seen=seen, aside=aside, raised=raised, tracks=tracks, names=names, real=real)
     pending, unavailable, missing_decisive = snap.pending, snap.unavailable, snap.missing_decisive
     counts: dict[str, dict[str, int]] = {
         k: {
@@ -2300,7 +2338,9 @@ def query(
     }
     # what the counts read is the same for a few hundred combinations of it: they are counted once per snapshot, and a request's filters are
     # asked of a combination, not of 26,000 finds five times over
-    groups = snap.groups(with_place=bool(place), only=only)
+    groups = every = snap.groups(with_place=bool(place), only=only)
+    if faint == "hide":
+        groups = [g for g in every if not g[0]["faint"]]
     for f, n in groups:
         tally = counts.setdefault(f["kind"], dict.fromkeys(next(iter(counts.values())), 0))
         if f["status"] not in HIDDEN:  # a star's residual and a galaxy are not leads: counted apart
@@ -2326,6 +2366,7 @@ def query(
             and (visibility != "unseen" or f["visible"] is False)
         )
 
+    faint_n = sum(n for f, n in every if f["faint"] and (not kind or f["kind"] == kind) and (not kinds or f["kind"] in kinds) and passes(f))
     counts_view: dict[str, int] = dict.fromkeys(KINDS, 0)
     for f, n in groups:
         if passes(f):
@@ -2370,6 +2411,7 @@ def query(
         and (not waiting or (f["viewers"] == 0 and f["stage"] == "new"))
         and (only is None or f["id"] in only)
         and (not noted or f["note"] is not None)
+        and (faint != "hide" or not f["faint"])
     ]
 
     def vis_of(f: dict[str, Any]) -> str:
@@ -2424,6 +2466,7 @@ def query(
             f.update(rel[f["id"]])
     return {
         "count": len(sel),
+        "faint": faint_n,  # the faint peaks under the request's other filters, shown or hidden
         "total": sum(n for _, n in shown),
         "counts": counts,
         # per kind, the finds that pass this request's every filter but the kind ones (status, stage, waiting, visibility, …): the

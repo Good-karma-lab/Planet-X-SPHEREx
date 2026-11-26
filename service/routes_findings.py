@@ -74,12 +74,12 @@ PAGE_SIZE = 48  # the Findings page's (web/src/screens/findings/finds.tsx)
 
 def warm_keys() -> list[dict[str, Any]]:
     """The lists the pages ask for as they open: Findings' Promising and its kinds, the kind chips' numbers, Planet X's peaks."""
-    card = {"status": "all", "sort": "promise", "visibility": "seen", "lite": True, "limit": PAGE_SIZE}
+    card = {"status": "all", "sort": "promise", "visibility": "seen", "lite": True, "limit": PAGE_SIZE, "faint": "hide"}
     return [
         {**card, "kinds": ",".join(("mover", "browndwarf", "peak", "film", "pair"))},
-        {"status": "all", "visibility": "seen", "lite": True, "limit": 1},
+        {"status": "all", "visibility": "seen", "lite": True, "limit": 1, "faint": "hide"},
         *({**card, "kind": k} for k in KINDS),
-        {"status": "all", "kind": "peak", "limit": 2000},
+        {"status": "all", "kind": "peak", "limit": 2000, "faint": "hide"},
     ]
 
 
@@ -134,6 +134,22 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         v: dict[str, str] = raised_cache["v"]
         return v
 
+    real_cache: dict[str, Any] = {"at": 0.0, "v": frozenset()}
+
+    def people_real() -> frozenset[str]:
+        """The finds a person said are real (never behind the faint filter), read every 30 s at most."""
+        now = time.time()
+        if now - real_cache["at"] > 30.0:
+            try:
+                from service.accounts import people
+
+                real_cache["v"] = people.said_real(st)
+            except Exception:  # no accounts here: nobody said anything
+                real_cache["v"] = frozenset()
+            real_cache["at"] = now
+        v: frozenset[str] = real_cache["v"]
+        return v
+
     list_cache: dict[tuple[Any, ...], tuple[float, Any]] = {}
     list_inflight: dict[tuple[Any, ...], asyncio.Future[Any]] = {}
     list_tasks: set[asyncio.Task[Any]] = set()  # lists made behind a request (kept here: a task nobody holds may be collected)
@@ -146,7 +162,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
     snap_kept: dict[str, Any] = {"at": 0.0, "snap": None, "task": None}
 
     def people_said() -> dict[str, Any]:
-        return {"aside": people_aside(), "raised": people_raised(), "tracks": people_tracks_said()}
+        return {"aside": people_aside(), "raised": people_raised(), "tracks": people_tracks_said(), "real": people_real()}
 
     async def make_snap(f: Any) -> Snapshot:
         clips = clips_or_none()
@@ -176,7 +192,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         many = tuple(k for k in (q.get("kinds") or "").split(",") if k)
         return (
             q.get("kind"), q.get("status"), None, q.get("limit", 300), 0, q.get("sort"), None, False, many, None, q.get("visibility"), False,
-            bool(q.get("lite")),
+            bool(q.get("lite")), q.get("faint"),
         )  # fmt: skip
 
     warm_set = frozenset(ckey_of(q) for q in warm_keys())
@@ -193,7 +209,10 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             with contextlib.suppress(OSError, ValueError):
                 kept = json.loads(await asyncio.to_thread(path.read_text))
                 for q in warm_keys():
-                    body = kept.get(json.dumps(q, sort_keys=True))
+                    # (kept by a build without the faint filter: the same list with them, for the seconds until it is made again)
+                    body = kept.get(json.dumps(q, sort_keys=True)) or kept.get(
+                        json.dumps({k: v for k, v in q.items() if k != "faint"}, sort_keys=True)
+                    )
                     if body is not None:  # old enough to be made again at the first request, fresh enough to be handed out
                         list_cache.setdefault(
                             ckey_of(q), (time.monotonic() - LIST_TTL_S, Response(body.encode(), media_type="application/json"))
@@ -295,6 +314,9 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         ),
         noted: bool = Query(False, description="only the finds that carry a machine note (they look like an artefact)"),
         lite: bool = Query(False, description="only what a card shows (no data, spectrum, catalogue answers)"),
+        faint: str | None = Query(
+            None, pattern="^(hide)$", description="hide: without the faint Planet X peaks (their number is in `faint`)"
+        ),
     ) -> Any:
         """{count, total, counts[kind]{all, unexplained, known}, stages{stage: n}, waiting, promising, identification{pending, unavailable, catalogues},
         finds[{id, kind, place, ra, dec, rate, snr, score, chance, status, verdict, idents[{catalogue, state, name, sep, type}], data, scans,
@@ -312,7 +334,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             clips.prerender(every_find)  # the background queue starts with the first look at the list
         # every guest asks the same list: the answer of the same question is kept LIST_TTL_S, and requests that arrive while it is
         # being made wait for that one instead of each making their own (a launch-day crowd costs one query, not hundreds)
-        ckey = (kind, status, place, limit, offset, sort, stage, waiting, many, ids, visibility, noted, lite)
+        ckey = (kind, status, place, limit, offset, sort, stage, waiting, many, ids, visibility, noted, lite, faint)
         hit = list_cache.get(ckey)
         age = time.monotonic() - hit[0] if hit is not None else 0.0
         if hit is not None and age < LIST_TTL_S:
@@ -330,7 +352,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
 
     async def made_list(ckey: tuple[Any, ...]) -> Response:
         """The answer of one question, made and kept; those who ask it meanwhile wait for this one."""
-        kind, status, place, limit, offset, sort, stage, waiting, many, ids, visibility, noted, lite = ckey
+        kind, status, place, limit, offset, sort, stage, waiting, many, ids, visibility, noted, lite, faint = ckey
         f = need()
         clips = clips_or_none()
         rank = clips.rank if clips is not None else None
@@ -340,7 +362,24 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             snap = await the_snap(f) if ids is None else None
             async with list_gate if ids is None else contextlib.nullcontext():  # a few finds by id wait for no list
                 body = await make_list(
-                    f, kind, status, place, limit, offset, sort, stage, waiting, many, rank, ids, noted, clips, visibility, lite, snap
+                    f,
+                    kind,
+                    status,
+                    place,
+                    limit,
+                    offset,
+                    sort,
+                    stage,
+                    waiting,
+                    many,
+                    rank,
+                    ids,
+                    noted,
+                    clips,
+                    visibility,
+                    lite,
+                    snap,
+                    faint,
                 )
             made = Response(await asyncio.to_thread(lambda: jsonsafe.dumps(body).encode()), media_type="application/json")
             fut.set_result(made)
@@ -359,6 +398,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
     async def make_list(
         f: Any, kind: Any, status: Any, place: Any, limit: int, offset: int, sort: Any, stage: Any, waiting: bool, many: tuple[str, ...],
         rank: Any, ids: str | None, noted: bool, clips: Any, visibility: Any, lite: bool, snap: Snapshot | None = None,
+        faint: str | None = None,
     ) -> Any:  # fmt: skip
         said = await asyncio.to_thread(people_said) if snap is None else {}
         body: dict[str, Any] = await asyncio.to_thread(
@@ -381,6 +421,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                 visibility=visibility,
                 names=names(),
                 snap=snap,
+                faint=faint,
                 **said,
             )
         )

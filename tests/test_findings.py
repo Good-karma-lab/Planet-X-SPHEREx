@@ -1396,3 +1396,51 @@ def test_a_peak_is_not_a_main_belt_body_that_passes_there() -> None:
     f = _findings_with(_jpl([["12 Victoria", "3.0", "0.0", "40.0", "0.0", "17"]]))
     assert asyncio.run(f.sbident(120.0, 10.0, 61000.0, None, None, False, 15.0))["state"] == "none"
     assert asyncio.run(f.sbident(120.0, 10.0, 61000.0, None, None, False))["state"] == "ok"  # (no limit: as for a brown dwarf)
+
+
+def _peak(fid: str, sn: float | None, d0: float = 260.0, det: str = "123", search: str = "distant") -> dict[str, object]:
+    return {
+        "id": f"peak:{fid}", "kind": "peak", "place": "p", "fov": 18.0, "ra": 10.0 + len(fid), "dec": 1.0, "rate": None, "snr": sn, "score": 7.0,
+        "chance": None, "scans": ["s"],
+        "data": {"search": search, "peak": {"ok": True, "phot_sn": sn, "knob": {"d": [d0, 400.0]}, "bydet": {k: [0.1, 9] for k in det}}},
+    }  # fmt: skip
+
+
+def test_the_faint_peaks_stand_behind_their_own_filter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a far peak of detectors 1-3 under 6 sigma is faint; hidden in the list when asked, always there by its id."""
+    from service.findings import faint_peak
+
+    rule = {
+        "a": (_peak("a", 5.9), True), "b": (_peak("b", 6.0), False), "c": (_peak("c", 5.1, d0=30.1), False),
+        "d": (_peak("d", 5.1, det="4"), False), "e": (_peak("e", None), False), "f": (_peak("f", 5.1, search="deep"), False),
+        "g": (_peak("g", 5.1, det="1234"), False),
+    }  # fmt: skip
+    for p, want in rule.values():
+        assert faint_peak("peak", p["data"]) is want, p["id"]  # type: ignore[arg-type]
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    rows = [{**p, "sigma": None, "rate_err": None} for p, _ in rule.values()]
+    for r in rows:
+        r.setdefault("versions", {})
+    db.write_finds(rows)
+    ids = lambda **k: {f["id"] for f in query(db, "peak", "all", None, 50, 0, **k)["finds"]}  # noqa: E731
+    every = {p["id"] for p, _ in rule.values()}
+    assert ids() == every and ids(faint="hide") == every - {"peak:a"}
+    out = query(db, "peak", "all", None, 50, 0, faint="hide")
+    assert (
+        out["faint"] == 1 and out["count"] == 6 and out["counts_view"]["peak"] == 6 and query(db, "peak", "all", None, 5, 0)["faint"] == 1
+    )
+    assert ids(faint="hide", real=frozenset({"peak:a"})) == every  # a person said it is real
+    assert ids(faint="hide", raised={"peak:a": "candidate"}) == every
+    assert query(db, None, "any", None, 1, 0, only=frozenset({"peak:a"}))["finds"][0]["id"] == "peak:a"
+    monkeypatch.setenv("SKY_HIDE_FAINT_PEAKS", "0")
+    assert ids(faint="hide") == every and query(db, "peak", "all", None, 50, 0)["faint"] == 0
+
+
+def test_one_faint_peak_in_ten_is_asked_about_by_its_id() -> None:
+    from service.accounts.people import askable
+    from service.findings import faint_sample
+
+    n = sum(faint_sample(f"peak:{i:012x}") for i in range(5000))
+    assert 400 < n < 600 and faint_sample("peak:00000000000a") == faint_sample("peak:00000000000a")
+    assert not askable({"kind": "peak", "visible": True, "faint": True})
+    assert askable({"kind": "peak", "visible": True}) and askable({"kind": "peak", "visible": True, "faint": True, "raised": "candidate"})

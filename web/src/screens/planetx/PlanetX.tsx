@@ -113,14 +113,15 @@ const isKnown = (f: Peak) =>
   f.data.peak?.known?.state === 'ok' ||
   atKnown(f.ra, f.dec) ||
   echoOf(f) != null;
-function usePeaks(): { leads: Peak[]; known: Peak[] } | null {
-  const [p, setP] = useState<{ leads: Peak[]; known: Peak[] } | null>(null);
+/** `faint`: with the faint peaks (far, detectors 1–3, under 6 sigma: the service hides them unless asked, as Findings does) */
+function usePeaks(faint: boolean): { leads: Peak[]; known: Peak[]; faint: number } | null {
+  const [p, setP] = useState<{ leads: Peak[]; known: Peak[]; faint: number } | null>(null);
   useEffect(() => {
     let stop = false;
     const load = () =>
-      fetch('/api/v1/findings?status=all&limit=2000&kind=peak')
+      fetch(`/api/v1/findings?status=all&limit=2000&kind=peak${faint ? '' : '&faint=hide'}`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((d: { finds?: (Peak & { kind: string })[] } | null) => {
+        .then((d: { finds?: (Peak & { kind: string })[]; faint?: number } | null) => {
           if (stop || !d?.finds) return;
           // the Findings rule: one peak with ok=true per object; known bodies are not leads (status 'known' from the service; until the service
           // marks the live Eris and Makemake detections, their places are matched here)
@@ -128,7 +129,7 @@ function usePeaks(): { leads: Peak[]; known: Peak[] } | null {
           const ok = d.finds.filter(
             (f) => f.kind === 'peak' && f.data.peak?.ok !== false && !['residual', 'galaxy', 'below', 'halo'].includes(f.status ?? ''),
           );
-          setP({ leads: ok.filter((f) => !isKnown(f)), known: ok.filter(isKnown) });
+          setP({ leads: ok.filter((f) => !isKnown(f)), known: ok.filter(isKnown), faint: d.faint ?? 0 });
         })
         .catch(() => {});
     void load();
@@ -137,7 +138,7 @@ function usePeaks(): { leads: Peak[]; known: Peak[] } | null {
       stop = true;
       off();
     };
-  }, []);
+  }, [faint]);
   return p;
 }
 const hhmm = (s?: string) => (s ? `${s.slice(0, 10)} ${s.slice(11, 16)} UTC` : '');
@@ -210,7 +211,8 @@ const CH: Chapter[] = [
 export function PlanetXPage() {
   const searched = useSearched(true);
   const honest = useHonest();
-  const pk = usePeaks();
+  const [faint, setFaint] = useState(false);
+  const pk = usePeaks(faint);
   const leads = pk?.leads ?? null;
   const knownPeaks = pk?.known ?? [];
   // known bodies' echoes the service did not name (their strongest pass sits on the body)
@@ -395,6 +397,19 @@ export function PlanetXPage() {
                 {c.name}
               </button>
             ))}
+            {(faint || (pk?.faint ?? 0) > 0) && (
+              <button
+                class="px3-chip"
+                style={{ '--c': '#8a9aa6' }}
+                aria-pressed={faint}
+                data-testid="px-faint"
+                title="Peaks of the far search on detectors 1–3 under 6 sigma: most are noise, so they are left out unless you ask"
+                onClick={() => setFaint(!faint)}
+              >
+                <i />
+                Faint peaks {faint ? 'shown' : 'hidden'}: {pk?.faint ?? 0}
+              </button>
+            )}
           </div>
           {cap && (
             <div class="px3-cap" style={{ '--c': cap[0] }}>
