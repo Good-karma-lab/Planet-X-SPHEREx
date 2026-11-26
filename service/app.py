@@ -31,7 +31,7 @@ from service.bodies import KnownBodies
 from service.browndwarfs import BrownDwarfs
 from service.catalogue_check import check as catalogue_check
 from service.clips import ClipPending, ClipUnavailable
-from service.config import Config, load
+from service.config import Config, gc_freeze, load
 from service.context import CatalogueContext
 from service.coverage import coverage_payload, index_key
 from service.findings import Findings, find_row
@@ -44,7 +44,7 @@ from service.known import Known
 from service.lightcurves import neowise as lc_neowise
 from service.lightcurves import ztf as lc_ztf
 from service.loopwatch import LoopWatch
-from service.memwatch import MemWatch
+from service.memwatch import MemWatch, settle_when
 from service.movers import Movers
 from service.pairs import Pairs
 from service.products.store import Store, product_key
@@ -52,7 +52,7 @@ from service.products.versions import VERSIONS
 from service.quicklook import QuickLook
 from service.ratelimit import Buckets, client_id
 from service.reader.calib import WavelengthMaps
-from service.reader.files import FileReader
+from service.reader.files import LAYOUTS_KEEP, FileReader
 from service.reader.s3 import S3
 from service.red import find_red_async
 from service.routes_brightness import make_brightness_router
@@ -267,6 +267,15 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         asyncio.get_running_loop().run_in_executor(None, prime_find_rows, st)
         warm_findings = getattr(st, "warm_findings", None)  # the first lists of Findings, kept ready (service/routes_findings.py)
         st.warm_findings_task = asyncio.create_task(warm_findings()) if callable(warm_findings) else None
+        # once warm (the first lists of Findings made, the layouts kept full): what the collector walks, then gc.freeze (SKY_GC_FREEZE)
+        wf_task = st.warm_findings_task
+        settle_task = asyncio.create_task(
+            settle_when(
+                lambda: (wf_task is None or wf_task.done()) and st.files is not None and len(st.files._layouts) >= LAYOUTS_KEEP,
+                gc_freeze(),
+                quiet=lambda: st.scheduler is None or st.scheduler.snapshot()["running_people"] == 0,
+            )
+        )
         hips = st.hips
         asyncio.get_running_loop().run_in_executor(None, hips.count_tiles)
         if st.index is not None:
@@ -325,6 +334,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         flags_task.cancel()
         if st.grid_import is not None:
             st.grid_import.cancel()
+        settle_task.cancel()
         if st.warm_findings_task is not None:
             st.warm_findings_task.cancel()
         if st.findings is not None:
