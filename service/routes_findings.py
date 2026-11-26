@@ -233,6 +233,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                         out[json.dumps(q, sort_keys=True)] = bytes(made.body).decode()
                     if path is not None and not getattr(f.db, "read_only", True) and getattr(f, "writer", False):
                         await asyncio.to_thread(atomic_write_bytes, path, json.dumps(out).encode())
+                    st.findings_warmed = True  # the first lists are made: what service/memwatch.settle_when waits for
             except asyncio.CancelledError:
                 raise
             except Exception:

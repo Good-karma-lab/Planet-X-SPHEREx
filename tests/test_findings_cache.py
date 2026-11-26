@@ -129,6 +129,7 @@ def test_the_first_lists_are_kept_for_the_next_start_and_a_stale_one_is_handed_o
                     break
                 await asyncio.sleep(0.05)
             assert all(json.loads(v)["from"] == "new" for v in kept.values()) and len(kept) == len(warm_keys())
+            assert st.findings_warmed  # the freeze of the collector waits for this (service/memwatch.settle_when)
             warm.cancel()
 
     asyncio.run(run())

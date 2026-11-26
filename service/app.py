@@ -271,7 +271,11 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         wf_task = st.warm_findings_task
         settle_task = asyncio.create_task(
             settle_when(
-                lambda: (wf_task is None or wf_task.done()) and st.files is not None and len(st.files._layouts) >= LAYOUTS_KEEP,
+                lambda: (
+                    (wf_task is None or wf_task.done() or getattr(st, "findings_warmed", False))  # its loop never ends: once made
+                    and st.files is not None
+                    and len(st.files._layouts) >= LAYOUTS_KEEP
+                ),
                 gc_freeze(),
                 quiet=lambda: st.scheduler is None or st.scheduler.snapshot()["running_people"] == 0,
             )
