@@ -78,7 +78,7 @@ def test_a_stall_names_the_full_collection_within_it() -> None:
 
 def test_the_line_says_what_the_collector_walks_and_what_is_frozen() -> None:
     line = MemWatch({}).line()
-    assert " gc_count (" in line and " tracked " in line and " frozen " in line
+    assert " gc_count (" in line and " tracked " in line and f" frozen {gc.get_freeze_count()} " in line
 
 
 def test_census_names_the_most_numerous_types_first() -> None:
@@ -118,7 +118,9 @@ def test_settle_off_counts_and_freezes_nothing() -> None:
     assert said.startswith("census: ") and "freeze off" in said and gc.get_freeze_count() == before
 
 
-def test_settle_waits_for_warm_and_not_past_its_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_settle_waits_for_warm_then_for_no_persons_job_and_not_past_its_limit(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
     import asyncio
 
     from service import memwatch
@@ -126,6 +128,7 @@ def test_settle_waits_for_warm_and_not_past_its_limit(monkeypatch: pytest.Monkey
     done: list[bool] = []
     monkeypatch.setattr(memwatch, "settle", lambda freeze: done.append(freeze) or "census: x")
     asks = iter([False, RuntimeError("not there yet"), True])
+    people = iter([1, 1, 0])
 
     def ready() -> bool:
         a = next(asks)
@@ -133,5 +136,28 @@ def test_settle_waits_for_warm_and_not_past_its_limit(monkeypatch: pytest.Monkey
             raise a
         return a
 
-    assert asyncio.run(memwatch.settle_when(ready, True, max_s=10.0, every_s=0.01)) == "census: x" and done == [True]
-    assert asyncio.run(memwatch.settle_when(lambda: False, False, max_s=0.05, every_s=0.01)) == "census: x" and done == [True, False]
+    def quiet() -> bool:
+        assert next(asks, None) is None  # asked only once warm
+        return next(people) == 0
+
+    with caplog.at_level("WARNING", logger="sky.mem"):
+        assert asyncio.run(memwatch.settle_when(ready, True, quiet=quiet, max_s=10.0, every_s=0.01)) == "census: x" and done == [True]
+    assert next(people, None) is None and "s for warm" in caplog.text and "s for no person's job" in caplog.text
+    # neither ever comes: settled anyway, each wait no longer than its limit
+    t = __import__("time").monotonic()
+    assert asyncio.run(memwatch.settle_when(lambda: False, False, quiet=lambda: False, max_s=0.05, every_s=0.01)) == "census: x"
+    assert done == [True, False] and __import__("time").monotonic() - t < 1.0
+
+
+def test_tracked_is_counted_only_with_the_freeze_on() -> None:
+    from service.memwatch import tracked
+
+    assert tracked() == "-" and " tracked - " in MemWatch({}).line()  # SKY_GC_FREEZE=0: no walk of every object each line
+    gc.freeze()
+    try:
+        import re
+
+        assert isinstance(tracked(), int) and re.search(r" tracked \d+ frozen ", MemWatch({}).line())
+    finally:
+        gc.unfreeze()
+    assert tracked() == "-"

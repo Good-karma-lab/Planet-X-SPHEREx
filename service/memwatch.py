@@ -80,6 +80,15 @@ def trim() -> str | None:
     return f"trim: rss_anon_mb {a} -> {rss_anon_mb()} ms {ms:.0f}"
 
 
+FROZEN_AT_START = gc.get_freeze_count()  # the interpreter's own (375 on 3.12), not ours
+
+
+def tracked() -> int | str:
+    """How many objects the collector walks, counted only once settle() froze the rest: without the freeze (SKY_GC_FREEZE=0) the count
+    is a walk of 15 million objects with the GIL held and a list as long (~1 s, 120 MB, every line), so it says "-"."""
+    return len(gc.get_objects()) if gc.get_freeze_count() > FROZEN_AT_START else "-"
+
+
 def census(top: int = 20) -> str:
     """The objects the collector walks, by type, the most numerous first (a walk of them all: seconds on prod, once)."""
     n = collections.Counter(
@@ -106,18 +115,32 @@ SETTLE_MAX_S = 5400.0  # warm or not, settled by then: the layouts kept filled t
 SETTLE_EVERY_S = 30.0
 
 
-async def settle_when(ready: Callable[[], bool], freeze: bool, max_s: float = SETTLE_MAX_S, every_s: float = SETTLE_EVERY_S) -> str:
-    """settle() in a thread once `ready()` says the service is warm, or after `max_s` whatever it says; what it did is in the log."""
+async def _until(ok: Callable[[], bool], max_s: float, every_s: float) -> float:
+    """Waits until `ok()` (one that fails counts as not yet) or `max_s` went by; how long it waited, s."""
     t0 = time.monotonic()
     while time.monotonic() - t0 < max_s:
         try:
-            if ready():
+            if ok():
                 break
         except Exception:  # a part not there yet
             pass
         await asyncio.sleep(every_s)
+    return time.monotonic() - t0
+
+
+async def settle_when(
+    ready: Callable[[], bool],
+    freeze: bool,
+    quiet: Callable[[], bool] = lambda: True,
+    max_s: float = SETTLE_MAX_S,
+    every_s: float = SETTLE_EVERY_S,
+) -> str:
+    """settle() in a thread once `ready()` says the service is warm and then `quiet()` that no person's job runs (its seconds stop every
+    thread), each waited for `max_s` at most; how long each wait and settle itself took is in the log."""
+    warm = await _until(ready, max_s, every_s)
+    calm = await _until(quiet, max_s, every_s)
     said = await asyncio.to_thread(settle, freeze)
-    log.warning("%s after %.0f s", said, time.monotonic() - t0)
+    log.warning("%s; waited %.0f s for warm, %.0f s for no person's job", said, warm, calm)
     return said
 
 
@@ -149,7 +172,7 @@ class MemWatch:
         self.full, self.full_s, self.full_max = 0, 0.0, 0.0
         return (
             f"memory: rss_anon_mb {rss_anon_mb()} malloc_mb {malloc_mb()} py_blocks {sys.getallocatedblocks()} "
-            f"gc2 {n} sum_s {s:.1f} max_s {m:.2f} gc_count {gc.get_count()} tracked {len(gc.get_objects())} frozen {gc.get_freeze_count()} "
+            f"gc2 {n} sum_s {s:.1f} max_s {m:.2f} gc_count {gc.get_count()} tracked {tracked()} frozen {gc.get_freeze_count()} "
             f"threads {threading.active_count()} sizes {got}"
         )
 
