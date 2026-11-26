@@ -44,7 +44,7 @@ from service.known import Known
 from service.lightcurves import neowise as lc_neowise
 from service.lightcurves import ztf as lc_ztf
 from service.loopwatch import LoopWatch
-from service.memwatch import MemWatch, settle_when
+from service.memwatch import MemWatch, keep_frozen
 from service.movers import Movers
 from service.pairs import Pairs
 from service.products.store import Store, product_key
@@ -270,7 +270,7 @@ def create_app(config: Config | None = None, scheduler: Scheduler | None = None,
         # once warm (the first lists of Findings made, the layouts kept full): what the collector walks, then gc.freeze (SKY_GC_FREEZE)
         wf_task = st.warm_findings_task
         settle_task = asyncio.create_task(
-            settle_when(
+            keep_frozen(
                 lambda: (
                     (wf_task is None or wf_task.done() or getattr(st, "findings_warmed", False))  # its loop never ends: once made
                     and st.files is not None
