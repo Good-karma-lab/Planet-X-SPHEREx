@@ -17,6 +17,7 @@ from fastapi.testclient import TestClient
 
 from service import accounts
 from service.accounts import COOKIE, register_accounts
+from service.accounts.db import default_name
 from service.config import Config
 
 
@@ -63,7 +64,17 @@ def _sign_in(app: FastAPI, mail: _Mail, email: str = "ann@example.org") -> TestC
     link = mail.sent[-1][1]
     r = c.get(link.replace("http://localhost", ""))
     assert r.status_code == 303 and r.headers["location"] == "/#/me"
+    _named(email)
     return c
+
+
+def _named(email: str) -> None:
+    """The name this person chose, the start of their address here (a new account's is "Volunteer NNNN"), set without the
+    Cabinet's route: its achievement would be one more notification in the tests that count them."""
+    import os
+
+    with sqlite3.connect(os.environ["SKY_PRODUCT_DB"]) as db:
+        db.execute("UPDATE acc_users SET name=? WHERE email=?", (email.split("@")[0], email))
 
 
 MARK = {"id": "m-0001-abcdef", "field_key": "f" * 24, "cell_id": "b10c20", "ra": 10.5, "dec": -3.25, "pass": 2, "label": "dot",
@@ -89,7 +100,8 @@ def test_link_signs_in_once_and_the_cookie_is_httponly(site: tuple[FastAPI, _Sta
     cookie = r.headers["set-cookie"]
     assert COOKIE in cookie and "HttpOnly" in cookie and "SameSite=lax" in cookie and "Secure" not in cookie
     me = c.get("/api/me").json()["user"]
-    assert me["email"] == "ann@example.org" and me["name"] == "ann"
+    # a new account's name is neutral and its own, never the start of the address (27 Nov 2026, С3)
+    assert me["email"] == "ann@example.org" and re.fullmatch(r"Volunteer \d{4}", me["name"]) and me["name"] == default_name(me["id"])
     # the same link a second time, in another browser: refused
     other = _client(app)
     r = other.get(link.replace("http://localhost", ""))
@@ -433,7 +445,7 @@ def test_google_sign_in_with_a_fake_google(site: tuple[FastAPI, _State, _Mail], 
     r = c.get("/api/auth/google/callback", params={"code": "the-code", "state": state})
     assert r.headers["location"] == "/#/me"
     me = c.get("/api/me").json()["user"]
-    assert me == {"id": me["id"], "name": "Ann K.", "email": "ann@example.org", "reviewer": False}
+    assert me == {"id": me["id"], "name": default_name(me["id"]), "email": "ann@example.org", "reviewer": False}  # nor Google's name
 
 
 def test_google_sign_in_from_the_bare_domain_comes_back_to_the_lab(
@@ -1016,3 +1028,34 @@ def test_finds_nobody_measured_wait_for_their_picture(monkeypatch: pytest.Monkey
     assert routes_tasks.finds_to_measure(SimpleNamespace(clips=object())) == [rows[0]]
     assert routes_tasks.finds_to_measure(SimpleNamespace(clips=None)) == []
     assert routes_tasks.finds_asked(SimpleNamespace()) == [rows[1], rows[3]]
+
+
+def test_nobody_sees_another_answer_before_their_own_or_the_verdict(site: tuple[FastAPI, _State, _Mail]) -> None:
+    # 27 Nov 2026 (exploratory report, С3): a guest read every person's answer on a finding nobody had decided, a hint that spoils
+    # the independent agreement of three people. The names stay (the credit line), the answers wait.
+    from service.accounts.db import public_credit
+
+    app, st, _ = site
+    db = accounts.get(st).db
+    ann, bob = db.user_for_email("a1@example.org")["id"], db.user_for_email("b1@example.org")["id"]
+    assert db.user(ann)["name"] != "a1" and "@" not in db.user(ann)["name"]
+    db.credit("film:1", ann, "checked", "no_dot")
+    line = db.credits_of(["film:1"], users=True)["film:1"]
+    assert public_credit(line, decided=False) == [{"name": db.user(ann)["name"], "role": "checked", "at": line[0]["at"]}]
+    assert public_credit(line, decided=False, viewer_id=bob)[0].get("result") is None  # bob has not answered
+    assert public_credit(line, decided=False, viewer_id=ann)[0]["result"] == "no_dot"  # her own
+    db.credit("film:1", bob, "checked", "moves")
+    both = db.credits_of(["film:1"], users=True)["film:1"]
+    assert [x["result"] for x in public_credit(both, decided=False, viewer_id=bob)] == ["no_dot", "moves"]  # answered: both
+    assert [x["result"] for x in public_credit(both, decided=True)] == ["no_dot", "moves"]  # decided: anyone
+    assert all("user_id" not in x for x in public_credit(both, decided=True))
+    # the public list of submissions: an open one shows no answers
+    fid = "user:abc999"
+    db._conn().execute(
+        "INSERT INTO acc_submissions(finding_id,user_id,investigation_id,checks_job,title,ra,dec,status,checks,created,updated)"
+        " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+        (fid, ann, "inv-9", "j9", "A dot", 1.0, 2.0, "in_review", "[]", 1.0, 1.0),
+    )
+    db.credit(fid, bob, "checked", "moves")
+    sub = next(x for x in _client(app).get("/api/findings/submitted").json()["findings"] if x["finding_id"] == fid)
+    assert sub["credit"] and all("result" not in c for c in sub["credit"])

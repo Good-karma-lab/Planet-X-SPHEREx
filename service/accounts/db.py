@@ -147,6 +147,18 @@ def token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def default_name(user_id: str) -> str:
+    """The neutral name of a new account, the same for the same account: "Volunteer 4821"."""
+    return f"Volunteer {int(hashlib.sha256(user_id.encode()).hexdigest()[:8], 16) % 9000 + 1000}"
+
+
+def public_credit(entries: list[dict[str, Any]], decided: bool, viewer_id: str | None = None) -> list[dict[str, Any]]:
+    """A credit line as anyone may see it: the names and roles, and what each person answered only once the finding is decided or the
+    viewer has answered it too (another's answer is a hint that spoils the independent agreement of three people). Never a user id."""
+    answered = viewer_id is not None and any(e.get("user_id") == viewer_id for e in entries)
+    return [{k: v for k, v in e.items() if k != "user_id" and (k != "result" or decided or answered)} for e in entries]
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(8)}"
 
@@ -203,9 +215,14 @@ class AccountsDB:
         """The user of this address, created at the first sign-in."""
         c = self._conn()
         now = time.time()
+        uid = new_id("u")
+        # the name shown in the credit lines is never taken from the address nor from the Google profile (the exploratory report of 27 Nov
+        # 2026, С3: it showed the start of every volunteer's e-mail): a neutral one, the person changes it in the Cabinet. `name` is kept
+        # for the callers and not shown
+        del name
         c.execute(
             "INSERT OR IGNORE INTO acc_users(id,email,name,google_sub,created) VALUES(?,?,?,?,?)",
-            (new_id("u"), email, (name or email.split("@")[0])[:60], google_sub, now),
+            (uid, email, default_name(uid), google_sub, now),
         )
         if google_sub:
             c.execute("UPDATE acc_users SET google_sub=? WHERE email=? AND google_sub IS NULL", (google_sub, email))
@@ -650,16 +667,18 @@ class AccountsDB:
             (finding_id, user_id, role, result, time.time()),
         )
 
-    def credits_of(self, finding_ids: list[str] | None = None) -> dict[str, list[dict[str, Any]]]:
-        """{finding id: [{name, role, result, at}]} oldest first: the public credit line (names only, never an address)."""
-        q = "SELECT c.finding_id, c.role, c.result, c.at, u.name FROM acc_credits c JOIN acc_users u ON u.id=c.user_id"
+    def credits_of(self, finding_ids: list[str] | None = None, users: bool = False) -> dict[str, list[dict[str, Any]]]:
+        """{finding id: [{name, role, result, at}]} oldest first (names only, never an address; with `users` the user_id too, for
+        public_credit). Shown to anyone, it goes through public_credit."""
+        q = "SELECT c.finding_id, c.role, c.result, c.at, c.user_id, u.name FROM acc_credits c JOIN acc_users u ON u.id=c.user_id"
         args: tuple[Any, ...] = ()
         if finding_ids is not None:
             q += f" WHERE c.finding_id IN ({','.join('?' * len(finding_ids))})"
             args = tuple(finding_ids)
         out: dict[str, list[dict[str, Any]]] = {}
         for r in self._conn().execute(q + " ORDER BY c.at", args):
-            out.setdefault(r["finding_id"], []).append({"name": r["name"], "role": r["role"], "result": r["result"], "at": iso(r["at"])})
+            e = {"name": r["name"], "role": r["role"], "result": r["result"], "at": iso(r["at"])}
+            out.setdefault(r["finding_id"], []).append({**e, "user_id": r["user_id"]} if users else e)
         return out
 
     def check_counts(self) -> dict[str, int]:
@@ -671,7 +690,7 @@ class AccountsDB:
         """Every finding submitted by a person, newest first, with its credit line."""
         rows = [self._sub(r) for r in self._conn().execute("SELECT * FROM acc_submissions ORDER BY created DESC")]
         cr = self.credits_of([s["finding_id"] for s in rows]) if rows else {}
-        return [{**s, "credit": cr.get(s["finding_id"], [])} for s in rows]
+        return [{**s, "credit": public_credit(cr.get(s["finding_id"], []), s.get("status") != "in_review")} for s in rows]
 
     def my_findings(self, user_id: str) -> list[dict[str, Any]]:
         """What the user submitted, and the machine findings they checked."""

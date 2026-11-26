@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from service import accounts
 from service.accounts import register_accounts, score, share
 from service.config import Config
+from tests.test_accounts import _named
 
 LOOK = {"seconds": 75, "passes_shown": 4, "passes_total": 4, "local_hour": 14}
 
@@ -33,6 +34,7 @@ def _user(app: FastAPI, email: str) -> TestClient:
     c = TestClient(app, base_url="http://localhost", follow_redirects=False)
     link = c.post("/api/auth/email", json={"email": email}).json()["dev_link"]
     c.get(link.replace("http://localhost", ""))
+    _named(email)
     return c
 
 

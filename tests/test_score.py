@@ -30,6 +30,7 @@ def sc(tmp_path: Path) -> Score:
 
 def _user(sc: Score, name: str = "ann") -> str:
     uid: str = sc.db.user_for_email(f"{name}@example.org")["id"]
+    sc.db.rename(uid, name)  # the name they chose (a new account's is "Volunteer NNNN")
     return uid
 
 
