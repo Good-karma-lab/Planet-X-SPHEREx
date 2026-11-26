@@ -22,5 +22,11 @@ def hide_faint_peaks() -> bool:
     return os.environ.get("SKY_HIDE_FAINT_PEAKS", "1") == "1"
 
 
+def gc_freeze() -> bool:
+    """Whether the objects alive once the service is warm are frozen out of the collector's walks (service/memwatch.settle):
+    SKY_GC_FREEZE=0 and a restart turns it off."""
+    return os.environ.get("SKY_GC_FREEZE", "1") == "1"
+
+
 def load() -> Config:
     return Config()

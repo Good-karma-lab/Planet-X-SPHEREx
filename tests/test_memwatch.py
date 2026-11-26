@@ -4,7 +4,7 @@ import gc
 
 import pytest
 
-from service.memwatch import GC_THRESHOLD, MemWatch, trim
+from service.memwatch import GC_THRESHOLD, MemWatch, census, settle, trim
 
 
 def test_line_names_sizes_and_survives_a_missing_collection() -> None:
@@ -74,3 +74,64 @@ def test_a_stall_names_the_full_collection_within_it() -> None:
         w.stop()
     assert "a full collection stopped every thread" in LoopWatch._collected(before)
     assert LoopWatch._collected(time.monotonic()) == ""
+
+
+def test_the_line_says_what_the_collector_walks_and_what_is_frozen() -> None:
+    line = MemWatch({}).line()
+    assert " gc_count (" in line and " tracked " in line and " frozen " in line
+
+
+def test_census_names_the_most_numerous_types_first() -> None:
+    class Many:
+        pass
+
+    kept = [Many() for _ in range(200_000)]
+    said = census(3)
+    assert said.startswith("census: tracked ") and f"{Many.__module__}.{Many.__qualname__} 200000" in said
+    assert said.count(", ") == 2
+    del kept
+
+
+def test_settle_freezes_what_is_alive_once_and_a_frozen_one_that_leaves_is_freed() -> None:
+    import weakref
+
+    class Kept:
+        pass
+
+    before = gc.get_freeze_count()  # the interpreter's own (375 on 3.12)
+    kept = [Kept() for _ in range(1000)]
+    gone = weakref.ref(kept[0])
+    try:
+        said = settle(True)
+        assert "census: tracked " in said and "; frozen " in said
+        assert gc.get_freeze_count() >= before + 1000
+        assert all(o is not kept[0] for o in gc.get_objects())  # left out of the walks
+        kept.pop(0)  # a layout that leaves its cache: freed by its count, frozen or not
+        assert gone() is None
+    finally:
+        gc.unfreeze()
+
+
+def test_settle_off_counts_and_freezes_nothing() -> None:
+    before = gc.get_freeze_count()
+    said = settle(False)
+    assert said.startswith("census: ") and "freeze off" in said and gc.get_freeze_count() == before
+
+
+def test_settle_waits_for_warm_and_not_past_its_limit(monkeypatch: pytest.MonkeyPatch) -> None:
+    import asyncio
+
+    from service import memwatch
+
+    done: list[bool] = []
+    monkeypatch.setattr(memwatch, "settle", lambda freeze: done.append(freeze) or "census: x")
+    asks = iter([False, RuntimeError("not there yet"), True])
+
+    def ready() -> bool:
+        a = next(asks)
+        if isinstance(a, Exception):
+            raise a
+        return a
+
+    assert asyncio.run(memwatch.settle_when(ready, True, max_s=10.0, every_s=0.01)) == "census: x" and done == [True]
+    assert asyncio.run(memwatch.settle_when(lambda: False, False, max_s=0.05, every_s=0.01)) == "census: x" and done == [True, False]
