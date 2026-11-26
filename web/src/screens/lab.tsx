@@ -3688,7 +3688,7 @@ export function Lab({ route }: { route: Route }) {
       const tr = trackOfRed(x);
       const id = identOf(x.ra, x.dec);
       const times = redv?.result?.median_colour
-        ? `${x.lower_limit ? 'over ' : ''}${(x.colour / redv.result.median_colour).toFixed(1)}× redder than the field's stars`
+        ? redderWords(x.colour / redv.result.median_colour, x.lower_limit)
         : 'red';
       return {
         key: `red:${k}`,
@@ -4585,7 +4585,7 @@ export function Lab({ route }: { route: Route }) {
                       <b>Red source {k + 1}</b>
                       <span class="t">
                         {redv.result!.median_colour
-                          ? `${x.lower_limit ? '> ' : ''}${(x.colour / redv.result!.median_colour).toFixed(1)}× redder than the field's stars`
+                          ? redderWords(x.colour / redv.result!.median_colour, x.lower_limit)
                           : ''}
                         {(() => {
                           const tr = trackOfRed(x);
@@ -5426,4 +5426,11 @@ export function Lab({ route }: { route: Route }) {
       </div>
     </div>
   );
+}
+
+/** How much redder than the field's stars a red source is. One not seen at 1.1–1.6 µm has only a lower limit: "over 1579.0×" read
+ *  as a mistake (the exploratory report of 27 Nov 2026, М2), so it says what was seen; a big ratio is rounded. */
+export function redderWords(ratio: number, lowerLimit: boolean): string {
+  if (lowerLimit) return 'seen at 3.8–5 µm, not at 1.1–1.6 µm: far redder than the field’s stars';
+  return `${ratio >= 100 ? Math.round(ratio) : ratio.toFixed(1)}× redder than the field’s stars`;
 }
