@@ -368,7 +368,11 @@ export function FindCard({
           {f.visible_sn != null && (
             <span
               class={f.visible ? '' : 'wait'}
-              title="How far the brightest point inside the ring stands above the noise of this picture"
+              title={
+                f.kind === 'peak' && f.sight?.state === 'ok'
+                  ? 'How far the brightest point inside the ring stands above the noise of the pictures added up along the orbit'
+                  : 'How far the brightest point inside the ring stands above the noise of this picture'
+              }
             >
               {f.visible_sn.toFixed(1)}× the noise in the ring
             </span>

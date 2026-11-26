@@ -28,6 +28,17 @@ def hide_unseen_peaks() -> bool:
     return os.environ.get("SKY_HIDE_UNSEEN_PEAKS", "1") == "1"
 
 
+def faint_ask_share() -> int:
+    """One faint Planet X peak in so many is still handed out in the tasks, by its id (service/findings.faint_asked), and so are the
+    faint ones people were given or answered already: SKY_FAINT_ASK_SHARE=10 for one in ten. 0 (the default, 27 Nov 2026): before the
+    launch no faint peak goes into a task, whatever the reason (a task handed out peak:0e4362c15d4f, hidden for a bright star, as a
+    person's first task on a phone). Read at every list of the tasks."""
+    try:
+        return max(0, int(os.environ.get("SKY_FAINT_ASK_SHARE", "0")))
+    except ValueError:
+        return 0
+
+
 def gc_freeze() -> bool:
     """Whether the objects alive once the service is warm are frozen out of the collector's walks (service/memwatch.settle):
     SKY_GC_FREEZE=0 and a restart turns it off."""

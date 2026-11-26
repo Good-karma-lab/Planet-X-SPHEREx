@@ -1617,13 +1617,20 @@ def test_a_peak_nobody_can_see_stands_behind_the_faint_filter_and_says_why(tmp_p
     assert out["faint"] == 3 and out["faint_why"] == {"unseen": 1, "no_sum": 2, "star": 1}
     every = {f["id"]: f for f in query(db, "peak", "all", None, 50, 0)["finds"]}
     assert every["peak:dim"]["hidden_why"] == ["unseen"] and every["peak:dim"]["sight"]["z"] == SIGHT_Z - 0.1
+    # a looked-at peak's dot in its sum says whether it is seen, whatever the clip's own S/N in the ring said (26 Nov: 39 of 93 shown)
+    seen = lambda f: (False, 3.2)  # noqa: E731
+    judged = {f["id"]: f for f in query(db, "peak", "all", None, 50, 0, seen=seen)["finds"]}
+    assert (judged["peak:seen"]["visible"], judged["peak:seen"]["visible_sn"]) == (True, round(SIGHT_Z + 0.1, 1))
+    assert (judged["peak:dim"]["visible"], judged["peak:dim"]["visible_sn"]) == (False, round(SIGHT_Z - 0.1, 1))
+    assert (judged["peak:new"]["visible"], judged["peak:nosum"]["visible"]) == (False, False)  # not looked at, or no sum: the clip's
     assert every["peak:both"]["hidden_why"] == ["star", "no_sum"] and "hidden_why" not in every["peak:seen"]
     assert "peak:dim" in ids(faint="hide", real=frozenset({"peak:dim"})) and "peak:dim" in ids(
         faint="hide", raised={"peak:dim": "candidate"}
     )
     # one faint peak in ten is still asked about, but never one with no sum: there is nothing to judge
     sampled = next(f"peak:{i:012x}" for i in range(100) if faint_sample(f"peak:{i:012x}"))
-    assert faint_asked({"id": sampled, "hidden_why": ["unseen"]}) and not faint_asked({"id": sampled, "hidden_why": ["no_sum"]})
+    assert faint_asked({"id": sampled, "hidden_why": ["unseen"]}, 10) and not faint_asked({"id": sampled, "hidden_why": ["no_sum"]}, 10)
+    assert not faint_asked({"id": sampled, "hidden_why": ["unseen"]})  # SKY_FAINT_ASK_SHARE is 0 before the launch: none is
     monkeypatch.setenv("SKY_HIDE_UNSEEN_PEAKS", "0")
     assert ids(faint="hide") == {"peak:seen", "peak:new", "peak:dim", "peak:nosum"}  # the star's glow still hides "both"
     monkeypatch.setenv("SKY_HIDE_FAINT_PEAKS", "0")
@@ -1709,3 +1716,27 @@ def test_the_sight_loop_looks_at_every_peaks_sum_once_and_says_how_far_it_is(
     assert "sights: looked at 2 (seen 1, unseen 0, no sum 1, failed 0), left 0" in caplog.text
     got = db.sights()
     assert got["peak:a"]["state"] == "ok" and got["peak:a"]["z"] > 5 and got["peak:bb"] == {"state": "nosum", "z": None, "here": None}
+
+
+def test_no_faint_peak_goes_into_a_task_before_the_launch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """27 Nov 2026: a task handed out peak:0e4362c15d4f (hidden for a bright star) as a person's first task: one faint peak in ten was
+    asked all the same, and so was one a person had been given already. SKY_FAINT_ASK_SHARE (by default 0) turns both on again."""
+    from types import SimpleNamespace
+
+    from service.accounts import people
+    from service.accounts.people import askable
+    from service.findings import faint_sample
+    from service.routes_tasks import lead_findings
+
+    sampled = next(f"{i:012x}" for i in range(100) if faint_sample(f"peak:{i:012x}"))
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds([{**_peak(i, 8.0), "sigma": None, "rate_err": None, "versions": {}} for i in (sampled, "given", "plain")])
+    for i in (sampled, "given"):
+        db.put_wing(f"peak:{i}", "ok", "2MASS J1", 41.0, 8.1)
+    db.db.commit()
+    monkeypatch.setattr(people, "started", lambda st: frozenset({"peak:given"}))
+    st = SimpleNamespace(findings=SimpleNamespace(db=db))
+    asked = lambda: {r["finding_id"] for r in lead_findings(st) or [] if askable({**r, "visible": True})}  # noqa: E731
+    assert asked() == {"peak:plain"}
+    monkeypatch.setenv("SKY_FAINT_ASK_SHARE", "10")
+    assert asked() == {"peak:plain", f"peak:{sampled}", "peak:given"}

@@ -378,7 +378,10 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
         aside, raised = field_people.set_aside(st), people.raised(st)
     except Exception:
         aside, raised = {}, {}
-    try:  # a faint peak is not handed out, but for one in ten and those people were given or answered already
+    from service.config import faint_ask_share
+
+    share = faint_ask_share()  # 0 (the default before the launch): no faint peak is handed out, for any reason
+    try:  # with a share, a faint peak is handed out for one in `share` and those people were given or answered already
         from service.accounts import people
 
         real, started = people.said_real(st), people.started(st)
@@ -438,7 +441,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             **({"visits_seen": visits[x["id"]]} if x["id"] in visits else {}),
             **({"ask": x["ask"]} if "ask" in x else {}),
             **({"echo": True} if x.get("echo") else {}),
-            **({"faint": True} if x.get("faint") and x["id"] not in started and not faint_asked(x) else {}),
+            **({"faint": True} if x.get("faint") and not (share and (x["id"] in started or faint_asked(x, share))) else {}),
             **({"raised": x["people_raised"]} if "people_raised" in x else {}),
             **({"_listed": x["id"] in listed} if status == "any" else {}),
         }
