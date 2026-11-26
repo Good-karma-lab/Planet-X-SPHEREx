@@ -86,7 +86,8 @@ def test_the_series_are_the_spec_wording_and_never_ask_what_the_machine_knows() 
 def test_paths_lead_to_results() -> None:
     cases = {
         "track": {("every", "dot"): "moves", ("some", "done", "dot"): "partial", ("no",): "no_dot", ("every", "streak"): "streak",
-                  ("some", "done", "streak"): "streak", ("not_sure",): "cant_tell", ("every", "not_sure"): "cant_tell"},
+                  ("some", "done", "streak"): "streak", ("not_sure",): "cant_tell", ("every", "not_sure"): "cant_tell",
+                  ("yes", "no"): "sum_only", ("yes",): "sum_only"},
         "slow": {("no",): "still", ("yes", "two"): "blend", ("yes", "one", "yes"): "moves_old", ("yes", "one", "no"): "moves"},
         "peak": {("no",): "no_peak", ("yes", "yes"): "glow", ("yes", "no"): "candidate"},
         "red": {("fuzzy",): "galaxy", ("sharp", "no"): "artefact", ("sharp", "yes", "yes"): "artefact", ("sharp", "yes", "no", "yes"): "brown_dwarf",
@@ -103,6 +104,21 @@ def test_paths_lead_to_results() -> None:
     for bad in ([], ["every"], ["no", "dot"], ["maybe"], ["not_sure", "dot"]):
         with pytest.raises(AnswerError):
             run_path("track", bad, [1])
+
+
+def test_a_track_whose_visits_show_nothing_is_asked_about_its_sums_only() -> None:
+    # 27 Nov 2026 (exploratory report, Б2): "Does one faint dot move along the arrow?" was asked over visits with nothing in the ring
+    # (4 tracks of 4), and the honest "No" set the track aside. Its visits are asked about only when they show the dot; "on the sum,
+    # not along the arrow" keeps it a lead.
+    short = steps_of("track", sum_only=True)
+    assert [s["id"] for s in short] == ["sum"]
+    assert [(a["id"], a.get("result"), a.get("next")) for a in short[0]["answers"]] == [
+        ("yes", "sum_only", None), ("no", "no_dot", None), ("not_sure", "cant_tell", None)]  # fmt: skip
+    assert steps_of("track", sum_only=False) == steps_of("track") and len(steps_of("slow", sum_only=True)) == 3
+    assert run_path("track", ["yes"]) == run_path("track", ["yes", "no"]) == "sum_only"
+    assert "sum_only" not in people.ACTIONS["track"]  # nothing is done with it: it stays a lead
+    assert people.visits_show((3, 6)) and not people.visits_show((1, 4)) and not people.visits_show((0, 5))
+    assert not people.visits_show(None) and not people.visits_show((0, 0))
 
 
 # -------------------------------------------------------------------------------------------------------- agreement and actions
@@ -198,7 +214,7 @@ def test_low_accuracy_weighs_less_and_high_accuracy_more(pp: People) -> None:
 
 def test_control_objects_are_judged_at_once_and_mixed_into_the_series(pp: People) -> None:
     a, b = _users(pp, 2)
-    assert pp.expected("track", ROW["film:known"]) == frozenset({"moves", "partial"})  # a body JPL knows does step along
+    assert pp.expected("track", ROW["film:known"]) == frozenset({"moves", "partial", "sum_only"})  # a body JPL knows does step along
     assert pp.answer(a, "track", ROW["film:known"], ["every", "dot"], [], [])[1] == 10
     assert pp.answer(b, "track", ROW["film:known"], ["no"], [], [])[1] == 0
     assert _score(pp, a) == (10, 1.0) and _score(pp, b) == (0, 0.0)
@@ -251,14 +267,22 @@ def _people(app: FastAPI) -> Any:
     return user
 
 
-def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any]) -> None:
+def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import routes_tasks
+
     app, st = site
+    seen: dict[str, tuple[int, int] | None] = {"film:2": (4, 5)}
+    monkeypatch.setattr(routes_tasks, "visits_of_track", lambda _st, row: seen.get(row.get("id") or row.get("finding_id")))  # its visits show its dot
     user = _people(app)
     ann = user("ann")
     t = ann.get("/api/tasks/next", params={"kind": "moves", "finding_id": "film:2"}).json()["task"]
     # the page's slug names the same find (track-2 is film:2) and gives the same open task
     assert ann.get("/api/tasks/next", params={"kind": "moves", "finding_id": "track-2"}).json()["task"]["finding_id"] == "film:2"
     assert t["series"]["id"] == "track" and [s["id"] for s in t["series"]["steps"]] == ["sum", "steps", "missing", "shape"]
+    seen["film:2"] = (1, 5)  # the dot in one visit of five: asked about its sums only, and its "Yes" ends the path
+    zed = user("zed").get("/api/tasks/next", params={"kind": "moves", "finding_id": "film:2"}).json()["task"]
+    assert [s["id"] for s in zed["series"]["steps"]] == ["sum"] and zed["series"]["steps"][0]["answers"][0]["result"] == "sum_only"
+    seen["film:2"] = (4, 5)
     assert [p["i"] for p in t["pictures"]] == [0, 1, 2, 3, 4] and t["pictures"][2]["mjd"] == 61102.0
     assert "question" not in t and "answers" not in t and "tree" not in t  # no one-click classes any more
     out = ann.post(f"/api/me/tasks/{t['id']}/done", json={"path": ["some", "done", "dot"], "pictures": [3]}).json()

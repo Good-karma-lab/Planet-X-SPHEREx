@@ -604,6 +604,17 @@ TASK_FOVS = (10.0, 20.0, 60.0)  # the field sizes a finding task opens at: the s
 LEAD_MARGIN = 0.15  # each side of a track in its task's field: the whole track and this share of the field around it
 
 
+def visits_of_track(st: Any, row: dict[str, Any]) -> tuple[int, int] | None:
+    """(in how many of a track's visits its dot is seen, how many it has): Clips.visits_seen, None where it is not measured here."""
+    try:
+        from service.routes_clips import clips_of
+
+        clips = clips_of(st) if getattr(st, "store", None) is not None else getattr(st, "clips", None)
+        return clips.visits_seen(row) if clips is not None and hasattr(clips, "visits_seen") else None
+    except Exception:
+        return None
+
+
 def track_place(row: dict[str, Any] | None) -> tuple[float, float, float] | None:
     """Where a time-lapse track's task opens: centred on the middle of its visits, at the smallest of the task sizes that holds them
     all with LEAD_MARGIN on each side (60′ when nothing smaller does). None without the visits' places. On its film's own field a
@@ -713,6 +724,10 @@ def make_tasks_router(st: Any) -> APIRouter:
 
     def findings() -> list[dict[str, Any]]:
         return find_rows(st)
+
+    def still_asked(r: dict[str, Any] | None) -> bool:
+        """A find an open task may still ask about: a lead nobody settled, that people may be asked about now."""
+        return r is not None and r.get("status") in LEADS and r.get("ask", True) and people.askable(r)
 
     qs = Quarters(st, quarter_place)
     st.quarters = qs
@@ -977,7 +992,9 @@ def make_tasks_router(st: Any) -> APIRouter:
                 task["anomaly"] = {k: an.get(k) for k in ("n", "ra", "dec", "pmra", "pmdec", "drivers")}
             series = people.series_of(str(task["finding_id"]).split(":")[0])
             if series is not None:
-                task["series"] = {"id": series, "steps": people.steps_of(series)}
+                # a track opened from its card or kept open from before (27 Nov 2026, Б2): its visits are asked about only when they show it
+                sum_only = series == "track" and row is not None and not people.visits_show(visits_of_track(st, row))
+                task["series"] = {"id": series, "steps": people.steps_of(series, sum_only)}
                 if series == "track":
                     task["pictures"] = people.picture_list(row)
         elif kind in ASK:
@@ -1042,7 +1059,12 @@ def make_tasks_router(st: Any) -> APIRouter:
         if asked is not None and not REF_ID.match(asked):
             raise HTTPException(422, "this is not an id")
         if asked is None and uid is not None and not (kind == "cell" and quarter):
-            have = acc.db.open_task(uid, kind, OPEN_TASK_KEEP_S if kind == "cell" else None)
+            if kind not in ("finding", "moves", "red", "anomaly"):
+                have = acc.db.open_task(uid, kind, OPEN_TASK_KEEP_S if kind == "cell" else None)
+            else:  # an open task of before is given again only while its find may still be asked about (27 Nov 2026, Б2: tasks kept
+                # open since 19-24 Nov handed out tracks with nothing in any of their visits, and peaks the faint filter hides now)
+                rows = {r["finding_id"]: r for r in findings()}
+                have = next((t for t in acc.db.open_tasks(uid, kind) if still_asked(rows.get(str(t.get("finding_id"))))), None)
             if have is not None and kind == "finding" and recent and str(have["finding_id"]).split(":")[0] == recent[0].split(":")[0]:
                 other = next_finding(acc, uid, None, had, recent)  # one of the kind just answered waits for its turn
                 if other is not None and str(other["finding_id"]).split(":")[0] != recent[0].split(":")[0]:

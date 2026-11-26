@@ -352,6 +352,13 @@ class AccountsDB:
         )
         return None if r is None else self._task(r)
 
+    def open_tasks(self, user_id: str, kind: str) -> list[dict[str, Any]]:
+        """The user's open tasks of this kind, the newest first."""
+        rows = self._conn().execute(
+            "SELECT * FROM acc_tasks WHERE user_id=? AND kind=? AND state='open' ORDER BY created DESC", (user_id, kind)
+        )
+        return [self._task(r) for r in rows]
+
     def quarters_taken(self, user_id: str) -> dict[str, set[str]]:
         """{square: quarters this user has a task for}. A task of before the quarters (no quarter) took all four."""
         out: dict[str, set[str]] = {}

@@ -66,7 +66,7 @@ export const SERIES: Record<string, SeriesStep[]> = {
     s_('steps', 'Does one faint dot move along the arrow?', 'blink', [
       { id: 'every', label: 'Yes, in every picture', next: 'shape' },
       { id: 'some', label: 'Only in some', next: 'missing' },
-      { id: 'no', label: 'No', result: 'no_dot' },
+      { id: 'no', label: 'No', result: 'sum_only' }, // on the sum, not in its single pictures: it stays a lead (27 Nov 2026)
     ]),
     s_('missing', 'Tap the pictures where it is missing.', 'pictures', [{ id: 'done', label: 'Done', next: 'shape' }], true),
     s_('shape', 'Is it a dot like the stars, or a streak?', 'blink', [
