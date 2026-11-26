@@ -22,6 +22,12 @@ def hide_faint_peaks() -> bool:
     return os.environ.get("SKY_HIDE_FAINT_PEAKS", "1") == "1"
 
 
+def hide_unseen_peaks() -> bool:
+    """Whether the Planet X peaks a person cannot see stand behind the faint filter too (service/findings.unseen_why: no sum along the
+    orbit kept, or its dot under service/clips.SIGHT_Z in it): SKY_HIDE_UNSEEN_PEAKS=0 turns it off. Read at every judging."""
+    return os.environ.get("SKY_HIDE_UNSEEN_PEAKS", "1") == "1"
+
+
 def gc_freeze() -> bool:
     """Whether the objects alive once the service is warm are frozen out of the collector's walks (service/memwatch.settle):
     SKY_GC_FREEZE=0 and a restart turns it off."""

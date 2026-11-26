@@ -9,6 +9,7 @@ import { api, useUser } from '../../lib/account';
 import { Talk } from './talk';
 import { Clip, FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
 import { peopleLine, usePeople } from './people';
+import { faintTitle } from '../../lib/wing';
 
 export interface Ident {
   catalogue: string;
@@ -593,6 +594,8 @@ interface CardReply {
   noted: number;
   /** the faint Planet X peaks under the request's other filters, shown or hidden */
   faint?: number;
+  /** ... by why they are hidden (photometry, star, no_sum, unseen; a peak may have several) */
+  faint_why?: Record<string, number>;
   visibility: {
     by_kind: Record<string, { visible: number; not_visible: number; not_measured: number }>;
     in_view: { visible: number; not_visible: number; not_measured: number };
@@ -1001,7 +1004,7 @@ export function FindingsView({
                 class={faint ? 'on' : ''}
                 aria-pressed={faint}
                 data-testid="faint-toggle"
-                title="Far peaks (beyond 200 au) on detectors 1–3 whose photometry is under 6σ, and far peaks 25–60″ from a bright star (2MASS K ≤ 10), whose glow outside the search’s mask most likely makes them: most are not bodies. They stay out of the list until you ask for them. The number on a card is the search’s signal, not the photometry."
+                title={faintTitle(h?.faint_why, 'The number on a card is the search’s signal, not the photometry.')}
                 onClick={() => setFaint(!faint)}
               >
                 Faint peaks: {faint ? 'shown' : 'hidden'} <span>{h?.faint ?? NONE}</span>

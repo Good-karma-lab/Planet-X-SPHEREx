@@ -395,7 +395,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
         f.db, None, status, None, 100000, 0, aside=aside, raised=raised, seen=getattr(clips, "seen", None),
         names=idn.verdict_on if idn is not None else None, slim=True, real=real,
     )  # fmt: skip
-    from service.findings import HIDDEN, faint_sample
+    from service.findings import HIDDEN, faint_asked
 
     visits: dict[str, tuple[int, int] | None] = {}
     if clips is not None and hasattr(clips, "visits_seen"):  # the tracks that may be asked about: how many of their own visits show the dot
@@ -438,7 +438,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             **({"visits_seen": visits[x["id"]]} if x["id"] in visits else {}),
             **({"ask": x["ask"]} if "ask" in x else {}),
             **({"echo": True} if x.get("echo") else {}),
-            **({"faint": True} if x.get("faint") and x["id"] not in started and not faint_sample(x["id"]) else {}),
+            **({"faint": True} if x.get("faint") and x["id"] not in started and not faint_asked(x) else {}),
             **({"raised": x["people_raised"]} if "people_raised" in x else {}),
             **({"_listed": x["id"] in listed} if status == "any" else {}),
         }

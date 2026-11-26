@@ -830,14 +830,57 @@ PEAK_SN_FULL = 12.0  # the product keeps S/N × 255 / 12: this S/N is white
 PEAK_SN_DARK = 3.0  # below this S/N the sum is noise: black
 
 
+def sum_window(find: dict[str, Any], sum_meta: dict[str, Any], sum_bin: bytes) -> tuple[F, tuple[float, float], float, float]:
+    """The sum along the orbit around a Planet X peak as its clip shows it: (the WINDOW_ARCMIN window of the search's best-S/N map in
+    S/N, row 0 to the north and east to the left; the peak's place in it (x, y); the grid step in arcsec; the map's S/N at the place)."""
+    from engine import distant as edist
+
+    # the best-S/N map, N × N, pixel (x, y) at u = (x - N/2) S to the west and v = (y - N/2) S to the north of the centre
+    sl = sum_meta["slider"]
+    n, step = int(sl["n"]), float(sl["step"])
+    nvis = len(sl["t"])
+    best = np.frombuffer(sum_bin, np.uint8, count=n * n, offset=nvis * n * n).reshape(n, n)
+    pr = sum_meta["params"]
+    tan = edist.Tangent(float(pr["ra"]), float(pr["dec"]))  # type: ignore[no-untyped-call]
+    u, v = tan.sky2uv(float(find["ra"]), float(find["dec"]))  # type: ignore[no-untyped-call]
+    cx, cy = float(u) / step + n / 2.0, float(v) / step + n / 2.0
+    w = round(WINDOW_ARCMIN * 60.0 / step)
+    x0, y0 = round(cx - w / 2.0), round(cy - w / 2.0)
+    cut = _window(best, x0, y0, w, 0)[::-1]  # row 0 to the north
+    sn_here = float(_window(best, round(cx) - 2, round(cy) - 2, 5, 0).max()) * PEAK_SN_FULL / 255.0
+    return cut.astype(np.float64) * PEAK_SN_FULL / 255.0, (cx - x0, (w - 1) - (cy - y0)), step, sn_here
+
+
+# Can a person see the peak's dot in the sum along the orbit? The brightest point within MEASURE_ARCSEC of the ring's centre against the
+# median and the 1.4826 × MAD scatter of the whole 3′ window (the pixels the search did not mask). Calibrated on 23 peaks judged by eye
+# on 26 Nov 2026: the 7 with a clear dot 5.0-8.1, the 4 with nothing in the ring 0.5-2.1, the 12 lumps like the noise around them
+# 1.0-7.8 (7 under 4.8, 5 of them as high as the clear ones: in a grey sum a lump and a dot measure alike). The old "visible" (an annulus
+# 2-5 ring radii out and control rings) passed 3 of the 7 clear dots and 4 of the lumps
+SIGHT_Z = 4.8
+
+
+def sum_sight(find: dict[str, Any], sum_meta: dict[str, Any], sum_bin: bytes) -> dict[str, float]:
+    """How far the peak's dot stands above the noise of its sum along the orbit: {z, here (S/N at the dot), floor, noise}."""
+    sn_map, ring, step, _ = sum_window(find, sum_meta, sum_bin)
+    h, w = sn_map.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    inner = (xx - ring[0]) ** 2 + (yy - ring[1]) ** 2 <= (MEASURE_ARCSEC / step) ** 2
+    ok = sn_map > 0  # 0: masked (a star) or beyond the field
+    if not inner.any() or int(ok.sum()) < 50:
+        return {"z": 0.0, "here": 0.0, "floor": 0.0, "noise": 0.0}
+    here = float(sn_map[inner].max())
+    floor = float(np.median(sn_map[ok]))
+    noise = 1.4826 * float(np.median(np.abs(sn_map[ok] - floor)))
+    z = (here - floor) / noise if noise > 0 else 0.0
+    return {"z": round(z, 2), "here": round(here, 2), "floor": round(floor, 2), "noise": round(noise, 3)}
+
+
 def render_peak(
     find: dict[str, Any], src: Source, sum_meta: dict[str, Any], sum_bin: bytes, size: int = SIZE
 ) -> tuple[bytes, dict[str, Any]]:
     """The Blink of a Planet X peak: "one pass" (the stacked pass of the search's date: the ring is empty, the body is below what one
     pass shows) and "sum along the orbit" (the best-S/N map of the distance search that covers the place: the visits of that pass
     shifted along every tried orbit and added; the peak stands in the ring). The same window of the sky in both, north up, east left."""
-    from engine import distant as edist
-
     t0 = time.time()
     data, info = render(find, src, WINDOW_ARCMIN, size, True, False, None)
     stack = Image.open(io.BytesIO(data))
@@ -851,24 +894,10 @@ def render_peak(
     _text(d1, (8, size - 26), "one pass", 14, "ls")
     _text(d1, (8, size - 8), passes[k]["label"], 13, "ls")
     _text(d1, (size - 8, size - 8), f"{WINDOW_ARCMIN:g} arcmin", 12, "rs")
-    # the sum: the best-S/N map, N × N, pixel (x, y) at u = (x - N/2) S to the west and v = (y - N/2) S to the north of the centre
-    sl = sum_meta["slider"]
-    n, step = int(sl["n"]), float(sl["step"])
-    nvis = len(sl["t"])
-    best = np.frombuffer(sum_bin, np.uint8, count=n * n, offset=nvis * n * n).reshape(n, n)
-    pr = sum_meta["params"]
-    tan = edist.Tangent(float(pr["ra"]), float(pr["dec"]))  # type: ignore[no-untyped-call]
-    u, v = tan.sky2uv(float(find["ra"]), float(find["dec"]))  # type: ignore[no-untyped-call]
-    cx, cy = float(u) / step + n / 2.0, float(v) / step + n / 2.0
-    w = round(WINDOW_ARCMIN * 60.0 / step)
-    x0, y0 = round(cx - w / 2.0), round(cy - w / 2.0)
-    cut = _window(best, x0, y0, w, 0)[::-1]  # row 0 to the north
-    sn_here = float(_window(best, round(cx) - 2, round(cy) - 2, 5, 0).max()) * PEAK_SN_FULL / 255.0
-    sn_map = cut.astype(np.float64) * PEAK_SN_FULL / 255.0
-    sn_l, beat, nctl, contrast = stands_out(sn_map, cx - x0, (w - 1) - (cy - y0), max(1.5, MEASURE_ARCSEC / step))
+    sn_map, ring, step, sn_here = sum_window(find, sum_meta, sum_bin)
+    sn_l, beat, nctl, contrast = stands_out(sn_map, ring[0], ring[1], max(1.5, MEASURE_ARCSEC / step))
     grey = np.clip((sn_map - PEAK_SN_DARK) / (PEAK_SN_FULL - PEAK_SN_DARK), 0.0, 1.0) ** 0.8  # noise (under 3 sigma) dark, 12 sigma white
     pic = np.repeat(grey[..., None], 3, axis=-1)
-    ring = (cx - x0, (w - 1) - (cy - y0))
     summed = draw_frame(pic, ring, RING_ARCSEC / step, "", "", size, None, False)
     d2 = ImageDraw.Draw(summed)
     _text(d2, (8, size - 26), "sum along the orbit", 14, "ls")
@@ -884,7 +913,7 @@ def render_peak(
             "blink": ["sum along the orbit", "one pass"],
             "pass": passes[k],
             "sum_product": sum_meta.get("key"),
-            "sum_params": pr,
+            "sum_params": sum_meta["params"],
             "sum_sn_at_place": round(sn_here, 1),
             "visible_sn": round(sn_l, 1),
             "visible_controls": [beat, nctl],
@@ -908,6 +937,36 @@ def clips_dir(store_dir: Path) -> Path:
 
 
 BuildFn = Callable[[Store, dict[str, Any]], Awaitable[str | None]]
+
+
+def find_sum(store: Store, find: dict[str, Any], rows: list[dict[str, Any]] | None = None) -> tuple[dict[str, Any], bytes] | None:
+    """The distance search (one pass) whose map holds a Planet X peak: its field covers the place, its pass is the peak's, its distances
+    include the peak's; the smallest field first. (meta with its key, the binary part) or None. `rows`: the store's listing of the
+    distance searches, when the caller has read it already."""
+    peak = (find.get("data") or {}).get("peak") or {}
+    ref, dist = peak.get("ref_mjd"), peak.get("d")
+    best: tuple[float, str] | None = None
+    for row in rows if rows is not None else store.listing((DISTANT,)):
+        p = row["params"]
+        if not row["complete"] or list(p.get("det") or []) != [1, 2, 3]:
+            continue
+        half = float(p.get("fov", 0.0)) / 120.0 - WINDOW_ARCMIN / 120.0
+        dra = ((float(find["ra"]) - float(p["ra"]) + 540.0) % 360.0 - 180.0) * math.cos(math.radians(float(find["dec"])))
+        if abs(dra) > half or abs(float(find["dec"]) - float(p["dec"])) > half:
+            continue
+        if ref is not None and p.get("mjd") is not None and abs(float(p["mjd"]) - float(ref)) > 40.0:
+            continue
+        if dist is not None and not (float(p.get("dmin", 0)) <= float(dist) <= float(p.get("dmax", 1e9))):
+            continue
+        if best is None or float(p["fov"]) < best[0]:
+            best = (float(p["fov"]), row["key"])
+    if best is None:
+        return None
+    meta = store.read_meta(DISTANT, best[1])
+    blob = store.read_part(DISTANT, best[1], "bin")
+    if not meta or blob is None or meta.get("status") != "ok" or not meta.get("slider"):
+        return None
+    return {**meta, "key": best[1]}, blob
 
 
 class Clips:
@@ -1042,32 +1101,7 @@ class Clips:
         return None
 
     def sum_for(self, find: dict[str, Any]) -> tuple[dict[str, Any], bytes] | None:
-        """The distance search (one pass) whose map holds a Planet X peak: its field covers the place, its pass is the peak's, its
-        distances include the peak's; the smallest field first. (meta with its key, the binary part) or None."""
-        peak = (find.get("data") or {}).get("peak") or {}
-        ref, dist = peak.get("ref_mjd"), peak.get("d")
-        best: tuple[float, str] | None = None
-        for row in self.store.listing((DISTANT,)):
-            p = row["params"]
-            if not row["complete"] or list(p.get("det") or []) != [1, 2, 3]:
-                continue
-            half = float(p.get("fov", 0.0)) / 120.0 - WINDOW_ARCMIN / 120.0
-            dra = ((float(find["ra"]) - float(p["ra"]) + 540.0) % 360.0 - 180.0) * math.cos(math.radians(float(find["dec"])))
-            if abs(dra) > half or abs(float(find["dec"]) - float(p["dec"])) > half:
-                continue
-            if ref is not None and p.get("mjd") is not None and abs(float(p["mjd"]) - float(ref)) > 40.0:
-                continue
-            if dist is not None and not (float(p.get("dmin", 0)) <= float(dist) <= float(p.get("dmax", 1e9))):
-                continue
-            if best is None or float(p["fov"]) < best[0]:
-                best = (float(p["fov"]), row["key"])
-        if best is None:
-            return None
-        meta = self.store.read_meta(DISTANT, best[1])
-        blob = self.store.read_part(DISTANT, best[1], "bin")
-        if not meta or blob is None or meta.get("status") != "ok" or not meta.get("slider"):
-            return None
-        return {**meta, "key": best[1]}, blob
+        return find_sum(self.store, find)
 
     def seen(self, find: dict[str, Any]) -> tuple[bool | None, float | None]:
         """Whether the object is visible in its own picture: (True / False, the S/N in the ring), or (None, None) while the picture is
