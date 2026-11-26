@@ -4,7 +4,7 @@ import gc
 
 import pytest
 
-from service.memwatch import GC_THRESHOLD, MemWatch, census, settle, trim
+from service.memwatch import GC_THRESHOLD, MemWatch, census, refreeze, settle, trim
 
 
 def test_line_names_sizes_and_survives_a_missing_collection() -> None:
@@ -161,3 +161,57 @@ def test_tracked_is_counted_only_with_the_freeze_on() -> None:
     finally:
         gc.unfreeze()
     assert tracked() == "-"
+
+
+def test_refreeze_takes_the_garbage_among_the_frozen_and_freezes_what_lives() -> None:
+    import weakref
+
+    class Node:
+        other: object = None
+
+    a, b, kept = Node(), Node(), Node()
+    a.other, b.other = b, a  # a cycle: only a full collection frees it
+    gone = weakref.ref(a)
+    gc.freeze()
+    try:
+        del a, b  # garbage now, but frozen: a collection does not see it
+        gc.collect()
+        assert gone() is not None
+        said = refreeze()
+        assert said.startswith("refreeze: collected ") and gone() is None  # taken: no cycle stays for good
+        assert all(o is not kept for o in gc.get_objects())  # what lives is frozen again
+    finally:
+        gc.unfreeze()
+
+
+def test_keep_frozen_freezes_again_every_so_often_and_skips_a_busy_hour(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import asyncio
+
+    from service import memwatch
+
+    done: list[str] = []
+    state = {"busy": False, "asked": 0}
+
+    def fake_refreeze() -> str:
+        done.append("refreeze")
+        state["busy"] = len(done) == 2  # after the first refreeze a person's job runs for a while
+        return "refreeze: x"
+
+    def quiet() -> bool:
+        if state["busy"]:
+            state["asked"] += 1
+            state["busy"] = state["asked"] < 12  # longer than one wait (again_s / every_s = 5 asks)
+            return False
+        return True
+
+    monkeypatch.setattr(memwatch, "settle", lambda freeze: done.append("settle") or "census: x")
+    monkeypatch.setattr(memwatch, "refreeze", fake_refreeze)
+    with caplog.at_level("WARNING", logger="sky.mem"):
+        asyncio.run(memwatch.keep_frozen(lambda: True, True, quiet=quiet, max_s=1.0, every_s=0.01, again_s=0.05, rounds=4))
+    assert done == ["settle", "refreeze", "refreeze", "refreeze"] or done == ["settle", "refreeze", "refreeze"]
+    assert "refreeze: skipped, a person's job ran" in caplog.text
+    done.clear()
+    asyncio.run(memwatch.keep_frozen(lambda: True, False, max_s=1.0, every_s=0.01, again_s=0.01, rounds=3))
+    assert done == ["settle"]  # SKY_GC_FREEZE=0: never frozen, never again

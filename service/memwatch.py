@@ -113,6 +113,9 @@ def settle(freeze: bool) -> str:
 
 SETTLE_MAX_S = 5400.0  # warm or not, settled by then: the layouts kept filled their 2,000 in under an hour after a restart (26 Nov)
 SETTLE_EVERY_S = 30.0
+# the freeze melts: the layouts kept are replaced as people open new fields (26 Nov: 3.03 to 1.97 million frozen in 50 min, 1.08 million
+# walked again), so it is made again this often, each time with no person's job running: one full collection an hour instead of ~16
+REFREEZE_S = 3600.0
 
 
 async def _until(ok: Callable[[], bool], max_s: float, every_s: float) -> float:
@@ -142,6 +145,39 @@ async def settle_when(
     said = await asyncio.to_thread(settle, freeze)
     log.warning("%s; waited %.0f s for warm, %.0f s for no person's job", said, warm, calm)
     return said
+
+
+def refreeze() -> str:
+    """What is alive now frozen anew: gc.unfreeze(), a full collection (it takes the garbage among the ones frozen before too, so no
+    cycle stays for good) and gc.freeze(). One pause of the collection's length, every thread standing."""
+    t = time.perf_counter()
+    gc.unfreeze()
+    gone = gc.collect()
+    gc.freeze()
+    return f"refreeze: collected {gone} frozen {gc.get_freeze_count()} tracked {len(gc.get_objects())} ({time.perf_counter() - t:.1f} s)"
+
+
+async def keep_frozen(
+    ready: Callable[[], bool],
+    freeze: bool,
+    quiet: Callable[[], bool] = lambda: True,
+    max_s: float = SETTLE_MAX_S,
+    every_s: float = SETTLE_EVERY_S,
+    again_s: float = REFREEZE_S,
+    rounds: int | None = None,
+) -> None:
+    """settle_when once, then with `freeze` refreeze() every `again_s` once no person's job runs (waited for `again_s` at most: then
+    the next hour); `rounds` bounds the repeats (tests)."""
+    await settle_when(ready, freeze, quiet, max_s, every_s)
+    n = 0
+    while freeze and (rounds is None or n < rounds):
+        n += 1
+        await asyncio.sleep(again_s)
+        calm = await _until(quiet, again_s, every_s)
+        if not quiet():
+            log.warning("refreeze: skipped, a person's job ran for %.0f s", calm)
+            continue
+        log.warning("%s; waited %.0f s for no person's job", await asyncio.to_thread(refreeze), calm)
 
 
 class MemWatch:
