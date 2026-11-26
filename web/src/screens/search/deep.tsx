@@ -93,6 +93,9 @@ export function DeepSumPanel({
   useEffect(() => {
     tok.current++;
     setD({ state: 'idle' });
+    return () => {
+      tok.current++; // leaving the field or the page stops asking (useDistant)
+    };
   }, [ra, dec, fov]);
   const planned = useRef('');
   useEffect(() => {

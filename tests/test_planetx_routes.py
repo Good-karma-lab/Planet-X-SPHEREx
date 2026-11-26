@@ -44,6 +44,7 @@ def make_app(tmp_path: Path) -> tuple[TestClient, Store]:
     )
     app = FastAPI(lifespan=lifespan)
     app.include_router(make_planetx_router(st))
+    app.state.scheduler = sched
     return TestClient(app), store
 
 
@@ -161,3 +162,34 @@ def test_deep_needs_two_to_six_fields(tmp_path: Path, fields: str) -> None:
                 body = client.get(f"/api/v1/deep?fields={fields}").json()
             # a job on a field without exposures ends at once; at most six fields are taken
             assert body["state"] == "done" and body["result"]["status"] == "no-coverage" and len(body["result"]["fields"]) == 6
+
+
+def test_the_jumps_checks_run_to_their_end_a_pages_background_search_is_followed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The scheduler cancels a background /distant run nobody asks about for 90 s (its page left); the searches jump(check=1) starts
+    for a person are asked about by nobody (the jump is asked again), so they are not followed and run to their end."""
+    import asyncio
+
+    async def plan(index: Any, params: Any) -> dict[str, Any]:
+        return {"estimate_s": 1}
+
+    async def forever(*a: Any) -> dict[str, Any]:
+        await asyncio.sleep(60)
+        return {}
+
+    # every field has exposures here (none is read: the search itself waits)
+    monkeypatch.setattr(distantjob, "selection", lambda index, params: (["e"], 0, "pk", {}, None))
+    monkeypatch.setattr(distantjob, "signature", lambda exps: "sig")
+    monkeypatch.setattr(distantjob, "plan_async", plan)
+    monkeypatch.setattr(distantjob, "run_distant", forever)
+    client, store = make_app(tmp_path)
+    X0, V0 = circular_body(27.378, -0.12, T1, 95.0)
+    key = write_pass(store, T1, X0, V0, 95.0)
+    sched = client.app.state.scheduler  # type: ignore[attr-defined]
+    with client:
+        j = client.get(f"/api/v1/jump?key={key}&i=0&mjd={T2}&corridor=60&dmin=60&dmax=200&check=1").json()
+        started = {x["key"] for x in j["started"]}
+        assert started and all(sched.jobs[sched.by_key[k]].followed is False for k in started)
+        r = client.get("/api/v1/distant?ra=40&dec=1&fov=5&mjd=61000&bg=1").json()
+        assert sched.jobs[sched.by_key[r["key"]]].followed is True
+        r0 = client.get("/api/v1/distant?ra=41&dec=1&fov=5&mjd=61000").json()  # a person's own (P0): abandoned the old way, not followed
+        assert sched.jobs[sched.by_key[r0["key"]]].followed is False

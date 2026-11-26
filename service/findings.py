@@ -130,6 +130,15 @@ def decisive_of(kind: str, ra: float, dec: float, data: dict[str, Any]) -> list[
 RESIDUAL_ARCSEC = 3.0
 HALO_ARCSEC = 60.0  # a Gaia star brighter than G 10 this close puts a peak in its halo
 HALO_MAG = 10.0
+# a 2MASS star of K <= 10 this far from a far-search peak: the peak is most likely the wing of its light outside the search's mask (the
+# mask is made from the other passes, where the wing lies on the other side; 64 of 485 peaks on 26 Nov 2026, the first four Promising,
+# against 0-2 in the control directions). Behind the faint filter, as the faint peaks are. No side in the rule: it turns with the season
+WING_K = 10.0
+WING_MIN_ARCSEC = 25.0
+WING_MAX_ARCSEC = 60.0
+WING_PAUSE_S = 2.0  # between two questions to IRSA
+WING_RETRY_S = 3600.0  # an unanswered one is asked again after this
+WING_FIRST_S = 60.0  # the first question after a start: the start itself is busy enough
 GALAXY_TYPES = frozenset(
     {
         "G",
@@ -796,6 +805,8 @@ class FindingsDB:
 
     def _migrate(self) -> None:
         self.db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
+        # the bright 2MASS star near a far-search peak (Findings.wing_loop): apart from idents, so the identification never asks again
+        self.db.execute("CREATE TABLE IF NOT EXISTS wings (find_id TEXT PRIMARY KEY, state TEXT, name TEXT, sep REAL, k REAL, tried REAL)")
         row = self.db.execute("SELECT value FROM meta WHERE key='schema'").fetchone()
         have = int(row[0]) if row else 0
         if have > SCHEMA:  # written by a newer instance: read what is there, change nothing
@@ -967,6 +978,29 @@ class FindingsDB:
             ),
         )
 
+    def put_wing(self, find_id: str, state: str, name: str | None = None, sep: float | None = None, k: float | None = None) -> None:
+        self.db.execute(
+            "INSERT OR REPLACE INTO wings (find_id, state, name, sep, k, tried) VALUES (?,?,?,?,?,?)",
+            (find_id, state, name, sep, k, time.time()),
+        )
+
+    def wings(self) -> dict[str, dict[str, Any]]:
+        """The far-search peaks a bright 2MASS star stands near ({id: {name, sep, k}}): only those answered "ok". Call it under _READ."""
+        try:
+            rows = self.db.execute("SELECT find_id, name, sep, k FROM wings WHERE state='ok'").fetchall()
+        except sqlite3.OperationalError:  # a database without the table yet
+            return {}
+        return {r[0]: {"name": r[1], "sep": r[2], "k": r[3]} for r in rows}
+
+    def wings_to_ask(self, now: float, limit: int) -> list[sqlite3.Row]:
+        """The far-search peaks never asked about a bright 2MASS star, or not answered for WING_RETRY_S."""
+        return self.db.execute(
+            "SELECT f.id, f.ra, f.dec FROM finds f LEFT JOIN wings w ON w.find_id = f.id WHERE f.kind='peak' "
+            "AND json_extract(f.data, '$.search')='distant' AND (w.find_id IS NULL OR (w.state='unavailable' AND w.tried < ?)) "
+            "ORDER BY f.score DESC LIMIT ?",
+            (now - WING_RETRY_S, limit),
+        ).fetchall()
+
     def ident_rows_of(self, ids: list[str]) -> dict[str, list[sqlite3.Row]]:
         """The catalogues' answers of these finds as the table holds them (their JSON not read)."""
         out: dict[str, list[sqlite3.Row]] = {i: [] for i in ids}
@@ -1102,7 +1136,9 @@ class Findings:
         if self.writer:
             with contextlib.suppress(Exception):
                 self.cleanup()
-            self.tasks = [asyncio.create_task(self.sweep_loop()), asyncio.create_task(self.identify_loop())]
+            self.tasks = [
+                asyncio.create_task(self.sweep_loop()), asyncio.create_task(self.identify_loop()), asyncio.create_task(self.wing_loop())
+            ]  # fmt: skip
 
     async def stop(self) -> None:
         for t in self.tasks:
@@ -1423,6 +1459,79 @@ class Findings:
             return best[1] if best else {"state": "none"}
         raise err or RuntimeError("no Gaia archive")
 
+    async def bright_ir_star(self, ra: float, dec: float) -> dict[str, Any]:
+        """The brightest 2MASS star of K <= WING_K WING_MIN_ARCSEC to WING_MAX_ARCSEC from the place: IRSA's TAP, else the 2MASS magnitudes
+        of AllWISE's copy in AWS (CDS was down on 26 Nov). A bright star barely moves between 2MASS and now: no motion is applied."""
+        from service.context import IRSA_TAP, allwise_cone, sep_arcsec
+
+        cone = (WING_MAX_ARCSEC + 1.0) / 3600.0
+        adql = (
+            "SELECT TOP 20 designation, ra, dec, k_m FROM fp_psc WHERE "
+            f"CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {cone:.6f})) = 1 AND k_m <= {WING_K}"
+        )
+        rows: list[dict[str, Any]] = []
+        try:
+            body = await self.catalogue._tap("irsa", IRSA_TAP, adql)
+            head, *lines = [ln for ln in body.splitlines() if ln.strip()]
+            cols = [c.strip().strip('"') for c in head.split(",")]
+            if "k_m" not in cols:
+                raise ValueError("IRSA answered no table")
+            for ln in lines:
+                v = dict(zip(cols, ln.split(","), strict=False))
+                rows.append(
+                    {"name": f"2MASS J{v['designation'].strip()}", "ra": float(v["ra"]), "dec": float(v["dec"]), "k": float(v["k_m"])}
+                )
+        except (httpx.HTTPError, BreakerOpenError, ValueError, KeyError):
+            got = await cpu.run(allwise_cone, ra, dec, WING_MAX_ARCSEC + 1.0)
+            rows = [
+                {
+                    "name": f"2MASS star of AllWISE {r.get('designation')}",
+                    "ra": float(r["ra"]),
+                    "dec": float(r["dec"]),
+                    "k": float(r["k_m_2mass"]),
+                }
+                for r in got
+                if r.get("k_m_2mass") is not None and float(r["k_m_2mass"]) <= WING_K
+            ]
+        best: dict[str, Any] | None = None
+        for r in rows:
+            sep = sep_arcsec(r["ra"], r["dec"], ra, dec)
+            if WING_MIN_ARCSEC <= sep <= WING_MAX_ARCSEC and (best is None or r["k"] < best["k"]):
+                best = {"state": "ok", "name": r["name"], "sep": round(sep, 1), "k": round(r["k"], 2)}
+        return best or {"state": "none"}
+
+    async def wing_loop(self) -> None:
+        """Every far-search peak asked once whether a bright 2MASS star stands near it (bright_ir_star), one at a time, the strongest
+        first; the answer is kept (FindingsDB.wings) and never asked again."""
+        cpu.JOB.set(_Maintenance())
+        await asyncio.sleep(WING_FIRST_S)
+        while True:
+            try:
+                todo = await asyncio.to_thread(self._wings_to_ask)
+                if not todo:
+                    await asyncio.sleep(300)
+                    continue
+                for row in todo:
+                    try:
+                        h = await self.bright_ir_star(float(row["ra"]), float(row["dec"]))
+                    except Exception:  # neither IRSA nor the copy answered: asked again later
+                        h = {"state": "unavailable"}
+                    await asyncio.to_thread(self._put_wing, row["id"], h)
+                    await asyncio.sleep(WING_PAUSE_S)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(60)
+
+    def _wings_to_ask(self) -> list[sqlite3.Row]:
+        with _READ:
+            return self.db.wings_to_ask(time.time(), 50)
+
+    def _put_wing(self, find_id: str, h: dict[str, Any]) -> None:
+        with _READ:
+            self.db.put_wing(find_id, h["state"], h.get("name"), h.get("sep"), h.get("k"))
+            self.db.db.commit()
+
     async def identify_one(self, row: sqlite3.Row) -> None:
         want = want_of(row["kind"], row["ra"], row["dec"], json.loads(row["data"] or "{}"))
         if "sbident" in want:
@@ -1533,6 +1642,28 @@ def _pm_of(i: dict[str, Any]) -> float | None:
     return math.hypot(float(raw["pmra"]), float(raw["pmdec"])) / 1000.0
 
 
+DWARF_PM_RATIO = 2.0  # a catalogue's motion within this factor of ours ...
+DWARF_PM_ANGLE = 45.0  # ... and this many degrees of its direction is the same brown dwarf
+
+
+def _dwarf_moves_like(f: dict[str, Any], i: dict[str, Any]) -> bool:
+    """A catalogue source (SIMBAD or Gaia, with its own proper motion) that moves as the brown dwarf's search says it does: within
+    DWARF_PM_RATIO in size and DWARF_PM_ANGLE in direction. A source without a motion never does (26 Nov 2026: nine of twelve were
+    called known brown dwarfs on a radio source or a still star a few arcseconds off, at 3-11″/yr)."""
+    src = (f.get("data") or {}).get("source") or {}
+    raw = i.get("raw") or {}
+    if i["catalogue"] not in ("simbad", "gaia") or i["state"] != "ok":
+        return False
+    a, b = (_f(src.get("pmra")), _f(src.get("pmdec"))), (_f(raw.get("pmra")), _f(raw.get("pmdec")))
+    if None in a or None in b:
+        return False
+    sa, sb = math.hypot(*a), math.hypot(*b)  # type: ignore[arg-type]
+    if sa <= 0 or sb <= 0 or not (1 / DWARF_PM_RATIO <= sb / sa <= DWARF_PM_RATIO):
+        return False
+    cos = (a[0] * b[0] + a[1] * b[1]) / (sa * sb)  # type: ignore[operator]
+    return math.degrees(math.acos(max(-1.0, min(1.0, cos)))) <= DWARF_PM_ANGLE
+
+
 def _motion_identity(f: dict[str, Any], idents: list[dict[str, Any]]) -> None:
     """For a mover or brown dwarf the name is the catalogue source that moves as it does. SIMBAD at the motion-corrected place (the scan's own
     answer, or the stored one) wins over a Gaia neighbour; a Gaia row whose motion does not match is marked a neighbour."""
@@ -1546,6 +1677,14 @@ def _motion_identity(f: dict[str, Any], idents: list[dict[str, Any]]) -> None:
     for i in idents:
         if i["catalogue"] == "gaia" and i["state"] == "ok" and _pm_of(i) is not None and not agrees(_pm_of(i)):
             i["note"] = "a neighbour: its proper motion does not match the find"
+    if f["kind"] == "browndwarf":  # named only by a catalogue source that moves as it does (_dwarf_moves_like)
+        m = next((i for c in ("simbad", "gaia") for i in idents if i["catalogue"] == c and i.get("name") and _dwarf_moves_like(f, i)), None)
+        if m is not None:
+            f["identity"] = {
+                "name": m["name"], "catalogue": "SIMBAD" if m["catalogue"] == "simbad" else "Gaia DR3", "type": m.get("type"),
+                "basis": "same proper motion",
+            }  # fmt: skip
+        return
     sb = next((i for i in idents if i["catalogue"] == "simbad" and i["state"] == "ok" and i.get("name")), None)
     src = (f["data"].get("source") or {}).get("simbad") or {}
     if sb is not None and (agrees(_pm_of(sb)) or (_pm_of(sb) is None and src.get("state") == "ok")):
@@ -1688,7 +1827,7 @@ def status_of(f: dict[str, Any], idents: list[dict[str, Any]]) -> str:
         t = d.get("track") or {}
         known = t.get("check") == "same" or bool(t.get("name")) or str(t.get("status", "")).startswith("known") or _pm_agrees(f, idents)
     elif kind == "browndwarf":
-        known = d.get("group") == "known" or _pm_agrees(f, idents) or (ok("simbad") and "BD" in str(by["simbad"].get("type") or ""))
+        known = any(_dwarf_moves_like(f, i) for i in idents)  # the scan's own "known" (a name at the place) is not enough
     elif kind == "film":
         known = ok("sbident")
     elif kind in ("red", "anomaly"):
@@ -1995,7 +2134,7 @@ def rate_unit(kind: str) -> str:
 
 LITE_KEYS = (
     "id", "slug", "kind", "place", "fov", "ra", "dec", "rate", "rate_unit", "snr", "score", "chance", "status", "verdict", "identity", "updated",
-    "stage", "promise", "viewers", "credit", "clip", "note", "visible", "visible_sn",
+    "stage", "promise", "viewers", "credit", "clip", "note", "visible", "visible_sn", "star_wing",
 )  # fmt: skip
 
 
@@ -2180,6 +2319,7 @@ def snapshot(
     with _READ:
         views = flow.views() if flow is not None else {}
         packed = read_some(db, sorted(only)) if only is not None else read_base(db)
+        wings = db.wings()
     order = {c: i for i, c in enumerate([*list(CATALOGUES), "sbident"])}
     hide_faint = hide_faint_peaks()
 
@@ -2232,12 +2372,14 @@ def snapshot(
             f["people_raised"] = raised[f["id"]]  # moves_old: the old pictures confirm the motion; candidate: a Planet X dot
         f["idents"] = ids_
         # behind its own filter, unless a person said it is real (or people raised it); what a catalogue or JPL named is not faint
+        if f["kind"] == "peak" and f["id"] in wings:
+            f["star_wing"] = wings[f["id"]]  # a bright 2MASS star 25-60″ away: its glow outside the mask most likely makes the peak
         f["faint"] = (
             hide_faint
             and st in ("unexplained", "unchecked")
             and "people_raised" not in f
             and f["id"] not in real
-            and faint_peak(f["kind"], f["data"])
+            and (faint_peak(f["kind"], f["data"]) or "star_wing" in f)
         )
         if f["kind"] in ("red", "anomaly"):
             f["catalogue_class"] = catalogue_class(f, ids_)

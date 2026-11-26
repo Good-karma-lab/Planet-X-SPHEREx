@@ -53,10 +53,16 @@ def card_extras(x: dict[str, Any]) -> dict[str, Any]:
     """What a card needs from the heavy parts of a find: the name a catalogue gave it, the field its search ran on, its group."""
     sb = next((i for i in x.get("idents") or [] if i["catalogue"] == "simbad" and i["state"] == "ok" and i.get("name")), None)
     d = x.get("data") or {}
+    dwarf = x.get("kind") == "browndwarf"  # its name and "known" only from a catalogue source that moves as it does (findings.status_of)
+    group = d.get("group")
+    if dwarf and x.get("status") == "blend":
+        group = "blend"  # a neighbour or a survey source at its place says it did not move
+    elif dwarf and group == "known" and x.get("status") != "known":
+        group = "candidate"
     return {
-        "name": (x.get("identity") or {}).get("name") or (sb["name"] if sb else None),
+        "name": (x.get("identity") or {}).get("name") or (sb["name"] if sb and not dwarf else None),
         "field": d.get("field_params"),
-        "group": d.get("group"),
+        "group": group,
         "passes": len((d.get("track") or (d.get("source") or {}).get("track") or {}).get("mjd") or []) or None,
         # a time-lapse track: the date of the film its search ran on (the lab opens straight on that film: built, never a new one)
         **({"film": d["film"]} if x.get("kind") == "film" and isinstance(d.get("film"), (int, float)) else {}),
@@ -73,9 +79,11 @@ PAGE_SIZE = 48  # the Findings page's (web/src/screens/findings/finds.tsx)
 
 
 def warm_keys() -> list[dict[str, Any]]:
-    """The lists the pages ask for as they open: Findings' Promising and its kinds, the kind chips' numbers, Planet X's peaks."""
+    """The lists the pages ask for as they open: Findings' Promising and its kinds, the kind chips' numbers, Planet X's peaks, and the
+    plain list (no filter: what an outside reader asks first; 26 Nov it took 5 s after a start, 33 s at the deploy's own check)."""
     card = {"status": "all", "sort": "promise", "visibility": "seen", "lite": True, "limit": PAGE_SIZE, "faint": "hide"}
     return [
+        {},
         {**card, "kinds": ",".join(("mover", "browndwarf", "peak", "film", "pair"))},
         {"status": "all", "visibility": "seen", "lite": True, "limit": 1, "faint": "hide"},
         *({**card, "kind": k} for k in KINDS),
@@ -231,6 +239,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
                         out[json.dumps(q, sort_keys=True)] = bytes(made.body).decode()
                     if path is not None and not getattr(f.db, "read_only", True) and getattr(f, "writer", False):
                         await asyncio.to_thread(atomic_write_bytes, path, json.dumps(out).encode())
+                    st.findings_warmed = True  # the first lists are made: what service/memwatch.settle_when waits for
             except asyncio.CancelledError:
                 raise
             except Exception:

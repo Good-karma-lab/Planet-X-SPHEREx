@@ -278,3 +278,35 @@ def test_a_stranger_who_leaves_for_others_takes_nothing_from_a_page_that_watches
         await s.stop()
 
     asyncio.run(run())
+
+
+def test_a_followed_background_run_nobody_asks_about_is_cancelled_the_others_go_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    """26 Nov: a guest's Lab started a 2.5 GB Planet X search (bg=1, P2) per field opened and it ran to its end after they left."""
+    from service.jobs import scheduler as sch
+
+    monkeypatch.setattr(sch, "UNFOLLOWED_S", 0.3)
+
+    async def run() -> None:
+        s = Scheduler(slots={"light": 1, "heavy": 4})
+        s.start()
+        left = s.submit("distant", "left", {}, sleeper(5.0), Priority.P2, "heavy", followed=True)
+        asked = s.submit("distant", "asked", {}, sleeper(5.0), Priority.P2, "heavy", followed=True)
+        warm = s.submit("field", "warm", {}, sleeper(5.0), Priority.P2, "heavy")  # nobody asks about the warm set: it goes on
+        for _ in range(8):
+            await asyncio.sleep(0.1)
+            s.poll(asked.id)
+        await until(lambda: left.state == "cancelled", timeout=2)
+        assert asked.state in ("queued", "running", "paused") and warm.state in ("queued", "running", "paused")
+        # the same search asked for by one who will not ask again (a person's P0 takes it over; a plain submit) is not cancelled
+        taken = s.submit("distant", "taken", {}, sleeper(5.0), Priority.P2, "heavy", followed=True)
+        s.submit("distant", "taken", {}, sleeper(5.0), Priority.P2, "heavy")
+        await asyncio.sleep(0.6)
+        assert taken.state in ("queued", "running", "paused") and not taken.followed
+        # a cancelled one is made again by the next ask
+        again = s.submit("distant", "left", {}, sleeper(0.05), Priority.P2, "heavy", followed=True)
+        assert again is not left
+        for j in (asked, warm, taken, again):
+            s.cancel(j.id)
+        await s.stop()
+
+    asyncio.run(run())

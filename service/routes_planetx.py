@@ -10,6 +10,7 @@ Job routes answer {key, state: running | done | error, phase, done, total, error
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import math
 from typing import Any
@@ -23,6 +24,10 @@ from service.ratelimit import client_id
 from service.reader.psfs import PsfProvider
 from service.workers import deepjob, distantjob, linkjob
 from service.workers.planetx import honest_words
+
+# whether a background /distant run started here is asked about again and again by its caller (so the scheduler may cancel it once
+# nobody asks): a page's and the sweep's are; the jump's checks are not, and run to their end (set only inside that request)
+FOLLOWED: contextvars.ContextVar[bool] = contextvars.ContextVar("followed", default=True)
 
 API_PREFIX = "/api/v1"
 
@@ -159,7 +164,9 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             async def fn(ctx: Any) -> dict[str, Any]:
                 return await distantjob.run_distant(ctx, index, files, store, wl, ps, params)
 
-            job = st.scheduler.submit(distantjob.KIND, key, params, fn, Priority.P2 if bg else Priority.P0, "heavy", 2500)
+            job = st.scheduler.submit(
+                distantjob.KIND, key, params, fn, Priority.P2 if bg else Priority.P0, "heavy", 2500, followed=bool(bg) and FOLLOWED.get()
+            )
         return job_reply(key, job, estimates.get(key))
 
     @r.get(f"{prefix}/deep")
@@ -236,7 +243,7 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             if background and (request.client is None or request.client.host not in ("127.0.0.1", "::1")):
                 raise HTTPException(403, "background searches are started from the machine itself")
             job_priority = Priority.P3 if background else Priority.P2 if bg else Priority.P0
-            job = st.scheduler.submit(deepjob.KIND, key, params, fn, job_priority, "heavy", 4000)
+            job = st.scheduler.submit(deepjob.KIND, key, params, fn, job_priority, "heavy", 4000, followed=bool(bg) and not background)
         return job_reply(key, job, estimates.get(key))
 
     @r.get(f"{prefix}/distant/{{key}}/bin")
@@ -297,14 +304,18 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         out = await asyncio.to_thread(linkjob.run_jump, st.store, key, i, mjd, corridor, dmin, dmax)
         if out is None:
             raise HTTPException(404, "no such one-pass search or candidate (run /distant first)")
-        if check:
+        if check:  # searches a person asked for and waits for to their end; nobody polls them by key (the jump is asked again)
+            tok = FOLLOWED.set(False)
             started = []
-            for fd in [x for x in out["fields"] if not x["covered"]][: linkjob.JUMP_FIELDS_MAX]:
-                rep = await distant(
-                    request, ra=fd["ra"], dec=fd["dec"], fov=fd["fov"], mjd=fd["mjd"], pass_=None, dmin=fd["dmin"], dmax=fd["dmax"],
-                    det="123", mu_scale=1.0, plan=0, bg=1,
-                )  # fmt: skip
-                started.append({**fd, "key": rep.get("key"), "state": rep.get("state")})
+            try:
+                for fd in [x for x in out["fields"] if not x["covered"]][: linkjob.JUMP_FIELDS_MAX]:
+                    rep = await distant(
+                        request, ra=fd["ra"], dec=fd["dec"], fov=fd["fov"], mjd=fd["mjd"], pass_=None, dmin=fd["dmin"], dmax=fd["dmax"],
+                        det="123", mu_scale=1.0, plan=0, bg=1,
+                    )  # fmt: skip
+                    started.append({**fd, "key": rep.get("key"), "state": rep.get("state")})
+            finally:
+                FOLLOWED.reset(tok)
             out["started"] = started
         return out
 

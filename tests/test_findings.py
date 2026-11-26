@@ -5,8 +5,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import sqlite3
+import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -697,10 +700,21 @@ def test_a_galaxy_match_is_not_a_brown_dwarf_or_a_mover() -> None:
         "kind": "browndwarf",
         "ra": 133.8,
         "dec": -7.2,
-        "rate": 7.9,
-        "data": {"group": "known", "source": {"simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "BD*"}}},
+        "rate": 6.2,
+        "data": {
+            "group": "known",
+            "source": {"pmra": -6196.9, "pmdec": 0.0, "simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "BD*"}},
+        },
     }
-    assert status_of(real, []) == "known"
+    assert status_of(real, []) != "known"  # the scan's name at the place, without a motion to compare: not enough
+    wise = {
+        "catalogue": "simbad",
+        "state": "ok",
+        "name": "WISEA J085510.74-071442.5",
+        "type": "BD*",
+        "raw": {"pmra": -8123.7, "pmdec": 673.2},
+    }
+    assert status_of(real, [wise]) == "known"
     sb = [{"catalogue": "simbad", "state": "ok", "name": "NAME Some Galaxy", "type": "AGN", "label": "SIMBAD", "sep": 0.5}]
     assert status_of({"kind": "mover", "ra": 10.0, "dec": 5.0, "rate": 5.0, "data": {"track": {"check": "none"}}}, sb) == "galaxy"
 
@@ -750,7 +764,10 @@ def test_halo_peaks_and_motion_identity() -> None:
         "ra": 133.8,
         "dec": -7.2,
         "rate": 7.9,
-        "data": {"group": "known", "source": {"simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "Y*"}}},
+        "data": {
+            "group": "known",
+            "source": {"pmra": -7760.0, "pmdec": 1500.0, "simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "Y*"}},
+        },
     }
     ids = [
         {
@@ -1444,3 +1461,92 @@ def test_one_faint_peak_in_ten_is_asked_about_by_its_id() -> None:
     assert 400 < n < 600 and faint_sample("peak:00000000000a") == faint_sample("peak:00000000000a")
     assert not askable({"kind": "peak", "visible": True, "faint": True})
     assert askable({"kind": "peak", "visible": True}) and askable({"kind": "peak", "visible": True, "faint": True, "raised": "candidate"})
+
+
+@pytest.mark.parametrize(
+    ("ours", "theirs", "known"),
+    [
+        ((3759.0, -2794.0), (3981.977, -2466.832), True),  # eps Ind B (26 Nov prod)
+        ((-6196.9, 0.0), (-8123.7, 673.2), True),  # WISE 0855: 1.3 times faster in the catalogue, 5 degrees apart
+        ((6476.9, -1525.5), (None, None), False),  # NVSS J032033+154917, a radio source: no motion of its own
+        ((10571.2, 3024.9), (-17.146, 0.062), False),  # a Gaia star that stands still
+        ((3000.0, 0.0), (-3000.0, 0.0), False),  # as fast, the other way
+        ((3000.0, 0.0), (7000.0, 0.0), False),  # the same way, more than twice as fast
+        ((3000.0, 0.0), (2400.0, 1600.0), True),  # 34 degrees apart, 0.96 times as fast
+    ],
+)
+def test_a_brown_dwarf_is_known_only_by_a_catalogue_source_that_moves_as_it_does(
+    ours: tuple[float, float], theirs: tuple[float | None, float | None], known: bool
+) -> None:
+    from service.findings import _motion_identity
+
+    f = {
+        "kind": "browndwarf", "ra": 50.0, "dec": 10.0, "rate": math.hypot(*ours) / 1000,
+        "data": {"group": "known", "source": {"pmra": ours[0], "pmdec": ours[1], "simbad": {"state": "ok", "name": "X", "otype": "Rad"}}},
+    }  # fmt: skip
+    ids = [
+        {
+            "catalogue": "simbad",
+            "state": "ok",
+            "name": "X",
+            "type": "Rad",
+            "label": "SIMBAD",
+            "sep": 3.0,
+            "raw": {"pmra": theirs[0], "pmdec": theirs[1]},
+        }
+    ]
+    _motion_identity(f, ids)
+    assert (status_of(f, ids) == "known") is known
+    assert ("identity" in f) is known
+
+
+def test_a_peak_in_a_bright_stars_glow_stands_behind_the_faint_filter(tmp_path: Path) -> None:
+    """26 Nov: 64 of 485 far peaks, the first four Promising among them, had a 2MASS star of K <= 10 25-60″ away: its glow outside the
+    search's mask. Asked once per far peak (wings_to_ask), kept apart from the catalogues, hidden as a faint peak is."""
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    rows = [{**_peak(i, 8.0), "sigma": None, "rate_err": None, "versions": {}} for i in ("w", "x", "y")]
+    rows.append({**_peak("z", 8.0, search="deep"), "sigma": None, "rate_err": None, "versions": {}})
+    db.write_finds(rows)
+    assert {r["id"] for r in db.wings_to_ask(time.time(), 10)} == {"peak:w", "peak:x", "peak:y"}  # far peaks only
+    db.put_wing("peak:w", "ok", "2MASS J03270136+1245470", 41.0, 8.13)
+    db.put_wing("peak:x", "none")
+    db.put_wing("peak:y", "unavailable")
+    db.db.commit()
+    assert [r["id"] for r in db.wings_to_ask(time.time(), 10)] == []  # the unanswered one waits an hour
+    assert [r["id"] for r in db.wings_to_ask(time.time() + 3700, 10)] == ["peak:y"]
+    ids = lambda **k: {f["id"] for f in query(db, "peak", "all", None, 50, 0, **k)["finds"]}  # noqa: E731
+    assert ids(faint="hide") == {"peak:x", "peak:y", "peak:z"} and query(db, "peak", "all", None, 50, 0, faint="hide")["faint"] == 1
+    w = query(db, None, "any", None, 1, 0, only=frozenset({"peak:w"}))["finds"][0]  # its own link still opens it
+    assert w["star_wing"] == {"name": "2MASS J03270136+1245470", "sep": 41.0, "k": 8.13} and w["faint"]
+    assert "peak:w" in ids(faint="hide", real=frozenset({"peak:w"})) and "peak:w" in ids(faint="hide", raised={"peak:w": "candidate"})
+
+
+def test_the_bright_star_is_asked_of_irsa_and_else_of_the_allwise_copy(monkeypatch: pytest.MonkeyPatch) -> None:
+    from service import context
+    from service.findings import Findings
+
+    async def tap(which: str, url: str, adql: str) -> str:
+        assert "fp_psc" in adql and "k_m <= 10.0" in adql
+        # 41″ east at K 8.1 (the band), 10″ at K 6 (inside 25″: not the wing), 59″ at K 9.9
+        return "designation,ra,dec,k_m\n03270136+1245470,51.755753,12.763,8.13\n03270000+1245000,51.74692,12.764,6.0\n0327x,51.7604,12.764,9.9\n"
+
+    f = Findings.__new__(Findings)
+    f.catalogue = SimpleNamespace(_tap=tap)
+    got = asyncio.run(f.bright_ir_star(51.744073, 12.764138))
+    assert got["state"] == "ok" and got["k"] == 8.13 and 40 < got["sep"] < 42
+
+    async def down(which: str, url: str, adql: str) -> str:
+        raise httpx.ConnectError("IRSA down")
+
+    async def run(fn: Any, *a: Any) -> Any:
+        return fn(*a)
+
+    f.catalogue = SimpleNamespace(_tap=down)
+    monkeypatch.setattr("service.findings.cpu.run", run)
+    monkeypatch.setattr(
+        context, "allwise_cone", lambda ra, dec, r: [{"ra": 51.7550, "dec": 12.7641, "k_m_2mass": 7.5, "designation": "J1"}]
+    )
+    got = asyncio.run(f.bright_ir_star(51.744073, 12.764138))
+    assert got["state"] == "ok" and got["k"] == 7.5
+    monkeypatch.setattr(context, "allwise_cone", lambda ra, dec, r: [{"ra": 51.7441, "dec": 12.7641, "k_m_2mass": 7.5}])  # 0″: no wing
+    assert asyncio.run(f.bright_ir_star(51.744073, 12.764138)) == {"state": "none"}

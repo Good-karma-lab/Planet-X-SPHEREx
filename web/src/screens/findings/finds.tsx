@@ -1001,7 +1001,7 @@ export function FindingsView({
                 class={faint ? 'on' : ''}
                 aria-pressed={faint}
                 data-testid="faint-toggle"
-                title="Planet X peaks under 6 sigma in the pictures: most are noise. They stay out of the list until you ask for them."
+                title="Far peaks (beyond 200 au) on detectors 1–3 whose photometry is under 6σ, and far peaks 25–60″ from a bright star (2MASS K ≤ 10), whose glow outside the search’s mask most likely makes them: most are not bodies. They stay out of the list until you ask for them. The number on a card is the search’s signal, not the photometry."
                 onClick={() => setFaint(!faint)}
               >
                 Faint peaks: {faint ? 'shown' : 'hidden'} <span>{h?.faint ?? NONE}</span>
