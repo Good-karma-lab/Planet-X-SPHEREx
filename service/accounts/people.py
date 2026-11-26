@@ -347,6 +347,8 @@ def askable(row: dict[str, Any]) -> bool:
         return False  # a faint Planet X peak (findings.faint_peak): most are noise
     if row.get("kind") == "film":
         return track_seen(row)
+    if row.get("kind") == "anomaly" and row.get("star_shown") is False:
+        return False  # its odd pictures are noise: nobody can say whether a star touches the one in the middle (С2, 27 Nov 2026)
     return row.get("visible", True) is True or "raised" in row
 
 

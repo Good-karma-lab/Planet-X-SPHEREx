@@ -30,6 +30,12 @@ DISK_STOP_PCT = 77.0  # nothing is built ahead on a disk this full (the keeper c
 FAST_PCT = 3.0  # nor, above FAST_FROM_PCT, while the disk grew by more than this in FAST_S: people's fields and the sweep fill it then
 FAST_FROM_PCT = 72.0
 FAST_S = 1800.0
+# an anomaly is asked about only when the star in the middle of its odd pictures is seen: in the stamps the task shows (web
+# taskviews StampsView), the middle stands at least STAMP_SN times the stamp's own noise above its sky, in half of them (the median).
+# The exploratory report of 27 Nov 2026 (С2): anomaly:bdb2bb574761 was asked about over six stamps of noise (median 10.1); the
+# neighbour of HD 21496 that people judged at once stands 55-164
+STAMP_SN = 20.0
+STAMPS_SHOWN = 6  # web taskviews MAX_STAMPS
 
 
 def _inside(ra: float, dec: float, p: dict[str, Any]) -> float:
@@ -48,6 +54,7 @@ class TaskFields:
         self._used: list[tuple[float, float]] = []  # how full the disk was, over the last FAST_S
         self._tried: dict[str, float] = {}  # what was asked to be made, and when
         self._fresh: dict[str, tuple[float, bool]] = {}  # product key -> (asked at, built of today's exposures and not stripped)
+        self._star: dict[str, bool] = {}  # spectrum key -> its odd pictures show the star (star_in_stamps), measured once
 
     def _listing(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -157,6 +164,60 @@ class TaskFields:
             return False
         key = sp.key_of(anomaly_params(anomaly))
         return bool((sp.dir / f"{key}.json").is_file() and (sp.dir / f"{key}.stamps.json").is_file())
+
+    def star_in_stamps(self, anomaly: dict[str, Any]) -> bool | None:
+        """Whether the odd pictures the task shows of an anomaly show its star (STAMP_SN); None while they are not on disk."""
+        sp = getattr(self.st, "spectra", None)
+        if sp is None:
+            return None
+        key = sp.key_of(anomaly_params(anomaly))
+        if key in self._star:
+            return self._star[key]
+        try:
+            points = json.loads((sp.dir / f"{key}.json").read_text())["points"]
+            stamps = json.loads((sp.dir / f"{key}.stamps.json").read_text())
+        except (OSError, ValueError, KeyError):
+            return None
+        shown = shown_stamps(points, stamps, anomaly.get("drivers") or [])
+        sns = [s for p in shown if (s := stamp_sn(stamps[str(p["i"])]["raw"])) is not None]
+        self._star[key] = bool(sns) and _median(sns) >= STAMP_SN
+        return self._star[key]
+
+
+def _median(v: list[float]) -> float:
+    s, n = sorted(v), len(v)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2.0
+
+
+def shown_stamps(points: list[dict[str, Any]], stamps: dict[str, Any], drivers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The odd pictures a task shows of an anomaly, as web taskviews StampsView picks them: the measured exposures inside its odd
+    bins that have a stamp, the farthest from the spectrum's median flux first, at most STAMPS_SHOWN."""
+    ok = [p for p in points if p.get("ok") and p.get("flux") is not None and p.get("lam") is not None]
+    inside = [p for p in ok if any(float(d["lo"]) <= p["lam"] <= float(d["hi"]) for d in drivers)]
+    fl = sorted(float(p["flux"]) for p in ok)
+    med = fl[len(fl) // 2] if fl else 0.0
+    have = [p for p in inside if (stamps.get(str(p["i"])) or {}).get("raw")]
+    return sorted(have, key=lambda p: -abs(float(p["flux"]) - med))[:STAMPS_SHOWN]
+
+
+def stamp_sn(raw: list[list[float | None]]) -> float | None:
+    """How far the middle of a stamp stands above its own sky: (the brightest pixel within 1.5 px of the centre - the median of the
+    ring 4-8 px) / the ring's MAD sigma. None for a stamp without room for the ring."""
+    import numpy as np
+
+    a = np.array([[np.nan if v is None else v for v in row] for row in raw], dtype=float)
+    if a.ndim != 2:
+        return None
+    h, w = a.shape
+    yy, xx = np.mgrid[0:h, 0:w]
+    d = np.hypot(xx - (w - 1) / 2.0, yy - (h - 1) / 2.0)
+    ring = a[(d >= 4.0) & (d <= 8.0) & np.isfinite(a)]
+    mid = a[(d <= 1.5) & np.isfinite(a)]
+    if ring.size < 20 or mid.size == 0:
+        return None
+    med = float(np.median(ring))
+    sig = 1.4826 * float(np.median(np.abs(ring - med)))
+    return (float(mid.max()) - med) / sig if sig > 0 else None
 
 
 def anomaly_params(a: dict[str, Any]) -> dict[str, Any]:

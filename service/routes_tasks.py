@@ -410,6 +410,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
                 visits[x["id"]] = clips.visits_seen({**x, **full}) if full is not None else None
     tf = task_fields(st)
     ready: dict[str, bool] = {}
+    star: dict[str, bool] = {}  # an anomaly: its odd pictures show its star (TaskFields.star_in_stamps; 27 Nov 2026, С2)
     pictures: dict[str, bool] = {}
     if tf is not None:  # the few finds people are asked about: can the lab show what the question is about at once?
         from service.findings import find_row as one
@@ -420,6 +421,8 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
                 if ok and x["kind"] == "anomaly":
                     an = ((one(f.db, x["id"]) or {}).get("data") or {}).get("anomaly")
                     ok = bool(an) and tf.spectrum_kept(an)
+                    if ok and an and (shown := tf.star_in_stamps(an)) is not None:
+                        star[x["id"]] = shown
                 ready[x["id"]] = ok
                 if x["kind"] == "peak" and clips is not None:  # the question is about its two pictures: without them it is not asked
                     pictures[x["id"]] = len((clips.info(x["id"]) or {}).get("blink") or []) == 2
@@ -439,6 +442,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             **({"ready": ready[x["id"]]} if x["id"] in ready else {}),
             **({"pictures": pictures[x["id"]]} if x["id"] in pictures else {}),
             **({"visits_seen": visits[x["id"]]} if x["id"] in visits else {}),
+            **({"star_shown": star[x["id"]]} if x["id"] in star else {}),
             **({"ask": x["ask"]} if "ask" in x else {}),
             **({"echo": True} if x.get("echo") else {}),
             **({"faint": True} if x.get("faint") and not (share and (x["id"] in started or faint_asked(x, share))) else {}),
