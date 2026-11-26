@@ -29,7 +29,8 @@ from service.storage import digest, load_npz, save_npz, sharded
 BAND_ROWS = 64
 # the layouts kept in memory, the latest used: 264 KB and 1,100 objects each, so without a limit every exposure ever read stayed
 # (73,000 on prod, 20 GB), and the garbage collector walks them all (6,000: 0.6 s on the Mac, with the API's threads standing). A square
-# reads up to 1,100 exposures; one that left is read from disk again (12 ms, in a thread)
+# reads up to 1,100 exposures; one that left is read from disk again (12 ms, in a thread). Since 26 Nov 2026 a layout keeps its headers as
+# text (engine.spx.layout): 8 objects and ~60 KB each instead of 1,117 and 300 KB, so the 2,000 no longer hold 2.2 million objects
 LAYOUTS_KEEP = 2000
 WCS_KEEP = 2000  # as many as the layouts: emptied all at once at 6,000, the next square built its thousand anew (11 ms each)
 HEADER_PROBE = 32768  # first read at each header: enough for every header seen so far (IMAGE ~26 kB, PSF 43 kB needs two)

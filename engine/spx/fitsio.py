@@ -24,11 +24,15 @@ def header_length(buf: bytes) -> int | None:
     return None
 
 
-def parse_header(buf: bytes) -> fits.Header:
+def header_text(buf: bytes) -> str:
     n = header_length(buf)
     if n is None:
         raise ValueError("no END card in the bytes given")
-    return fits.Header.fromstring(buf[:n].decode("ascii", errors="replace"))
+    return buf[:n].decode("ascii", errors="replace")
+
+
+def parse_header(buf: bytes) -> fits.Header:
+    return fits.Header.fromstring(header_text(buf))
 
 
 def data_size(h: fits.Header) -> int:
@@ -53,6 +57,7 @@ class HDU:
     data_offset: int
     data_size: int
     header: fits.Header
+    text: str = ""  # the header as read (whole blocks), for those who keep it: a string the garbage collector does not walk
 
     @property
     def next_offset(self) -> int:
@@ -61,8 +66,8 @@ class HDU:
 
 def hdu_at(index: int, offset: int, buf: bytes) -> HDU:
     """The HDU whose header starts at file offset `offset`; `buf` holds the bytes from that offset (at least its header)."""
-    h = parse_header(buf)
-    n = header_length(buf)
-    assert n is not None
+    text = header_text(buf)
+    n = len(text)  # one character per byte (ascii, an unreadable byte replaced by one character)
+    h = fits.Header.fromstring(text)
     name = str(h.get("EXTNAME", "PRIMARY" if index == 0 else f"HDU{index}")).strip().upper()
-    return HDU(index=index, name=name, header_offset=offset, data_offset=offset + n, data_size=data_size(h), header=h)
+    return HDU(index=index, name=name, header_offset=offset, data_offset=offset + n, data_size=data_size(h), header=h, text=text)

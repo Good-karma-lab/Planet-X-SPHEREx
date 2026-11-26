@@ -245,7 +245,7 @@ class Spectra:
         img = raw[RAW - HALF : RAW + HALF + 1, RAW - HALF : RAW + HALF + 1].copy()
         flg = (await self.files.rows(e.key, "flags", y0, y1))[:, x0:x1].astype(np.int64)
         var = (await self.files.rows(e.key, "variance", y0, y1))[:, x0:x1].astype(np.float64)
-        table, _, _ = spxflags.resolve(lay.flags_header)
+        table, _, _ = lay.flag_bits
         moving = bool(params.get("pmra") or params.get("pmdec"))
         bad_names = [n for n in spxflags.BAD_ALWAYS if not (moving and n in spxflags.MOVER_KEEP)]
         bad = (flg & spxflags.mask_of(table, bad_names)) != 0

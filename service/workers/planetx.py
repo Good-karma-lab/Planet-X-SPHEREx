@@ -226,12 +226,10 @@ class CancelFlag:
 async def spacecraft_of(fr: FileReader, key: str) -> NDArray[np.float64] | None:
     """The spacecraft's place from the Earth's centre (km) at the exposure, from the file's header; None when the header does not have
     it."""
-    lay = await fr.layout(key)
-    h = lay.image_header
-    try:
-        v = np.array([float(h["X_SC"]), float(h["Y_SC"]), float(h["Z_SC"])])
-    except (KeyError, ValueError, TypeError):
+    sc = (await fr.layout(key)).spacecraft
+    if sc is None:
         return None
+    v = np.array(sc)
     return v if np.all(np.isfinite(v)) else None
 
 
@@ -340,7 +338,7 @@ class PointMeter:
         y0, y1 = max(0, y0), min(ny, y1)
         img = (await self.fr.rows(key, "image", y0, y1)).astype(np.float64)
         flg = (await self.fr.rows(key, "flags", y0, y1)).astype(np.int64)
-        table, _, _ = spxflags.resolve(lay.flags_header)
+        table, _, _ = lay.flag_bits
         bad_names = [m for m in spxflags.BAD_ALWAYS if m not in spxflags.MOVER_KEEP]
         bad = (flg & spxflags.mask_of(table, bad_names)) != 0
         overflow = (flg & spxflags.mask_of(table, spxflags.SATURATION)) != 0
