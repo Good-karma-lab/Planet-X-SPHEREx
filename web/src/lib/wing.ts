@@ -10,14 +10,14 @@ export const wingLine = (w: { sep?: number | null; k?: number | null } | null | 
 };
 
 /** service/clips.py SIGHT_Z: the dot of a peak shown to people stands this far above the noise of its sum along the orbit */
-export const SIGHT_Z = 4.8;
+export const SIGHT_Z = 5.0;
 
 /** Why a Planet X peak stands behind the faint filter (service/findings.py hidden_why), in the words of the chip's tooltip */
 const WHY: Record<string, string> = {
   photometry: 'far peaks (beyond 200 au) on detectors 1–3 whose photometry is under 6σ',
   star: 'peaks a bright star’s light makes: its glow outside the search’s mask (2MASS K ≤ 10 at 25–60″, K ≤ 7 to 92″, K ≤ 3 to 6′) or its ghost about 3′ away (K ≤ 7.5)',
   no_sum: 'peaks whose sum along the orbit is not kept here, so there is nothing to see them in',
-  unseen: `peaks whose dot does not stand out of the noise in the sum along the orbit (under ${SIGHT_Z}×)`,
+  unseen: `peaks whose dot does not stand out of the noise in the sum along the orbit (under ${SIGHT_Z.toFixed(1)}×)`,
 };
 
 /** The tooltip of the faint-peaks chip: why each hidden peak is hidden, with the counts the list gave (`faint_why`). */
@@ -37,7 +37,7 @@ export function hiddenLine(why: string[] | null | undefined, sight?: { z?: numbe
     else if (w === 'no_sum') out.push('its sum along the orbit is not kept here, so nobody can see it');
     else if (w === 'unseen')
       out.push(
-        `its dot stands ${sight?.z != null ? `${sight.z.toFixed(1)}×` : 'too little'} above the noise of the sum along the orbit (${SIGHT_Z}× needed)`,
+        `its dot stands ${sight?.z != null ? `${sight.z.toFixed(1)}×` : 'too little'} above the noise of the sum along the orbit (${SIGHT_Z.toFixed(1)}× needed)`,
       );
     else if (w === 'star') out.push('a bright star’s glow most likely makes it');
   }

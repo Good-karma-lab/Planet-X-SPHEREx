@@ -853,10 +853,13 @@ def sum_window(find: dict[str, Any], sum_meta: dict[str, Any], sum_bin: bytes) -
 
 # Can a person see the peak's dot in the sum along the orbit? The brightest point within MEASURE_ARCSEC of the ring's centre against the
 # median and the 1.4826 × MAD scatter of the whole 3′ window (the pixels the search did not mask). Calibrated on 23 peaks judged by eye
-# on 26 Nov 2026: the 7 with a clear dot 5.0-8.1, the 4 with nothing in the ring 0.5-2.1, the 12 lumps like the noise around them
-# 1.0-7.8 (7 under 4.8, 5 of them as high as the clear ones: in a grey sum a lump and a dot measure alike). The old "visible" (an annulus
-# 2-5 ring radii out and control rings) passed 3 of the 7 clear dots and 4 of the lumps
-SIGHT_Z = 4.8
+# on 26 Nov 2026: the 7 with a clear dot 5.0-8.1 (all pass), the 4 with nothing in the ring 0.5-2.1 (none), the 12 lumps like the noise
+# around them 1.0-7.8 (7 under 5.0; the other 5, 5.5-7.8, as high as the clear ones: in a grey sum a lump and a dot measure alike).
+# Checked on 24 more judged blind: 10 of 11 clear dots pass (ffb27f 4.64 does not), none of the 6 empty rings, 5 of 7 lumps. 4.8 at
+# first; 5.0 since 27 Nov 2026: it also hides 46eb5f6c505e (4.92, the ring on the rim of a star's mask, a glow by the eye of two
+# testers) and 5 others of 4.81-4.95, and no clear dot of either set. The old "visible" (an annulus 2-5 ring radii out and control
+# rings) passed 3 of the 7 clear dots and 4 of the lumps
+SIGHT_Z = 5.0
 
 
 def sum_sight(find: dict[str, Any], sum_meta: dict[str, Any], sum_bin: bytes) -> dict[str, float]:
