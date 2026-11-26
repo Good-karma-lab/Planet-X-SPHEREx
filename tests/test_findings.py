@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import sqlite3
 from pathlib import Path
 from typing import Any
@@ -697,10 +698,21 @@ def test_a_galaxy_match_is_not_a_brown_dwarf_or_a_mover() -> None:
         "kind": "browndwarf",
         "ra": 133.8,
         "dec": -7.2,
-        "rate": 7.9,
-        "data": {"group": "known", "source": {"simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "BD*"}}},
+        "rate": 6.2,
+        "data": {
+            "group": "known",
+            "source": {"pmra": -6196.9, "pmdec": 0.0, "simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "BD*"}},
+        },
     }
-    assert status_of(real, []) == "known"
+    assert status_of(real, []) != "known"  # the scan's name at the place, without a motion to compare: not enough
+    wise = {
+        "catalogue": "simbad",
+        "state": "ok",
+        "name": "WISEA J085510.74-071442.5",
+        "type": "BD*",
+        "raw": {"pmra": -8123.7, "pmdec": 673.2},
+    }
+    assert status_of(real, [wise]) == "known"
     sb = [{"catalogue": "simbad", "state": "ok", "name": "NAME Some Galaxy", "type": "AGN", "label": "SIMBAD", "sep": 0.5}]
     assert status_of({"kind": "mover", "ra": 10.0, "dec": 5.0, "rate": 5.0, "data": {"track": {"check": "none"}}}, sb) == "galaxy"
 
@@ -750,7 +762,10 @@ def test_halo_peaks_and_motion_identity() -> None:
         "ra": 133.8,
         "dec": -7.2,
         "rate": 7.9,
-        "data": {"group": "known", "source": {"simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "Y*"}}},
+        "data": {
+            "group": "known",
+            "source": {"pmra": -7760.0, "pmdec": 1500.0, "simbad": {"state": "ok", "name": "WISEA J085510.74-071442.5", "otype": "Y*"}},
+        },
     }
     ids = [
         {
@@ -1444,3 +1459,40 @@ def test_one_faint_peak_in_ten_is_asked_about_by_its_id() -> None:
     assert 400 < n < 600 and faint_sample("peak:00000000000a") == faint_sample("peak:00000000000a")
     assert not askable({"kind": "peak", "visible": True, "faint": True})
     assert askable({"kind": "peak", "visible": True}) and askable({"kind": "peak", "visible": True, "faint": True, "raised": "candidate"})
+
+
+@pytest.mark.parametrize(
+    ("ours", "theirs", "known"),
+    [
+        ((3759.0, -2794.0), (3981.977, -2466.832), True),  # eps Ind B (26 Nov prod)
+        ((-6196.9, 0.0), (-8123.7, 673.2), True),  # WISE 0855: 1.3 times faster in the catalogue, 5 degrees apart
+        ((6476.9, -1525.5), (None, None), False),  # NVSS J032033+154917, a radio source: no motion of its own
+        ((10571.2, 3024.9), (-17.146, 0.062), False),  # a Gaia star that stands still
+        ((3000.0, 0.0), (-3000.0, 0.0), False),  # as fast, the other way
+        ((3000.0, 0.0), (7000.0, 0.0), False),  # the same way, more than twice as fast
+        ((3000.0, 0.0), (2400.0, 1600.0), True),  # 34 degrees apart, 0.96 times as fast
+    ],
+)
+def test_a_brown_dwarf_is_known_only_by_a_catalogue_source_that_moves_as_it_does(
+    ours: tuple[float, float], theirs: tuple[float | None, float | None], known: bool
+) -> None:
+    from service.findings import _motion_identity
+
+    f = {
+        "kind": "browndwarf", "ra": 50.0, "dec": 10.0, "rate": math.hypot(*ours) / 1000,
+        "data": {"group": "known", "source": {"pmra": ours[0], "pmdec": ours[1], "simbad": {"state": "ok", "name": "X", "otype": "Rad"}}},
+    }  # fmt: skip
+    ids = [
+        {
+            "catalogue": "simbad",
+            "state": "ok",
+            "name": "X",
+            "type": "Rad",
+            "label": "SIMBAD",
+            "sep": 3.0,
+            "raw": {"pmra": theirs[0], "pmdec": theirs[1]},
+        }
+    ]
+    _motion_identity(f, ids)
+    assert (status_of(f, ids) == "known") is known
+    assert ("identity" in f) is known

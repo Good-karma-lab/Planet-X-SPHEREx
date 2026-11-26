@@ -80,7 +80,9 @@ export function cardTitle(f: CardFind): string {
     case 'mover':
       return `${nm || 'Mover'} · ${(f.rate ?? 0).toFixed(2)}″/yr`;
     case 'browndwarf':
-      return `${nm || (f.group === 'known' ? 'Known brown dwarf' : f.group === 'slow' ? 'Slow red mover' : 'Brown dwarf candidate')} · ${(f.rate ?? 0).toFixed(1)}″/yr`;
+      return f.group === 'blend'
+        ? `${nm || 'Red source'} · did not move`
+        : `${nm || (f.group === 'known' ? 'Known brown dwarf' : f.group === 'slow' ? 'Slow red mover' : 'Brown dwarf candidate')} · ${(f.rate ?? 0).toFixed(1)}″/yr`;
     case 'film':
       return `${nm || 'Moves within one pass'} · ${(f.rate ?? 0).toFixed(1)}″/h`;
     case 'peak':
