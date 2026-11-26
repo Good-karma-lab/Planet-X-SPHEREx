@@ -147,11 +147,10 @@ async def observers(fr: FileReader, exps: list[Any], visit_of: dict[int, int], f
         for i in by_visit.get(f.visit, []):
             if exps[i].det != f.det:
                 continue
-            h = (await fr.layout(exps[i].key)).image_header
-            try:
-                xyz = [float(h["X_SC"]), float(h["Y_SC"]), float(h["Z_SC"])]
-            except (KeyError, ValueError):
+            here = (await fr.layout(exps[i].key)).spacecraft
+            if here is None:
                 continue
+            xyz = list(here)
             mjds.append(0.5 * (exps[i].mjd0 + exps[i].mjd1))
             sc.append(xyz)
         if mjds:

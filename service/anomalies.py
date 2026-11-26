@@ -193,7 +193,7 @@ class Anomalies:
         flg = (await self.files.rows(e.key, "flags", y0, y1))[:, x0:x1].astype(np.int64)
         ps_path = await self.psfs.path_for_file(e.key)
         cw, _ = await self.wavelengths.get(lay.detector)
-        table, _, _ = spxflags.resolve(lay.flags_header)
+        table, _, _ = lay.flag_bits
         box = np.ascontiguousarray(cw[y0:y1, x0:x1])  # only the box crosses to the worker, not the detector's whole map
         moves = [bool(s["moves"]) for s in sources]
         return await cpu.run(fit_all, img, flg, table, ps_path, box, px, py, inside, x0, y0, moves)

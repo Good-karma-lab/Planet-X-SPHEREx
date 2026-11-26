@@ -65,7 +65,7 @@ def test_rows_decode_exactly(layout: str) -> None:
         a, b = lay.flags.rows_range(y0, y1)
         got = plain_rows(lay.flags, data[a:b], y1 - y0)
     np.testing.assert_array_equal(got, planes["flags"][y0:y1])
-    assert lay.detector == 1 and lay.spacecraft_km is not None
+    assert lay.detector == 1 and lay.spacecraft is not None
 
 
 def test_flag_tables_of_both_releases() -> None:
@@ -74,6 +74,51 @@ def test_flag_tables_of_both_releases() -> None:
         lay = layout_from_hdus(walk(data), len(data))
         table, src, mismatch = flags.resolve(lay.flags_header)
         assert src == "file" and table == bits and mismatch == {}
+
+
+@pytest.mark.parametrize("layout", ["qr2", "v27"])
+def test_a_kept_layout_holds_no_astropy_header(layout: str) -> None:
+    # 26 Nov 2026: 2,000 kept layouts held 2.2 million astropy objects (Card, the lists of the Header's index), which every full
+    # collection walked. The layout keeps the headers as text and what is read from them every time.
+    import gc
+
+    data, _ = make_file(layout)
+    hdus = walk(data)
+    lay = layout_from_hdus(hdus, len(data))
+    seen: dict[int, object] = {}
+    todo: list[object] = [lay]
+    while todo:
+        o = todo.pop()
+        if id(o) in seen or isinstance(o, type):
+            continue
+        seen[id(o)] = o
+        assert not isinstance(o, (fits.Header, fits.Card)), type(o)
+        todo.extend(gc.get_referents(o))
+    assert sum(gc.is_tracked(o) for o in seen.values()) < 30  # was 1,100 on a real file
+    by = {h.name: h for h in hdus}
+    # the same headers as before, read anew from the text
+    assert lay.image_header.tostring() == by["IMAGE"].header.tostring()
+    assert lay.flags_header.tostring() == by["FLAGS"].header.tostring()
+    assert lay.flag_bits == flags.resolve(by["FLAGS"].header)
+    h = by["IMAGE"].header
+    assert lay.detector == int(h["DETECTOR"]) and lay.mjd == float(h["MJD-AVG"])
+    assert lay.spacecraft == (float(h["X_SC"]), float(h["Y_SC"]), float(h["Z_SC"]))
+    if lay.wave is not None:
+        assert lay.wave.header.tostring() == by["WCS-WAVE"].header.tostring()
+
+
+def test_a_header_without_what_is_read_fails_only_for_who_asks() -> None:
+    data, _ = make_file("v27")
+    hdus = walk(data)
+    for h in hdus:
+        if h.name == "IMAGE":
+            for k in ("X_SC", "MJD-AVG"):
+                del h.header[k]
+            object.__setattr__(h, "text", "")  # the text is made from the header changed by hand
+    lay = layout_from_hdus(hdus, len(data))
+    assert lay.spacecraft is None and lay.detector == 1
+    with pytest.raises(KeyError):
+        _ = lay.mjd
 
 
 def test_builtin_table_when_the_file_has_none_and_mismatch_reported() -> None:

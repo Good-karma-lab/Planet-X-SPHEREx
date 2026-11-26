@@ -98,7 +98,7 @@ async def measure_places(
     """The PSF flux at every place of one exposure (None where the place is off the detector or the window could not be read).
     The reading is done here; every array step runs in a worker process."""
     lay = await fr.layout(key)
-    w = spxwcs.celestial(lay.image_header)
+    w = await fr.wcs(key, lay)
     ra = np.array([p[0] for p in places])
     dec = np.array([p[1] for p in places])
     px, py = spxwcs.sky2pix(w, ra, dec)
@@ -111,7 +111,7 @@ async def measure_places(
     y1 = int(np.ceil(py[inside].max())) + HALF + 1
     img_raw = await fr.rows(key, "image", y0, y1)
     flg_raw = await fr.rows(key, "flags", y0, y1)
-    table, _, _ = spxflags.resolve(lay.flags_header)
+    table, _, _ = lay.flag_bits
     ps = await psfs.for_file(key)
     cw, _ = await wl.get(det)
     bad_mask = spxflags.mask_of(table, [n for n in spxflags.BAD_ALWAYS if n not in spxflags.MOVER_KEEP])

@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
+from astropy.io import fits
 from scipy.ndimage import distance_transform_edt
 
 from engine import clean
@@ -73,8 +74,8 @@ async def read_native(
         lay.detector,
         lay.mjd,
         visit,
-        lay.image_header,
-        lay.flags_header,
+        lay.image_text,
+        lay.flag_bits[0],
         img,
         flg,
         x0,
@@ -92,8 +93,8 @@ def prepare_native(
     detector: int,
     mjd: float,
     visit: int,
-    image_header: Any,
-    flags_header: Any,
+    image_text: str,
+    table: dict[str, int],
     img: np.ndarray,
     flg: np.ndarray,
     x0: int,
@@ -105,9 +106,8 @@ def prepare_native(
     keep_outlier: bool,
 ) -> NativeExposure:
     """Masks, background, grid position and wavelength of every pixel of the box (runs in a worker process)."""
-    w = spxwcs.celestial(image_header)
+    w = spxwcs.celestial(fits.Header.fromstring(image_text))  # the text crosses to the worker: half the bytes of a pickled Header
     y1, x1 = y0 + img.shape[0], x0 + img.shape[1]
-    table, _, _ = spxflags.resolve(flags_header)
     jj, ii = np.mgrid[y0:y1, x0:x1]
     xd, yd = ii.ravel().astype(float), jj.ravel().astype(float)
     pra, pdec = spxwcs.pix2sky(w, xd, yd)

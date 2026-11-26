@@ -7,11 +7,13 @@ Header lengths differ between files, so every offset comes from walking the chai
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
 from astropy.io import fits
 
+from engine.spx import flags as spxflags
 from engine.spx.fitsio import HDU
 
 
@@ -55,11 +57,19 @@ class RiceImage:
 class TableHDU:
     data_offset: int
     data_size: int
-    header: fits.Header
+    header_text: str
+
+    @property
+    def header(self) -> fits.Header:
+        """Parsed anew on every call (0.1 ms): the kept layouts hold only the text."""
+        return fits.Header.fromstring(self.header_text)
 
 
 @dataclass(frozen=True)
 class Layout:
+    """Kept by the thousand (service.reader.files): it holds the headers as text and the few numbers read from them every time, never
+    astropy Header objects (1,100 objects a file, which the garbage collector walked on every full collection)."""
+
     release_layout: Literal["qr2", "v27"]
     image: PlainImage
     flags: PlainImage | RiceImage
@@ -68,23 +78,42 @@ class Layout:
     psf: TableHDU | None  # QR2: the PSF image cube; v27: the EPSF table
     psf_kind: Literal["cube", "epsf"] | None
     wave: TableHDU | None
-    image_header: fits.Header
-    flags_header: fits.Header
+    image_text: str
+    flags_text: str
     file_size: int
+    spacecraft: tuple[float, float, float] | None  # X_SC, Y_SC, Z_SC (km from the Earth's centre); None when one is missing or not a number
+    # read when the layout is made; None when that failed: the property then reads the header and fails as before, for its caller only
+    detector_read: int | None
+    mjd_read: float | None
+    flag_bits_read: tuple[dict[str, int], str, dict[str, tuple[int, int]]] | None
 
     @property
     def detector(self) -> int:
-        return int(self.image_header["DETECTOR"])
+        return self.detector_read if self.detector_read is not None else int(self.image_header["DETECTOR"])
 
     @property
     def mjd(self) -> float:
-        return float(self.image_header["MJD-AVG"])
+        return self.mjd_read if self.mjd_read is not None else float(self.image_header["MJD-AVG"])
 
     @property
-    def spacecraft_km(self) -> tuple[float, float, float] | None:
-        h = self.image_header
-        if all(k in h for k in ("X_SC", "Y_SC", "Z_SC")):
-            return float(h["X_SC"]), float(h["Y_SC"]), float(h["Z_SC"])
+    def flag_bits(self) -> tuple[dict[str, int], str, dict[str, tuple[int, int]]]:
+        """engine.spx.flags.resolve of the FLAGS header: (bit of every flag name, "file" | "builtin", mismatches)."""
+        return self.flag_bits_read if self.flag_bits_read is not None else spxflags.resolve(self.flags_header)
+
+    @property
+    def image_header(self) -> fits.Header:
+        """Parsed anew on every call (0.3 ms): read it once where it is needed, not in a loop on the event loop."""
+        return fits.Header.fromstring(self.image_text)
+
+    @property
+    def flags_header(self) -> fits.Header:
+        return fits.Header.fromstring(self.flags_text)
+
+
+def _spacecraft(h: fits.Header) -> tuple[float, float, float] | None:
+    try:
+        return float(h["X_SC"]), float(h["Y_SC"]), float(h["Z_SC"])
+    except (KeyError, ValueError, TypeError):
         return None
 
 
@@ -123,19 +152,35 @@ def layout_from_hdus(hdus: list[HDU], file_size: int) -> Layout:
     for need in ("IMAGE", "FLAGS"):
         if need not in by:
             raise ValueError(f"no {need} extension")
-    flags_hdu = by["FLAGS"]
+    flags_hdu, image = by["FLAGS"], by["IMAGE"]
     compressed = bool(flags_hdu.header.get("ZIMAGE", False))
     psf_hdu, psf_kind = (by["PSF"], "cube") if "PSF" in by else ((by["EPSF"], "epsf") if "EPSF" in by else (None, None))
     return Layout(
         release_layout="v27" if compressed else "qr2",
-        image=_plain(by["IMAGE"]),
+        image=_plain(image),
         flags=_rice(flags_hdu) if compressed else _plain(flags_hdu),
         variance=_plain(by["VARIANCE"]) if "VARIANCE" in by else None,
         zodi=_plain(by["ZODI"]) if "ZODI" in by else None,
-        psf=TableHDU(psf_hdu.data_offset, psf_hdu.data_size, psf_hdu.header) if psf_hdu else None,
+        psf=TableHDU(psf_hdu.data_offset, psf_hdu.data_size, _text(psf_hdu)) if psf_hdu else None,
         psf_kind=psf_kind,  # type: ignore[arg-type]
-        wave=TableHDU(by["WCS-WAVE"].data_offset, by["WCS-WAVE"].data_size, by["WCS-WAVE"].header) if "WCS-WAVE" in by else None,
-        image_header=by["IMAGE"].header,
-        flags_header=flags_hdu.header,
+        wave=TableHDU(by["WCS-WAVE"].data_offset, by["WCS-WAVE"].data_size, _text(by["WCS-WAVE"])) if "WCS-WAVE" in by else None,
+        image_text=_text(image),
+        flags_text=_text(flags_hdu),
         file_size=file_size,
+        spacecraft=_spacecraft(image.header),
+        detector_read=_or_none(lambda: int(image.header["DETECTOR"])),
+        mjd_read=_or_none(lambda: float(image.header["MJD-AVG"])),
+        flag_bits_read=_or_none(lambda: spxflags.resolve(flags_hdu.header)),
     )
+
+
+def _or_none[T](read: Callable[[], T]) -> T | None:
+    try:
+        return read()
+    except Exception:
+        return None
+
+
+def _text(hdu: HDU) -> str:
+    """The header as read; an HDU made by hand (tests) has only the parsed header."""
+    return hdu.text or hdu.header.tostring()
