@@ -1,6 +1,6 @@
 import { visibleInterval } from '../../lib/idle';
 import { useEffect, useRef, useState } from 'preact/hooks';
-import { wingLine } from '../../lib/wing';
+import { faintTitle, hiddenLine, wingLine } from '../../lib/wing';
 import { honestLines } from '../search/jobs';
 import { useSearched, type SearchedField } from '../search/searched';
 import { P9, RECORDED } from './data';
@@ -91,6 +91,9 @@ interface Peak {
   dec: number;
   /** a bright 2MASS star 25–60″ away: its glow most likely makes the peak (findings/cards.tsx wingLine) */
   star_wing?: { name?: string | null; sep?: number | null; k?: number | null } | null;
+  /** how far its dot stands above the noise of its sum along the orbit; why it is hidden with the faint peaks (findings/cards.tsx) */
+  sight?: { state?: string; z?: number | null } | null;
+  hidden_why?: string[] | null;
   fov: number;
   place: string;
   snr: number | null;
@@ -116,15 +119,16 @@ const isKnown = (f: Peak) =>
   f.data.peak?.known?.state === 'ok' ||
   atKnown(f.ra, f.dec) ||
   echoOf(f) != null;
-/** `faint`: with the faint peaks (far, detectors 1–3, under 6 sigma: the service hides them unless asked, as Findings does) */
-function usePeaks(faint: boolean): { leads: Peak[]; known: Peak[]; faint: number } | null {
-  const [p, setP] = useState<{ leads: Peak[]; known: Peak[]; faint: number } | null>(null);
+/** `faint`: with the faint peaks (far, detectors 1–3, under 6 sigma; in a bright star's glow; not to be seen in the sum along the orbit: the
+ * service hides them unless asked, as Findings does) */
+function usePeaks(faint: boolean): { leads: Peak[]; known: Peak[]; faint: number; why?: Record<string, number> } | null {
+  const [p, setP] = useState<{ leads: Peak[]; known: Peak[]; faint: number; why?: Record<string, number> } | null>(null);
   useEffect(() => {
     let stop = false;
     const load = () =>
       fetch(`/api/v1/findings?status=all&limit=2000&kind=peak${faint ? '' : '&faint=hide'}`)
         .then((r) => (r.ok ? r.json() : null))
-        .then((d: { finds?: (Peak & { kind: string })[]; faint?: number } | null) => {
+        .then((d: { finds?: (Peak & { kind: string })[]; faint?: number; faint_why?: Record<string, number> } | null) => {
           if (stop || !d?.finds) return;
           // the Findings rule: one peak with ok=true per object; known bodies are not leads (status 'known' from the service; until the service
           // marks the live Eris and Makemake detections, their places are matched here)
@@ -132,7 +136,7 @@ function usePeaks(faint: boolean): { leads: Peak[]; known: Peak[]; faint: number
           const ok = d.finds.filter(
             (f) => f.kind === 'peak' && f.data.peak?.ok !== false && !['residual', 'galaxy', 'below', 'halo'].includes(f.status ?? ''),
           );
-          setP({ leads: ok.filter((f) => !isKnown(f)), known: ok.filter(isKnown), faint: d.faint ?? 0 });
+          setP({ leads: ok.filter((f) => !isKnown(f)), known: ok.filter(isKnown), faint: d.faint ?? 0, why: d.faint_why });
         })
         .catch(() => {});
     void load();
@@ -264,6 +268,7 @@ export function PlanetXPage() {
         {pk.data.peak?.phot_sn != null ? ` · photometry ${pk.data.peak.phot_sn.toFixed(1)}× the noise` : ''}
       </div>
       {pk.star_wing && <p data-testid="px-star-wing">{wingLine(pk.star_wing)}.</p>}
+      {pk.hidden_why && pk.hidden_why.length > 0 && <p data-testid="px-hidden-why">{hiddenLine(pk.hidden_why, pk.sight)}.</p>}
       {pk.data.peak?.known?.state === 'ok' && pk.data.peak.known.words && (
         <p>{`${pk.data.peak.known.words[0]!.toUpperCase()}${pk.data.peak.known.words.slice(1)}. JPL’s own place and the search’s agree to ${Math.max(...(pk.data.peak.known.seps ?? [0])).toFixed(1)}″.`}</p>
       )}
@@ -407,7 +412,7 @@ export function PlanetXPage() {
                 style={{ '--c': '#8a9aa6' }}
                 aria-pressed={faint}
                 data-testid="px-faint"
-                title="Far peaks (beyond 200 au) on detectors 1–3 whose photometry is under 6σ, and far peaks 25–60″ from a bright star (2MASS K ≤ 10), whose glow outside the search’s mask most likely makes them: they are left out unless you ask. Search signal and photometry are the two numbers on each card."
+                title={faintTitle(pk?.why, 'Search signal and photometry are the two numbers on each card.')}
                 onClick={() => setFaint(!faint)}
               >
                 <i />

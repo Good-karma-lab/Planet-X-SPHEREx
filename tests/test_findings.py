@@ -1591,3 +1591,121 @@ def test_the_wing_loop_asks_several_at_once_and_says_how_far_it_is(
     assert "wings: asked 9 (ok " in caplog.text and "failed " in caplog.text and "via AllWISE" in caplog.text
     states = dict(db.db.execute("SELECT state, count(*) FROM wings GROUP BY state").fetchall())
     assert sum(states.values()) == 9 and states.get("unavailable", 0) >= 1
+
+
+def test_a_peak_nobody_can_see_stands_behind_the_faint_filter_and_says_why(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """26 Nov 2026: a Planet X peak shown to people must have its dot visible in the sum along the orbit. No sum kept here, or a dot
+    under SIGHT_Z: hidden as a faint peak is (SKY_HIDE_UNSEEN_PEAKS=0 turns it off), and the list says why."""
+    from service.clips import SIGHT_Z
+    from service.findings import faint_asked, faint_sample
+
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds([{**_peak(i, 8.0), "sigma": None, "rate_err": None, "versions": {}} for i in ("seen", "dim", "nosum", "new", "both")])
+    assert {r["id"] for r in db.sights_to_ask(time.time(), 10)} == {f"peak:{i}" for i in ("seen", "dim", "nosum", "new", "both")}
+    db.put_sight("peak:seen", "ok", {"z": SIGHT_Z + 0.1, "here": 7.0, "floor": 1.5, "noise": 0.8}, "k1")
+    db.put_sight("peak:dim", "ok", {"z": SIGHT_Z - 0.1, "here": 5.0, "floor": 4.2, "noise": 0.5}, "k2")
+    db.put_sight("peak:nosum", "nosum")
+    db.put_sight("peak:both", "nosum")
+    db.put_sight("peak:new", "unavailable")
+    db.put_wing("peak:both", "ok", "2MASS J1", 74.0, 6.45)
+    db.db.commit()
+    assert db.sights_to_ask(time.time(), 10) == []  # each looked at once
+    assert {r["id"] for r in db.sights_to_ask(time.time() + 7 * 3600, 10)} == {"peak:nosum", "peak:both", "peak:new"}
+    ids = lambda **k: {f["id"] for f in query(db, "peak", "all", None, 50, 0, **k)["finds"]}  # noqa: E731
+    out = query(db, "peak", "all", None, 50, 0, faint="hide")
+    assert ids(faint="hide") == {"peak:seen", "peak:new"}  # a peak not looked at yet (or not read) stays in
+    assert out["faint"] == 3 and out["faint_why"] == {"unseen": 1, "no_sum": 2, "star": 1}
+    every = {f["id"]: f for f in query(db, "peak", "all", None, 50, 0)["finds"]}
+    assert every["peak:dim"]["hidden_why"] == ["unseen"] and every["peak:dim"]["sight"]["z"] == SIGHT_Z - 0.1
+    assert every["peak:both"]["hidden_why"] == ["star", "no_sum"] and "hidden_why" not in every["peak:seen"]
+    assert "peak:dim" in ids(faint="hide", real=frozenset({"peak:dim"})) and "peak:dim" in ids(
+        faint="hide", raised={"peak:dim": "candidate"}
+    )
+    # one faint peak in ten is still asked about, but never one with no sum: there is nothing to judge
+    sampled = next(f"peak:{i:012x}" for i in range(100) if faint_sample(f"peak:{i:012x}"))
+    assert faint_asked({"id": sampled, "hidden_why": ["unseen"]}) and not faint_asked({"id": sampled, "hidden_why": ["no_sum"]})
+    monkeypatch.setenv("SKY_HIDE_UNSEEN_PEAKS", "0")
+    assert ids(faint="hide") == {"peak:seen", "peak:new", "peak:dim", "peak:nosum"}  # the star's glow still hides "both"
+    monkeypatch.setenv("SKY_HIDE_FAINT_PEAKS", "0")
+    assert len(ids(faint="hide")) == 5
+
+
+@pytest.mark.parametrize(
+    ("k", "sep", "wing"),
+    [
+        (8.1, 41.0, True),  # the old rule: K <= 10, 25-60″
+        (10.5, 41.0, False),
+        (8.0, 20.0, False),  # inside 25″: the star itself, not its glow
+        (8.0, 90.0, False),  # an ordinary star beyond 60″
+        (6.45, 73.9, True),  # peak:ef1efcde994e
+        (5.56, 78.1, True),  # peak:6c2e6fa9b5c8
+        (1.49, 314.6, True),  # peak:e87b5c9cdc9b, eta Bootis
+        (6.45, 120.0, False),  # between the glow and the ghost: as many as chance puts there
+        (7.2, 75.0, False),
+        (5.0, 186.0, True),  # the ghost about 3′ away (peak:e286021312d8 K 4.1 at 186″)
+        (7.4, 190.0, True),
+        (7.8, 190.0, False),
+        (4.0, 300.0, False),
+    ],
+)
+def test_a_very_bright_stars_glow_reaches_farther(k: float, sep: float, wing: bool) -> None:
+    from service.findings import wing_of
+
+    assert wing_of(k, sep) is wing
+
+
+def test_the_bright_stars_asked_before_the_wider_circle_are_asked_again(tmp_path: Path) -> None:
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    db.write_finds([{**_peak(i, 8.0), "sigma": None, "rate_err": None, "versions": {}} for i in ("old", "new")])
+    db.db.execute(
+        "INSERT INTO wings (find_id, state, name, sep, k, tried) VALUES ('peak:old', 'none', NULL, NULL, NULL, ?)", (time.time(),)
+    )
+    db.put_wing("peak:new", "none")
+    db.db.commit()
+    assert [r["id"] for r in db.wings_to_ask(time.time(), 10)] == ["peak:old"]
+    db2 = FindingsDB(tmp_path / "findings.db", writer=True)  # opened again: the column is there once
+    assert [r["id"] for r in db2.wings_to_ask(time.time(), 10)] == ["peak:old"]
+
+
+def test_the_sight_loop_looks_at_every_peaks_sum_once_and_says_how_far_it_is(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import numpy as np
+
+    from engine import distant as edist
+    from service import findings as fmod
+    from service.findings import Findings
+    from service.products.store import Store
+
+    monkeypatch.setattr(fmod, "SIGHT_FIRST_S", 0.0)
+    monkeypatch.setattr(fmod, "SIGHT_PAUSE_S", 0.0)
+    store = Store(tmp_path / "store")
+    n, nvis = 120, 3
+    best = np.clip(np.round(np.random.default_rng(5).normal(30.0, 15.0, (n, n))), 1, 255).astype(np.uint8)  # the noise of the sum
+    best[n // 2 - 1 : n // 2 + 2, n // 2 - 1 : n // 2 + 2] = 200
+    params = {"ra": 11.0, "dec": 1.0, "fov": n * edist.S / 60.0, "mjd": 61000.0, "det": [1, 2, 3], "dmin": 200.0, "dmax": 2000.0}
+    store.begin("distant", "d" * 24, params)
+    store.write_part("distant", "d" * 24, "bin", np.zeros((nvis, n, n), np.uint8).tobytes() + best.tobytes() + bytes(n * n))
+    store.write_meta("distant", "d" * 24, {"status": "ok", "params": params, "slider": {"n": n, "step": edist.S, "t": [0.0] * nvis}})
+    store.complete("d" * 24)
+    db = FindingsDB(tmp_path / "findings.db", writer=True)
+    rows = [{**_peak(i, 8.0), "sigma": None, "rate_err": None, "versions": {}} for i in ("a", "bb")]  # ra 11 (in the search), 12
+    for r in rows:
+        r["data"]["peak"].update({"ref_mjd": 61000.0, "d": 500.0})  # type: ignore[index]
+    db.write_finds(rows)
+    f = Findings.__new__(Findings)
+    f.db, f.store = db, store
+
+    async def run() -> None:
+        t = asyncio.create_task(f.sight_loop())
+        for _ in range(300):
+            await asyncio.sleep(0.02)
+            if "left" in caplog.text:
+                break
+        t.cancel()
+
+    with caplog.at_level("WARNING", logger="sky.findings"):
+        asyncio.run(run())
+    assert "sights: looked at 2 (seen 1, unseen 0, no sum 1, failed 0), left 0" in caplog.text
+    got = db.sights()
+    assert got["peak:a"]["state"] == "ok" and got["peak:a"]["z"] > 5 and got["peak:bb"] == {"state": "nosum", "z": None, "here": None}

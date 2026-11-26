@@ -488,3 +488,49 @@ def test_a_check_never_builds_and_the_fields_are_listed_off_the_event_loop(tmp_p
 
     asyncio.run(both())
     assert len(built) == 1 and where[0] is False
+
+
+def _sum_search(store: Store, key: str, best: np.ndarray, nvis: int = 3) -> dict[str, Any]:
+    """A finished distance search of the place whose best-S/N map is `best` (uint8, S/N × 255 / 12)."""
+    from engine import distant as edist
+
+    n = best.shape[0]
+    blob = np.zeros((nvis, n, n), np.uint8).tobytes() + best.tobytes() + np.zeros((n, n), np.uint8).tobytes()
+    params = {"ra": RA0, "dec": DEC0, "fov": n * edist.S / 60.0, "mjd": MJD[1], "det": [1, 2, 3], "dmin": 60.0, "dmax": 110.0}
+    meta = {"status": "ok", "params": params, "slider": {"n": n, "step": edist.S, "t": [0.0] * nvis}}
+    store.begin("distant", key, params)
+    store.write_part("distant", key, "bin", blob)
+    store.write_meta("distant", key, meta)
+    store.complete(key)
+    return meta
+
+
+def _noise_map(n: int, floor: float, sigma: float, seed: int) -> np.ndarray:
+    rng = np.random.default_rng(seed)
+    return np.clip(np.round((floor + sigma * rng.normal(size=(n, n))) * 255 / 12.0), 0, 255).astype(np.uint8)
+
+
+def test_the_dot_of_a_peak_is_seen_in_its_sum_only_above_the_noise_of_the_window(tmp_path: Path) -> None:
+    """26 Nov 2026: the sum along the orbit of a Planet X peak shows its dot (z >= SIGHT_Z against the median and MAD of the 3′
+    window), or nothing in the ring, or a lump like the noise around it; a masked star (0) is not noise."""
+    from service.clips import SIGHT_Z, find_sum, sum_sight
+
+    store = Store(tmp_path / "main")
+    n = 120
+    peak = {"id": "peak:t", "kind": "peak", "ra": RA0, "dec": DEC0, "data": {"peak": {"ref_mjd": MJD[1], "d": 80.0}}}
+    c = n // 2
+    clear = _noise_map(n, 1.5, 0.8, 1)
+    clear[c - 1 : c + 2, c - 1 : c + 2] = round(7.5 * 255 / 12)  # a 7.5σ dot on a dark sum: z about 7.5
+    clear[:, :20] = 0  # a star's mask
+    lump = _noise_map(n, 4.3, 0.5, 2)
+    lump[c - 1 : c + 2, c - 1 : c + 2] = round(5.4 * 255 / 12)  # a grey wash with a lump 2σ above it
+    empty = _noise_map(n, 1.5, 0.8, 3)
+    got = {}
+    for name, m in (("clear", clear), ("lump", lump), ("empty", empty)):
+        meta = _sum_search(store, name[0] * 24, m)
+        got[name] = sum_sight(peak, meta, store.read_part("distant", name[0] * 24, "bin") or b"")
+    assert got["clear"]["z"] >= SIGHT_Z and 1.2 < got["clear"]["floor"] < 1.8 and got["clear"]["here"] == pytest.approx(7.5, abs=0.05)
+    assert got["lump"]["z"] < SIGHT_Z and got["empty"]["z"] < SIGHT_Z
+    # the search of the place is found once its listing is given, and a peak of another distance has none
+    rows = store.listing(("distant",))
+    assert find_sum(store, peak, rows) is not None and find_sum(store, {**peak, "data": {"peak": {"d": 500.0}}}, rows) is None

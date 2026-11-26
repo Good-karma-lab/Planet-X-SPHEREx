@@ -33,7 +33,7 @@ import httpx
 
 from service import cpu, people_tracks
 from service.bodies import SB_IDENT, _iso, _sexa_dec, _sexa_ra
-from service.config import hide_faint_peaks
+from service.config import hide_faint_peaks, hide_unseen_peaks
 from service.products.store import Store
 from service.products.versions import VERSIONS
 from service.storage import atomic_write_bytes
@@ -137,11 +137,32 @@ HALO_MAG = 10.0
 WING_K = 10.0
 WING_MIN_ARCSEC = 25.0
 WING_MAX_ARCSEC = 60.0
+# ... and farther out, from 2MASS around all 507 peaks (26 Nov 2026, K <= 7.5 within 6′ against the stars an even scatter puts there):
+#   K <= 7 at 60-92″: 20 peaks against 2.5 by chance, the star east of 18 (the same glow past the mask edge as 25-60″, for a brighter star);
+#   K <= 7.5 at 165-215″: 37 against 7.5 by chance, the star 160-170° round from north for 30 (a ghost at a fixed offset, any brightness);
+#   K <= 3 anywhere within 6′: eta Bootis and a K 2.2 star made 3 peaks 5-6′ away, nothing in their rings.
+# No side in the rules (it turns with the season): about 9 of 507 peaks are caught by a star that happens to stand there
+WING_BANDS = ((WING_K, WING_MIN_ARCSEC, WING_MAX_ARCSEC), (7.0, WING_MAX_ARCSEC, 92.0), (7.5, 165.0, 215.0), (3.0, WING_MIN_ARCSEC, 360.0))
+WING_FAR_MAX_ARCSEC = 360.0
 WING_PAUSE_S = 0.5  # between two questions of one asker
 WING_AT_ONCE = 4  # askers at a time: IRSA's sync TAP takes 5-20 s a question (26 Nov: 88 peaks in 25 min, one at a time)
 WING_LOG_S = 600.0  # how often the loop says how far it is
 WING_RETRY_S = 3600.0  # an unanswered one is asked again after this
 WING_FIRST_S = 60.0  # the first question after a start: the start itself is busy enough
+# the sum along the orbit of every Planet X peak is looked at once (Findings.sight_loop, service/clips.sum_sight), a few at a time
+SIGHT_AT_ONCE = 2
+SIGHT_PAUSE_S = 0.2
+SIGHT_FIRST_S = 90.0
+SIGHT_RETRY_S = 6 * 3600.0  # a peak whose sum is not kept here is looked for again after this (the search may come back)
+SIGHT_FAILED_S = 3600.0
+
+
+def wing_of(k: float, sep: float) -> bool:
+    """A 2MASS star of magnitude K `sep` arcsec from a far peak most likely makes it with its light outside the search's mask (WING_BANDS):
+    its glow, or its ghost about 3′ away."""
+    return any(k <= kmax and lo <= sep <= hi for kmax, lo, hi in WING_BANDS)
+
+
 GALAXY_TYPES = frozenset(
     {
         "G",
@@ -810,6 +831,14 @@ class FindingsDB:
         self.db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
         # the bright 2MASS star near a far-search peak (Findings.wing_loop): apart from idents, so the identification never asks again
         self.db.execute("CREATE TABLE IF NOT EXISTS wings (find_id TEXT PRIMARY KEY, state TEXT, name TEXT, sep REAL, k REAL, tried REAL)")
+        if self.writer and "reach" not in {r[1] for r in self.db.execute("PRAGMA table_info(wings)").fetchall()}:
+            self.db.execute("ALTER TABLE wings ADD COLUMN reach REAL")  # how far out it was asked: the older answers reached 61″
+        # how far a Planet X peak's dot stands above the noise of its sum along the orbit (Findings.sight_loop): state ok (z, the S/N at
+        # the dot, the floor and the noise of the 3′ window), nosum (no sum kept here) or unavailable
+        self.db.execute(
+            "CREATE TABLE IF NOT EXISTS sights (find_id TEXT PRIMARY KEY, state TEXT, z REAL, here REAL, floor REAL, noise REAL, "
+            "product TEXT, tried REAL)"
+        )
         row = self.db.execute("SELECT value FROM meta WHERE key='schema'").fetchone()
         have = int(row[0]) if row else 0
         if have > SCHEMA:  # written by a newer instance: read what is there, change nothing
@@ -981,10 +1010,18 @@ class FindingsDB:
             ),
         )
 
-    def put_wing(self, find_id: str, state: str, name: str | None = None, sep: float | None = None, k: float | None = None) -> None:
+    def put_wing(
+        self,
+        find_id: str,
+        state: str,
+        name: str | None = None,
+        sep: float | None = None,
+        k: float | None = None,
+        reach: float = WING_FAR_MAX_ARCSEC,
+    ) -> None:
         self.db.execute(
-            "INSERT OR REPLACE INTO wings (find_id, state, name, sep, k, tried) VALUES (?,?,?,?,?,?)",
-            (find_id, state, name, sep, k, time.time()),
+            "INSERT OR REPLACE INTO wings (find_id, state, name, sep, k, tried, reach) VALUES (?,?,?,?,?,?,?)",
+            (find_id, state, name, sep, k, time.time(), reach),
         )
 
     def wings(self) -> dict[str, dict[str, Any]]:
@@ -999,9 +1036,33 @@ class FindingsDB:
         """The far-search peaks never asked about a bright 2MASS star, or not answered for WING_RETRY_S."""
         return self.db.execute(
             "SELECT f.id, f.ra, f.dec FROM finds f LEFT JOIN wings w ON w.find_id = f.id WHERE f.kind='peak' "
-            "AND json_extract(f.data, '$.search')='distant' AND (w.find_id IS NULL OR (w.state='unavailable' AND w.tried < ?)) "
+            "AND json_extract(f.data, '$.search')='distant' AND (w.find_id IS NULL OR (w.state='unavailable' AND w.tried < ?) "
+            "OR (w.state != 'unavailable' AND (w.reach IS NULL OR w.reach < ?))) ORDER BY f.score DESC LIMIT ?",
+            (now - WING_RETRY_S, WING_FAR_MAX_ARCSEC, limit),
+        ).fetchall()
+
+    def put_sight(self, find_id: str, state: str, got: Mapping[str, Any] | None = None, product: str | None = None) -> None:
+        g = got or {}
+        self.db.execute(
+            "INSERT OR REPLACE INTO sights (find_id, state, z, here, floor, noise, product, tried) VALUES (?,?,?,?,?,?,?,?)",
+            (find_id, state, g.get("z"), g.get("here"), g.get("floor"), g.get("noise"), product, time.time()),
+        )
+
+    def sights(self) -> dict[str, dict[str, Any]]:
+        """The Planet X peaks whose sum along the orbit was looked at ({id: {state, z, here}}): ok and nosum. Call it under _READ."""
+        try:
+            rows = self.db.execute("SELECT find_id, state, z, here FROM sights WHERE state IN ('ok', 'nosum')").fetchall()
+        except sqlite3.OperationalError:  # a database without the table yet
+            return {}
+        return {r[0]: {"state": r[1], "z": r[2], "here": r[3]} for r in rows}
+
+    def sights_to_ask(self, now: float, limit: int) -> list[sqlite3.Row]:
+        """The peaks whose sum was never looked at, or not found (SIGHT_RETRY_S ago) or not read (SIGHT_FAILED_S ago); the strongest first."""
+        return self.db.execute(
+            "SELECT f.id, f.ra, f.dec, f.data FROM finds f LEFT JOIN sights s ON s.find_id = f.id WHERE f.kind='peak' "
+            "AND (s.find_id IS NULL OR (s.state='nosum' AND s.tried < ?) OR (s.state='unavailable' AND s.tried < ?)) "
             "ORDER BY f.score DESC LIMIT ?",
-            (now - WING_RETRY_S, limit),
+            (now - SIGHT_RETRY_S, now - SIGHT_FAILED_S, limit),
         ).fetchall()
 
     def ident_rows_of(self, ids: list[str]) -> dict[str, list[sqlite3.Row]]:
@@ -1140,7 +1201,8 @@ class Findings:
             with contextlib.suppress(Exception):
                 self.cleanup()
             self.tasks = [
-                asyncio.create_task(self.sweep_loop()), asyncio.create_task(self.identify_loop()), asyncio.create_task(self.wing_loop())
+                asyncio.create_task(self.sweep_loop()), asyncio.create_task(self.identify_loop()), asyncio.create_task(self.wing_loop()),
+                asyncio.create_task(self.sight_loop()),
             ]  # fmt: skip
 
     async def stop(self) -> None:
@@ -1463,13 +1525,13 @@ class Findings:
         raise err or RuntimeError("no Gaia archive")
 
     async def bright_ir_star(self, ra: float, dec: float) -> dict[str, Any]:
-        """The brightest 2MASS star of K <= WING_K WING_MIN_ARCSEC to WING_MAX_ARCSEC from the place: IRSA's TAP, else the 2MASS magnitudes
-        of AllWISE's copy in AWS (CDS was down on 26 Nov). A bright star barely moves between 2MASS and now: no motion is applied."""
+        """The brightest 2MASS star whose glow may make a peak at the place (wing_of): IRSA's TAP, else the 2MASS magnitudes of AllWISE's
+        copy in AWS (CDS was down on 26 Nov). A bright star barely moves between 2MASS and now: no motion is applied."""
         from service.context import IRSA_TAP, allwise_cone, sep_arcsec
 
-        cone = (WING_MAX_ARCSEC + 1.0) / 3600.0
-        adql = (
-            "SELECT TOP 20 designation, ra, dec, k_m FROM fp_psc WHERE "
+        cone = (WING_FAR_MAX_ARCSEC + 1.0) / 3600.0
+        adql = (  # IRSA takes neither an OR of two circles nor an ORDER BY here: every K <= 10 star of the wider circle, judged below
+            "SELECT TOP 500 designation, ra, dec, k_m FROM fp_psc WHERE "
             f"CONTAINS(POINT('ICRS', ra, dec), CIRCLE('ICRS', {ra:.6f}, {dec:.6f}, {cone:.6f})) = 1 AND k_m <= {WING_K}"
         )
         rows: list[dict[str, Any]] = []
@@ -1487,7 +1549,7 @@ class Findings:
                 )
         except (httpx.HTTPError, BreakerOpenError, ValueError, KeyError):
             via = "allwise"
-            got = await cpu.run(allwise_cone, ra, dec, WING_MAX_ARCSEC + 1.0)
+            got = await cpu.run(allwise_cone, ra, dec, WING_FAR_MAX_ARCSEC + 1.0)
             rows = [
                 {
                     "name": f"2MASS star of AllWISE {r.get('designation')}",
@@ -1501,7 +1563,7 @@ class Findings:
         best: dict[str, Any] | None = None
         for r in rows:
             sep = sep_arcsec(r["ra"], r["dec"], ra, dec)
-            if WING_MIN_ARCSEC <= sep <= WING_MAX_ARCSEC and (best is None or r["k"] < best["k"]):
+            if wing_of(r["k"], sep) and (best is None or r["k"] < best["k"]):
                 best = {"state": "ok", "name": r["name"], "sep": round(sep, 1), "k": round(r["k"], 2)}
         return {**(best or {"state": "none"}), "via": via}
 
@@ -1553,6 +1615,70 @@ class Findings:
     def _put_wing(self, find_id: str, h: dict[str, Any]) -> None:
         with _READ:
             self.db.put_wing(find_id, h["state"], h.get("name"), h.get("sep"), h.get("k"))
+            self.db.db.commit()
+
+    async def sight_loop(self) -> None:
+        """Every Planet X peak's sum along the orbit looked at once (service/clips.sum_sight: how far its dot stands above the noise
+        of the 3′ window), SIGHT_AT_ONCE at a time in threads, the strongest first; kept (FindingsDB.sights). A peak whose sum is not
+        kept here is marked nosum and looked for again after SIGHT_RETRY_S. Every WING_LOG_S the log says how far it is."""
+        cpu.JOB.set(_Maintenance())
+        await asyncio.sleep(SIGHT_FIRST_S)
+        said = {"looked": 0, "seen": 0, "unseen": 0, "nosum": 0, "failed": 0}
+        last = time.monotonic()
+        gate = asyncio.Semaphore(SIGHT_AT_ONCE)
+
+        async def one(row: sqlite3.Row, rows: list[dict[str, Any]]) -> None:
+            async with gate:
+                try:
+                    state = await asyncio.to_thread(self._look_at_sum, row, rows)
+                except Exception:  # the map could not be read: looked at again later
+                    state = "unavailable"
+                    await asyncio.to_thread(self._put_sight, row["id"], state)
+                said["looked"] += 1
+                said["failed" if state == "unavailable" else state] += 1
+                await asyncio.sleep(SIGHT_PAUSE_S)
+
+        while True:
+            try:
+                todo = await asyncio.to_thread(self._sights_to_ask)
+                if todo:
+                    rows = await asyncio.to_thread(self.store.listing, ("distant",))  # once for the batch, not once per peak
+                    await asyncio.gather(*(one(r, rows) for r in todo))
+                if time.monotonic() - last >= WING_LOG_S or not todo:
+                    left = len(await asyncio.to_thread(self._sights_to_ask))
+                    if said["looked"] or left:
+                        log.warning(
+                            "sights: looked at %d (seen %d, unseen %d, no sum %d, failed %d), left %d",
+                            said["looked"], said["seen"], said["unseen"], said["nosum"], said["failed"], left,
+                        )  # fmt: skip
+                    last = time.monotonic()
+                if not todo:
+                    await asyncio.sleep(300)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                await asyncio.sleep(60)
+
+    def _look_at_sum(self, row: sqlite3.Row, rows: list[dict[str, Any]]) -> str:
+        """One peak's sum along the orbit measured and kept (a thread): seen, unseen or nosum."""
+        from service.clips import SIGHT_Z, find_sum, sum_sight
+
+        find = {"id": row["id"], "ra": row["ra"], "dec": row["dec"], "data": json.loads(row["data"] or "{}")}
+        got = find_sum(self.store, find, rows)
+        if got is None:
+            self._put_sight(row["id"], "nosum")
+            return "nosum"
+        sight = sum_sight(find, got[0], got[1])
+        self._put_sight(row["id"], "ok", sight, got[0].get("key"))
+        return "seen" if sight["z"] >= SIGHT_Z else "unseen"
+
+    def _sights_to_ask(self) -> list[sqlite3.Row]:
+        with _READ:
+            return self.db.sights_to_ask(time.time(), 50)
+
+    def _put_sight(self, find_id: str, state: str, got: Mapping[str, Any] | None = None, product: str | None = None) -> None:
+        with _READ:
+            self.db.put_sight(find_id, state, got, product)
             self.db.db.commit()
 
     async def identify_one(self, row: sqlite3.Row) -> None:
@@ -2157,13 +2283,13 @@ def rate_unit(kind: str) -> str:
 
 LITE_KEYS = (
     "id", "slug", "kind", "place", "fov", "ra", "dec", "rate", "rate_unit", "snr", "score", "chance", "status", "verdict", "identity", "updated",
-    "stage", "promise", "viewers", "credit", "clip", "note", "visible", "visible_sn", "star_wing",
+    "stage", "promise", "viewers", "credit", "clip", "note", "visible", "visible_sn", "star_wing", "sight", "hidden_why",
 )  # fmt: skip
 
 
 SLIM_KEYS = (
     "id", "kind", "place", "ra", "dec", "scans", "snr", "score", "status", "stage", "promise", "viewers", "note", "visible", "people_raised",
-    "ask", "echo", "faint",
+    "ask", "echo", "faint", "hidden_why",
 )  # fmt: skip
 
 
@@ -2277,8 +2403,26 @@ def faint_peak(kind: str, data: Mapping[str, Any]) -> bool:
     )
 
 
+def unseen_why(sight: Mapping[str, Any] | None) -> list[str]:
+    """Why a person cannot see a peak in its pictures: ["no_sum"] (its sum along the orbit is not kept here: nothing to judge),
+    ["unseen"] (its dot stands under SIGHT_Z above the noise of the sum), or [] (seen, or not looked at yet)."""
+    from service.clips import SIGHT_Z
+
+    if not sight:
+        return []
+    if sight.get("state") == "nosum":
+        return ["no_sum"]
+    return ["unseen"] if sight.get("z") is not None and float(sight["z"]) < SIGHT_Z else []
+
+
 def faint_sample(find_id: str) -> bool:
     return int.from_bytes(hashlib.sha1(find_id.encode()).digest()[:4], "big") % FAINT_SHARE == 0
+
+
+def faint_asked(find: Mapping[str, Any]) -> bool:
+    """A faint peak people are asked about all the same (one in FAINT_SHARE, by its id), unless it has no sum along the orbit here:
+    then there is nothing in its pictures to judge."""
+    return faint_sample(str(find["id"])) and "no_sum" not in (find.get("hidden_why") or ())
 
 
 class Snapshot:
@@ -2345,8 +2489,9 @@ def snapshot(
         views = flow.views() if flow is not None else {}
         packed = read_some(db, sorted(only)) if only is not None else read_base(db)
         wings = db.wings()
+        sights = db.sights()
     order = {c: i for i, c in enumerate([*list(CATALOGUES), "sbident"])}
-    hide_faint = hide_faint_peaks()
+    hide_faint, hide_unseen = hide_faint_peaks(), hide_unseen_peaks()
 
     def judge(blob: Any, whole: bool) -> dict[str, Any]:
         """One find as the page says it, from its own packed copy (a caller's change stays its own)."""
@@ -2398,14 +2543,20 @@ def snapshot(
         f["idents"] = ids_
         # behind its own filter, unless a person said it is real (or people raised it); what a catalogue or JPL named is not faint
         if f["kind"] == "peak" and f["id"] in wings:
-            f["star_wing"] = wings[f["id"]]  # a bright 2MASS star 25-60″ away: its glow outside the mask most likely makes the peak
-        f["faint"] = (
-            hide_faint
-            and st in ("unexplained", "unchecked")
-            and "people_raised" not in f
-            and f["id"] not in real
-            and (faint_peak(f["kind"], f["data"]) or "star_wing" in f)
-        )
+            f["star_wing"] = wings[f["id"]]  # a bright 2MASS star whose glow outside the mask most likely makes the peak (wing_of)
+        if f["kind"] == "peak" and f["id"] in sights:
+            f["sight"] = sights[f["id"]]  # how far its dot stands above the noise of its sum along the orbit (or no sum kept here)
+        why = []
+        if st in ("unexplained", "unchecked") and "people_raised" not in f and f["id"] not in real:
+            if hide_faint and faint_peak(f["kind"], f["data"]):
+                why.append("photometry")
+            if hide_faint and "star_wing" in f:
+                why.append("star")
+            if hide_unseen:
+                why += unseen_why(f.get("sight"))
+        f["faint"] = bool(why)
+        if why:
+            f["hidden_why"] = why  # why it stands behind the faint filter: photometry, star, no_sum, unseen
         if f["kind"] in ("red", "anomaly"):
             f["catalogue_class"] = catalogue_class(f, ids_)
             f["ask"] = ask_people(f, ids_)
@@ -2578,8 +2729,13 @@ def query(
         and (not waiting or (f["viewers"] == 0 and f["stage"] == "new"))
         and (only is None or f["id"] in only)
         and (not noted or f["note"] is not None)
-        and (faint != "hide" or not f["faint"])
     ]
+    faint_why: dict[str, int] = {}  # the faint peaks of this list (shown or hidden) by why they stand behind the filter
+    for f in sel:
+        for w in f.get("hidden_why") or ():
+            faint_why[w] = faint_why.get(w, 0) + 1
+    if faint == "hide":
+        sel = [f for f in sel if not f["faint"]]
 
     def vis_of(f: dict[str, Any]) -> str:
         return "visible" if f["visible"] else "not_visible" if f["visible"] is False else "not_measured"
@@ -2634,6 +2790,7 @@ def query(
     return {
         "count": len(sel),
         "faint": faint_n,  # the faint peaks under the request's other filters, shown or hidden
+        "faint_why": faint_why,  # ... by why: photometry, star (a bright star's glow), no_sum, unseen (a peak may have several)
         "total": sum(n for _, n in shown),
         "counts": counts,
         # per kind, the finds that pass this request's every filter but the kind ones (status, stage, waiting, visibility, …): the
