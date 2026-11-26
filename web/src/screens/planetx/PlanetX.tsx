@@ -1,5 +1,6 @@
 import { visibleInterval } from '../../lib/idle';
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { wingLine } from '../../lib/wing';
 import { honestLines } from '../search/jobs';
 import { useSearched, type SearchedField } from '../search/searched';
 import { P9, RECORDED } from './data';
@@ -88,6 +89,8 @@ interface Peak {
   id: string;
   ra: number;
   dec: number;
+  /** a bright 2MASS star 25–60″ away: its glow most likely makes the peak (findings/cards.tsx wingLine) */
+  star_wing?: { name?: string | null; sep?: number | null; k?: number | null } | null;
   fov: number;
   place: string;
   snr: number | null;
@@ -260,6 +263,7 @@ export function PlanetXPage() {
         RA {pk.ra.toFixed(2)} · Dec {fmtDec(pk.dec)}
         {pk.data.peak?.phot_sn != null ? ` · photometry ${pk.data.peak.phot_sn.toFixed(1)}× the noise` : ''}
       </div>
+      {pk.star_wing && <p data-testid="px-star-wing">{wingLine(pk.star_wing)}.</p>}
       {pk.data.peak?.known?.state === 'ok' && pk.data.peak.known.words && (
         <p>{`${pk.data.peak.known.words[0]!.toUpperCase()}${pk.data.peak.known.words.slice(1)}. JPL’s own place and the search’s agree to ${Math.max(...(pk.data.peak.known.seps ?? [0])).toFixed(1)}″.`}</p>
       )}
@@ -403,7 +407,7 @@ export function PlanetXPage() {
                 style={{ '--c': '#8a9aa6' }}
                 aria-pressed={faint}
                 data-testid="px-faint"
-                title="Far peaks (beyond 200 au) on detectors 1–3 whose photometry is under 6σ: most are noise, so they are left out unless you ask. Search signal and photometry are the two numbers on each card."
+                title="Far peaks (beyond 200 au) on detectors 1–3 whose photometry is under 6σ, and far peaks 25–60″ from a bright star (2MASS K ≤ 10), whose glow outside the search’s mask most likely makes them: they are left out unless you ask. Search signal and photometry are the two numbers on each card."
                 onClick={() => setFaint(!faint)}
               >
                 <i />

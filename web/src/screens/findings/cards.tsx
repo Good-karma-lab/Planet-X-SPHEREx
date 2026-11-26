@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import { nextTask, taskHash } from '../../lib/account';
 import { formatHash } from '../../lib/route';
 import { cleanName } from './finds';
+import { wingLine } from '../../lib/wing';
 
 /** A find as a card needs it (`GET /api/findings?lite=1`). */
 export interface CardFind {
@@ -41,6 +42,8 @@ export interface CardFind {
   passes: number | null;
   /** a time-lapse track: the date (MJD) of the film its search ran on (the service's card says it) */
   film?: number | null;
+  /** a far-search peak with a bright 2MASS star 25–60″ away: its glow outside the search's mask most likely makes the peak */
+  star_wing?: { name?: string | null; sep?: number | null; k?: number | null } | null;
 }
 
 export const STAGE_LABEL: Record<string, string> = {
@@ -366,6 +369,11 @@ export function FindCard({
             </span>
           )}
         </span>
+        {f.kind === 'peak' && f.star_wing && (
+          <span class="mono-s fcard-sub" data-testid="star-wing" title={f.star_wing.name ? `${f.star_wing.name}, K ${f.star_wing.k ?? '?'}` : undefined}>
+            {wingLine(f.star_wing)}
+          </span>
+        )}
         {f.kind === 'peak' && f.clip?.state === 'ready' && !f.clip.blink && (
           <span class="mono-s fcard-sub">the sum along the orbit is not kept here: the passes alone are shown</span>
         )}
