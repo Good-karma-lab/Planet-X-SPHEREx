@@ -25,7 +25,8 @@ export const HINTS: Hint[] = [
   { id: 'play', screen: 'lab', at: '[data-testid=picture]', title: 'Watch it play', text: 'The passes take turns. Find a dot that steps while the stars stay.', task: 'cell' },
   { id: 'mark', screen: 'lab', at: '[data-testid=task-missed]', title: 'It moves and has no ring?', text: 'Mark it here, then click it on the picture.', task: 'cell', around: '.lab .panel' },
   { id: 'answer', screen: 'lab', at: '[data-testid=task-panel] .tp-btns', title: 'Then answer', text: 'Nothing here, or Done, with marks. After a minute and every pass.', task: 'cell', around: '.lab .panel' },
-  { id: 'finds', screen: 'findings', at: '.fcard', title: 'What the machine found', text: 'Each is a lead, not a discovery. Check one: a few questions.' },
+  // at the card's button, not the whole card: on a phone the card fills the screen and the hint covered its picture's ring
+  { id: 'finds', screen: 'findings', at: '.fcard .fcard-go', title: 'What the machine found', text: 'Each is a lead, not a discovery. Check one: a few questions.' },
   { id: 'cabinet', screen: 'me', at: '.cb-work', title: 'Your work', text: 'Squares you looked through, your marks, findings and points.' },
 ];
 
