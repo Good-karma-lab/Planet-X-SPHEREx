@@ -89,7 +89,8 @@ export function StampsView({ src, drivers, onShown, onNone }: { src: Source | nu
           p ? (
             <figure key={p.i} class="tv-st" title={`${new Date((p.mjd - 40587) * 86400000).toISOString().slice(0, 10)} · D${p.det} · ${p.lam.toFixed(2)} µm`}>
               <RawStamp stamp={stamps.get(p.i)!} />
-              <figcaption style={{ color: detColour(p.det) }}>D{p.det}</figcaption>
+              {/* its colour of light, not the detector's name ("D4" said nothing to a newcomer: 86.4) */}
+              <figcaption style={{ color: detColour(p.det) }}>{p.lam.toFixed(1)} µm</figcaption>
             </figure>
           ) : (
             <figure key={`e${k}`} class="tv-st empty" />
