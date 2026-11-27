@@ -1513,7 +1513,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           }}
           data-testid={`blink-${k ? 'b' : 'a'}`}
         >
-          <option value="">{k ? 'B · all' : 'A · all'}</option>
+          {/* nothing chosen: every pass plays in turn ("A · all / B · all" read as all against all, nothing to blink: test of 27 Nov, M8) */}
+          <option value="">{k ? (pa == null ? 'or pick two' : 'B · pick') : 'All passes'}</option>
           {a.passes.map((q) => (
             <option key={q.index} value={String(q.index)} disabled={q.index === (k ? pa : pb)}>
               {`${k ? 'B' : 'A'} · ${q.label}`}
