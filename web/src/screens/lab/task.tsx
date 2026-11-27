@@ -529,7 +529,9 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         // what the answers lead to once people agree (service/accounts/people.py ACTIONS), in the series' own terms
         ...(got.result?.id && seriesId ? [nextWord(seriesId, got.result.id)] : []),
         ...(ag && !ag.settled && !(got.points ?? 0)
-          ? [`${ag.answers ?? 1} of ${ag.needed ?? 3} people answered · +${ag.points_when_agreed ?? 10} points if yours matches theirs`]
+          ? // the person's own answer is one of them: the service leaves a control object's answers out of its count, and "0 of 3"
+            // right after answering read as a lost answer (and told a control from a lead: 86.4, Н5)
+            [`${Math.max(1, ag.answers ?? 1)} of ${ag.needed ?? 3} people answered · +${ag.points_when_agreed ?? 10} points if yours matches theirs`]
           : []),
       ];
       points = typeof got.points === 'number' ? got.points : null;
