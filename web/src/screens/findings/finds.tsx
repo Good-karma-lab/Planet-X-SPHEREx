@@ -5,7 +5,7 @@ import { formatHash } from '../../lib/route';
 import { formatDec, formatRA } from '../../lib/sky';
 import { parseSxp, halfToFloat } from '../../lib/sxp';
 import { ATLAS_LEAD, LeadPanel } from './leads';
-import { api, useUser } from '../../lib/account';
+import { api, nextTask, taskHash, useUser } from '../../lib/account';
 import { Talk } from './talk';
 import { Clip, FindCard, STAGE_LABEL, submittedCard, type CardFind, type Submitted } from './cards';
 import { peopleLine, usePeople } from './people';
@@ -559,7 +559,26 @@ function Detail({ f, onClose, inline }: { f: Find; onClose: () => void; inline: 
         </tbody>
       </table>
       <div class="chips">
-        <a class="btn sm primary" href={lab}>
+        {/* the find's questions, as on its card (a phone opens this page with a tap on the picture: only "Open in the lab" was here,
+            86.4, Н10); the plain lab when the service gives no task for it */}
+        <a
+          class="btn sm primary"
+          href={lab}
+          data-testid="detail-check"
+          onClick={(e) => {
+            e.preventDefault();
+            const btn = e.currentTarget as HTMLElement;
+            if (btn.getAttribute('aria-busy') === 'true') return;
+            btn.setAttribute('aria-busy', 'true');
+            void Promise.race([nextTask('finding', f.id).catch(() => null), new Promise<null>((res) => setTimeout(() => res(null), 8000))]).then((t) => {
+              location.hash = t && t.finding_id === f.id ? taskHash(t) : lab;
+              btn.removeAttribute('aria-busy');
+            });
+          }}
+        >
+          Check this finding
+        </a>
+        <a class="btn sm" href={lab}>
           Open in the lab
         </a>
         <a
