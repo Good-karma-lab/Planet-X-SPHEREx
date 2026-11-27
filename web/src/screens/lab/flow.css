@@ -523,3 +523,7 @@
 .vsq .toolstrip .tool-tip { position: absolute; right: calc(100% + 8px); top: 2px; width: max-content; max-width: 220px; padding: 5px 9px; border-radius: 8px; background: rgba(6, 12, 16, 0.92); border: 1px solid var(--edge); font: 500 12px var(--font); color: var(--ink); pointer-events: none; }
 @media (max-width: 599.98px) and (min-height: 480px) { .vsq .toolstrip .tool-tip { right: 0; top: auto; bottom: calc(100% + 8px); } }
 @media (max-width: 599.98px) and (min-height: 480px) { .vsq .ps-pair.one { width: min(100% - 24px, 264px); margin-bottom: 64px; } }
+/* the answer being saved turns (Н4 round, 86.4) */
+.taskpanel .tp-saving { flex: none; display: inline-block; width: 12px; height: 12px; margin-left: 8px; vertical-align: -2px; border-radius: 50%; border: 2px solid rgba(190, 236, 246, 0.3); border-top-color: var(--accent-l, #8ff); animation: tpsave 0.9s linear infinite; }
+@keyframes tpsave { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .taskpanel .tp-saving { animation: none; } }
