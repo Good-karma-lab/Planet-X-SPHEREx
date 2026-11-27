@@ -532,3 +532,9 @@
   :root .lab .panel:not([data-detent='full']) .taskpanel .tv-rest { min-height: 0; margin: 2px 0 6px; }
   :root .lab .panel:not([data-detent='full']) .taskpanel .tv-rest .tv-clipbox { width: 112px; height: 112px; }
 }
+/* a phone, the sky under a find's two pictures: one small button at the top right, no wide bar over the field (86.4, Н9) */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .vsq .peaksum.sky .ps-bar { left: auto; right: 10px; top: 96px; bottom: auto; transform: none; padding: 0; gap: 0; background: none; border: 0; max-width: none; }
+  :root .vsq .peaksum.sky .ps-bar > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  :root .vsq .peaksum.sky .ps-bar .btn { min-height: 40px; padding: 0 12px; font-size: 12.5px; }
+}

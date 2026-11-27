@@ -4074,7 +4074,10 @@ export function Lab({ route }: { route: Route }) {
                 <div class="vwait">loading the pictures of every {view === 'det' ? 'detector' : 'band'} for each pass…</div>
               )}
               {distShow && dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
-              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && <PeakSum id={findId} tool={!!flow.tool} loading={!!loadNow} />}
+              {/* a square's own look (its lead answered) is the sky alone: the lead's two pictures and their bar stood over the quarter (86.4, Н9) */}
+              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && !(squareTask && !flow.leadOpen) && (
+                <PeakSum id={findId} tool={!!flow.tool} loading={!!loadNow} />
+              )}
               {flow.trackSum && findId.startsWith('film:') && film !== null && view === 'picture' && <PeakSum id={findId} track tool={!!flow.tool} loading={!!(loadNow ?? daysLoad)} />}
               <div
                 class="float ftitle"
