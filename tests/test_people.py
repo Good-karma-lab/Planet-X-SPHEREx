@@ -88,7 +88,7 @@ def test_paths_lead_to_results() -> None:
         "track": {("every", "dot"): "moves", ("some", "done", "dot"): "partial", ("no",): "no_dot", ("every", "streak"): "streak",
                   ("some", "done", "streak"): "streak", ("not_sure",): "cant_tell", ("every", "not_sure"): "cant_tell",
                   ("yes", "no"): "sum_only", ("yes",): "sum_only"},
-        "slow": {("no",): "still", ("yes", "two"): "blend", ("yes", "one", "yes"): "moves_old", ("yes", "one", "no"): "moves"},
+        "slow": {("no",): "still", ("yes", "two"): "moves_past", ("yes", "one", "yes"): "moves_old", ("yes", "one", "no"): "moves"},
         "peak": {("no",): "no_peak", ("yes", "yes"): "glow", ("yes", "no"): "candidate"},
         "red": {("fuzzy",): "galaxy", ("sharp", "no"): "artefact", ("sharp", "yes", "yes"): "artefact", ("sharp", "yes", "no", "yes"): "brown_dwarf",
                 ("sharp", "yes", "no", "no"): "still"},
@@ -97,7 +97,8 @@ def test_paths_lead_to_results() -> None:
     for series, paths in cases.items():
         for path, want in paths.items():
             assert run_path(series, list(path), [1]) == want, (series, path)
-        assert set(paths.values()) - {"cant_tell"} == set(people.RESULTS[series]), series
+        # "blend" stays in RESULTS for the answers of before 27 Nov 2026; no path leads to it now
+        assert set(paths.values()) - {"cant_tell"} == set(people.RESULTS[series]) - {"blend"}, series
     # "Only in some", then Done with none tapped: missing from none of them, so in every picture (M-1: it was a 422)
     assert run_path("track", ["some", "done", "dot"], []) == "moves"
     assert run_path("track", ["some", "done", "dot"], None) == "moves"
@@ -160,12 +161,12 @@ def test_every_series_does_what_the_spec_says(pp: People) -> None:
         for uid in _users(pp, 3, start):
             pp.answer(uid, series, ROW[fid], path, [], exposures or [])
 
-    settle("slow", "mover:1", ["yes", "two"])
+    settle("slow", "mover:1", ["no"])
     settle("peak", "peak:1", ["yes", "yes"], start=10)
     settle("red", "red:1", ["sharp", "yes", "no", "yes"], start=20)
     settle("anomaly", "anomaly:1", ["yes"], ["exp-A", "exp-B"], start=30)
     acts = {r["finding_id"]: (r["action"], r["reason"], r["data"]) for r in pp.db._conn().execute("SELECT * FROM acc_people_actions")}
-    assert acts["mover:1"] == ("drop", "blend", "{}")
+    assert acts["mover:1"] == ("drop", "still", "{}")
     assert acts["peak:1"] == ("drop", "glow", "{}")
     assert acts["red:1"][:2] == ("bd_queue", "brown_dwarf")
     assert acts["anomaly:1"] == ("leave_out", "neighbour", '{"exposures": ["exp-A", "exp-B"]}')
@@ -272,7 +273,9 @@ def test_series_through_the_api_and_the_read_calls(site: tuple[FastAPI, Any], mo
 
     app, st = site
     seen: dict[str, tuple[int, int] | None] = {"film:2": (4, 5)}
-    monkeypatch.setattr(routes_tasks, "visits_of_track", lambda _st, row: seen.get(row.get("id") or row.get("finding_id")))  # its visits show its dot
+    monkeypatch.setattr(
+        routes_tasks, "visits_of_track", lambda _st, row: seen.get(row.get("id") or row.get("finding_id"))
+    )  # its visits show its dot
     user = _people(app)
     ann = user("ann")
     t = ann.get("/api/tasks/next", params={"kind": "moves", "finding_id": "film:2"}).json()["task"]
@@ -920,3 +923,19 @@ def test_a_red_source_is_asked_about_when_seen_in_two_passes() -> None:
     assert not people.askable({**red, "passes_seen": None})  # measured in the background, not yet
     assert not people.askable({**red, "passes_seen": (1, 3)}) and not people.askable({**red, "passes_seen": (0, 0)})
     assert people.askable({**red, "passes_seen": (2, 3)}) and people.askable({**red, "passes_seen": (4, 4)})
+
+
+def test_a_moving_dot_passing_a_star_stays_and_a_shift_nobody_can_see_is_not_asked(pp: People) -> None:
+    # 27 Nov 2026 (exploratory report of 86.4, Н2): WISE 0855-0714 "moves: Yes" then "two touching" set it aside; HD 18702 (1.5″ in
+    # a year, under a pixel) was judged wrong for an honest "No".
+    assert run_path("slow", ["yes", "two"]) == "moves_past" and "moves_past" not in people.ACTIONS["slow"]
+    tiny = {"finding_id": "mover:hd", "kind": "mover", "status": "known", "visible": True,
+            "data": {"track": {"shift_arcsec": 1.5, "speed": 1.44, "baseline_years": 1.03}}}  # fmt: skip
+    seen = {**tiny, "finding_id": "mover:big", "data": {"track": {"shift_arcsec": 9.0}}}
+    assert people.too_small_to_see(tiny) and not people.too_small_to_see(seen)
+    assert pp.expected("slow", tiny) is None and pp.expected("slow", seen) == frozenset({"moves", "moves_old", "moves_past"})
+    assert not people.askable({"kind": "mover", "visible": True, "shift_arcsec": 2.0})
+    assert people.askable({"kind": "mover", "visible": True, "shift_arcsec": 4.0}) and people.askable({"kind": "mover", "visible": True})
+    a = _users(pp, 1)[0]
+    assert pp.answer(a, "slow", tiny, ["no"], [], []) == ("still", 0)  # not judged: no points lost, nothing set aside
+    assert pp.db._conn().execute("SELECT COUNT(*) FROM acc_people_actions WHERE finding_id='mover:hd'").fetchone()[0] == 0
