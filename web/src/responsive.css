@@ -1590,6 +1590,16 @@
   :root .fbar .fkinds .fgroup-h {
     flex-basis: 100%;
   }
+  /* a long chip ("Visible in the picture 167 · 17 being measured") wraps inside the sheet, never to its edge */
+  :root .fbar .fkinds button {
+    flex: 0 1 auto;
+    max-width: 100%;
+    flex-wrap: wrap;
+    white-space: normal;
+    text-align: left;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
   :root .fbar .leadcount {
     margin: 4px 0 0;
     font-size: 13px;
