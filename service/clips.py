@@ -1386,7 +1386,8 @@ class Clips:
         if p.is_file():
             return p
         find = {"id": fid, "kind": "place", "ra": ra, "dec": dec, "data": {}}
-        src = self.source_for(find)
+        # every field's meta is listed in a thread (Clips.sources): on the event loop it held it 1.1 s (26-27 Nov 2026), as get() learned
+        src = await asyncio.to_thread(self.source_for, find)
         if src is None:
             raise ClipUnavailable("no SPHEREx field covers this place yet")
         async with self.gate:
@@ -1406,7 +1407,8 @@ class Clips:
         p = self.still_path(str(find["id"]))
         if p.is_file():
             return p
-        src = self.source_for(find)
+        # every field's meta is listed in a thread (Clips.sources): on the event loop it held it 1.1 s (26-27 Nov 2026), as get() learned
+        src = await asyncio.to_thread(self.source_for, find)
         if src is None:
             raise ClipUnavailable("no SPHEREx field covers this place yet")
         async with self.gate:
