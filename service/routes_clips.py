@@ -122,7 +122,22 @@ def make_clips_router(st: Any) -> APIRouter:
         clips = clips_of(st)
         find = await asyncio.to_thread(the_find, find_id)
         # in a thread: the summary may list every field's meta (Clips.sources), which held the event loop 1.1 s (26-27 Nov 2026)
-        return await asyncio.to_thread(lambda: {**clips.summary(find), "shows": clips.info(find_id)})
+        return await asyncio.to_thread(lambda: {**clips.summary(find), "shows": as_listed(find, clips.info(find_id))})
+
+    def as_listed(find: dict[str, Any], shows: dict[str, Any] | None) -> dict[str, Any] | None:
+        """A Planet X peak whose sum along the orbit was looked at says the same z as the lists (findings.snapshot: its dot against the
+        sum's noise); the ring's own S/N on the clip stays as ring_sn. 60c0a10726a3 said 4.8 here and 7.8 in Findings (27 Nov 2026)."""
+        from service.clips import SIGHT_Z
+        from service.config import hide_unseen_peaks
+
+        f = getattr(st, "findings", None)
+        if shows is None or find.get("kind") != "peak" or f is None or not hide_unseen_peaks():
+            return shows
+        sight = f.db.sight_of(str(find["id"])) if hasattr(f.db, "sight_of") else None
+        if not sight or sight.get("state") != "ok" or sight.get("z") is None:
+            return shows
+        z = float(sight["z"])
+        return {**shows, "ring_sn": shows.get("visible_sn"), "visible_sn": round(z, 1), "visible": z >= SIGHT_Z}
 
     async def place_clip(
         ra: float = Query(..., ge=0.0, le=360.0),

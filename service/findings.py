@@ -1056,6 +1056,17 @@ class FindingsDB:
             return {}
         return {r[0]: {"state": r[1], "z": r[2], "here": r[3]} for r in rows}
 
+    def sight_of(self, find_id: str) -> dict[str, Any] | None:
+        """sights() of one peak, or None."""
+        with _READ:
+            try:
+                r = self.db.execute(
+                    "SELECT state, z, here FROM sights WHERE find_id = ? AND state IN ('ok', 'nosum')", (find_id,)
+                ).fetchone()
+            except sqlite3.OperationalError:
+                return None
+        return None if r is None else {"state": r[0], "z": r[1], "here": r[2]}
+
     def sights_to_ask(self, now: float, limit: int) -> list[sqlite3.Row]:
         """The peaks whose sum was never looked at, or not found (SIGHT_RETRY_S ago) or not read (SIGHT_FAILED_S ago); the strongest first."""
         return self.db.execute(

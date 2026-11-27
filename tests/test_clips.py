@@ -607,3 +607,25 @@ def test_a_red_source_is_counted_only_where_its_ring_holds_something_red(tmp_pat
     red = {"id": "red:x", "kind": "red", "ra": RA0 + 0.01, "dec": DEC0, "data": {}}
     assert passes_seen(red, src) == (1, 3)
     assert passes_seen({**red, "id": "mover:x", "kind": "mover"}, src) == (3, 3)  # any other kind: whatever stands out
+
+
+def test_a_peak_clip_says_the_same_z_as_the_lists(tmp_path: Path, monkeypatch: Any) -> None:
+    # 27 Nov 2026 (exploratory report of 86.4, М2): peak:60c0a10726a3's clip said 4.8 (the ring on the picture) and Findings 7.8 (its
+    # dot against the noise of its sum along the orbit). The clip info says the lists' z; the ring's own stays as ring_sn.
+    import json
+
+    monkeypatch.setenv("SKY_CLIPS", str(tmp_path / "clips"))
+    monkeypatch.setenv("SKY_PRODUCT_DB", str(tmp_path / "product.sqlite"))
+    client, st = _service(tmp_path)
+    row = {"place": "test", "fov": 5.0, "rate": None, "snr": 5.3, "score": 5.3, "chance": 0.0, "scans": []}
+    st.findings.db.write_finds([{**row, "id": "peak:60c0", "kind": "peak", "ra": RA0, "dec": DEC0, "data": {"peak": {"ok": True}}}])
+    client.get("/api/findings/mover:abc/clip")  # the clips' store is made
+    p = st.clips.path("peak:60c0").with_suffix(".json")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"id": "peak:60c0", "visible_sn": 4.8, "visible": True}))
+    assert client.get("/api/findings/peak:60c0/clip").json()["shows"]["visible_sn"] == 4.8  # no sum looked at yet: the ring's
+    st.findings.db.put_sight("peak:60c0", "ok", {"z": 7.83, "here": 1.0})
+    shows = client.get("/api/findings/peak:60c0/clip").json()["shows"]
+    assert (shows["visible_sn"], shows["ring_sn"], shows["visible"]) == (7.8, 4.8, True)
+    monkeypatch.setenv("SKY_HIDE_UNSEEN_PEAKS", "0")  # the lists say the ring's too then
+    assert client.get("/api/findings/peak:60c0/clip").json()["shows"]["visible_sn"] == 4.8
