@@ -506,7 +506,9 @@
 /* the clip's own small print (a track's three lines from 42 px above its foot, a peak's two) is cut off whole: the words are under the
    picture (14.5% left the top of "added along the motion" over the site's own caption: test of 27 Nov, M5) */
 .taskpanel .tv-pair figure, .vsq .ps-pair figure { display: flex; flex-direction: column; }
-.taskpanel .tv-pair img, .vsq .ps-pair img { clip-path: inset(0 0 18.5% 0); margin-bottom: -18.5%; }
+/* the box is 81.5% as tall as wide and shows the picture's top, whatever its size (a clip with a negative margin let the words under a
+   big pair be covered by the picture: 86.4, M5) */
+.taskpanel .tv-pair img, :root .vsq .peaksum .ps-pair img { width: 100%; height: auto; aspect-ratio: 1 / 0.815; object-fit: cover; object-position: top; clip-path: none; margin-bottom: 0; }
 /* the sheet at rest shows the subject of the question: an anomaly's odd pictures in one row */
 @media (max-width: 599.98px) and (min-height: 480px) {
   :root .lab .panel[data-detent='peek'] .taskpanel .tv-fixed, :root .lab .panel:not([data-detent]) .taskpanel .tv-fixed { min-height: 0; }
