@@ -22,7 +22,7 @@ class FakeStore:
         self.meta: dict[str, dict[str, Any]] = {r["key"]: {"passes": [1]} for r in self.rows}
         self.listed = 0
 
-    def listing(self, kinds: tuple[str, ...]) -> list[dict[str, Any]]:
+    def listing(self, kinds: tuple[str, ...], memo: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         self.listed += 1
         return self.rows
 
@@ -169,3 +169,24 @@ def test_an_anomaly_is_asked_about_only_when_its_odd_pictures_show_the_star(
     assert tf.star_in_stamps(a) is asked
     row = {"kind": "anomaly", "visible": True, "star_shown": tf.star_in_stamps(a)}
     assert people.askable(row) is asked and people.askable({"kind": "anomaly", "visible": True})  # not measured: as before
+
+
+def test_the_fields_are_parsed_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 26-27 Nov 2026: the task fields listed the store every 30 s and parsed every field's params anew, a thread on Python while the
+    # event loop waited. Only the new rows are parsed now; the listing is the same.
+    from service.products import store as storemod
+    from service.products.store import Store
+
+    st = Store(tmp_path / "s")
+    for i in range(3):
+        k = f"{i}" * 24
+        st.begin("field", k, {"ra": 10.0 + i, "dec": 1.0, "fov": 10.0})
+        st.complete(k)
+    memo: dict[str, Any] = {}
+    assert st.listing(("field",), memo) == st.listing(("field",))
+    parsed: list[str] = []
+    real = storemod.json.loads
+    monkeypatch.setattr(storemod.json, "loads", lambda s, *a, **k: parsed.append(s) or real(s, *a, **k))
+    st.begin("field", "9" * 24, {"ra": 20.0, "dec": 1.0, "fov": 10.0})
+    got = st.listing(("field",), memo)
+    assert len(got) == 4 and len(parsed) == 1 and got[-1]["params"]["ra"] == 20.0  # the new one alone

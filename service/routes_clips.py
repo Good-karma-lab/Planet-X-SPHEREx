@@ -121,7 +121,8 @@ def make_clips_router(st: Any) -> APIRouter:
         find_id = id_of(find_id)  # its slug too (track-…)
         clips = clips_of(st)
         find = await asyncio.to_thread(the_find, find_id)
-        return {**clips.summary(find), "shows": clips.info(find_id)}
+        # in a thread: the summary may list every field's meta (Clips.sources), which held the event loop 1.1 s (26-27 Nov 2026)
+        return await asyncio.to_thread(lambda: {**clips.summary(find), "shows": clips.info(find_id)})
 
     async def place_clip(
         ra: float = Query(..., ge=0.0, le=360.0),

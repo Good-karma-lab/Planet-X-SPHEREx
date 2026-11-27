@@ -33,6 +33,7 @@ log = logging.getLogger("sky.fpx_known")
 
 SLOW_RATE = 15.0  # arcsec/hour: faster is a main-belt or near-Earth body, not what a search at 30-2000 au looks for
 MATCH_ARCSEC = 20.0
+STAT_S = 30.0  # verdict_on looks at a file's mtime at most this often
 DISTANCE_TOL = 0.06  # the heliocentric distance of the body against the search's distance (its own range, plus this)
 MAX_BODIES = 6
 SB_VMAG = 26.0
@@ -450,6 +451,7 @@ class FpxIdentifier:
         self.running: set[tuple[str, str]] = set()
         self.complete: set[tuple[str, str]] = set()
         self._read: dict[str, tuple[int, list[dict[str, Any]]]] = {}  # verdict_on: the files as last read, by name
+        self._stat: dict[str, tuple[float, int | None]] = {}  # verdict_on: (looked at, the file's mtime or None), by name
 
     def path(self, kind: str, key: str) -> Path:
         return self.dir / f"{kind}-{key}.{FILE_VERSION}.json"
@@ -487,6 +489,7 @@ class FpxIdentifier:
         tmp = self.path(kind, key).with_suffix(".part")
         tmp.write_text(jsonsafe.dumps({str(i): v for i, v in sorted(found.items())}, separators=(",", ":")))
         tmp.replace(self.path(kind, key))
+        self._stat.pop(self.path(kind, key).name, None)  # this process's own answer: verdict_on sees it at once
 
     async def identify_result(self, kind: str, key: str, result: dict[str, Any]) -> bool:
         """Looks up the leads of one result, strongest first, and keeps each definite answer as it comes (JPL's gateway fails one request
@@ -596,6 +599,20 @@ class FpxIdentifier:
                 await self.task
         await self.client.aclose()
 
+    def _mtime(self, p: Path) -> int | None:
+        """The file's mtime, looked at once per STAT_S: every list asked the disk for each of its 500 peaks, a thread on Python while
+        the event loop waited (26-27 Nov 2026). A new answer shows within STAT_S."""
+        now = time.monotonic()
+        hit = self._stat.get(p.name)
+        if hit is not None and now - hit[0] < STAT_S:
+            return hit[1]
+        try:
+            at: int | None = p.stat().st_mtime_ns
+        except OSError:
+            at = None
+        self._stat[p.name] = (now, at)
+        return at
+
     def verdict_on(self, f: dict[str, Any]) -> dict[str, Any] | None:
         """What JPL said of a Planet X peak of Findings (the kept answers; nothing is asked), or None. Each file is read once while it
         stands unchanged."""
@@ -604,9 +621,8 @@ class FpxIdentifier:
         if f.get("kind") != "peak" or not scans or kind not in KINDS:
             return None
         p = self.path(kind, scans[0])
-        try:
-            at = p.stat().st_mtime_ns
-        except OSError:
+        at = self._mtime(p)
+        if at is None:
             return None
         hit = self._read.get(p.name)
         if hit is None or hit[0] != at:

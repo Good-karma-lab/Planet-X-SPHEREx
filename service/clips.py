@@ -379,6 +379,7 @@ log = logging.getLogger("sky.clips")
 _LOOKS: OrderedDict[tuple[str, int], PassLook] = OrderedDict()
 
 
+READY_LIST_S = 30.0  # the clip files are listed again after this (Clips.ready)
 PASSES_PAUSE_S = 0.2  # between two finds measured in the background
 PICS_KEEP = 8  # the pass pictures kept decoded for passes_seen (a 20′ field's: ~4 MB each)
 _PICS: OrderedDict[tuple[str, int], dict[str, Any]] = OrderedDict()
@@ -1044,6 +1045,8 @@ class Clips:
         self._visits: tuple[float, list[tuple[str, dict[str, Any], dict[str, Any]]]] = (0.0, [])
         self.pre: dict[str, Any] = {"running": False, "rounds": 0, "made": 0, "left": None, "now": None}
         self._pre_task: asyncio.Task[None] | None = None
+        self._made: tuple[float, frozenset[str]] = (-1e9, frozenset())  # (listed at, the clip files there), see ready
+        self._made_lock = threading.Lock()
 
     # -- files
 
@@ -1052,7 +1055,25 @@ class Clips:
         return self.root / VERSION / safe[-2:] / f"{safe}.webp"
 
     def ready(self, find_id: str) -> bool:
-        return self.path(find_id).is_file()
+        """Its clip is made. From the clip files listed at most READY_LIST_S ago (one listing instead of a stat of each find's file: the
+        lists asked the disk for thousands of finds, and those threads held up the event loop, 26-27 Nov 2026); a clip written by this
+        process counts at once (made), one written by another (the standby, a worker) within READY_LIST_S."""
+        return str(self.path(find_id)) in self._made_files()
+
+    def _made_files(self) -> frozenset[str]:
+        at, files = self._made
+        if time.monotonic() - at <= READY_LIST_S:
+            return files
+        with self._made_lock:
+            if time.monotonic() - self._made[0] > READY_LIST_S:
+                self._made = (time.monotonic(), frozenset(str(p) for p in (self.root / VERSION).glob("*/*.webp")))
+            return self._made[1]
+
+    def made(self, p: Path) -> None:
+        """A clip file this process wrote: ready at once."""
+        with self._made_lock:
+            at, files = self._made
+            self._made = (at, files | {str(p)})
 
     def info(self, find_id: str) -> dict[str, Any] | None:
         p = self.path(find_id).with_suffix(".json")
@@ -1351,6 +1372,7 @@ class Clips:
                     self.failed[fid] = str(e)
                     raise
                 atomic_write_bytes(p, data)
+                self.made(p)
                 atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
         return p
 
@@ -1364,13 +1386,15 @@ class Clips:
         if p.is_file():
             return p
         find = {"id": fid, "kind": "place", "ra": ra, "dec": dec, "data": {}}
-        src = self.source_for(find)
+        # every field's meta is listed in a thread (Clips.sources): on the event loop it held it 1.1 s (26-27 Nov 2026), as get() learned
+        src = await asyncio.to_thread(self.source_for, find)
         if src is None:
             raise ClipUnavailable("no SPHEREx field covers this place yet")
         async with self.gate:
             if not p.is_file():
                 data, info = await asyncio.to_thread(render, find, src, WINDOW_ARCMIN, size, ring, labels)
                 atomic_write_bytes(p, data)
+                self.made(p)
                 atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
         return p
 
@@ -1383,13 +1407,15 @@ class Clips:
         p = self.still_path(str(find["id"]))
         if p.is_file():
             return p
-        src = self.source_for(find)
+        # every field's meta is listed in a thread (Clips.sources): on the event loop it held it 1.1 s (26-27 Nov 2026), as get() learned
+        src = await asyncio.to_thread(self.source_for, find)
         if src is None:
             raise ClipUnavailable("no SPHEREx field covers this place yet")
         async with self.gate:
             if not p.is_file():
                 data, _ = await asyncio.to_thread(render, find, src, WINDOW_ARCMIN, SIZE, True, True, 1)
                 atomic_write_bytes(p, data)
+                self.made(p)
         return p
 
     async def _get_film(self, find: dict[str, Any], p: Path) -> Path:
@@ -1408,6 +1434,7 @@ class Clips:
                     self.failed[fid] = str(e)
                     raise
                 atomic_write_bytes(p, data)
+                self.made(p)
                 atomic_write_bytes(p.with_suffix(".json"), json.dumps(info, separators=(",", ":")).encode())
         return p
 

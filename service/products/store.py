@@ -152,15 +152,22 @@ class Store:
                     shutil.rmtree(vdir, ignore_errors=True)
         return removed
 
-    def listing(self, kinds: tuple[str, ...]) -> list[dict[str, Any]]:
-        """The current-version products of these kinds: key, kind, params, created (epoch s), complete."""
+    def listing(self, kinds: tuple[str, ...], memo: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+        """The current-version products of these kinds: key, kind, params, created (epoch s), complete. With `memo` (key -> params,
+        kept by the caller) only the rows not in it are parsed: a product's params never change, and parsing every field's JSON
+        twice a minute kept a thread on Python while the event loop waited (26-27 Nov 2026)."""
         marks = ",".join("?" for _ in kinds)
         with self._lock:
             rows = self._db.execute(
                 f"SELECT key, kind, params, created, complete, version FROM products WHERE kind IN ({marks}) ORDER BY created", kinds
             ).fetchall()
+        memo = {} if memo is None else memo
+
+        def params(k: str, p: str) -> Any:
+            return memo[k] if k in memo else memo.setdefault(k, json.loads(p))
+
         return [
-            {"key": k, "kind": kind, "params": json.loads(p), "created": c, "complete": bool(done)}
+            {"key": k, "kind": kind, "params": params(k, p), "created": c, "complete": bool(done)}
             for k, kind, p, c, done, v in rows
             if VERSIONS.get(kind) == v
         ]

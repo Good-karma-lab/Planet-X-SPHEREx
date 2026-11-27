@@ -54,6 +54,7 @@ class TaskFields:
         self._used: list[tuple[float, float]] = []  # how full the disk was, over the last FAST_S
         self._tried: dict[str, float] = {}  # what was asked to be made, and when
         self._fresh: dict[str, tuple[float, bool]] = {}  # product key -> (asked at, built of today's exposures and not stripped)
+        self._params: dict[str, Any] = {}  # product key -> its params, parsed once (Store.listing memo)
         self._star: dict[str, bool] = {}  # spectrum key -> its odd pictures show the star (star_in_stamps), measured once
 
     def _listing(self) -> list[dict[str, Any]]:
@@ -61,7 +62,7 @@ class TaskFields:
             if time.monotonic() - self._at > LIST_TTL_S:
                 self._fields = [
                     {**x["params"], "key": x["key"]}
-                    for x in self.st.store.listing((fieldjob.KIND,))
+                    for x in self.st.store.listing((fieldjob.KIND,), self._params)
                     if x["complete"] and float(x["params"].get("fov", 99.0)) <= MAX_FOV
                 ]
                 self._at = time.monotonic()

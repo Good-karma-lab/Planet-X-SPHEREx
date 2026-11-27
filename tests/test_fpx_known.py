@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -177,6 +178,29 @@ def test_findings_peaks_that_are_known_bodies_say_so(tmp_path: Path) -> None:
     assert idn.verdict_on({**find, "scans": ["e" * 24]}) is None
     idn._keep("deep", "k" * 24, {})  # the file written again is read again
     assert idn.verdict_on(find) is None
+
+
+def test_a_peak_list_asks_the_disk_once_per_30_s(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 26-27 Nov 2026: every list asked the disk for each of its 500 peaks' answer files (a thread on Python while the event loop
+    # waited). A file is looked at once per STAT_S; one written by another process is seen within STAT_S.
+    now = [100.0]
+    monkeypatch.setattr(fpx_known.time, "monotonic", lambda: now[0])
+    idn = fpx_known.FpxIdentifier(FakeStore({}), tmp_path, client=object())  # type: ignore[arg-type]
+    idn._keep("deep", "k" * 24, {"0": {"state": "ok", "name": "X", "at": [1.0, 2.0, 61000.0]}})
+    find = {"id": "peak:1", "kind": "peak", "ra": 1.0, "dec": 2.0, "scans": ["k" * 24], "data": {"search": "deep"}}
+    assert (idn.verdict_on(find) or {}).get("name") == "X"
+    stats: list[str] = []
+    real = Path.stat
+    monkeypatch.setattr(Path, "stat", lambda self, *a, **k: stats.append(self.name) or real(self, *a, **k))
+    for _ in range(50):
+        idn.verdict_on(find)
+    assert stats == []  # within 30 s: not once
+    other = idn.path("deep", "k" * 24)
+    time.sleep(0.01)
+    other.write_text('{"0": {"state": "ok", "name": "Y", "at": [1.0, 2.0, 61000.0]}}')  # another process
+    assert (idn.verdict_on(find) or {}).get("name") == "X"
+    now[0] += fpx_known.STAT_S + 0.5
+    assert (idn.verdict_on(find) or {}).get("name") == "Y" and len(stats) == 2  # its one look, and the changed file read once
 
 
 def test_an_answer_got_is_kept_while_another_lead_waits_for_jpl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

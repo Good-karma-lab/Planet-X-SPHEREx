@@ -97,6 +97,18 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
         idn = getattr(st, "fpx_known", None)
         return idn.annotate(kind, key, result) if idn is not None else result
 
+    async def finished(kind: str, key: str) -> dict[str, Any] | None:
+        """The finished product's reply, or None. Read in a thread: the store's catalogue is shared with the standby and the workers, and
+        its lock or SQLite's held the event loop up to 1.5 s (26 of the 116 holds of the night of 26-27 Nov 2026 in /distant)."""
+
+        def read() -> dict[str, Any] | None:
+            if not st.store.is_complete(key):
+                return None
+            meta = st.store.read_meta(kind, key) or {}
+            return done_reply(kind, key, with_known(kind, key, meta))
+
+        return await asyncio.to_thread(read)
+
     def done_reply(kind: str, key: str, result: dict[str, Any]) -> dict[str, Any]:
         return {
             "key": key,
@@ -150,8 +162,8 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
                 "result": {"status": "no-coverage", "passes": info, "notes": ["no exposure of these detectors here"]},
             }
         key = product_key(distantjob.KIND, params, extra=(distantjob.signature(exps), str(pk)))
-        if st.store.is_complete(key):
-            return done_reply(distantjob.KIND, key, with_known(distantjob.KIND, key, st.store.read_meta(distantjob.KIND, key) or {}))
+        if (done := await finished(distantjob.KIND, key)) is not None:
+            return done
         job = st.scheduler.jobs.get(st.scheduler.by_key.get(key, ""))
         if job is None or job.state in ("error", "cancelled"):
             limited = throttled(request)
@@ -226,8 +238,8 @@ def make_planetx_router(st: Any, prefix: str = API_PREFIX) -> APIRouter:
             return await deepjob.plan_async(st.index, params)
         sels = deepjob.selections(st.index, params)
         key = product_key(deepjob.KIND, params, extra=(deepjob.signature(sels),))
-        if st.store.is_complete(key):
-            return done_reply(deepjob.KIND, key, with_known(deepjob.KIND, key, st.store.read_meta(deepjob.KIND, key) or {}))
+        if (done := await finished(deepjob.KIND, key)) is not None:
+            return done
         job = st.scheduler.jobs.get(st.scheduler.by_key.get(key, ""))
         if job is None or job.state in ("error", "cancelled"):
             limited = throttled(request)

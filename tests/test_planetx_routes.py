@@ -193,3 +193,33 @@ def test_the_jumps_checks_run_to_their_end_a_pages_background_search_is_followed
         assert sched.jobs[sched.by_key[r["key"]]].followed is True
         r0 = client.get("/api/v1/distant?ra=41&dec=1&fov=5&mjd=61000").json()  # a person's own (P0): abandoned the old way, not followed
         assert sched.jobs[sched.by_key[r0["key"]]].followed is False
+
+
+def test_a_finished_search_is_read_off_the_event_loop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 26-27 Nov 2026: the store's check of a finished /distant search ran on the event loop and held it up to 1.5 s (26 of the 116
+    # holds of that night): its catalogue is shared with the standby and the workers. It is read in a thread now.
+    import threading
+
+    from service.products.store import product_key
+
+    client, store = make_app(tmp_path)
+    monkeypatch.setattr(distantjob, "selection", lambda index, params: (["e"], 0, "pk", {}, None))
+    monkeypatch.setattr(distantjob, "signature", lambda exps: "sig")
+    params = distantjob.distant_params(44.5, 4.0, 18.0, None, None, 30.0, 300.0, (1, 2, 3), 1.0)
+    key = product_key(distantjob.KIND, params, extra=("sig", "pk"))
+    store.begin(distantjob.KIND, key, params)
+    store.write_meta(distantjob.KIND, key, {"status": "ok", "candidates": []})
+    store.complete(key)
+    asked: list[str] = []
+    real = store.is_complete
+
+    def watched(k: str) -> bool:
+        asked.append(threading.current_thread().name)
+        return real(k)
+
+    monkeypatch.setattr(store, "is_complete", watched)
+    with client:
+        loop_thread = client.portal.call(lambda: threading.current_thread().name)  # type: ignore[union-attr]
+        r = client.get("/api/v1/distant", params={"ra": 44.5, "dec": 4.0}).json()
+    assert r["state"] == "done" and r["key"] == key and r["result"]["status"] == "ok"
+    assert asked and loop_thread not in asked
