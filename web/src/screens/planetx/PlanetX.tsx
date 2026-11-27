@@ -95,6 +95,8 @@ interface Peak {
   /** how far its dot stands above the noise of its sum along the orbit; why it is hidden with the faint peaks (findings/cards.tsx) */
   sight?: { state?: string; z?: number | null } | null;
   hidden_why?: string[] | null;
+  /** is its dot seen in its own picture (null: not measured yet) */
+  visible?: boolean | null;
   fov: number;
   place: string;
   snr: number | null;
@@ -134,13 +136,20 @@ function usePeaks(faint: boolean): { leads: Peak[]; known: Peak[]; faint: number
           // the Findings rule: one peak with ok=true per object; known bodies are not leads (status 'known' from the service; until the service
           // marks the live Eris and Makemake detections, their places are matched here)
           // statuses the service keeps out of the leads (a star's residual or halo, a galaxy, below the bar) are not leads here either
+          // one rule with Findings' "Planet X peaks" (its list as it opens: any status, seen in the picture, faint hidden): a peak not
+          // seen in its own picture goes with the faint ones ("88 spots" here and "91" there, 86.4, M2)
           const ok = d.finds.filter(
-            (f) => f.kind === 'peak' && f.data.peak?.ok !== false && !['residual', 'galaxy', 'below', 'halo'].includes(f.status ?? ''),
+            (f) =>
+              f.kind === 'peak' &&
+              f.data.peak?.ok !== false &&
+              !['residual', 'galaxy', 'below', 'halo'].includes(f.status ?? '') &&
+              (faint || f.visible !== false),
           );
           // the leads in the order of the number each card shows first, its search signal (the service's order read as unsorted:
           // "10.6×, 10.9×, 10.7×", test of 26 Nov, П8)
           const bySignal = (a: Peak, b: Peak) => (b.data.peak?.sn ?? -1) - (a.data.peak?.sn ?? -1);
-          setP({ leads: ok.filter((f) => !isKnown(f)).sort(bySignal), known: ok.filter(isKnown), faint: d.faint ?? 0, why: d.faint_why });
+          const unseen = faint ? 0 : d.finds.filter((f) => f.kind === 'peak' && f.visible === false).length;
+          setP({ leads: ok.filter((f) => !isKnown(f)).sort(bySignal), known: ok.filter(isKnown), faint: (d.faint ?? 0) + unseen, why: d.faint_why });
         })
         .catch(() => {});
     void load();
@@ -434,8 +443,10 @@ export function PlanetXPage() {
                 'loading what was searched…'
               ) : (
                 <>
-                  <b title="Every peak still a lead, one per object: known bodies and the faint peaks are not counted (Findings counts by its own filters)">{nLeads}</b>{' '}
-                  {nLeads === 1 ? 'spot' : 'spots'} to check in <b>{mine.length}</b>{' '}
+                  <b title="Planet X peaks seen in their pictures, of any status, the faint ones hidden: Findings' “Planet X peaks” as its list opens">
+                    {nLeads + knownPeaks.length}
+                  </b>{' '}
+                  Planet X peaks seen in their pictures · <b>{nLeads}</b> to check, in <b>{mine.length}</b>{' '}
                   <span title="Fields of any size where Find Planet X ran (most other searched fields are the time-lapse search only)">fields searched for Planet X</span>
                 </>
               )}

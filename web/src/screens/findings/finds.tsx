@@ -930,7 +930,15 @@ export function FindingsView({
   const chip = (k: KindSel, label: string) => {
     const n = cnt(k);
     return (
-      <button key={k} class={kind === k ? 'on' : ''} aria-pressed={kind === k} disabled={n === 0 && k !== kind} onClick={() => setKind(k)}>
+      <button
+        key={k}
+        class={kind === k ? 'on' : ''}
+        aria-pressed={kind === k}
+        disabled={n === 0 && k !== kind}
+        onClick={() => setKind(k)}
+        // the same rule as the Planet X page's number when the list opens (any status, seen in the picture, faint hidden: 86.4, M2)
+        title={k === 'peak' ? 'Planet X peaks under the filters set; as the list opens: any status, seen in the picture, the faint ones hidden (the Planet X page’s number)' : undefined}
+      >
         {label} <span>{n ?? NONE}</span>
       </button>
     );
