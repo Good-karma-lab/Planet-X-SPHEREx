@@ -61,6 +61,23 @@ const STILL = 44;
 /** rows of the list on show before "All N" */
 export const TOP_ROWS = 4;
 
+/** The still's own stretch: a faint place cut from the picture's stretch (set by the whole field) was a black square, 8-12 of 255
+ *  (test of 27 Nov, M1). Its sky (the 30th percentile of brightness) goes to near black, its brightest (99.5th) to white. */
+export function stretch(g: CanvasRenderingContext2D, w: number, h: number): void {
+  const im = g.getImageData(0, 0, w, h);
+  const d = im.data;
+  const lum: number[] = [];
+  for (let i = 0; i < d.length; i += 4) lum.push(0.3 * d[i]! + 0.59 * d[i + 1]! + 0.11 * d[i + 2]!);
+  lum.sort((a, b) => a - b);
+  const lo = lum[Math.floor(lum.length * 0.3)] ?? 0;
+  const hi = Math.max(lum[Math.floor(lum.length * 0.995)] ?? 255, lo + 24);
+  if (lo < 2 && hi > 200) return; // already full range
+  const k = 235 / (hi - lo);
+  for (let i = 0; i < d.length; i += 4)
+    for (let j = 0; j < 3; j++) d[i + j] = Math.max(0, Math.min(255, 12 + (d[i + j]! - lo) * k));
+  g.putImageData(im, 0, 0);
+}
+
 /** A small still of a find: the pixels of the lab's picture around its place, taken when the row appears and every few seconds. */
 function Still({ uv, picture, path }: { uv: [number, number] | null; picture: () => HTMLCanvasElement | null; path?: [number, number][] }) {
   const cv = useRef<HTMLCanvasElement>(null);
@@ -70,7 +87,7 @@ function Still({ uv, picture, path }: { uv: [number, number] | null; picture: ()
       const c = cv.current;
       const src = picture();
       if (!c) return;
-      const g = c.getContext('2d')!;
+      const g = c.getContext('2d', { willReadFrequently: true })!;
       g.clearRect(0, 0, c.width, c.height);
       if (!src || !src.width || !uv) return;
       // 1/9 of the picture's side around the place, never beyond its edge
@@ -80,6 +97,7 @@ function Still({ uv, picture, path }: { uv: [number, number] | null; picture: ()
       try {
         g.imageSmoothingEnabled = true;
         g.drawImage(src, x, y, s, s, 0, 0, c.width, c.height);
+        stretch(g, c.width, c.height);
         // a track: its visits as dots on a thin line, in the still's own scale (it may run out of the still: then it is clipped)
         if (path && path.length > 1) {
           const k = c.width / s;
