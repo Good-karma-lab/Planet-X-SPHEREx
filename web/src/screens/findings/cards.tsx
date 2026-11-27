@@ -94,7 +94,9 @@ export function cardTitle(f: CardFind): string {
     case 'film':
       return `${nm || 'Moves within one pass'} · ${(f.rate ?? 0).toFixed(1)}″/h`;
     case 'peak':
-      return `Planet X peak · search signal ${(f.snr ?? f.score ?? 0).toFixed(1)}× the noise`;
+      // the search's own signal (`score`), the number Planet X and the clip show; `snr` is the photometry (6.9× here, 9.3× there: test of
+      // 27 Nov, M2)
+      return `Planet X peak · search signal ${(f.score ?? f.snr ?? 0).toFixed(1)}× the noise`;
     case 'red':
       return `${nm || 'Red source'} · colour ${(f.score ?? 0).toFixed(1)}`;
     case 'anomaly':
@@ -278,17 +280,40 @@ export function Clip({ f, collapse = false }: { f: CardFind; collapse?: boolean 
       if (timer) clearTimeout(timer);
     };
   }, [near, url, f.clip?.state]);
+  // a two-picture Blink (a track: added along / without the motion; a peak: the sum along the orbit / one pass) rests on its first
+  // picture, the one with the dot: a card glanced at in its empty half looked empty (test of 27 Nov, M6). Held or hovered, it shows
+  // the other picture; the lab plays the Blink.
+  const pair = f.kind === 'film' || (f.kind === 'peak' && (f.clip?.blink?.length ?? 0) === 2);
+  const [other, setOther] = useState(false);
+  const frameOf = (u: string, i: number) => `${u}${u.includes('?') ? '&' : '?'}frame=${i}`;
   const why = (url && reasons.get(url)) || f.clip?.reason || 'no SPHEREx field covers this place yet';
   if (collapse && state === 'none' && !f.clip?.still) return <p class="mono-s fclip-none">no time-lapse: {why}</p>;
   return (
     <div class="fclip" ref={box}>
-      {state === 'ready' && near && url && (
+      {state === 'ready' && near && url && !pair && (
         <img
           src={url}
           alt={`Time-lapse of ${cardTitle(f)}: one frame per SPHEREx pass, the object ringed`}
           width={320}
           height={320}
           decoding="async"
+        />
+      )}
+      {state === 'ready' && near && url && pair && (
+        <img
+          src={frameOf(url, other ? 1 : 0)}
+          alt={`${cardTitle(f)}: ${f.kind === 'film' ? 'its visits added along the motion' : 'its passes added along the orbit'}, the object ringed`}
+          title={f.kind === 'film' ? 'Hold or point: the same visits added without motion' : 'Hold or point: one pass alone'}
+          width={320}
+          height={320}
+          decoding="async"
+          data-testid="clip-pair"
+          onPointerEnter={(e) => e.pointerType === 'mouse' && setOther(true)}
+          onPointerLeave={() => setOther(false)}
+          onPointerDown={() => setOther(true)}
+          onPointerUp={() => setOther(false)}
+          onPointerCancel={() => setOther(false)}
+          onContextMenu={(e) => e.preventDefault()}
         />
       )}
       {state !== 'ready' && near && f.clip?.still && (

@@ -1,3 +1,4 @@
+import { nextTask, taskHash } from '../../lib/account';
 import { visibleInterval } from '../../lib/idle';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { faintTitle, hiddenLine, wingLine } from '../../lib/wing';
@@ -136,7 +137,10 @@ function usePeaks(faint: boolean): { leads: Peak[]; known: Peak[]; faint: number
           const ok = d.finds.filter(
             (f) => f.kind === 'peak' && f.data.peak?.ok !== false && !['residual', 'galaxy', 'below', 'halo'].includes(f.status ?? ''),
           );
-          setP({ leads: ok.filter((f) => !isKnown(f)), known: ok.filter(isKnown), faint: d.faint ?? 0, why: d.faint_why });
+          // the leads in the order of the number each card shows first, its search signal (the service's order read as unsorted:
+          // "10.6×, 10.9×, 10.7×", test of 26 Nov, П8)
+          const bySignal = (a: Peak, b: Peak) => (b.data.peak?.sn ?? -1) - (a.data.peak?.sn ?? -1);
+          setP({ leads: ok.filter((f) => !isKnown(f)).sort(bySignal), known: ok.filter(isKnown), faint: d.faint ?? 0, why: d.faint_why });
         })
         .catch(() => {});
     void load();
@@ -215,10 +219,27 @@ const CH: Chapter[] = [
   },
 ];
 
+const FAINT_KEY = 'spherex-px-faint';
+
 export function PlanetXPage() {
   const searched = useSearched(true);
   const honest = useHonest();
-  const [faint, setFaint] = useState(false);
+  // the faint peaks shown or hidden: kept for the tab, as Findings keeps its own (it came back "hidden" at every visit: test of 26 Nov, П6)
+  const [faint, setFaintState] = useState(() => {
+    try {
+      return sessionStorage.getItem(FAINT_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setFaint = (on: boolean) => {
+    setFaintState(on);
+    try {
+      sessionStorage.setItem(FAINT_KEY, on ? '1' : '0');
+    } catch {
+      // kept for this view only
+    }
+  };
   const pk = usePeaks(faint);
   const leads = pk?.leads ?? null;
   const knownPeaks = pk?.known ?? [];
@@ -227,6 +248,7 @@ export function PlanetXPage() {
   const [tab, setTab] = useState<'cands' | 'searched' | 'story'>('cands');
   const [chapter, setChapter] = useState(-1);
   const [layers, setLayersState] = useState<Layers>(ALL);
+  const [layersOpen, setLayersOpen] = useState(false);
   const [log, setLog] = useState(true);
   const [ready, setReady] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -239,6 +261,21 @@ export function PlanetXPage() {
   /** a lead opens a 5′ field centred on the lead's own place at its reference date (quick to load), the lead named so the Lab marks it */
   const fieldOf = (pk: Peak) =>
     `#/lab?ra=${pk.ra.toFixed(5)}&dec=${pk.dec.toFixed(5)}&fov=5&find=${encodeURIComponent(pk.id)}&find_ra=${pk.ra.toFixed(5)}&find_dec=${pk.dec.toFixed(5)}`;
+  /** "Check this lead": the lead's task from the service (its question, its two sums at once); the plain 5′ field when there is none
+   *  (a peak nobody may be asked about) or the service does not answer in 8 s */
+  const checkLead = async (pk: Peak, btn: HTMLElement) => {
+    if (btn.getAttribute('aria-busy') === 'true') return;
+    btn.setAttribute('aria-busy', 'true');
+    let href = fieldOf(pk);
+    try {
+      const t = await Promise.race([nextTask('finding', pk.id), new Promise<null>((res) => setTimeout(() => res(null), 8000))]);
+      if (t && t.finding_id === pk.id) href = taskHash(t);
+    } catch {
+      // the field alone
+    }
+    location.hash = href;
+    btn.removeAttribute('aria-busy');
+  };
   /** the searched field the lead lies in, at its own size (20′ or 60′) */
   const searchedOf = (pk: Peak) => (searched ?? []).find((x) => sep([x.ra, x.dec], [pk.ra, pk.dec]) < x.fov / 120);
   const nLeads = leads?.length ?? 0;
@@ -279,6 +316,19 @@ export function PlanetXPage() {
         </figure>
       )}
       <div class="px3-links">
+        {/* the lead as a question: its two sums are ready at once and the question with them, the sky loads behind (the 5′ field
+            alone took ~40 s and asked nothing: tests of 26 and 27 Nov, П2, С5) */}
+        <a
+          class="btn sm primary px3-check"
+          href={fieldOf(pk)}
+          data-testid="px-check-lead"
+          onClick={(e) => {
+            e.preventDefault();
+            void checkLead(pk, e.currentTarget as HTMLElement);
+          }}
+        >
+          Check this lead
+        </a>
         <a class="go" href={fieldOf(pk)}>
           Open the lead in the Lab (5′) →
         </a>
@@ -384,7 +434,8 @@ export function PlanetXPage() {
                 'loading what was searched…'
               ) : (
                 <>
-                  <b>{nLeads}</b> {nLeads === 1 ? 'spot' : 'spots'} to check in <b>{mine.length}</b>{' '}
+                  <b title="Every peak still a lead, one per object: known bodies and the faint peaks are not counted (Findings counts by its own filters)">{nLeads}</b>{' '}
+                  {nLeads === 1 ? 'spot' : 'spots'} to check in <b>{mine.length}</b>{' '}
                   <span title="Fields of any size where Find Planet X ran (most other searched fields are the time-lapse search only)">fields searched for Planet X</span>
                 </>
               )}
@@ -393,7 +444,19 @@ export function PlanetXPage() {
               <b>0</b> confirmed
             </span>
           </div>
-          <div class="px3-chips">
+          {/* a phone: the layers fold behind one button, so they never cover the model (the globe's "Layers" does the same) */}
+          <button
+            class="px3-chip px3-layers"
+            style={{ '--c': '#5fe3d6' }}
+            aria-expanded={layersOpen}
+            aria-controls="px3-chips"
+            data-testid="px-layers"
+            onClick={() => setLayersOpen(!layersOpen)}
+          >
+            <i />
+            Layers {layersOpen ? '▴' : '▾'}
+          </button>
+          <div class="px3-chips" id="px3-chips" data-open={layersOpen ? 'true' : 'false'}>
             {CHIPS.map((c) => (
               <button
                 key={c.g}
@@ -499,7 +562,7 @@ export function PlanetXPage() {
         <div class="px3-body">
           {tab === 'cands' && (
             <div data-testid="px-cands">
-              <h4 class="px3-sub">Leads{leads == null ? '' : ` · ${nLeads}`}</h4>
+              <h4 class="px3-sub">Leads{leads == null ? '' : ` · ${nLeads} · strongest search signal first`}</h4>
               {leads == null && (
                 <p class="px3-note" role="status" data-testid="px-leads-wait">
                   loading the candidates…

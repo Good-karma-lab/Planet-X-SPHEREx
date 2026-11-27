@@ -680,9 +680,11 @@ class Score:
         """The leaderboard achievements look at the last finished week and month."""
         now = time.time()
         week0, month0 = period_start("week", now), period_start("month", now)
-        last_week = self.board(week0 - 7 * 86400, week0)
+        # only the ranked rows hold places: the board lists the unranked after them (too few settled answers, hidden, no points), and a
+        # lone person with 0 points was "first of a week" (test of 26 Nov, П12)
+        last_week = [r for r in self.board(week0 - 7 * 86400, week0) if r["ranked"]]
         prev_month_start = period_start("month", month0 - 86400)
-        last_month = self.board(prev_month_start, month0)
+        last_month = [r for r in self.board(prev_month_start, month0) if r["ranked"]]
         place = next((i + 1 for i, r in enumerate(last_week) if r["user_id"] == user_id), None)
         s.top_ten_week = s.top_ten_week or (place is not None and place <= 10)
         s.first_week = s.first_week or place == 1

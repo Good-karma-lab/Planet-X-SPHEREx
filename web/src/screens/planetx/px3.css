@@ -127,6 +127,9 @@
   border-radius: 2px;
   background: var(--c);
 }
+.px3-layers {
+  display: none;
+}
 .px3-chip[aria-pressed='true'] {
   color: var(--ink);
   border-color: color-mix(in srgb, var(--c) 60%, transparent);
@@ -589,6 +592,13 @@
   }
   .px3-chip {
     flex: none;
+    height: 40px;
+  }
+  .px3-layers {
+    display: inline-flex;
+  }
+  .px3-chips[data-open='false'] {
+    display: none;
   }
   .px3-tools {
     top: auto;
@@ -680,3 +690,8 @@
   color: var(--faint);
   margin-top: 3px;
 }
+/* a lead's own button: its question, the sums at once (a 40 px target on a phone) */
+.px3-links { align-items: center; }
+.px3-check { min-height: 40px; display: inline-flex; align-items: center; }
+.px3-check[aria-busy='true'] { opacity: 0.75; pointer-events: none; }
+.px3-check[aria-busy='true']::after { content: ' · opening…'; }

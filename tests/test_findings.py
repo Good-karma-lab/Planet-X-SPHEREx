@@ -1615,6 +1615,8 @@ def test_a_peak_nobody_can_see_stands_behind_the_faint_filter_and_says_why(tmp_p
     out = query(db, "peak", "all", None, 50, 0, faint="hide")
     assert ids(faint="hide") == {"peak:seen", "peak:new"}  # a peak not looked at yet (or not read) stays in
     assert out["faint"] == 3 and out["faint_why"] == {"unseen": 1, "no_sum": 2, "star": 1}
+    # Findings counts the faint under its own filters, and says the whole number too (what Planet X counts): "0 here, 3 in all"
+    assert out["faint_all"] == 3 and query(db, "peak", "all", None, 50, 0, faint="hide", visibility="unseen")["faint_all"] == 3
     every = {f["id"]: f for f in query(db, "peak", "all", None, 50, 0)["finds"]}
     assert every["peak:dim"]["hidden_why"] == ["unseen"] and every["peak:dim"]["sight"]["z"] == SIGHT_Z - 0.1
     # a looked-at peak's dot in its sum says whether it is seen, whatever the clip's own S/N in the ring said (26 Nov: 39 of 93 shown)

@@ -33,10 +33,13 @@ export function rulerOf(a: RulerPoint, b: RulerPoint): RulerResult {
 
 const COMPASS = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
 
-/** "12.4″ · 10.3″/yr · toward 355° (N)"; a rate within a pass (days apart) is said per hour. */
-export function rulerWord(r: RulerResult): string {
+/** "12.4″ · 10.3″/yr · toward 355° (N)"; a rate within a pass (days apart) is said per hour. `rate: false` (the ruler the lab lays itself
+ *  between two passes of a find): "12.4″ in 1.4 yr · toward 355° (N)", so the picture never shows a second rate beside the find's
+ *  own (a two-point rate of noisy places: 5.60″/yr on the picture, 4.29″/yr on the card, test of 27 Nov, M2) */
+export function rulerWord(r: RulerResult, { rate = true }: { rate?: boolean } = {}): string {
   const parts = [`${r.shift.toFixed(r.shift >= 100 ? 0 : 1)}″`];
-  if (r.rate != null && r.dt != null) {
+  if (!rate && r.dt != null && Math.abs(r.dt) >= 0.1) parts[0] += ` in ${Math.abs(r.dt).toFixed(1)} yr`;
+  else if (r.rate != null && r.dt != null) {
     if (Math.abs(r.dt) < 0.1) parts.push(`${(r.rate / 8766).toFixed(2)}″/h`);
     else parts.push(`${r.rate.toFixed(r.rate >= 100 ? 0 : r.rate >= 10 ? 1 : 2)}″/yr`);
   }

@@ -518,7 +518,7 @@ export function Landing() {
       <main>
         <section class="lp-hero" aria-labelledby="lp-h1">
           <div class="lp-wrap lp-hero-grid">
-            <div>
+            <div class="lp-hero-text">
               <p class="lp-eyebrow">Real images from NASA’s SPHEREx space telescope</p>
               <h1 id="lp-h1">
                 Flip through the sky.

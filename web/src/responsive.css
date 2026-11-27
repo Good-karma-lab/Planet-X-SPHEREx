@@ -1590,6 +1590,16 @@
   :root .fbar .fkinds .fgroup-h {
     flex-basis: 100%;
   }
+  /* a long chip ("Visible in the picture 167 · 17 being measured") wraps inside the sheet, never to its edge */
+  :root .fbar .fkinds button {
+    flex: 0 1 auto;
+    max-width: 100%;
+    flex-wrap: wrap;
+    white-space: normal;
+    text-align: left;
+    padding-top: 6px;
+    padding-bottom: 6px;
+  }
   :root .fbar .leadcount {
     margin: 4px 0 0;
     font-size: 13px;
@@ -2759,6 +2769,27 @@
     content: '';
     position: absolute;
     inset: -16px -12px;
+  }
+  /* the task's "sign-in" in its line of words, and the rows of "To look at" (16-31 px high): 40 px or more for a finger */
+  :root .lab .taskpanel .tp-guestline .tp-guest {
+    position: relative;
+  }
+  :root .lab .taskpanel .tp-guestline .tp-guest::after {
+    content: '';
+    position: absolute;
+    inset: -14px -8px -5px; /* not down over the answers under the line */
+  }
+  :root .lab .panel .candlist .cr-group > summary,
+  :root .lab .panel .cr-details > summary,
+  :root .lab .panel .anrow {
+    min-height: 40px;
+    box-sizing: border-box;
+  }
+  /* a summary keeps its disclosure marker: taller by its padding, not by a flex box */
+  :root .lab .panel .candlist .cr-group > summary,
+  :root .lab .panel .cr-details > summary {
+    padding-top: 10px;
+    padding-bottom: 10px;
   }
   :root .lab .taskpanel .tp-others {
     min-height: 44px;

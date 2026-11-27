@@ -17,4 +17,8 @@ describe('ruler', () => {
     const r = rulerOf({ ra: 10, dec: 0, epoch: 2025.9, pass: null }, { ra: 10, dec: 0.01, epoch: 2025.9 + 1 / 365.25, pass: null });
     expect(rulerWord(r)).toBe('36.0″ · 1.50″/h · toward 0° (N)');
   });
+  it("the lab's own ruler between a find's passes says the time, not a second rate", () => {
+    const r = rulerOf({ ra: 269.446448, dec: 4.767352, epoch: 2025.68, pass: 0 }, { ra: 269.446224, dec: 4.77023, epoch: 2026.68, pass: 2 });
+    expect(rulerWord(r, { rate: false })).toMatch(/^10\.4″ in 1\.0 yr · toward 35\d° \(N\)$/);
+  });
 });
