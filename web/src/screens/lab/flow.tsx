@@ -383,7 +383,14 @@ export function useLabFlow(a: FlowArgs): LabFlow {
   const [open, setOpen] = useState<string | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
-  const [ruler, setRuler] = useState<RulerPoint[]>([]);
+  const [ruler, setRulerState] = useState<RulerPoint[]>([]);
+  /** the ruler the lab laid itself between a find's two passes (its word has no rate of its own: the find's rate is the one) */
+  const autoRuler = useRef(false);
+  const setRuler: typeof setRulerState = (v) => {
+    autoRuler.current = false;
+    setRulerState(v);
+  };
+  const rulerSays = (r: RulerPoint[]) => rulerWord(rulerOf(r[0]!, r[1]!), { rate: !autoRuler.current });
   const rulerRef = useRef(ruler);
   rulerRef.current = ruler;
   const ptr = useRef<{ x: number; y: number } | null>(null);
@@ -942,7 +949,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
           ctx.fill();
         }
         if (pts.length === 2) {
-          const s = rulerWord(rulerOf(rl[0]!, rl[1]!));
+          const s = rulerSays(rl);
           ctx.font = '600 11px ui-monospace, Menlo, monospace';
           const tw = ctx.measureText(s).width;
           const mx = Math.max(box.x + 4, Math.min(box.x + box.w - tw - 4, (pts[0]![0] + pts[1]![0]) / 2 + 8));
@@ -1248,6 +1255,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       { ra: t.ra[i0]!, dec: t.dec[i0]!, epoch: yr(t.mjd[i0]!), pass: t.passes[i0]! },
       { ra: t.ra[i1]!, dec: t.dec[i1]!, epoch: yr(t.mjd[i1]!), pass: t.passes[i1]! },
     ]);
+    autoRuler.current = true;
   };
   // the panel's own pictures of the step (the two sums, the odd pictures) are on show
   const [panelShown, setPanelShown] = useState(false);
@@ -1259,7 +1267,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
       return (
         <MoverView
           blink={blink ? `${labelOf(blink[0])} and ${labelOf(blink[1])}` : track ? 'all passes' : 'waits for the search of the field'}
-          ruler={ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '—'}
+          ruler={ruler.length === 2 ? rulerSays(ruler) : '—'}
           search={
             track
               ? `${track.speed.toFixed(1)}″/yr toward ${track.pa.toFixed(0)}° · ${track.passes.length} passes`
@@ -1466,7 +1474,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         {tool && (
           // what the tool waits for, beside it and whole (the status line cut it off)
           <span class="tool-tip" role="status" data-testid="tool-tip">
-            {tool === 'mark' ? 'Click a place to mark it' : ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : ruler.length ? 'Now click the second place' : 'Click two places to measure'}
+            {tool === 'mark' ? 'Click a place to mark it' : ruler.length === 2 ? rulerSays(ruler) : ruler.length ? 'Now click the second place' : 'Click two places to measure'}
           </span>
         )}
         <button
@@ -1547,7 +1555,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     return { ra: r, dec: d };
   };
   const selPlace = cur ? { ra: cur.ra, dec: cur.dec } : selNow();
-  const rulerNow = ruler.length === 2 ? rulerWord(rulerOf(ruler[0]!, ruler[1]!)) : '';
+  const rulerNow = ruler.length === 2 ? rulerSays(ruler) : '';
   const newTitle = (cur ? cur.label : a.sel?.name) || `Lab ${a.ra.toFixed(4)} ${a.dec.toFixed(4)}`;
   const actions = (
     <>
@@ -1828,7 +1836,7 @@ export function useLabFlow(a: FlowArgs): LabFlow {
         ? 'Ruler: click the second place'
         : 'Ruler: click the first place'
       : tool === 'ruler' && ruler.length === 2
-        ? `Ruler: ${rulerWord(rulerOf(ruler[0]!, ruler[1]!))}`
+        ? `Ruler: ${rulerSays(ruler)}`
         : '';
   const eff = lastMarkEffect();
   // the server decides: a mover it already checks (linked to marks nearby) needs no second tap
