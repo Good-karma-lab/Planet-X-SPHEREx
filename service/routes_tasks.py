@@ -304,6 +304,18 @@ KIND_WORD = {
 }
 
 
+def answered_find(acc: Any, user_id: str, finding_id: str) -> bool:
+    """This person answered this find already: a question series, or a task about it closed."""
+    c = acc.db._conn()
+    if c.execute("SELECT 1 FROM acc_tasks WHERE user_id=? AND finding_id=? AND state='done' LIMIT 1", (user_id, finding_id)).fetchone():
+        return True
+    try:
+        got = c.execute("SELECT 1 FROM acc_series_answers WHERE user_id=? AND finding_id=? LIMIT 1", (user_id, finding_id)).fetchone()
+    except sqlite3.OperationalError:  # the series' table is made with the people's module: no answer yet
+        return False
+    return got is not None
+
+
 def why_of(p: dict[str, Any]) -> dict[str, Any]:
     """Why a quarter is given: the promising find in it, where it is, the card's words, and the question series to ask about it (the
     lab opens the quarter with that find's questions: /api/tasks/next?kind=<ask.kind>&finding_id=<ask.finding_id>)."""
@@ -863,8 +875,12 @@ def make_tasks_router(st: Any) -> APIRouter:
             p = RNG.choice(pq[:PROMISING_SPREAD])
         if pq and not plain and RNG.random() >= PLAIN_SHARE:
             row = searched[p["cell_id"]]
-            why = why_of(p)
-            return {**row, "quarter": p["quarter"], "fov": QUARTER_FOV, **quarter_place(p["cell_id"], p["quarter"]), "why": why}
+            place = {**row, "quarter": p["quarter"], "fov": QUARTER_FOV, **quarter_place(p["cell_id"], p["quarter"])}
+            if user_id and answered_find(acc, user_id, str(p["finding_id"])):
+                # its lead was answered by this person already (27 Nov 2026, Н3: peak:eeef37cb5caf asked again a minute later as
+                # "1 of 2" of its square): the quarter is looked through without its questions
+                return place
+            return {**place, "why": why_of(p)}
         # the squares take turns around the sky, the first 500 of them looked at
         turn = spread_ranks([r["cell_id"] for r in rows])
         rows = [rows[i] for i in sorted(range(len(rows)), key=lambda i: (turn[i], i))]
