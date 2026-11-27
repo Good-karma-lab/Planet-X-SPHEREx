@@ -257,7 +257,7 @@ export function SearchedCounter({ fields, leads = true }: { fields: SearchedFiel
       <div class="fsum searched-counter" aria-label="Searched so far">
         {tile(
           t.fields.toLocaleString('en-US'),
-          'fields searched so far',
+          'fields searched so far, by every search',
           'every field searched, of any size (2′ to 60′): the sweep’s 20′ squares and the fields people opened in the Lab. The globe counts only the squares of its grid',
         )}
         {tile(
