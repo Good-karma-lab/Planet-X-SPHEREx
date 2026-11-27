@@ -381,3 +381,6 @@
 @media (max-width: 599.98px) and (min-height: 480px) {
   .lp .lp-link { display: inline-flex; align-items: center; min-height: 44px; }
 }
+/* the year box at the picture's foot, left: at the top it stood over the card of Barnard's Star ("1950 POSS-I plate" on it, 86.4, M7);
+   the path never comes to that corner */
+.lp-pyear { top: auto; bottom: 16px; }
