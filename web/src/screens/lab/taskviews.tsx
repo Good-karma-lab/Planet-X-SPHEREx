@@ -89,7 +89,8 @@ export function StampsView({ src, drivers, onShown, onNone }: { src: Source | nu
           p ? (
             <figure key={p.i} class="tv-st" title={`${new Date((p.mjd - 40587) * 86400000).toISOString().slice(0, 10)} · D${p.det} · ${p.lam.toFixed(2)} µm`}>
               <RawStamp stamp={stamps.get(p.i)!} />
-              <figcaption style={{ color: detColour(p.det) }}>D{p.det}</figcaption>
+              {/* its colour of light, not the detector's name ("D4" said nothing to a newcomer: 86.4) */}
+              <figcaption style={{ color: detColour(p.det) }}>{p.lam.toFixed(1)} µm</figcaption>
             </figure>
           ) : (
             <figure key={`e${k}`} class="tv-st empty" />
@@ -133,7 +134,18 @@ interface ClipInfo {
 
 /** "Is this a real object?": the finding's own clip from the service. For a track or a Planet X peak it blinks the picture added
  *  along the motion against the same exposures added without it: a real mover is there in the first and gone in the second. */
-export function FindingClip({ id, onShown, onNone }: { id: string | null; onShown?: (on: boolean) => void; onNone?: (none: boolean) => void }) {
+/** `atRest`: shown in a phone's sheet at rest too (a red source's own passes: the object is what the question is about) */
+export function FindingClip({
+  id,
+  onShown,
+  onNone,
+  atRest = false,
+}: {
+  id: string | null;
+  onShown?: (on: boolean) => void;
+  onNone?: (none: boolean) => void;
+  atRest?: boolean;
+}) {
   const info = useClip(id);
   const pair = pairOf(id, info);
   const [broken, setBroken] = useState(false);
@@ -168,7 +180,7 @@ export function FindingClip({ id, onShown, onNone }: { id: string | null; onShow
           : 'getting the pictures…';
   const up = () => setLoaded((n) => n + 1);
   return (
-    <div class={`tv tv-clip${pair ? ' two' : ''}`} data-testid="task-clip">
+    <div class={`tv tv-clip${pair ? ' two' : ''}${atRest ? ' tv-fixed tv-rest' : ''}`} data-testid="task-clip">
       {pair ? (
         <div class="tv-pair">
           {pair.map((q) => (

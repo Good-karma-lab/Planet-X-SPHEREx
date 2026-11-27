@@ -304,6 +304,18 @@ KIND_WORD = {
 }
 
 
+def answered_find(acc: Any, user_id: str, finding_id: str) -> bool:
+    """This person answered this find already: a question series, or a task about it closed."""
+    c = acc.db._conn()
+    if c.execute("SELECT 1 FROM acc_tasks WHERE user_id=? AND finding_id=? AND state='done' LIMIT 1", (user_id, finding_id)).fetchone():
+        return True
+    try:
+        got = c.execute("SELECT 1 FROM acc_series_answers WHERE user_id=? AND finding_id=? LIMIT 1", (user_id, finding_id)).fetchone()
+    except sqlite3.OperationalError:  # the series' table is made with the people's module: no answer yet
+        return False
+    return got is not None
+
+
 def why_of(p: dict[str, Any]) -> dict[str, Any]:
     """Why a quarter is given: the promising find in it, where it is, the card's words, and the question series to ask about it (the
     lab opens the quarter with that find's questions: /api/tasks/next?kind=<ask.kind>&finding_id=<ask.finding_id>)."""
@@ -408,6 +420,14 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             if x["kind"] == "film" and x["status"] in LEADS and x.get("visible") is True:
                 full = one(f.db, x["id"])
                 visits[x["id"]] = clips.visits_seen({**x, **full}) if full is not None else None
+    shift: dict[str, float] = {}  # a slow mover's shift over its passes (people.too_small_to_see; 27 Nov 2026, Н2)
+    from service.findings import find_row as one_find
+
+    for x in body["finds"]:
+        if x["kind"] in ("mover", "browndwarf") and x["status"] in LEADS:
+            s = people.shift_of(one_find(f.db, x["id"]))
+            if s is not None:
+                shift[x["id"]] = round(s, 2)
     tf = task_fields(st)
     ready: dict[str, bool] = {}
     star: dict[str, bool] = {}  # an anomaly: its odd pictures show its star (TaskFields.star_in_stamps; 27 Nov 2026, С2)
@@ -448,6 +468,7 @@ def lead_findings(st: Any, status: str | None = None) -> list[dict[str, Any]] | 
             **({"visits_seen": visits[x["id"]]} if x["id"] in visits else {}),
             **({"star_shown": star[x["id"]]} if x["id"] in star else {}),
             **({"passes_seen": passes[x["id"]]} if x["id"] in passes else {}),
+            **({"shift_arcsec": shift[x["id"]]} if x["id"] in shift else {}),
             **({"ask": x["ask"]} if "ask" in x else {}),
             **({"echo": True} if x.get("echo") else {}),
             **({"faint": True} if x.get("faint") and not (share and (x["id"] in started or faint_asked(x, share))) else {}),
@@ -854,8 +875,12 @@ def make_tasks_router(st: Any) -> APIRouter:
             p = RNG.choice(pq[:PROMISING_SPREAD])
         if pq and not plain and RNG.random() >= PLAIN_SHARE:
             row = searched[p["cell_id"]]
-            why = why_of(p)
-            return {**row, "quarter": p["quarter"], "fov": QUARTER_FOV, **quarter_place(p["cell_id"], p["quarter"]), "why": why}
+            place = {**row, "quarter": p["quarter"], "fov": QUARTER_FOV, **quarter_place(p["cell_id"], p["quarter"])}
+            if user_id and answered_find(acc, user_id, str(p["finding_id"])):
+                # its lead was answered by this person already (27 Nov 2026, Н3: peak:eeef37cb5caf asked again a minute later as
+                # "1 of 2" of its square): the quarter is looked through without its questions
+                return place
+            return {**place, "why": why_of(p)}
         # the squares take turns around the sky, the first 500 of them looked at
         turn = spread_ranks([r["cell_id"] for r in rows])
         rows = [rows[i] for i in sorted(range(len(rows)), key=lambda i: (turn[i], i))]

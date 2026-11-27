@@ -506,7 +506,9 @@
 /* the clip's own small print (a track's three lines from 42 px above its foot, a peak's two) is cut off whole: the words are under the
    picture (14.5% left the top of "added along the motion" over the site's own caption: test of 27 Nov, M5) */
 .taskpanel .tv-pair figure, .vsq .ps-pair figure { display: flex; flex-direction: column; }
-.taskpanel .tv-pair img, .vsq .ps-pair img { clip-path: inset(0 0 18.5% 0); margin-bottom: -18.5%; }
+/* the box is 81.5% as tall as wide and shows the picture's top, whatever its size (a clip with a negative margin let the words under a
+   big pair be covered by the picture: 86.4, M5) */
+.taskpanel .tv-pair img, :root .vsq .peaksum .ps-pair img { width: 100%; height: auto; aspect-ratio: 1 / 0.815; object-fit: cover; object-position: top; clip-path: none; margin-bottom: 0; }
 /* the sheet at rest shows the subject of the question: an anomaly's odd pictures in one row */
 @media (max-width: 599.98px) and (min-height: 480px) {
   :root .lab .panel[data-detent='peek'] .taskpanel .tv-fixed, :root .lab .panel:not([data-detent]) .taskpanel .tv-fixed { min-height: 0; }
@@ -523,3 +525,18 @@
 .vsq .toolstrip .tool-tip { position: absolute; right: calc(100% + 8px); top: 2px; width: max-content; max-width: 220px; padding: 5px 9px; border-radius: 8px; background: rgba(6, 12, 16, 0.92); border: 1px solid var(--edge); font: 500 12px var(--font); color: var(--ink); pointer-events: none; }
 @media (max-width: 599.98px) and (min-height: 480px) { .vsq .toolstrip .tool-tip { right: 0; top: auto; bottom: calc(100% + 8px); } }
 @media (max-width: 599.98px) and (min-height: 480px) { .vsq .ps-pair.one { width: min(100% - 24px, 264px); margin-bottom: 64px; } }
+/* the answer being saved turns (Н4 round, 86.4) */
+.taskpanel .tp-saving { flex: none; display: inline-block; width: 12px; height: 12px; margin-left: 8px; vertical-align: -2px; border-radius: 50%; border: 2px solid rgba(190, 236, 246, 0.3); border-top-color: var(--accent-l, #8ff); animation: tpsave 0.9s linear infinite; }
+@keyframes tpsave { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .taskpanel .tp-saving { animation: none; } }
+/* a red source's own passes in a phone's sheet at rest: a compact square beside nothing else, the question and answers under it (Н8) */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .lab .panel:not([data-detent='full']) .taskpanel .tv-rest { min-height: 0; margin: 2px 0 6px; }
+  :root .lab .panel:not([data-detent='full']) .taskpanel .tv-rest .tv-clipbox { width: 112px; height: 112px; }
+}
+/* a phone, the sky under a find's two pictures: one small button at the top right, no wide bar over the field (86.4, Н9) */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .vsq .peaksum.sky .ps-bar { left: auto; right: 10px; top: 96px; bottom: auto; transform: none; padding: 0; gap: 0; background: none; border: 0; max-width: none; }
+  :root .vsq .peaksum.sky .ps-bar > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  :root .vsq .peaksum.sky .ps-bar .btn { min-height: 40px; padding: 0 12px; font-size: 12.5px; }
+}

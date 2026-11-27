@@ -2583,6 +2583,17 @@ export function Lab({ route }: { route: Route }) {
         // the image's own date is the ring: no dot over the object there, and its year stands outside the ring; the path's other dots
         // and years keep clear of the ring too (the orange "1993" covered the very object asked about: test of 27 Nov, M4)
         const k = size / side;
+        // the ring's own year first: where it stands, so no other year is written over it
+        const nowYr = pts.find(([yr]) => Math.abs(yr - epoch) < 0.6);
+        let nowBox: [number, number, number, number] | null = null;
+        if (nowYr) {
+          const tw = ctx.measureText(String(Math.round(nowYr[0]))).width;
+          let lx = x + ring * 0.75 + 4 * k;
+          let ly = y - ring * 0.75 - 2 * k;
+          if (lx + tw > size - 4) lx = x - ring * 0.75 - 4 * k - tw;
+          if (ly - 10 * k < 4) ly = y + ring * 0.75 + 12 * k;
+          nowBox = [lx, ly, tw, 12 * k];
+        }
         for (const [yr, px, py] of pts) {
           const now = Math.abs(yr - epoch) < 0.6;
           const inRing = Math.hypot(px - x, py - y) < ring + 2 * k;
@@ -2595,10 +2606,12 @@ export function Lab({ route }: { route: Route }) {
           if (now || (!inRing && yr - lastLabel > 4)) {
             const t = String(Math.round(yr));
             const tw = ctx.measureText(t).width;
-            let [lx, ly] = now ? [x + ring * 0.75 + 4 * k, y - ring * 0.75 - 2 * k] : [px + 6 * k, py + 4 * k];
-            // the ring's year never runs past the picture's edge: to the ring's other side
-            if (now && lx + tw > size - 4) lx = x - ring * 0.75 - 4 * k - tw;
-            if (now && ly - 10 * k < 4) ly = y + ring * 0.75 + 12 * k;
+            // no year runs past the picture's edge (the ring's goes to the ring's other side, a path dot's to the dot's other side), and
+            // none is written over the ring's own
+            let [lx, ly] = now && nowBox ? [nowBox[0], nowBox[1]] : [px + 6 * k, py + 4 * k];
+            if (!now && lx + tw > size - 4) lx = px - 6 * k - tw;
+            const over = (bx: number) => !!nowBox && bx < nowBox[0] + nowBox[2] + 4 * k && bx + tw > nowBox[0] - 4 * k && Math.abs(ly - nowBox[1]) < nowBox[3];
+            if (!now && over(lx)) continue;
             ctx.fillStyle = now ? '#ffb454' : '#7ff0e4';
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#000';
@@ -4074,7 +4087,10 @@ export function Lab({ route }: { route: Route }) {
                 <div class="vwait">loading the pictures of every {view === 'det' ? 'detector' : 'band'} for each pass…</div>
               )}
               {distShow && dist.ds.state === 'ok' && film === null && view === 'picture' && <DistantCanvas d={dist} />}
-              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && <PeakSum id={findId} tool={!!flow.tool} loading={!!loadNow} />}
+              {/* a square's own look (its lead answered) is the sky alone: the lead's two pictures and their bar stood over the quarter (86.4, Н9) */}
+              {findId.startsWith('peak:') && film === null && view === 'picture' && time === 'loop' && !opts.archive && !distShow && !(squareTask && !flow.leadOpen) && (
+                <PeakSum id={findId} tool={!!flow.tool} loading={!!loadNow} />
+              )}
               {flow.trackSum && findId.startsWith('film:') && film !== null && view === 'picture' && <PeakSum id={findId} track tool={!!flow.tool} loading={!!(loadNow ?? daysLoad)} />}
               <div
                 class="float ftitle"
@@ -4143,7 +4159,13 @@ export function Lab({ route }: { route: Route }) {
                 )}
                 {flow.chip}
               </div>
-              <div class="float fbands" role="group" aria-label={view === 'det' ? 'Detectors' : 'Spectral bands'}>
+              {/* an old survey's image has no SPHEREx bands: their buttons step aside, and the ring at the picture's foot is in sight (86.4, M4) */}
+              <div
+                class="float fbands"
+                role="group"
+                aria-label={view === 'det' ? 'Detectors' : 'Spectral bands'}
+                style={archNow ? { visibility: 'hidden' } : undefined}
+              >
                 {view === 'det'
                   ? DETECTORS.map((d, i) => (
                       <button

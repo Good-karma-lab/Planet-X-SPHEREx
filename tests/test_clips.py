@@ -550,7 +550,7 @@ def test_a_source_seen_in_one_pass_of_three_is_counted_once(tmp_path: Path) -> N
     x, y = (float(v) for v in g.sky_to_grid(RA0 + 0.01, DEC0))
     for k in range(3):
         img = _blob(g.n, x, y, 12.0) if k == 0 else np.zeros((g.n, g.n))
-        rgb = np.stack([img, img, img]) + np.random.default_rng(20 + k).normal(0.0, 0.02, (3, g.n, g.n)) + 0.05
+        rgb = np.stack([img, 0.5 * img, 0.3 * img]) + np.random.default_rng(20 + k).normal(0.0, 0.02, (3, g.n, g.n)) + 0.05  # a red one
         part = {"rgb": rgb.astype(np.float16), "sat": np.zeros((g.n, g.n), np.uint8)}
         store.write_part("field", key, f"picture_p{k}.sxp", encode(part, {"pass": k}))
     store.write_meta("field", key, meta)
@@ -582,3 +582,50 @@ def test_a_clip_made_by_another_process_is_ready_within_30_s(tmp_path: Path, mon
     assert c.ready("red:b2")  # this process's own: at once
     now[0] += 20.5  # 30.5 s after the listing
     assert c.ready("red:a1") and c.ready("red:b2") and not c.ready("red:c3")
+
+
+def test_a_red_source_is_counted_only_where_its_ring_holds_something_red(tmp_path: Path) -> None:
+    # 27 Nov 2026 (exploratory report of 86.4, Н3): red:de3ffd943342 was red in one pass; its ring, following a motion fitted through
+    # noise, held a white star in the other two, and passes_seen counted 3 of 3. A red source's pass counts when the ring is red.
+    from service.clips import passes_seen
+
+    store = Store(tmp_path)
+    meta = _field(store, "k" * 24, 6.0)
+    g = grid_for_fov(RA0, DEC0, 6.0)
+    key = "r" * 24
+    store.begin("field", key, meta["params"])
+    x, y = (float(v) for v in g.sky_to_grid(RA0 + 0.01, DEC0))
+    for k in range(3):
+        b = _blob(g.n, x, y, 12.0)
+        r_g_b = (b, 0.5 * b, 0.3 * b) if k == 0 else (0.4 * b, 0.7 * b, b)  # red in the first pass, a blue-white star after
+        rgb = np.stack(r_g_b) + np.random.default_rng(30 + k).normal(0.0, 0.02, (3, g.n, g.n)) + 0.05
+        part = {"rgb": rgb.astype(np.float16), "sat": np.zeros((g.n, g.n), np.uint8)}
+        store.write_part("field", key, f"picture_p{k}.sxp", encode(part, {"pass": k}))
+    store.write_meta("field", key, meta)
+    store.complete(key)
+    src = Source(store, key, meta, False)
+    red = {"id": "red:x", "kind": "red", "ra": RA0 + 0.01, "dec": DEC0, "data": {}}
+    assert passes_seen(red, src) == (1, 3)
+    assert passes_seen({**red, "id": "mover:x", "kind": "mover"}, src) == (3, 3)  # any other kind: whatever stands out
+
+
+def test_a_peak_clip_says_the_same_z_as_the_lists(tmp_path: Path, monkeypatch: Any) -> None:
+    # 27 Nov 2026 (exploratory report of 86.4, М2): peak:60c0a10726a3's clip said 4.8 (the ring on the picture) and Findings 7.8 (its
+    # dot against the noise of its sum along the orbit). The clip info says the lists' z; the ring's own stays as ring_sn.
+    import json
+
+    monkeypatch.setenv("SKY_CLIPS", str(tmp_path / "clips"))
+    monkeypatch.setenv("SKY_PRODUCT_DB", str(tmp_path / "product.sqlite"))
+    client, st = _service(tmp_path)
+    row = {"place": "test", "fov": 5.0, "rate": None, "snr": 5.3, "score": 5.3, "chance": 0.0, "scans": []}
+    st.findings.db.write_finds([{**row, "id": "peak:60c0", "kind": "peak", "ra": RA0, "dec": DEC0, "data": {"peak": {"ok": True}}}])
+    client.get("/api/findings/mover:abc/clip")  # the clips' store is made
+    p = st.clips.path("peak:60c0").with_suffix(".json")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps({"id": "peak:60c0", "visible_sn": 4.8, "visible": True}))
+    assert client.get("/api/findings/peak:60c0/clip").json()["shows"]["visible_sn"] == 4.8  # no sum looked at yet: the ring's
+    st.findings.db.put_sight("peak:60c0", "ok", {"z": 7.83, "here": 1.0})
+    shows = client.get("/api/findings/peak:60c0/clip").json()["shows"]
+    assert (shows["visible_sn"], shows["ring_sn"], shows["visible"]) == (7.8, 4.8, True)
+    monkeypatch.setenv("SKY_HIDE_UNSEEN_PEAKS", "0")  # the lists say the ring's too then
+    assert client.get("/api/findings/peak:60c0/clip").json()["shows"]["visible_sn"] == 4.8

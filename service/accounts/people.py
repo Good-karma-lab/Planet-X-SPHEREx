@@ -84,7 +84,8 @@ SERIES: dict[str, tuple[dict[str, Any], ...]] = {
             {"id": "no", "label": "No", "result": "still"})},
         {"id": "blend", "question": "Is it one dot, or two touching?", "show": "blink2", "answers": (
             {"id": "one", "label": "One", "next": "old"},
-            {"id": "two", "label": "Two", "result": "blend"})},
+            # it moves (the step before said so) and passes a star: not a blend that set it aside (27 Nov 2026, Н2: WISE 0855-0714)
+            {"id": "two", "label": "Two", "result": "moves_past"})},
         {"id": "old", "question": "Old pictures (WISE 2010, 2MASS 2000): is there a dot along the arrow, further back?", "show": "old_surveys", "answers": (
             {"id": "yes", "label": "Yes", "result": "moves_old"},
             {"id": "no", "label": "No", "result": "moves"})},
@@ -127,7 +128,7 @@ RESULTS = {
               "no_dot": "No dot steps along the arrow", "streak": "A streak: a satellite or a plane",
               "sum_only": "A dot on the sum, not in the single pictures"},
     "slow": {"moves": "It shifts", "moves_old": "It shifts, and old pictures show it further back", "still": "It does not shift",
-             "blend": "Two dots touching"},
+             "blend": "Two dots touching", "moves_past": "It shifts, passing a star"},
     "peak": {"candidate": "A dot on the orbit sum only", "no_peak": "No dot on the orbit sum only", "glow": "In a bright star's glow or on its spike"},
     "red": {"galaxy": "A fuzzy patch: a galaxy", "artefact": "Not there every time, or on a glow, a spike or the edge",
             "brown_dwarf": "It moved: a cold brown-dwarf candidate", "still": "A red dot that has not moved"},
@@ -144,8 +145,8 @@ ACTIONS = {
 CONTROL_EXPECT: dict[tuple[str, str], frozenset[str]] = {
     ("track", "known"): frozenset({"moves", "partial", "sum_only"}),
     ("track", "artefact"): frozenset({"no_dot", "streak"}),
-    ("slow", "known"): frozenset({"moves", "moves_old"}),
-    ("slow", "artefact"): frozenset({"still", "blend"}),
+    ("slow", "known"): frozenset({"moves", "moves_old", "moves_past"}),
+    ("slow", "artefact"): frozenset({"still", "blend", "moves_past"}),
     ("peak", "artefact"): frozenset({"no_peak", "glow"}),
     ("peak", "known"): frozenset({"candidate"}),  # a known body the search found blind (not an echo: one pass of it and noise)
     ("red", "galaxy"): frozenset({"galaxy"}),
@@ -331,6 +332,29 @@ def seen_twice(got: tuple[int, int] | None) -> bool:
     return got is not None and got[0] >= PASSES_MIN
 
 
+MIN_SHIFT_ARCSEC = 2.5 * 1.5375  # 2.5 pixels of a task's field (engine.grid: 1.5375″ at every size): a smaller shift is not seen
+
+
+def shift_of(row: dict[str, Any] | None) -> float | None:
+    """How far a slow mover shifts over the passes it is shown in (arcsec): its track's own measure, else speed × baseline."""
+    if not row:
+        return None
+    if row.get("shift_arcsec") is not None:
+        return float(row["shift_arcsec"])
+    tr = (row.get("data") or {}).get("track") or {}
+    if tr.get("shift_arcsec") is not None:
+        return float(tr["shift_arcsec"])
+    if tr.get("speed") is not None and tr.get("baseline_years") is not None:
+        return float(tr["speed"]) * float(tr["baseline_years"])
+    return None
+
+
+def too_small_to_see(row: dict[str, Any] | None) -> bool:
+    """A mover or brown dwarf whose shift is under MIN_SHIFT_ARCSEC: an honest "No" to "does it move?" (HD 18702, 1.5″ in a year)."""
+    s = shift_of(row)
+    return (row or {}).get("kind") in ("mover", "browndwarf") and s is not None and s < MIN_SHIFT_ARCSEC
+
+
 def visits_show(got: tuple[int, int] | None) -> bool:
     """Whether a track's own visits show its dot well enough to ask about them: in VISITS_SHARE of them (Clips.visits_seen)."""
     return got is not None and got[1] > 0 and got[0] >= VISITS_SHARE * got[1]
@@ -354,6 +378,8 @@ def askable(row: dict[str, Any]) -> bool:
         return False  # a faint Planet X peak (findings.faint_peak): most are noise
     if row.get("kind") == "film":
         return track_seen(row)
+    if too_small_to_see(row):
+        return False
     if row.get("kind") == "red" and "passes_seen" in row and not seen_twice(row["passes_seen"]):
         return False  # seen in one pass only (no galaxy leaves between passes), or not measured yet (С1, 27 Nov 2026)
     if row.get("kind") == "anomaly" and row.get("star_shown") is False:
@@ -404,6 +430,8 @@ class People:
         """The right results of a control object, or None when the find is not one."""
         if series == "peak" and row.get("echo"):
             return None
+        if series == "slow" and too_small_to_see(row):
+            return None  # its shift is under what a person can see: no right answer to judge (27 Nov 2026, Н2: HD 18702)
         got = CONTROL_EXPECT.get((series, str(row.get("status")))) or CONTROL_EXPECT.get((series, str(row.get("stage"))))
         return got if got is not None else self.gold(series).get(row["finding_id"])
 
@@ -433,7 +461,9 @@ class People:
         if user_id and done_n % CONTROL_EVERY == CONTROL_EVERY - 1:
             extra = [r for r in (controls() if controls else []) if series_of(r.get("kind")) and (kinds is None or r.get("kind") in kinds)]
             everyone = [
-                r for r in pool + extra if r.get("kind") not in KINDS_OFF and (r.get("kind") != "film" or askable(r))
+                r
+                for r in pool + extra
+                if r.get("kind") not in KINDS_OFF and (r.get("kind") != "film" or askable(r)) and not too_small_to_see(r)
             ]  # nor a control of them: it would be the only one of its kind
             cands = [r for r in everyone if r["finding_id"] not in mine and self.expected(str(series_of(r.get("kind"))), r) is not None]
             if shows is not None:  # a control the lab can show at once (any, where none can)
@@ -538,6 +568,8 @@ class People:
         action = ACTIONS.get(series, {}).get(result)
         if action is None:
             return
+        if series == "slow" and result == "still" and too_small_to_see(row):
+            return  # "it does not shift" is what anyone sees of a shift under a few pixels: it sets nothing aside
         c = self.db._conn()
         data: dict[str, Any] = {}
         if action == "relink":

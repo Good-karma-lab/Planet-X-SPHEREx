@@ -1279,7 +1279,8 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     // a red source: its own pass after pass, ringed, in the task panel over the sky (the sky is not made smaller); before, only the
     // two example pictures stood there and the object was in the field's small 2′ inset (27 Nov 2026, С1)
     if (show === 'picture' && (body?.finding_id ?? task?.finding_id ?? '').startsWith('red:'))
-      return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} />;
+      // shown in a phone's sheet at rest too: there it was the 2′ inset alone, the size of a nail (86.4, Н8)
+      return <FindingClip id={body?.finding_id ?? task?.finding_id ?? null} atRest />;
     if (show === 'stamps') {
       const own = body?.anomaly;
       const src: Source | null = own ? { ra: own.ra, dec: own.dec, pmra: own.pmra ?? 0, pmdec: own.pmdec ?? 0 } : anomaly ? taskSrc : null;
@@ -1395,6 +1396,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     const show = act.show;
     const body = act.body;
     const visits = (body?.pictures ?? []).map((q) => q.mjd).filter((m): m is number => typeof m === 'number');
+    // the old surveys belong to their own step: any other step leaves them (an archive left in the address by another task, or kept
+    // by a reload, hid the step's own pictures: test of 27 Nov, 86.4, Н1)
+    if (show !== 'old_surveys' && show !== 'old_new' && a.params['arch'] === '1') a.set({ arch: null });
     if (show === 'blink' || show === 'pictures') {
       // a track: the visits of its pass, in the Days scale
       if (!visits.length) return;

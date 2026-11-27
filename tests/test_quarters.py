@@ -186,7 +186,9 @@ def test_a_square_is_given_where_the_machine_finds_are_most_promising(
     # the task says why in the card's words, where the find is, and which question series to open it with
     t = _client(app).get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
     w = t["why"]
-    assert w["text"] == "a possible brown dwarf · worth a look: 77 of 100" and (w["ra"], w["dec"]) == tuple(round(v, 6) for v in at("294-0150", "SW"))  # noqa: E501
+    assert w["text"] == "a possible brown dwarf · worth a look: 77 of 100" and (w["ra"], w["dec"]) == tuple(
+        round(v, 6) for v in at("294-0150", "SW")
+    )
     assert w["ask"] == {"kind": "moves", "finding_id": "browndwarf:1", "series": "slow"}
     # the most promising quarter, every time (not a random one of the first few): a second built lead of lower promise is not given
     finds.append(lead("peak:2", "peak", "294-0150", "NE", 70))
@@ -316,3 +318,36 @@ def test_after_a_square_with_a_lead_a_plain_one_is_given(
     assert "why" in guest.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
     monkeypatch.setattr(routes_tasks, "BUSY_QUARTER_S", 0.0)
     assert "why" not in guest.get("/api/tasks/next", params={"kind": "cell", "plain": 1}).json()["task"]
+
+
+def test_a_square_does_not_ask_again_about_a_lead_its_person_answered(
+    site: tuple[FastAPI, _State, Any],  # noqa: F811
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 27 Nov 2026 (exploratory report of 86.4, Н3): peak:eeef37cb5caf was answered through "Check this lead", and a minute later its
+    # square brought the same question as "1 of 2". The quarter is given all the same, without the lead's questions.
+    import random
+
+    from service import accounts, grid, routes_tasks
+    from tests.test_accounts import _sign_in
+
+    app, st, mail = site
+    _fake_grid(st)
+    fake(st, {("294-0150", "SW")})
+    qc = grid.quarter(grid.by_id("294-0150"), "SW")
+    finds = [{"finding_id": "browndwarf:1", "kind": "browndwarf", "ra": qc.ra, "dec": qc.dec, "status": "unexplained", "promise": 77}]
+    monkeypatch.setattr(routes_tasks, "all_rows", lambda st: [dict(f, _listed=True) for f in finds])
+    monkeypatch.setattr(routes_tasks, "BUSY_QUARTER_S", 0.0)
+    monkeypatch.setitem(routes_tasks._promising, "at", 0.0)
+    monkeypatch.setattr(routes_tasks, "famous_cells", lambda: set())
+    monkeypatch.setattr(routes_tasks, "RNG", random.Random(1))
+    bob = _sign_in(app, mail, "bob@example.org")
+    assert bob.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]["why"]["finding_id"] == "browndwarf:1"  # not answered
+    monkeypatch.setattr(routes_tasks, "BUSY_QUARTER_S", -1.0)  # bob's quarter may be given to ann too
+    ann = _sign_in(app, mail)
+    db = accounts.get(st).db
+    uid = ann.get("/api/me").json()["user"]["id"]
+    t = db.add_task(uid, "finding", {"finding_id": "browndwarf:1", "ra": qc.ra, "dec": qc.dec})
+    db._conn().execute("UPDATE acc_tasks SET state='done' WHERE id=?", (t["id"],))  # answered through "Check this lead"
+    again = ann.get("/api/tasks/next", params={"kind": "cell"}).json()["task"]
+    assert again["cell_id"] == "294-0150" and again["quarter"] == "SW" and "why" not in again

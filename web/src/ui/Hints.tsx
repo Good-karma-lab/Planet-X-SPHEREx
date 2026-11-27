@@ -79,9 +79,9 @@ function place(r: DOMRect, w: number, h: number, upFirst: boolean): { left: numb
   return r.top > H - r.bottom ? { left, top: 16, up: true } : { left, top: Math.max(16, H - h - 16), up: false };
 }
 
-/** something else holds the person's eyes: the lab's loading card, a sign-in popup, or the Findings filter sheet (the hint drew over it) */
+/** something else holds the person's eyes: the lab's loading card, a sign-in popup, the Findings filter sheet or a find's report open over the list (the hint drew over them) */
 const busy = () =>
-  [...document.querySelectorAll<HTMLElement>('[data-testid=load-block], [data-testid=signin-popup], .sx-back, .fsheet-back')].some((e) => {
+  [...document.querySelectorAll<HTMLElement>('[data-testid=load-block], [data-testid=signin-popup], .sx-back, .fsheet-back, aside.leadpanel[role=dialog]')].some((e) => {
     const r = e.getBoundingClientRect();
     return r.width > 0 && r.height > 0 && getComputedStyle(e).visibility !== 'hidden' && !e.classList.contains('fading');
   });

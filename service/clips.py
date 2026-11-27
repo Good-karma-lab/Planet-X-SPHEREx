@@ -381,6 +381,7 @@ _LOOKS: OrderedDict[tuple[str, int], PassLook] = OrderedDict()
 
 READY_LIST_S = 30.0  # the clip files are listed again after this (Clips.ready)
 PASSES_PAUSE_S = 0.2  # between two finds measured in the background
+RED_OVER_BLUE = 1.2  # passes_seen: a red source's ring stands out at least as much in the red channel as in the blue
 PICS_KEEP = 8  # the pass pictures kept decoded for passes_seen (a 20′ field's: ~4 MB each)
 _PICS: OrderedDict[tuple[str, int], dict[str, Any]] = OrderedDict()
 
@@ -422,7 +423,15 @@ def passes_seen(find: dict[str, Any], src: Source, window_arcmin: float = WINDOW
         white = np.nanmean(rgb, axis=0)
         sn, beat, nctl, _ = stands_out(np.where((sat > 127) & ~np.isfinite(white), np.nanmax(white), white), rx, ry, ring_r)
         total += 1
-        seen += int(is_visible(sn, beat, nctl))
+        if not is_visible(sn, beat, nctl):
+            continue
+        if find.get("kind") == "red":
+            # what stands out in its ring must be red itself: a white star at the ring's edge was counted as the source in the passes
+            # it had left (red:de3ffd943342, 27 Nov 2026: 3 of 3 instead of 1 of 3; its ring follows a motion fitted through noise)
+            red, blue = (stands_out(rgb[c], rx, ry, ring_r)[0] for c in (0, 2))
+            if red < RED_OVER_BLUE * blue:
+                continue
+        seen += 1
     return seen, total
 
 

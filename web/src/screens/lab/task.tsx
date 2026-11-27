@@ -81,7 +81,7 @@ export const SERIES: Record<string, SeriesStep[]> = {
     ]),
     s_('blend', 'Is it one dot, or two touching?', 'blink2', [
       { id: 'one', label: 'One', next: 'old' },
-      { id: 'two', label: 'Two', result: 'blend' },
+      { id: 'two', label: 'Two', result: 'moves_past' },
     ]),
     s_('old', 'Old pictures (WISE 2010, 2MASS 2000): is there a dot along the arrow, further back?', 'old_surveys', [
       { id: 'yes', label: 'Yes', result: 'moves_old' },
@@ -388,6 +388,13 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   const [line, setLine] = useState('');
   // a question series: the answers given so far, and the pictures tapped as "missing"
   const [path, setPath] = useState<string[]>([]);
+  /** the task the state above belongs to: on the first render of the next task it is still the last one's (its body, its answers) */
+  const [stateOf, setStateOf] = useState('');
+  // the answer being saved: it turns while the service answers (1-8 s of grey buttons said nothing: test of 27 Nov, 86.4)
+  const [saving, setSaving] = useState('');
+  useEffect(() => {
+    if (!busy) setSaving('');
+  }, [busy]);
   const [missing, setMissing] = useState<number[]>([]);
   const [taps, setTaps] = useState<Tap[]>([]);
   // a closed task: what was answered and what it led to, until the person opens the next one (never a silent jump)
@@ -415,6 +422,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   useEffect(() => {
     setId(task?.id ?? null);
     setBody(null);
+    setStateOf(key);
     setLine('');
     setPath([]);
     setMissing([]);
@@ -448,14 +456,16 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   const seriesId = body?.series?.id ?? (task?.finding_id ? (SERIES_OF_KIND[task.finding_id.split(':')[0] ?? ''] ?? null) : null);
   const steps: SeriesStep[] | null =
     task && ['finding', 'moves', 'red', 'anomaly'].includes(task.kind) && seriesId ? (body?.series?.steps ?? SERIES[seriesId] ?? null) : null;
-  const step = steps ? stepAt(steps, path) : null;
+  // no step until the state is this task's: the last task's step ("Old pictures", its archive on) set up the next task's lab, which
+  // then opened on a 1993 plate without its own pictures (test of 27 Nov, 86.4, Н1)
+  const step = steps && stateOf === key ? stepAt(steps, path) : null;
   const tapping = !!task && (task.kind === 'find_again' || task.kind === 'recentre');
   const view: LabTaskView = {
     panel: null,
     kind: task?.kind ?? null,
     show: step?.show ?? null,
     series: steps ? seriesId : null,
-    body,
+    body: stateOf === key ? body : null,
     tapping,
     taps,
     blind: !!task && focusKind(task.kind) && !done,
@@ -519,7 +529,9 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         // what the answers lead to once people agree (service/accounts/people.py ACTIONS), in the series' own terms
         ...(got.result?.id && seriesId ? [nextWord(seriesId, got.result.id)] : []),
         ...(ag && !ag.settled && !(got.points ?? 0)
-          ? [`${ag.answers ?? 1} of ${ag.needed ?? 3} people answered · +${ag.points_when_agreed ?? 10} points if yours matches theirs`]
+          ? // the person's own answer is one of them: the service leaves a control object's answers out of its count, and "0 of 3"
+            // right after answering read as a lost answer (and told a control from a lead: 86.4, Н5)
+            [`${Math.max(1, ag.answers ?? 1)} of ${ag.needed ?? 3} people answered · +${ag.points_when_agreed ?? 10} points if yours matches theirs`]
           : []),
       ];
       points = typeof got.points === 'number' ? got.points : null;
@@ -577,7 +589,10 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   const answers: [string, string][] = body?.answers?.length ? body.answers.map((x) => [x.id, x.label]) : T.answers;
   const answer = (x: SeriesStep['answers'][number]) => {
     if (x.next) setPath([...path, x.id]);
-    else void close(x.result ?? 'cant_tell', [...path, x.id]);
+    else {
+      setSaving(x.id);
+      void close(x.result ?? 'cant_tell', [...path, x.id]);
+    }
   };
   const pictures = body?.pictures ?? [];
   taskTrack.pts = pictures.filter((q): q is { i: number; mjd: number; ra: number; dec: number } => q.mjd != null && q.ra != null && q.dec != null);
@@ -751,10 +766,13 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           // as tall as the longest step of this series (its answers and their example pictures), so no step jumps and none leaves a gap
           // the card hugs its content: a step with fewer answers is shorter (the tab's list under it moves, the picture never does)
         >
-          {step.answers.map((x, k) => (
+          {step.answers.map((x) => (
             <button
               key={x.id}
-              class={`btn sm tp-ans${k === 0 ? ' primary' : ''}${x.id === 'not_sure' ? ' quiet' : ''}`}
+              // no answer stands out before the person picks one: a highlighted first answer read as the expected one (86.4, Н4)
+              class={`btn sm tp-ans${x.id === 'not_sure' ? ' quiet' : ''}`}
+              aria-label={x.label}
+              aria-busy={busy && saving === x.id ? 'true' : undefined}
               // "missing in some" needs at least one picture tapped (the service refuses an empty list)
               disabled={busy || (PANEL_SHOWS.has(step.show) ? a.shown === false && !(a.noPictures && x.id === 'not_sure') : a.ready === false) || (!!step.tap && x.id === 'done' && missing.length === 0)}
               title={step.tap && x.id === 'done' && missing.length === 0 ? 'Tap at least one picture where it is missing' : undefined}
@@ -762,6 +780,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               data-testid={`task-answer-${x.id}`}
             >
               <span>{x.label}</span>
+              {busy && saving === x.id && <i class="tp-saving" aria-hidden="true" />}
               {(EXAMPLES[`${seriesId}.${step.id}.${x.id}`] ?? []).map((name) => (
                 <img
                   key={name}
@@ -780,10 +799,12 @@ export function useLabTask(a: TaskArgs): LabTaskView {
         </div>
       ) : (
         <div class={`tp-btns n${answers.length}`}>
-          {answers.map(([result, text], k) => (
+          {answers.map(([result, text]) => (
             <button
               key={result}
-              class={`btn sm${(task.kind === 'cell' ? result === 'marks' : k === 0) ? ' primary' : ''}${result === 'cant_tell' ? ' quiet' : ''}`}
+              // a square's "Done, with marks" stands out once there are marks; no other answer stands out before it is picked (Н4)
+              class={`btn sm${task.kind === 'cell' && result === 'marks' && n > 0 ? ' primary' : ''}${result === 'cant_tell' ? ' quiet' : ''}`}
+              aria-busy={busy && saving === result ? 'true' : undefined}
               disabled={
                 busy ||
                 (task.kind === 'cell' && result === 'marks' && n === 0) ||
@@ -799,10 +820,14 @@ export function useLabTask(a: TaskArgs): LabTaskView {
                     ? a.square.why
                     : undefined
               }
-              onClick={() => void close(result)}
+              onClick={() => {
+                setSaving(result);
+                void close(result);
+              }}
               data-testid={`task-${result}`}
             >
               {text}
+              {busy && saving === result && <i class="tp-saving" aria-hidden="true" />}
               {task.kind === 'cell' && result === 'nothing' && a.square && !a.square.canCount && a.square.why && a.square.why !== 'Sign in to count your look'
                 ? ` · ${a.square.why}`
                 : ''}
