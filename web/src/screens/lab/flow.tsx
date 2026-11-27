@@ -1395,6 +1395,9 @@ export function useLabFlow(a: FlowArgs): LabFlow {
     const show = act.show;
     const body = act.body;
     const visits = (body?.pictures ?? []).map((q) => q.mjd).filter((m): m is number => typeof m === 'number');
+    // the old surveys belong to their own step: any other step leaves them (an archive left in the address by another task, or kept
+    // by a reload, hid the step's own pictures: test of 27 Nov, 86.4, Н1)
+    if (show !== 'old_surveys' && show !== 'old_new' && a.params['arch'] === '1') a.set({ arch: null });
     if (show === 'blink' || show === 'pictures') {
       // a track: the visits of its pass, in the Days scale
       if (!visits.length) return;

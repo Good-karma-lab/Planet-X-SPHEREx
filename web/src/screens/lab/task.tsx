@@ -81,7 +81,7 @@ export const SERIES: Record<string, SeriesStep[]> = {
     ]),
     s_('blend', 'Is it one dot, or two touching?', 'blink2', [
       { id: 'one', label: 'One', next: 'old' },
-      { id: 'two', label: 'Two', result: 'blend' },
+      { id: 'two', label: 'Two', result: 'moves_past' },
     ]),
     s_('old', 'Old pictures (WISE 2010, 2MASS 2000): is there a dot along the arrow, further back?', 'old_surveys', [
       { id: 'yes', label: 'Yes', result: 'moves_old' },
@@ -388,6 +388,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   const [line, setLine] = useState('');
   // a question series: the answers given so far, and the pictures tapped as "missing"
   const [path, setPath] = useState<string[]>([]);
+  /** the task the state above belongs to: on the first render of the next task it is still the last one's (its body, its answers) */
+  const [stateOf, setStateOf] = useState('');
   const [missing, setMissing] = useState<number[]>([]);
   const [taps, setTaps] = useState<Tap[]>([]);
   // a closed task: what was answered and what it led to, until the person opens the next one (never a silent jump)
@@ -415,6 +417,7 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   useEffect(() => {
     setId(task?.id ?? null);
     setBody(null);
+    setStateOf(key);
     setLine('');
     setPath([]);
     setMissing([]);
@@ -448,14 +451,16 @@ export function useLabTask(a: TaskArgs): LabTaskView {
   const seriesId = body?.series?.id ?? (task?.finding_id ? (SERIES_OF_KIND[task.finding_id.split(':')[0] ?? ''] ?? null) : null);
   const steps: SeriesStep[] | null =
     task && ['finding', 'moves', 'red', 'anomaly'].includes(task.kind) && seriesId ? (body?.series?.steps ?? SERIES[seriesId] ?? null) : null;
-  const step = steps ? stepAt(steps, path) : null;
+  // no step until the state is this task's: the last task's step ("Old pictures", its archive on) set up the next task's lab, which
+  // then opened on a 1993 plate without its own pictures (test of 27 Nov, 86.4, Н1)
+  const step = steps && stateOf === key ? stepAt(steps, path) : null;
   const tapping = !!task && (task.kind === 'find_again' || task.kind === 'recentre');
   const view: LabTaskView = {
     panel: null,
     kind: task?.kind ?? null,
     show: step?.show ?? null,
     series: steps ? seriesId : null,
-    body,
+    body: stateOf === key ? body : null,
     tapping,
     taps,
     blind: !!task && focusKind(task.kind) && !done,
