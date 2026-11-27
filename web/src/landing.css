@@ -362,3 +362,18 @@
 .lp .lp-task { display: inline-flex; flex-direction: column; gap: 6px; max-width: 320px; }
 .lp .lp-task small { font-size: 12.5px; line-height: 1.4; color: var(--lp-muted, rgba(230, 240, 243, 0.72)); }
 .lp .lp-cta { align-items: flex-start; }
+
+/* a phone: the first screen shows the sky, not only text. The text column dissolves into the hero's grid, so the moving star comes
+   right under the title and the two buttons under it; the long lede follows the buttons */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  .lp-hero { padding-top: 84px; }
+  .lp-hero-grid { gap: 0; }
+  .lp-hero-text { display: contents; }
+  .lp-hero-text > * { order: 5; }
+  .lp-hero-text > .lp-eyebrow { order: 1; }
+  .lp-hero-text > h1 { order: 2; margin-bottom: 14px; font-size: 32px; }
+  .lp-hero-grid > .lp-live-fig { order: 3; }
+  .lp-hero-grid > .lp-live-fig .lp-live-cap { margin-top: 8px; }
+  .lp-hero-text > .lp-cta { order: 4; margin-top: 16px; }
+  .lp-hero-text > .lp-lede { margin: 26px 0 0 !important; }
+}
