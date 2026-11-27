@@ -222,3 +222,5 @@ a.btn[aria-busy="true"]::after { content: " · opening…"; }
 @media (prefers-reduced-motion: reduce) { .lc-ring { animation: none; } }
 .fskel .fclip { position: relative; }
 .fskel .fskel-say { position: absolute; left: 0; right: 0; bottom: 14px; padding: 0 12px; text-align: center; }
+/* a two-picture Blink rests on the picture with the dot; held (or pointed at) it shows the other one */
+.fclip img[data-testid='clip-pair'] { -webkit-touch-callout: none; user-select: none; -webkit-user-select: none; }
