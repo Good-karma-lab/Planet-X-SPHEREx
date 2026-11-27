@@ -127,6 +127,9 @@
   border-radius: 2px;
   background: var(--c);
 }
+.px3-layers {
+  display: none;
+}
 .px3-chip[aria-pressed='true'] {
   color: var(--ink);
   border-color: color-mix(in srgb, var(--c) 60%, transparent);
@@ -589,6 +592,13 @@
   }
   .px3-chip {
     flex: none;
+    height: 40px;
+  }
+  .px3-layers {
+    display: inline-flex;
+  }
+  .px3-chips[data-open='false'] {
+    display: none;
   }
   .px3-tools {
     top: auto;

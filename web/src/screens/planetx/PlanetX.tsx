@@ -227,6 +227,7 @@ export function PlanetXPage() {
   const [tab, setTab] = useState<'cands' | 'searched' | 'story'>('cands');
   const [chapter, setChapter] = useState(-1);
   const [layers, setLayersState] = useState<Layers>(ALL);
+  const [layersOpen, setLayersOpen] = useState(false);
   const [log, setLog] = useState(true);
   const [ready, setReady] = useState(false);
   const canvas = useRef<HTMLCanvasElement>(null);
@@ -393,7 +394,19 @@ export function PlanetXPage() {
               <b>0</b> confirmed
             </span>
           </div>
-          <div class="px3-chips">
+          {/* a phone: the layers fold behind one button, so they never cover the model (the globe's "Layers" does the same) */}
+          <button
+            class="px3-chip px3-layers"
+            style={{ '--c': '#5fe3d6' }}
+            aria-expanded={layersOpen}
+            aria-controls="px3-chips"
+            data-testid="px-layers"
+            onClick={() => setLayersOpen(!layersOpen)}
+          >
+            <i />
+            Layers {layersOpen ? '▴' : '▾'}
+          </button>
+          <div class="px3-chips" id="px3-chips" data-open={layersOpen ? 'true' : 'false'}>
             {CHIPS.map((c) => (
               <button
                 key={c.g}
