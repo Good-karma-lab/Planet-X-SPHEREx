@@ -2825,9 +2825,10 @@ export function Lab({ route }: { route: Route }) {
             color: 'var(--muted)',
           }}
         >
-          <span>
-            <a href="#/globe">Open a place from the globe</a>
-          </span>
+          {/* the Lab with no place: one real button (a 17 px link alone on a phone's empty screen before) */}
+          <a class="btn primary" href="#/globe" data-testid="lab-empty-globe">
+            Open a place from the globe
+          </a>
         </div>
       </div>
     );
