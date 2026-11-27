@@ -377,3 +377,7 @@
   .lp-hero-text > .lp-cta { order: 4; margin-top: 16px; }
   .lp-hero-text > .lp-lede { margin: 26px 0 0 !important; }
 }
+/* a phone: "Try it now →" (26 px of text) has a 44 px zone for the finger */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  .lp .lp-link { display: inline-flex; align-items: center; min-height: 44px; }
+}
