@@ -35,7 +35,7 @@ test('1. a guest signs in by the e-mail link (dev mode)', async () => {
   await page.getByRole('button', { name: 'Continue with e-mail' }).click();
   await expect(page.getByTestId('signin-status')).toContainText('We sent a link to');
   await page.getByTestId('dev-link').click();
-  await expect(page.getByTestId('who-name')).toHaveText(email.split('@')[0]!);
+  await expect(page.getByTestId('who-name')).toHaveText(/^Volunteer \d{4}$/); // never the start of the address (27 Nov 2026, С3)
   await shot('1-signed-in');
 });
 
@@ -248,9 +248,9 @@ test('6. a case that passes: the fast-mover lead is checked, commented and submi
   await expect(page.getByTestId('panel-findings')).toContainText('Fast mover near Barnard (end-to-end)');
   await expect(page.getByTestId('panel-findings')).toContainText(/submitted/i);
   // Findings: the lead carries the user's name (its own page: the list shows the most promising first, and there are a thousand)
-  const name = email.split('@')[0]!;
+  // (its neutral name, never the start of the address: 27 Nov 2026, С3)
   await page.goto(`/#/findings/${encodeURIComponent(LEAD)}`);
-  await expect(page.getByRole('heading', { name: 'Credit' }).locator('xpath=..')).toContainText(`marked first by ${name}`, {
+  await expect(page.getByRole('heading', { name: 'Credit' }).locator('xpath=..')).toContainText(/marked first by Volunteer \d{4}/, {
     timeout: 60_000,
   });
   await shot('6-findings-credit');

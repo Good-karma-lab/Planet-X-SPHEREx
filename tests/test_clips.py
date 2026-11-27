@@ -534,3 +534,26 @@ def test_the_dot_of_a_peak_is_seen_in_its_sum_only_above_the_noise_of_the_window
     # the search of the place is found once its listing is given, and a peak of another distance has none
     rows = store.listing(("distant",))
     assert find_sum(store, peak, rows) is not None and find_sum(store, {**peak, "data": {"peak": {"d": 500.0}}}, rows) is None
+
+
+def test_a_source_seen_in_one_pass_of_three_is_counted_once(tmp_path: Path) -> None:
+    # 27 Nov 2026 (exploratory report, С1): red:a028ded953e8 was in one pass of three (passes_seen on prod: 1 of 3) and people's
+    # "a fuzzy patch" made it a galaxy. A red source is asked about when it is seen in two passes or more.
+    from service.clips import passes_seen
+
+    store = Store(tmp_path)
+    meta = _field(store, "k" * 24, 6.0)
+    assert passes_seen(_mover(), Source(store, "k" * 24, meta, False)) == (3, 3)  # the mover in every pass, followed by its ring
+    g = grid_for_fov(RA0, DEC0, 6.0)
+    key = "o" * 24
+    store.begin("field", key, meta["params"])
+    x, y = (float(v) for v in g.sky_to_grid(RA0 + 0.01, DEC0))
+    for k in range(3):
+        img = _blob(g.n, x, y, 12.0) if k == 0 else np.zeros((g.n, g.n))
+        rgb = np.stack([img, img, img]) + np.random.default_rng(20 + k).normal(0.0, 0.02, (3, g.n, g.n)) + 0.05
+        part = {"rgb": rgb.astype(np.float16), "sat": np.zeros((g.n, g.n), np.uint8)}
+        store.write_part("field", key, f"picture_p{k}.sxp", encode(part, {"pass": k}))
+    store.write_meta("field", key, meta)
+    store.complete(key)
+    once = {"id": "red:once", "kind": "red", "ra": RA0 + 0.01, "dec": DEC0, "data": {}}
+    assert passes_seen(once, Source(store, key, meta, False)) == (1, 3)

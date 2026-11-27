@@ -69,7 +69,9 @@ SERIES: dict[str, tuple[dict[str, Any], ...]] = {
         {"id": "steps", "question": "Does one faint dot move along the arrow?", "show": "blink", "answers": (
             {"id": "every", "label": "Yes, in every picture", "next": "shape"},
             {"id": "some", "label": "Only in some", "next": "missing"},
-            {"id": "no", "label": "No", "result": "no_dot"})},
+            # on the sum, not along the arrow: the single visits of a faint body often show nothing (the exploratory report of 27 Nov
+            # 2026, Б2: "No" here set aside the tracks shown as the best). It stays a lead
+            {"id": "no", "label": "No", "result": "sum_only"})},
         {"id": "missing", "question": "Tap the pictures where it is missing.", "show": "pictures", "tap": True, "answers": (
             {"id": "done", "label": "Done", "next": "shape"},)},
         {"id": "shape", "question": "Is it a dot like the stars, or a streak?", "show": "blink", "answers": (
@@ -122,7 +124,8 @@ SERIES: dict[str, tuple[dict[str, Any], ...]] = {
 SERIES_OF_KIND = {"film": "track", "mover": "slow", "browndwarf": "slow", "peak": "peak", "red": "red", "anomaly": "anomaly"}
 RESULTS = {
     "track": {"moves": "A dot steps along the arrow", "partial": "A dot steps along the arrow, not in every picture",
-              "no_dot": "No dot steps along the arrow", "streak": "A streak: a satellite or a plane"},
+              "no_dot": "No dot steps along the arrow", "streak": "A streak: a satellite or a plane",
+              "sum_only": "A dot on the sum, not in the single pictures"},
     "slow": {"moves": "It shifts", "moves_old": "It shifts, and old pictures show it further back", "still": "It does not shift",
              "blend": "Two dots touching"},
     "peak": {"candidate": "A dot on the orbit sum only", "no_peak": "No dot on the orbit sum only", "glow": "In a bright star's glow or on its spike"},
@@ -139,7 +142,7 @@ ACTIONS = {
 }
 #: what a person should answer on a find the machine already knows: (series, machine status or stage) → the right results
 CONTROL_EXPECT: dict[tuple[str, str], frozenset[str]] = {
-    ("track", "known"): frozenset({"moves", "partial"}),
+    ("track", "known"): frozenset({"moves", "partial", "sum_only"}),
     ("track", "artefact"): frozenset({"no_dot", "streak"}),
     ("slow", "known"): frozenset({"moves", "moves_old"}),
     ("slow", "artefact"): frozenset({"still", "blend"}),
@@ -245,12 +248,15 @@ def series_of(find_kind: str | None) -> str | None:
     return SERIES_OF_KIND.get(str(find_kind or ""))
 
 
-def steps_of(series: str) -> list[dict[str, Any]]:
-    """The series as a task carries it: every step ends with "Not sure"."""
+def steps_of(series: str, sum_only: bool = False) -> list[dict[str, Any]]:
+    """The series as a task carries it: every step ends with "Not sure". `sum_only`: a track whose own visits do not show its dot
+    (track_seen) is asked about its sums alone, its "Yes" ends the path (SUM_ONLY)."""
+    steps = SERIES[series][:1] if sum_only and series == "track" else SERIES[series]
     return [
         {**{k: v for k, v in step.items() if k != "answers"},
-         "answers": [*(dict(a) for a in step["answers"]), {"id": NOT_SURE, "label": "Not sure", "result": CANT_TELL}]}
-        for step in SERIES[series]
+         "answers": [*(_ends(a) if len(steps) == 1 and a.get("next") else dict(a) for a in step["answers"]),
+                     {"id": NOT_SURE, "label": "Not sure", "result": CANT_TELL}]}
+        for step in steps
     ]  # fmt: skip
 
 
@@ -285,6 +291,8 @@ def run_path(series: str, path: list[str], pictures: list[int] | None = None) ->
         chosen = next((a for a in step["answers"] if a["id"] == answer), None)
         if chosen is None:
             raise AnswerError(f"“{answer}” is not an answer to “{step['question']}”")
+        if series == "track" and step["id"] == "sum" and answer == "yes" and len(path) == 1:
+            return SUM_ONLY  # asked about its sums alone (steps_of sum_only): a dot on the sum
         went_some = went_some or (series == "track" and step["id"] == "steps" and answer == "some")
         if step.get("tap") and not pictures:
             # "Done" with none tapped: it is missing from none of them, i.e. it is in every picture (a valid answer, not an error)
@@ -309,11 +317,29 @@ KINDS_OFF: frozenset[str] = frozenset()
 VISITS_SHARE = 0.5  # a track is asked about when its dot is seen in at least this share of its own visits
 
 
+SUM_ONLY = "sum_only"  # a track's dot seen on its sum, not in its single visits: it stays a lead (no ACTIONS)
+
+
+def _ends(answer: dict[str, Any]) -> dict[str, Any]:
+    return {**{k: v for k, v in answer.items() if k != "next"}, "result": SUM_ONLY}
+
+
+PASSES_MIN = 2  # a red source is asked about when it is seen in at least this many passes (Clips.passes_seen)
+
+
+def seen_twice(got: tuple[int, int] | None) -> bool:
+    return got is not None and got[0] >= PASSES_MIN
+
+
+def visits_show(got: tuple[int, int] | None) -> bool:
+    """Whether a track's own visits show its dot well enough to ask about them: in VISITS_SHARE of them (Clips.visits_seen)."""
+    return got is not None and got[1] > 0 and got[0] >= VISITS_SHARE * got[1]
+
+
 def track_seen(row: dict[str, Any]) -> bool:
     """A track a person can judge: seen in its added picture and in VISITS_SHARE of its own visits (service.clips Clips.visits_seen). A
     sum alone let through a track with nothing in any of its five visits (film:8ae52fb8ac8b, 24 Nov 2026)."""
-    got = row.get("visits_seen")
-    return row.get("visible") is True and got is not None and got[1] > 0 and got[0] >= VISITS_SHARE * got[1]
+    return row.get("visible") is True and visits_show(row.get("visits_seen"))
 
 
 def askable(row: dict[str, Any]) -> bool:
@@ -328,6 +354,10 @@ def askable(row: dict[str, Any]) -> bool:
         return False  # a faint Planet X peak (findings.faint_peak): most are noise
     if row.get("kind") == "film":
         return track_seen(row)
+    if row.get("kind") == "red" and "passes_seen" in row and not seen_twice(row["passes_seen"]):
+        return False  # seen in one pass only (no galaxy leaves between passes), or not measured yet (С1, 27 Nov 2026)
+    if row.get("kind") == "anomaly" and row.get("star_shown") is False:
+        return False  # its odd pictures are noise: nobody can say whether a star touches the one in the middle (С2, 27 Nov 2026)
     return row.get("visible", True) is True or "raised" in row
 
 

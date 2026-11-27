@@ -134,3 +134,38 @@ def test_nothing_is_built_ahead_while_people_fill_the_disk(tf: TaskFields, monke
         got.append(tf.room())
     # below 72 always; at 72.5 the disk grew by 6.5 in half an hour: no; 45 min later slowly again: yes; +3.9 again: no; 77: no
     assert got == [True, True, True, False, True, True, False, False]
+
+
+def _stamp(peak: float, seed: int) -> list[list[float]]:
+    import numpy as np
+
+    a = np.random.default_rng(seed).normal(100.0, 1.0, (15, 15))
+    a[7, 7] += peak
+    return a.tolist()
+
+
+@pytest.mark.parametrize(("peak", "asked"), [(60.0, True), (8.0, False)])
+def test_an_anomaly_is_asked_about_only_when_its_odd_pictures_show_the_star(
+    tf: TaskFields, tmp_path: Path, peak: float, asked: bool
+) -> None:
+    # 27 Nov 2026 (exploratory report, С2): anomaly:bdb2bb574761 was asked "is another star touching the one in the middle?" over six
+    # stamps of noise (the middle 10× the noise in the median); the neighbour of HD 21496 stands 55-164× and is judged at once
+    import json
+
+    from service.accounts import people
+    from service.spectrum import Spectra
+
+    tf.st.spectra = sp = Spectra(None, None, None, tmp_path)  # type: ignore[arg-type]
+    a = {"ra": 48.300065, "dec": 5.992323, "pmra": 0.0, "pmdec": 0.0, "drivers": [{"lo": 4.2, "hi": 4.6}]}
+    assert tf.star_in_stamps(a) is None  # not on disk yet
+    key = sp.key_of(taskfields.anomaly_params(a))
+    sp.dir.mkdir(parents=True, exist_ok=True)
+    # 8 exposures in the odd bin (6 shown) and 4 outside it, whose stamps are never looked at
+    points = [{"i": i, "ok": True, "flux": 1.0 + i, "err": 0.1, "lam": 4.4 if i < 8 else 1.0} for i in range(12)]
+    stamps = {str(i): {"raw": _stamp(peak if i < 8 else 500.0, i)} for i in range(12)}
+    (sp.dir / f"{key}.json").write_text(json.dumps({"points": points}))
+    (sp.dir / f"{key}.stamps.json").write_text(json.dumps(stamps))
+    assert len(taskfields.shown_stamps(points, stamps, a["drivers"])) == taskfields.STAMPS_SHOWN
+    assert tf.star_in_stamps(a) is asked
+    row = {"kind": "anomaly", "visible": True, "star_shown": tf.star_in_stamps(a)}
+    assert people.askable(row) is asked and people.askable({"kind": "anomaly", "visible": True})  # not measured: as before

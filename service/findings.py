@@ -2384,7 +2384,8 @@ STATUS_RANK = {
 
 
 FAINT_PHOT_SN = 6.0
-FAINT_SHARE = 10  # one faint peak in so many is asked about all the same, by its id: what people say of them measures the rule
+# with SKY_FAINT_ASK_SHARE=10: one faint peak in so many is asked about all the same, by its id (what people say of them measures the rule)
+FAINT_SHARE = 10
 
 
 def faint_peak(kind: str, data: Mapping[str, Any]) -> bool:
@@ -2415,14 +2416,17 @@ def unseen_why(sight: Mapping[str, Any] | None) -> list[str]:
     return ["unseen"] if sight.get("z") is not None and float(sight["z"]) < SIGHT_Z else []
 
 
-def faint_sample(find_id: str) -> bool:
-    return int.from_bytes(hashlib.sha1(find_id.encode()).digest()[:4], "big") % FAINT_SHARE == 0
+def faint_sample(find_id: str, share: int = FAINT_SHARE) -> bool:
+    return share > 0 and int.from_bytes(hashlib.sha1(find_id.encode()).digest()[:4], "big") % share == 0
 
 
-def faint_asked(find: Mapping[str, Any]) -> bool:
-    """A faint peak people are asked about all the same (one in FAINT_SHARE, by its id), unless it has no sum along the orbit here:
-    then there is nothing in its pictures to judge."""
-    return faint_sample(str(find["id"])) and "no_sum" not in (find.get("hidden_why") or ())
+def faint_asked(find: Mapping[str, Any], share: int | None = None) -> bool:
+    """A faint peak people are asked about all the same (one in `share`, by its id; SKY_FAINT_ASK_SHARE, by default 0: none), unless it
+    has no sum along the orbit here: then there is nothing in its pictures to judge."""
+    from service.config import faint_ask_share
+
+    n = faint_ask_share() if share is None else share
+    return faint_sample(str(find["id"]), n) and "no_sum" not in (find.get("hidden_why") or ())
 
 
 class Snapshot:
@@ -2492,6 +2496,7 @@ def snapshot(
         sights = db.sights()
     order = {c: i for i, c in enumerate([*list(CATALOGUES), "sbident"])}
     hide_faint, hide_unseen = hide_faint_peaks(), hide_unseen_peaks()
+    from service.clips import SIGHT_Z
 
     def judge(blob: Any, whole: bool) -> dict[str, Any]:
         """One find as the page says it, from its own packed copy (a caller's change stays its own)."""
@@ -2568,6 +2573,12 @@ def snapshot(
         f["note"] = machine_notes().get(f["id"])
         # is the object visible in its own picture (the peak inside the ring against the picture's noise)? None: not measured yet
         f["visible"], f["visible_sn"] = seen(f) if seen is not None else (None, None)
+        sight = f.get("sight") if hide_unseen else None
+        if sight and sight.get("state") == "ok" and sight.get("z") is not None:
+            # a Planet X peak whose sum was looked at: its dot against the sum's noise (sum_sight) says whether it is seen, so the
+            # promise, the order, the filters and the card say one thing. The clip's own S/N in the ring said "not visible" of 39 of the
+            # 93 peaks shown on 26 Nov 2026, the first lead (z 8.9) among them
+            f["visible"], f["visible_sn"] = float(sight["z"]) >= SIGHT_Z, round(float(sight["z"]), 1)
         if f["visible"] is False:
             f["promise"] = round(f["promise"] * PROMISE_NOT_VISIBLE)  # below everything the eye can see in its ring
         elif (f["data"] or {}).get("less_certain"):

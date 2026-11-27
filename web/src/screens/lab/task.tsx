@@ -66,7 +66,7 @@ export const SERIES: Record<string, SeriesStep[]> = {
     s_('steps', 'Does one faint dot move along the arrow?', 'blink', [
       { id: 'every', label: 'Yes, in every picture', next: 'shape' },
       { id: 'some', label: 'Only in some', next: 'missing' },
-      { id: 'no', label: 'No', result: 'no_dot' },
+      { id: 'no', label: 'No', result: 'sum_only' }, // on the sum, not in its single pictures: it stays a lead (27 Nov 2026)
     ]),
     s_('missing', 'Tap the pictures where it is missing.', 'pictures', [{ id: 'done', label: 'Done', next: 'shape' }], true),
     s_('shape', 'Is it a dot like the stars, or a streak?', 'blink', [
@@ -397,6 +397,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
     points: number | null;
     pending: boolean;
     next: Record<string, string> | null;
+    /** a square: the next one is taken only when "Next" is clicked (27 Nov 2026, С4: one was given by itself, unasked) */
+    later?: boolean;
     none: string;
   } | null>(null);
   // how the task was looked at: seconds with the lab visible, and which passes were on show
@@ -532,7 +534,8 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           })
         : [[body?.question ?? T.ask, body?.answers?.find((q) => q.id === result)?.label ?? T.answers.find(([q]) => q === result)?.[1] ?? result]];
     // (a lead's questions have no "Next": one asked for here was a task nobody opened)
-    const next = a.embedded ? null : await takeTask(task.kind as Takeable);
+    const later = task.kind === 'cell' && !a.embedded;
+    const next = a.embedded || later ? null : await takeTask(task.kind as Takeable);
     setBusy(false);
     setLine('');
     const to = next && next !== 'failed' && next.id !== id ? taskParams(next) : null;
@@ -542,8 +545,19 @@ export function useLabTask(a: TaskArgs): LabTaskView {
       points,
       pending,
       next: to,
+      later,
       none: next === 'failed' ? 'Tasks did not answer' : 'No more tasks of this kind',
     });
+  }
+  /** the next square, taken now that "Next" was clicked */
+  async function takeLater() {
+    if (busy) return;
+    setBusy(true);
+    const next = await takeTask('cell');
+    setBusy(false);
+    const to = next && next !== 'failed' && next.id !== id ? taskParams(next) : null;
+    if (to) return a.open(to);
+    setDone((d) => (d ? { ...d, later: false, next: null, none: next === 'failed' ? 'Tasks did not answer' : 'No square is waiting for a look' } : d));
   }
   /** a quarter given back without an answer, and another one taken */
   async function giveBack() {
@@ -611,6 +625,10 @@ export function useLabTask(a: TaskArgs): LabTaskView {
           </div>
           {a.embedded ? (
             <div class="mono-s">then the quarter below</div>
+          ) : done.later ? (
+            <button class="btn sm primary tp-next" disabled={busy} onClick={() => void takeLater()} data-testid="task-next">
+              Next: {T.title.toLowerCase()}
+            </button>
           ) : done.next ? (
             <button class="btn sm primary tp-next" onClick={() => a.open(done.next!)} data-testid="task-next">
               Next: {T.title.toLowerCase()}
@@ -785,6 +803,9 @@ export function useLabTask(a: TaskArgs): LabTaskView {
               data-testid={`task-${result}`}
             >
               {text}
+              {task.kind === 'cell' && result === 'nothing' && a.square && !a.square.canCount && a.square.why && a.square.why !== 'Sign in to count your look'
+                ? ` · ${a.square.why}`
+                : ''}
             </button>
           ))}
         </div>

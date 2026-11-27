@@ -105,6 +105,8 @@ def make_grid_router(st: Any, db: GridDB | None = None) -> APIRouter:
                 "corners": qc.corners(),
                 "viewers": seen[q],
                 "mine": q in mine,
+                # its 10′ field is built: the lab opens it at once; else it is made when asked (~2 min; 27 Nov 2026, С4)
+                **({"ready": bool(qs.ready(cid, q))} if (qs := getattr(st, "quarters", None)) is not None else {}),
             }
             for q, qc in ((q, grid.quarter(ce, q)) for q in grid.QUARTERS)
         ]

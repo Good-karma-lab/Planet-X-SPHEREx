@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, HTTPException, Query, Request
 from fastapi.responses import Response
 
 from service import jsonsafe
@@ -266,27 +266,41 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         idn = getattr(st, "fpx_known", None)
         return idn.verdict_on if idn is not None else None
 
-    def enrich(body: dict[str, Any]) -> dict[str, Any]:
+    def enrich(body: dict[str, Any], viewer_id: str | None = None) -> dict[str, Any]:
+        """The clip and the credit line of every find. The finds may be the cached snapshot's own dicts, shared by every request: each is
+        copied, never changed in place (a viewer's own answers must not reach the next guest)."""
+        from service.accounts.db import public_credit
+
         clips = clips_or_none()
         people = credits([f["id"] for f in body["finds"]])
-        for f in body["finds"]:
-            f["clip"] = clips.summary(f, detail=False) if clips is not None else None
+        out = []
+        for f0 in body["finds"]:
+            f = {**f0, "clip": clips.summary(f0, detail=False) if clips is not None else None}
             who = people.get(f["id"]) or []
+            # what people answered is shown once the find is decided, or to one who answered it too (27 Nov 2026, С3)
+            decided = f.get("stage") not in ("new", "in_review")
+            answered = viewer_id is not None and any(c.get("user_id") == viewer_id for c in who)
+            credit = dict(f.get("credit") or {})
+            if not (decided or answered):
+                credit["looks"] = {}
             if who:  # the accounts of the service: who closed a task on it, who marked or submitted it (names only)
                 checked = [c["name"] for c in who if c.get("role") == "checked"]
                 first = next((c["name"] for c in who if c.get("role") != "checked"), None)
-                f["credit"] = {**f["credit"], "people": who, "checked_by": list(dict.fromkeys(checked)), "first_marked_by": first}
+                credit = {**credit, "people": public_credit(who, decided, viewer_id), "checked_by": list(dict.fromkeys(checked)),
+                          "first_marked_by": first}  # fmt: skip
                 f["viewers"] = max(int(f.get("viewers") or 0), len(checked))
                 if f.get("stage") == "new" and checked:
                     f["stage"] = "in_review"
-        return body
+            f["credit"] = credit
+            out.append(f)
+        return {**body, "finds": out}
 
     def credits(ids: list[str]) -> dict[str, list[dict[str, Any]]]:
         acc = getattr(st, "accounts", None)  # set by the accounts stream when its routes are registered
         if acc is None or not ids:
             return {}
         try:
-            return dict(acc.db.credits_of(ids))
+            return dict(acc.db.credits_of(ids, users=True))
         except Exception:  # the credit line is an extra: the list is served without it
             return {}
 
@@ -449,9 +463,11 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
             body["finds"] = [{**{k: x.get(k) for k in LITE_KEYS}, **card_extras(x)} for x in body["finds"]]
         return body
 
-    async def one(find_id: str) -> Any:
+    async def one(find_id: str, request: Request) -> Any:
         find_id = id_of(find_id)  # its slug too (track-…)
         f = need()
+        me = getattr(st, "current_user", None)  # the accounts stream's hook: who asks, to show them the answers once they answered too
+        viewer = me(request) if callable(me) else None
         aside = await asyncio.to_thread(people_aside)
         tracks = await asyncio.to_thread(people_tracks_said)
         # this one find, whatever its status (a hidden one too): the whole list capped at 5000 lost every find past it once there were
@@ -463,7 +479,7 @@ def make_findings_router(st: Any, prefix: str = "/api/v1") -> APIRouter:
         )
         for x in body["finds"]:
             if x["id"] == find_id:
-                return (await asyncio.to_thread(enrich, {"finds": [x]}))["finds"][0]
+                return (await asyncio.to_thread(enrich, {"finds": [x]}, (viewer or {}).get("id")))["finds"][0]
         raise HTTPException(404, "no such find")
 
     async def viewed(find_id: str, body: dict[str, Any] = Body(default={})) -> Any:  # noqa: B008

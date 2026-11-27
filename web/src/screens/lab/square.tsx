@@ -17,7 +17,7 @@ export interface GridCell {
   dec: number;
   corners: [number, number][];
   /** the service's quarters (named `id`, or `q` in an earlier shape), with how many people looked and whether I did */
-  quarters?: { id?: string; q?: string; ra?: number; dec?: number; viewers?: number; mine?: boolean }[];
+  quarters?: { id?: string; q?: string; ra?: number; dec?: number; viewers?: number; mine?: boolean; ready?: boolean }[];
 }
 
 const wrap = (d: number) => ((d + 540) % 360) - 180;
@@ -165,8 +165,8 @@ export function useSquareLook(a: SquareArgs): SquareLook {
     : !user
       ? 'Sign in to count your look'
       : left > 0 || !allPasses
-        ? // quiet: the bar says how far; words only for the passes not yet shown and for the last 20 seconds
-          [allPasses ? '' : `passes ${look.current.passes.size} of ${a.passesTotal}`, left > 0 && left <= 20 ? `0:${String(left).padStart(2, '0')}` : ''].filter(Boolean).join(' · ')
+        ? // what is left to do, always (27 Nov 2026, С4: the button stood greyed for 20 s with no word why)
+          [allPasses ? '' : `show every pass: ${look.current.passes.size} of ${a.passesTotal}`, left > 0 ? `${left} s more` : ''].filter(Boolean).join(' · ')
         : '';
   const frac = !cell ? 0 : Math.min(1, look.current.seconds / LOOK_SECONDS) * 0.7 + (a.passesTotal ? Math.min(1, look.current.passes.size / a.passesTotal) : 1) * 0.3;
   const mine = cell?.quarters?.filter((q) => q.mine).length;
@@ -333,6 +333,12 @@ export function HereSquare({ ra, dec, fov, open }: { ra: number; dec: number; fo
         <button class="btn primary" onClick={() => void go(here.cell.id, to ?? here.quarter)} data-testid="here-look">
           {to === here.quarter ? 'Look through this quarter' : `Look through the ${to} quarter`}
         </button>
+      )}
+      {!done && here.cell.quarters?.find((x) => (x.id ?? x.q) === (to ?? here.quarter))?.ready === false && (
+        // a quarter not built yet: its picture is made when asked (27 Nov 2026, С4: 1 min 55 s with no word before)
+        <span class="cb-status" data-testid="here-cold">
+          its picture is not made yet: about 2 minutes once you start
+        </span>
       )}
       {line && <span class="cb-status">{line}</span>}
     </section>
