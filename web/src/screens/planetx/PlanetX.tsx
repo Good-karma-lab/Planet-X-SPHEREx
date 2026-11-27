@@ -1,3 +1,4 @@
+import { nextTask, taskHash } from '../../lib/account';
 import { visibleInterval } from '../../lib/idle';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import { faintTitle, hiddenLine, wingLine } from '../../lib/wing';
@@ -240,6 +241,21 @@ export function PlanetXPage() {
   /** a lead opens a 5′ field centred on the lead's own place at its reference date (quick to load), the lead named so the Lab marks it */
   const fieldOf = (pk: Peak) =>
     `#/lab?ra=${pk.ra.toFixed(5)}&dec=${pk.dec.toFixed(5)}&fov=5&find=${encodeURIComponent(pk.id)}&find_ra=${pk.ra.toFixed(5)}&find_dec=${pk.dec.toFixed(5)}`;
+  /** "Check this lead": the lead's task from the service (its question, its two sums at once); the plain 5′ field when there is none
+   *  (a peak nobody may be asked about) or the service does not answer in 8 s */
+  const checkLead = async (pk: Peak, btn: HTMLElement) => {
+    if (btn.getAttribute('aria-busy') === 'true') return;
+    btn.setAttribute('aria-busy', 'true');
+    let href = fieldOf(pk);
+    try {
+      const t = await Promise.race([nextTask('finding', pk.id), new Promise<null>((res) => setTimeout(() => res(null), 8000))]);
+      if (t && t.finding_id === pk.id) href = taskHash(t);
+    } catch {
+      // the field alone
+    }
+    location.hash = href;
+    btn.removeAttribute('aria-busy');
+  };
   /** the searched field the lead lies in, at its own size (20′ or 60′) */
   const searchedOf = (pk: Peak) => (searched ?? []).find((x) => sep([x.ra, x.dec], [pk.ra, pk.dec]) < x.fov / 120);
   const nLeads = leads?.length ?? 0;
@@ -280,6 +296,19 @@ export function PlanetXPage() {
         </figure>
       )}
       <div class="px3-links">
+        {/* the lead as a question: its two sums are ready at once and the question with them, the sky loads behind (the 5′ field
+            alone took ~40 s and asked nothing: tests of 26 and 27 Nov, П2, С5) */}
+        <a
+          class="btn sm primary px3-check"
+          href={fieldOf(pk)}
+          data-testid="px-check-lead"
+          onClick={(e) => {
+            e.preventDefault();
+            void checkLead(pk, e.currentTarget as HTMLElement);
+          }}
+        >
+          Check this lead
+        </a>
         <a class="go" href={fieldOf(pk)}>
           Open the lead in the Lab (5′) →
         </a>
