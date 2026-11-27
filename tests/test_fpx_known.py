@@ -200,7 +200,7 @@ def test_a_peak_list_asks_the_disk_once_per_30_s(tmp_path: Path, monkeypatch: py
     other.write_text('{"0": {"state": "ok", "name": "Y", "at": [1.0, 2.0, 61000.0]}}')  # another process
     assert (idn.verdict_on(find) or {}).get("name") == "X"
     now[0] += fpx_known.STAT_S + 0.5
-    assert (idn.verdict_on(find) or {}).get("name") == "Y" and len(stats) == 1
+    assert (idn.verdict_on(find) or {}).get("name") == "Y" and len(stats) == 2  # its one look, and the changed file read once
 
 
 def test_an_answer_got_is_kept_while_another_lead_waits_for_jpl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
