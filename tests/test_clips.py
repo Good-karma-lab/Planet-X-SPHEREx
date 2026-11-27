@@ -557,3 +557,28 @@ def test_a_source_seen_in_one_pass_of_three_is_counted_once(tmp_path: Path) -> N
     store.complete(key)
     once = {"id": "red:once", "kind": "red", "ra": RA0 + 0.01, "dec": DEC0, "data": {}}
     assert passes_seen(once, Source(store, key, meta, False)) == (1, 3)
+
+
+def test_a_clip_made_by_another_process_is_ready_within_30_s(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # 26-27 Nov 2026: Clips.ready asked the disk once per find (thousands each list), and those threads held up the event loop. The
+    # clip files are listed at most every READY_LIST_S (30 s); one written by this process is ready at once, one written by another
+    # (the standby, a worker) within 30 s.
+    from service import clips as clipsmod
+    from service.clips import READY_LIST_S, Clips
+
+    now = [1000.0]
+    monkeypatch.setattr(clipsmod.time, "monotonic", lambda: now[0])
+    c = Clips(Store(tmp_path / "store"), tmp_path / "clips")
+    assert READY_LIST_S == 30.0 and not c.ready("red:a1") and not c.ready("red:b2")
+    other = c.path("red:a1")  # written by another process: this one does not know
+    other.parent.mkdir(parents=True, exist_ok=True)
+    other.write_bytes(b"RIFF")
+    now[0] += 10.0
+    assert not c.ready("red:a1")  # the listing of 10 s ago stands
+    mine = c.path("red:b2")
+    mine.parent.mkdir(parents=True, exist_ok=True)
+    mine.write_bytes(b"RIFF")
+    c.made(mine)
+    assert c.ready("red:b2")  # this process's own: at once
+    now[0] += 20.5  # 30.5 s after the listing
+    assert c.ready("red:a1") and c.ready("red:b2") and not c.ready("red:c3")
