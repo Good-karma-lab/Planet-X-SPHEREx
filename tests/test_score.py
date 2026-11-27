@@ -321,6 +321,23 @@ def test_leaderboard_ranks_only_after_ten_answers_and_hides_on_request(sc: Score
     assert len(sc.leaders("all", bob)["rows"][0]["badges"]) <= 3
 
 
+def test_a_place_of_a_week_or_month_needs_a_ranked_row(sc: Score) -> None:
+    """The board lists the unranked after the ranked: a lone person with 0 points or too few answers is not "first of a week" (П12)."""
+    cid = _user(sc, "cid")
+    sc.db._conn().execute(
+        "INSERT INTO acc_score_events (user_id, kind, ref, points, at) VALUES (?, 'square', 'x:NW', 0, ?)",
+        (cid, score.period_start("week", time.time()) - 3 * 86400),
+    )
+    assert sc.board(score.period_start("week", time.time()) - 7 * 86400, score.period_start("week", time.time()))  # on last week's board
+    sc.award(cid)
+    assert not {"first_week", "top_ten_week", "first_month"} & _earned(sc, cid)
+    ann = _user(sc)
+    _answers(sc, ann, 12, "known", "known")  # ranked: 12 settled answers, 120 points
+    sc.db._conn().execute("UPDATE acc_score_events SET at = ? WHERE user_id=?", (score.period_start("week", time.time()) - 3 * 86400, ann))
+    sc.award(ann)
+    assert {"first_week", "top_ten_week"} <= _earned(sc, ann)
+
+
 def test_rarity_is_the_share_of_searchers_and_shown_from_fifty(sc: Score, monkeypatch: pytest.MonkeyPatch) -> None:
     ann, bob = _user(sc), _user(sc, "bob")
     sc.square_done(ann, _square("a"), LOOK, [])
