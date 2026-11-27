@@ -596,6 +596,8 @@ interface CardReply {
   faint?: number;
   /** ... by why they are hidden (photometry, star, no_sum, unseen; a peak may have several) */
   faint_why?: Record<string, number>;
+  /** every faint peak, under no filter but the hidden statuses: the number Planet X shows */
+  faint_all?: number;
   visibility: {
     by_kind: Record<string, { visible: number; not_visible: number; not_measured: number }>;
     in_view: { visible: number; not_visible: number; not_measured: number };
@@ -1008,6 +1010,8 @@ export function FindingsView({
                 onClick={() => setFaint(!faint)}
               >
                 Faint peaks: {faint ? 'shown' : 'hidden'} <span>{h?.faint ?? NONE}</span>
+                {/* the whole number beside this list's own: Planet X counts every faint peak (27 here, 424 there read as an error) */}
+                {h?.faint_all != null && h.faint_all > (h.faint ?? 0) && <span class="wait"> · {h.faint_all.toLocaleString('en-US')} in all</span>}
               </button>
             )}
           </div>

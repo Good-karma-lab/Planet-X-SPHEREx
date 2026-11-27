@@ -2696,6 +2696,9 @@ def query(
         )
 
     faint_n = sum(n for f, n in every if f["faint"] and (not kind or f["kind"] == kind) and (not kinds or f["kind"] in kinds) and passes(f))
+    # every faint peak still a lead or known (the Planet X page's own number), whatever the other filters: Findings says both ("73 here,
+    # 456 in all"; 27 against 424 read as an error: tests of 26 and 27 Nov, П6, М2)
+    faint_all = sum(n for f, n in every if f["faint"] and f["status"] not in HIDDEN)
     counts_view: dict[str, int] = dict.fromkeys(KINDS, 0)
     for f, n in groups:
         if passes(f):
@@ -2801,6 +2804,7 @@ def query(
     return {
         "count": len(sel),
         "faint": faint_n,  # the faint peaks under the request's other filters, shown or hidden
+        "faint_all": faint_all,  # the faint peaks under no filter but the hidden statuses (what Planet X counts)
         "faint_why": faint_why,  # ... by why: photometry, star (a bright star's glow), no_sum, unseen (a peak may have several)
         "total": sum(n for _, n in shown),
         "counts": counts,

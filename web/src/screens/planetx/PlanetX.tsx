@@ -219,10 +219,27 @@ const CH: Chapter[] = [
   },
 ];
 
+const FAINT_KEY = 'spherex-px-faint';
+
 export function PlanetXPage() {
   const searched = useSearched(true);
   const honest = useHonest();
-  const [faint, setFaint] = useState(false);
+  // the faint peaks shown or hidden: kept for the tab, as Findings keeps its own (it came back "hidden" at every visit: test of 26 Nov, П6)
+  const [faint, setFaintState] = useState(() => {
+    try {
+      return sessionStorage.getItem(FAINT_KEY) === '1';
+    } catch {
+      return false;
+    }
+  });
+  const setFaint = (on: boolean) => {
+    setFaintState(on);
+    try {
+      sessionStorage.setItem(FAINT_KEY, on ? '1' : '0');
+    } catch {
+      // kept for this view only
+    }
+  };
   const pk = usePeaks(faint);
   const leads = pk?.leads ?? null;
   const knownPeaks = pk?.known ?? [];
@@ -417,7 +434,8 @@ export function PlanetXPage() {
                 'loading what was searched…'
               ) : (
                 <>
-                  <b>{nLeads}</b> {nLeads === 1 ? 'spot' : 'spots'} to check in <b>{mine.length}</b>{' '}
+                  <b title="Every peak still a lead, one per object: known bodies and the faint peaks are not counted (Findings counts by its own filters)">{nLeads}</b>{' '}
+                  {nLeads === 1 ? 'spot' : 'spots'} to check in <b>{mine.length}</b>{' '}
                   <span title="Fields of any size where Find Planet X ran (most other searched fields are the time-lapse search only)">fields searched for Planet X</span>
                 </>
               )}
