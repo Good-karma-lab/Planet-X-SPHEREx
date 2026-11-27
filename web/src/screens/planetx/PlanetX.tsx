@@ -137,7 +137,10 @@ function usePeaks(faint: boolean): { leads: Peak[]; known: Peak[]; faint: number
           const ok = d.finds.filter(
             (f) => f.kind === 'peak' && f.data.peak?.ok !== false && !['residual', 'galaxy', 'below', 'halo'].includes(f.status ?? ''),
           );
-          setP({ leads: ok.filter((f) => !isKnown(f)), known: ok.filter(isKnown), faint: d.faint ?? 0, why: d.faint_why });
+          // the leads in the order of the number each card shows first, its search signal (the service's order read as unsorted:
+          // "10.6×, 10.9×, 10.7×", test of 26 Nov, П8)
+          const bySignal = (a: Peak, b: Peak) => (b.data.peak?.sn ?? -1) - (a.data.peak?.sn ?? -1);
+          setP({ leads: ok.filter((f) => !isKnown(f)).sort(bySignal), known: ok.filter(isKnown), faint: d.faint ?? 0, why: d.faint_why });
         })
         .catch(() => {});
     void load();
@@ -541,7 +544,7 @@ export function PlanetXPage() {
         <div class="px3-body">
           {tab === 'cands' && (
             <div data-testid="px-cands">
-              <h4 class="px3-sub">Leads{leads == null ? '' : ` · ${nLeads}`}</h4>
+              <h4 class="px3-sub">Leads{leads == null ? '' : ` · ${nLeads} · strongest search signal first`}</h4>
               {leads == null && (
                 <p class="px3-note" role="status" data-testid="px-leads-wait">
                   loading the candidates…
