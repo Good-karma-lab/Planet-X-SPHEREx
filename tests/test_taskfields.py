@@ -22,7 +22,7 @@ class FakeStore:
         self.meta: dict[str, dict[str, Any]] = {r["key"]: {"passes": [1]} for r in self.rows}
         self.listed = 0
 
-    def listing(self, kinds: tuple[str, ...]) -> list[dict[str, Any]]:
+    def listing(self, kinds: tuple[str, ...], memo: dict[str, Any] | None = None) -> list[dict[str, Any]]:
         self.listed += 1
         return self.rows
 
