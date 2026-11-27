@@ -527,3 +527,8 @@
 .taskpanel .tp-saving { flex: none; display: inline-block; width: 12px; height: 12px; margin-left: 8px; vertical-align: -2px; border-radius: 50%; border: 2px solid rgba(190, 236, 246, 0.3); border-top-color: var(--accent-l, #8ff); animation: tpsave 0.9s linear infinite; }
 @keyframes tpsave { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .taskpanel .tp-saving { animation: none; } }
+/* a red source's own passes in a phone's sheet at rest: a compact square beside nothing else, the question and answers under it (Н8) */
+@media (max-width: 599.98px) and (min-height: 480px) {
+  :root .lab .panel:not([data-detent='full']) .taskpanel .tv-rest { min-height: 0; margin: 2px 0 6px; }
+  :root .lab .panel:not([data-detent='full']) .taskpanel .tv-rest .tv-clipbox { width: 112px; height: 112px; }
+}
