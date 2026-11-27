@@ -628,6 +628,8 @@ export function Lab({ route }: { route: Route }) {
   const archive = useRef<ArchiveSet | null>(null);
   const [archTick, setArchTick] = useState(0);
   const [archStep, setArchStep] = useState<number | null>(null);
+  /** the archive image (then pass) on show while the old surveys play: the loop steps it, the scale under the picture sets it */
+  const archAt = useRef(0);
   const refCanvas = useRef<HTMLCanvasElement>(null);
   const archBig = useRef<HTMLCanvasElement>(null);
   const [phase, setPhase] = useState('');
@@ -2578,18 +2580,31 @@ export function Lab({ route }: { route: Route }) {
         ctx.setLineDash([]);
         ctx.font = `600 ${Math.round(10 * (size / Math.max(1, side)) + 0.5)}px ui-monospace, Menlo, monospace`;
         let lastLabel = -1e9;
+        // the image's own date is the ring: no dot over the object there, and its year stands outside the ring; the path's other dots
+        // and years keep clear of the ring too (the orange "1993" covered the very object asked about: test of 27 Nov, M4)
+        const k = size / side;
         for (const [yr, px, py] of pts) {
           const now = Math.abs(yr - epoch) < 0.6;
-          ctx.fillStyle = now ? '#ffb454' : '#7ff0e4';
-          ctx.beginPath();
-          ctx.arc(px, py, now ? 3.6 * (size / side) : 2.4 * (size / side), 0, 2 * Math.PI);
-          ctx.fill();
-          if (yr - lastLabel > 4) {
+          const inRing = Math.hypot(px - x, py - y) < ring + 2 * k;
+          if (!now && !inRing) {
+            ctx.fillStyle = '#7ff0e4';
+            ctx.beginPath();
+            ctx.arc(px, py, 2.4 * k, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+          if (now || (!inRing && yr - lastLabel > 4)) {
+            const t = String(Math.round(yr));
+            const tw = ctx.measureText(t).width;
+            let [lx, ly] = now ? [x + ring * 0.75 + 4 * k, y - ring * 0.75 - 2 * k] : [px + 6 * k, py + 4 * k];
+            // the ring's year never runs past the picture's edge: to the ring's other side
+            if (now && lx + tw > size - 4) lx = x - ring * 0.75 - 4 * k - tw;
+            if (now && ly - 10 * k < 4) ly = y + ring * 0.75 + 12 * k;
+            ctx.fillStyle = now ? '#ffb454' : '#7ff0e4';
             ctx.lineWidth = 3;
             ctx.strokeStyle = '#000';
-            ctx.strokeText(String(Math.round(yr)), px + 6 * (size / side), py + 4 * (size / side));
-            ctx.fillText(String(Math.round(yr)), px + 6 * (size / side), py + 4 * (size / side));
-            lastLabel = yr;
+            ctx.strokeText(t, lx, ly);
+            ctx.fillText(t, lx, ly);
+            if (!now) lastLabel = yr;
           }
         }
         ctx.restore();
@@ -2632,8 +2647,9 @@ export function Lab({ route }: { route: Route }) {
       return;
     }
     const n = meta.passes.length;
-    let step = 0;
+    archAt.current = 0;
     const show = () => {
+      const step = archAt.current;
       setArchStep(step);
       if (step >= ARCHIVE.length) setFrame(step - ARCHIVE.length);
     };
@@ -2641,7 +2657,7 @@ export function Lab({ route }: { route: Route }) {
     const t = setInterval(
       () => {
         if (!state.current.playing) return;
-        step = (step + 1) % (ARCHIVE.length + n);
+        archAt.current = (archAt.current + 1) % (ARCHIVE.length + n);
         show();
       },
       Math.round(1100 / Math.max(0.25, speed)),
@@ -3314,7 +3330,18 @@ export function Lab({ route }: { route: Route }) {
       if (url) URL.revokeObjectURL(url);
     };
   }, [valid, ra, dec, fov, film === null]);
-  const dateLabel = time === 'sum' ? 'all seasons' : passMeta ? season(passMeta.mjd_mid) : fieldLoading ? '' : phase || '';
+  // an old survey's image on show: its own survey and years, never the SPHEREx season under it ("Oct '26" over a 1993 plate: test of
+  // 27 Nov, M4)
+  const archNow = film === null && archStep !== null && archStep < ARCHIVE.length ? ARCHIVE[archStep]! : null;
+  const dateLabel = archNow
+    ? `${archNow.name} · ${archNow.years}`
+    : time === 'sum'
+      ? 'all seasons'
+      : passMeta
+        ? season(passMeta.mjd_mid)
+        : fieldLoading
+          ? ''
+          : phase || '';
   const daysShort = filmData ? `visit ${visit + 1} of ${nVisits} · ${utc(filmData.meta.frames[visit]?.mjd ?? 0)}` : daysStatus;
   const passMjd = (passes.find((q) => q.index === (shown?.pass ?? 0)) ?? passes[0])?.mjd_mid;
   const toDays = () => {
@@ -4239,7 +4266,14 @@ export function Lab({ route }: { route: Route }) {
                     step={1}
                     value={archStep}
                     aria-label="Archive images, then the passes"
-                    disabled
+                    onInput={(e) => {
+                      // the scale steps through the old images too (it was greyed out: test of 27 Nov, M4); stepping pauses the loop
+                      const v = Number((e.target as HTMLInputElement).value);
+                      setPlaying(false);
+                      archAt.current = v;
+                      setArchStep(v);
+                      if (v >= ARCHIVE.length) setFrame(v - ARCHIVE.length);
+                    }}
                   />
                 </>
               ) : film === null ? (
